@@ -22,18 +22,15 @@
 
 原因不是技术上完全做不到，而是这些平台的条款通常明确限制机器人、脚本或 scraping。登录态浏览器自动化也容易遇到 MFA、验证码、页面变更和封号风险。邮件只用于“发现链接”；一旦链接落到公开 Greenhouse/Lever/Ashby 等 ATS，后续优先直接监控雇主端。
 
-## 还需要你提供的四项信息
+## 私有简历与更新窗口
 
-1. Data 简历的 Markdown/纯文本版。
-2. AI/ML 简历的 Markdown/纯文本版。
-3. 地点、Remote、是否需要 sponsorship、毕业时间/可开始时间等硬条件。
-4. 希望日报完成的本地时间；示例安装命令使用每天 06:30。
+在私有 `config.json` 的 `resumeSources.dataPdf` 和 `resumeSources.aiPdf` 中保存两份 PDF 路径。每次任务运行前都会比较 SHA-256；覆盖同一路径的 PDF 后，下一次运行会自动更新 gitignored 的文本简历。如果文件名或目录改变，只需修改私有配置。PDF、提取文本、配置、邮件、日志、状态和报告都不会被 Git 跟踪。
 
 ## 费用保护
 
-默认 `semanticMatching.engine` 是 `codex_subscription`。程序运行前会检查 `codex login status` 必须明确显示 ChatGPT 登录，并从子进程环境中移除 OpenAI、Anthropic、Bedrock、Vertex、Google 的 API key 变量。若认证方式不符，任务直接失败，不会自动切换为按量 API。
+默认 `semanticMatching.engine` 是 `claude_subscription`。先运行 `claude auth login --claudeai`，不要选择 `--console`（后者是 API 计费入口）。程序运行前检查 Claude 订阅登录，并从子进程环境中移除 OpenAI、Anthropic、Bedrock、Vertex、Google 的 API key 变量。认证方式不符时任务直接失败，不会自动切换为按量 API。
 
-Claude Code 也可以设为 `claude_subscription`，但必须先完成 Claude 订阅登录。当前这台 Mac 的 Codex 已使用 ChatGPT 登录；Claude Code 已安装但尚未登录。订阅 CLI 的运行会消耗订阅计划额度，但不会产生 OpenAI Platform/Anthropic API 按量账单。
+Codex 的 ChatGPT 订阅登录仍可作为可选引擎 `codex_subscription`。订阅 CLI 的运行会消耗对应计划额度，但不会产生 OpenAI Platform/Anthropic API 按量账单。
 
 ## 推荐的邮箱设置
 
@@ -49,13 +46,13 @@ himalaya account configure
 
 ```bash
 cp config.example.json config.json
-cp resumes/data.example.md resumes/data.md
-cp resumes/ai.example.md resumes/ai.md
-# 替换两份简历内容并编辑 config.json
+claude auth login --claudeai
+# 编辑 config.json 中的 PDF 路径与偏好
+npm run resume:sync
 npm test
 npm run run
 chmod +x scripts/run-daily.sh scripts/install-launchd.sh
-./scripts/install-launchd.sh 6 30
+./scripts/install-launchd.sh 20 0
 ```
 
 先手动成功运行一次，以确认网络、Desktop 文件夹权限和邮箱读取权限都正常，再安装定时任务。

@@ -23,6 +23,13 @@ export async function loadConfig(configPath) {
     data: resolveFrom(root, config.resumes.data),
     ai: resolveFrom(root, config.resumes.ai),
   };
+  if (config.resumeSources) {
+    config.resumeSources = {
+      ...config.resumeSources,
+      dataPdf: config.resumeSources.dataPdf ? resolveFrom(root, config.resumeSources.dataPdf) : null,
+      aiPdf: config.resumeSources.aiPdf ? resolveFrom(root, config.resumeSources.aiPdf) : null,
+    };
+  }
   if (config.sources.emailFiles?.directory) {
     config.sources.emailFiles.directory = resolveFrom(root, config.sources.emailFiles.directory);
   }

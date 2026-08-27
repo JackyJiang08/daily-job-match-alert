@@ -2,7 +2,8 @@
   "lookbackHours": 24,
   "minimumMatchScore": 70,
   "semanticMatching": {
-    "engine": "codex_subscription",
+    "engine": "claude_subscription",
+    "claudeCommand": "claude",
     "required": true,
     "batchSize": 6,
     "maximumDescriptionCharacters": 7000,
@@ -20,12 +21,18 @@
     "data": "./resumes/data.md",
     "ai": "./resumes/ai.md"
   },
+  "resumeSources": {
+    "autoRefresh": true,
+    "dataPdf": "~/Desktop/Your Data Resume.pdf",
+    "aiPdf": "~/Desktop/Your AI Resume.pdf"
+  },
   "preferences": {
     "roleTypes": ["internship", "new_grad", "entry_level"],
-    "locations": ["United States", "Remote"],
+    "locations": ["United States", "USA", "Remote - US"],
     "remoteOkay": true,
     "maxYearsExperience": 3,
-    "needsSponsorship": null,
+    "needsSponsorship": false,
+    "graduationDate": "2027-05",
     "excludeTitleTerms": ["senior", "staff", "principal", "manager", "director", "lead"]
   },
   "sources": {

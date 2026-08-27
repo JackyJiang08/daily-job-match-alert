@@ -118,7 +118,7 @@ export function isEligible(job, config) {
   if (job.blockers?.length) return false;
   if (Math.max(job.scoreDetails?.data?.roleRelevance || 0, job.scoreDetails?.ai?.roleRelevance || 0) < 14) return false;
   const semantic = config.semanticMatching || {};
-  if ((semantic.engine || 'codex_subscription') !== 'local_only') {
+  if ((semantic.engine || 'claude_subscription') !== 'local_only') {
     if (!job.semanticReviewed) return false;
     if (!(semantic.acceptedMatchLevels || ['high']).includes(job.matchLevel)) return false;
   }

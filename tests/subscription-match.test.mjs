@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildSemanticPrompt, mergeSemanticResults, subscriptionEnvironment, verifyCodexSubscription } from '../src/subscription-match.mjs';
+import { buildSemanticPrompt, mergeSemanticResults, subscriptionEnvironment, verifyClaudeSubscription, verifyCodexSubscription } from '../src/subscription-match.mjs';
 
 test('removes API credentials from subscription subprocess environment', () => {
   const env = subscriptionEnvironment({ PATH: '/bin', OPENAI_API_KEY: 'secret', ANTHROPIC_API_KEY: 'secret2' });
@@ -14,6 +14,14 @@ test('requires explicit ChatGPT authentication for Codex', async () => {
   await assert.rejects(
     verifyCodexSubscription({ runner: async () => ({ stdout: 'Logged in using API key', stderr: '' }) }),
     /not authenticated with ChatGPT subscription/,
+  );
+});
+
+test('accepts Claude subscription auth and rejects API-key auth', async () => {
+  await verifyClaudeSubscription({ runner: async () => ({ stdout: JSON.stringify({ loggedIn: true, authMethod: 'claude.ai' }), stderr: '' }) });
+  await assert.rejects(
+    verifyClaudeSubscription({ runner: async () => ({ stdout: JSON.stringify({ loggedIn: true, authMethod: 'apiKey' }), stderr: '' }) }),
+    /not authenticated with a Claude subscription/,
   );
 });
 

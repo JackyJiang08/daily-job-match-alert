@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, loadResumes } from './config.mjs';
+import { syncResumes } from './resume-sync.mjs';
 import { collectSimplifyList } from './collectors/simplify-github.mjs';
 import { collectEmailFiles } from './collectors/email-files.mjs';
 import { collectHimalaya } from './collectors/himalaya.mjs';
@@ -65,6 +66,7 @@ async function main() {
   const now = new Date(arg('--now', new Date().toISOString()));
   if (Number.isNaN(now.getTime())) throw new Error('--now must be a valid ISO date');
   const config = await loadConfig(configPath);
+  const resumeSync = await syncResumes(config);
   const resumes = await loadResumes(config);
   await fs.mkdir(config.outputDirectory, { recursive: true });
   const statePath = path.join(config.root, 'state', 'state.json');
@@ -98,7 +100,7 @@ async function main() {
   const date = currentDate(now);
   const meta = {
     generatedAt: now.toISOString(), date, lookbackHours: config.lookbackHours,
-    minimumMatchScore: config.minimumMatchScore, collectedCount: collected.length,
+    minimumMatchScore: config.minimumMatchScore, resumeSync, collectedCount: collected.length,
     newCount: newJobs.length, reviewedCount: evaluated.length, matchCount: matches.length,
   };
   const paths = await writeReports(matches, evaluated, meta, config.outputDirectory);

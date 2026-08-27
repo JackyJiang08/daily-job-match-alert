@@ -115,14 +115,14 @@ function parseStructuredOutput(raw) {
 }
 
 async function verifyCodexSubscription(options = {}) {
-  const result = await (options.runner || run)('codex', ['login', 'status'], { timeoutMs: 30_000, env: subscriptionEnvironment() });
+  const result = await (options.runner || run)(options.codexCommand || 'codex', ['login', 'status'], { timeoutMs: 30_000, env: subscriptionEnvironment() });
   if (!/logged in using chatgpt/i.test(`${result.stdout}\n${result.stderr}`)) {
     throw new Error('Codex is not authenticated with ChatGPT subscription. Run `codex login`; API-key authentication is intentionally rejected.');
   }
 }
 
 async function verifyClaudeSubscription(options = {}) {
-  const result = await (options.runner || run)('claude', ['auth', 'status', '--json'], { timeoutMs: 30_000, env: subscriptionEnvironment() });
+  const result = await (options.runner || run)(options.claudeCommand || 'claude', ['auth', 'status', '--json'], { timeoutMs: 30_000, env: subscriptionEnvironment() });
   const status = JSON.parse(result.stdout);
   if (!status.loggedIn || /api.?key/i.test(String(status.authMethod || ''))) {
     throw new Error('Claude Code is not authenticated with a Claude subscription. API-key authentication is intentionally rejected.');
@@ -136,7 +136,7 @@ async function codexBatch(prompt, schemaPath, outputPath, tempDirectory, options
   ];
   if (options.model) args.push('--model', options.model);
   args.push('-');
-  await (options.runner || run)('codex', args, {
+  await (options.runner || run)(options.codexCommand || 'codex', args, {
     input: prompt, cwd: tempDirectory, timeoutMs: Number(options.timeoutMs || 600_000), env: subscriptionEnvironment(),
   });
   return parseStructuredOutput(await fs.readFile(outputPath, 'utf8'));
@@ -148,7 +148,7 @@ async function claudeBatch(prompt, _schemaPath, _outputPath, tempDirectory, opti
     '--tools', '', '--output-format', 'json', '--json-schema', JSON.stringify(resultSchema),
   ];
   if (options.model) args.push('--model', options.model);
-  const result = await (options.runner || run)('claude', args, {
+  const result = await (options.runner || run)(options.claudeCommand || 'claude', args, {
     input: prompt, cwd: tempDirectory, timeoutMs: Number(options.timeoutMs || 600_000), env: subscriptionEnvironment(),
   });
   return parseStructuredOutput(result.stdout);
@@ -184,7 +184,7 @@ export function mergeSemanticResults(jobs, results, engine) {
 }
 
 export async function applySubscriptionMatching(jobs, resumes, preferences, options = {}) {
-  const engine = options.engine || 'codex_subscription';
+  const engine = options.engine || 'claude_subscription';
   if (engine === 'local_only') return jobs.map(job => ({ ...job, scoringEngine: 'local_only' }));
   if (!['codex_subscription', 'claude_subscription'].includes(engine)) {
     throw new Error(`Unsupported semanticMatching.engine: ${engine}. API-backed engines are intentionally unavailable.`);

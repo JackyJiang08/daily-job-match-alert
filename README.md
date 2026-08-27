@@ -25,7 +25,7 @@ Daily Job Match Alert provides:
 - Public-source and official-alert ingestion without authenticated scraping.
 - Exact `postedAt` versus first-seen `discoveredAt` semantics.
 - Cross-source URL canonicalization and persistent deduplication.
-- Daily HTML, CSV, and JSON reports; optional XLSX when a compatible writer is available.
+- Daily HTML, CSV, JSON, and XLSX reports with the complete captured JD.
 - Hard safety boundaries: no auto-apply, no screening answers, no mailbox mutation.
 
 ## Architecture
@@ -71,24 +71,31 @@ cp resumes/data.example.md resumes/data.md
 cp resumes/ai.example.md resumes/ai.md
 ```
 
-Replace both resume placeholders, edit the preferences in `config.json`, then verify subscription authentication:
+Point `resumeSources.dataPdf` and `resumeSources.aiPdf` at your private PDFs, edit the preferences in `config.json`, then sign in to Claude Code with your Claude subscription:
 
 ```bash
-codex login status
-# Must say: Logged in using ChatGPT
+claude auth login --claudeai
+claude auth status --json
 
+npm run resume:sync
 npm test
 npm run run
 ```
 
-The runner refuses placeholder resumes. For Claude Code, authenticate with a Claude subscription and set `semanticMatching.engine` to `claude_subscription`.
+The default engine is `claude_subscription`. Choose the Claude.ai subscription flow—never `--console`, which is the API-billed path. If `claude` is outside the non-interactive system `PATH`, set `semanticMatching.claudeCommand` to its absolute executable path.
+
+## Private resume updates
+
+`resumeSources.autoRefresh` makes resume updates non-fixed. Before every run, the project hashes both source PDFs and refreshes the gitignored `resumes/data.md` and `resumes/ai.md` whenever either PDF changes. Replacing a PDF at the same path requires no configuration change; if its filename or folder changes, update only your private `config.json`.
+
+Real PDFs, extracted resume text, `config.json`, state, email, logs, and generated reports are excluded from Git. The public repository contains examples and extraction code only.
 
 ## Subscription-only cost guard
 
 This is an enforced runtime boundary, not just a documentation promise:
 
 - `codex_subscription` requires `codex login status` to explicitly report ChatGPT login.
-- `claude_subscription` rejects missing or API-key authentication.
+- `claude_subscription` rejects missing or API-key authentication and is the default.
 - OpenAI, Anthropic, Bedrock, Vertex, and Google API credential variables are removed from the model subprocess environment.
 - There is no OpenAI Platform or Anthropic API client in the project.
 - Authentication mismatch stops the run; it never falls back to an API.
@@ -114,18 +121,18 @@ The collector only lists envelopes and reads messages with `--preview`; it does 
 
 ## Daily macOS schedule
 
-Run the pipeline successfully once before installing the schedule. Example: every day at 06:30 local time.
+Run the pipeline successfully once before installing the schedule. Example: every day at 20:00 local time.
 
 ```bash
 chmod +x scripts/run-daily.sh scripts/install-launchd.sh
-./scripts/install-launchd.sh 6 30
+./scripts/install-launchd.sh 20 0
 ```
 
 The deterministic runner uses `launchd`, so collection and report generation do not depend on an OpenClaw gateway staying awake. OpenClaw can still provide mailbox tooling or downstream notifications.
 
 ## Reports and freshness
 
-Each successful run writes a dated folder plus `latest.html` to the configured output directory. Rows include source, role type, company, title, location, Data score, AI score, recommended resume, match reasons, gaps, blockers, freshness basis, and original posting link.
+Each successful run writes a dated folder plus `latest.html` to the configured output directory. Rows include source, role type, company, title, location, Data score, AI score, recommended resume, match reasons, gaps, blockers, full captured JD, freshness basis, and original posting link.
 
 - `postedAt` is populated only from employer or structured posting evidence.
 - `discoveredAt` records when Daily Job Match Alert first encountered the canonical URL.
