@@ -4,7 +4,7 @@ import { SpreadsheetFile, Workbook } from '@oai/artifact-tool';
 
 const [jsonPath, outputPath, verifyFlag] = process.argv.slice(2);
 if (!jsonPath || !outputPath) {
-  console.error('Usage: node src/report-xlsx.mjs <daily-job-match-alert.json> <output.xlsx> [--verify]');
+  console.error('Usage: node src/report-xlsx.mjs <report-payload.json> <output.xlsx> [--verify]');
   process.exit(2);
 }
 
@@ -21,7 +21,7 @@ summary.getRange('A1:F1').merge();
 summary.getRange('A1').values = [['Daily Job Match Alert']];
 summary.getRange('A1:F1').format = { fill: '#0F766E', font: { bold: true, color: '#FFFFFF', size: 18 }, rowHeight: 34 };
 summary.getRange('A3:B8').values = [
-  ['Report date', payload.meta.date],
+  ['Application date', payload.meta.applicationDate || payload.meta.date],
   ['Generated at', payload.meta.generatedAt],
   ['Lookback hours', payload.meta.lookbackHours],
   ['Reviewed jobs', payload.meta.reviewedCount],

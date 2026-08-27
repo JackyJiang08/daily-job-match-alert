@@ -57,6 +57,16 @@ export function isoDate(value) {
   return parsed && !Number.isNaN(parsed.getTime()) ? parsed.toISOString() : null;
 }
 
+export function dateWithOffset(now, timeZone = 'America/Chicago', offsetDays = 0) {
+  const shifted = new Date(now.getTime() + Number(offsetDays) * 24 * 60 * 60 * 1000);
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(shifted);
+}
+
 export function csvEscape(value) {
   const text = value == null ? '' : String(value);
   return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;

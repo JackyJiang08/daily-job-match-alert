@@ -7,6 +7,18 @@
 - **OpenClaw / Himalaya**：可作为只读邮件入口和后续通知层。你的 Mac 已安装 Himalaya，但还没有配置邮箱账户。
 - **macOS launchd**：负责每天固定时间直接运行本地脚本。即使 OpenClaw Gateway 没有常驻，日报仍能生成。
 
+## 日报时间与文件规则
+
+任务每天 **20:00 America/Chicago** 运行，文件夹和文件名使用第二天的投递日期。例如 2026-08-27 晚上运行后，只生成：
+
+```text
+~/Desktop/Daily Job Match Alert/2026-08-28/
+├── Daily Job Match Alert - 2026-08-28.html
+└── Daily Job Match Alert - 2026-08-28.xlsx
+```
+
+桌面日报目录不保留 `latest.html`、CSV、JSON、检查文件或验证图片。JSON 只在系统临时目录中用于构建 XLSX，完成后自动删除。
+
 ## 各来源怎么自动化
 
 | 来源 | 推荐方式 | 是否直接抓登录网站 |

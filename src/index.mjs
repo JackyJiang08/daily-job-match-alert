@@ -13,17 +13,13 @@ import { enrichJob } from './enrich.mjs';
 import { evaluateJob, isEligible } from './match.mjs';
 import { applySubscriptionMatching } from './subscription-match.mjs';
 import { writeReports } from './report.mjs';
-import { canonicalUrl, mapLimit, sha256 } from './utils.mjs';
+import { canonicalUrl, dateWithOffset, mapLimit, sha256 } from './utils.mjs';
 
 const execFileAsync = promisify(execFile);
 
 function arg(name, fallback = null) {
   const index = process.argv.indexOf(name);
   return index >= 0 && process.argv[index + 1] ? process.argv[index + 1] : fallback;
-}
-
-function currentDate(now) {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
 }
 
 async function readState(file) {
@@ -97,28 +93,44 @@ async function main() {
   const evaluated = (await applySubscriptionMatching(locallyEvaluated, resumes, config.preferences, config.semanticMatching || {}))
     .sort((a, b) => b.bestScore - a.bestScore);
   const matches = evaluated.filter(job => isEligible(job, config));
-  const date = currentDate(now);
+  const timeZone = config.timeZone || 'America/Chicago';
+  const runDate = dateWithOffset(now, timeZone, 0);
+  const date = dateWithOffset(now, timeZone, Number(config.reportDateOffsetDays ?? 1));
   const meta = {
-    generatedAt: now.toISOString(), date, lookbackHours: config.lookbackHours,
+    generatedAt: now.toISOString(), date, applicationDate: date, runDate, timeZone, lookbackHours: config.lookbackHours,
     minimumMatchScore: config.minimumMatchScore, resumeSync, collectedCount: collected.length,
     newCount: newJobs.length, reviewedCount: evaluated.length, matchCount: matches.length,
   };
   const paths = await writeReports(matches, evaluated, meta, config.outputDirectory);
-  if (config.reports?.xlsx?.enabled !== false) {
-    const xlsxPath = path.join(paths.runDirectory, 'daily-job-match-alert.xlsx');
-    const xlsxBuilder = fileURLToPath(new URL('./report-xlsx.mjs', import.meta.url));
-    try {
-      await execFileAsync(process.execPath, [xlsxBuilder, paths.jsonPath, xlsxPath], {
-        cwd: config.root,
-        timeout: 2 * 60 * 1000,
-      });
-      paths.xlsxPath = xlsxPath;
-    } catch (error) {
-      if (config.reports?.xlsx?.required) throw error;
-      paths.xlsxPath = null;
-      paths.xlsxWarning = 'XLSX writer unavailable; HTML, CSV, and JSON reports were still created.';
-      console.warn(`${paths.xlsxWarning} ${error.message}`);
+  try {
+    if (config.reports?.xlsx?.enabled !== false) {
+      const xlsxPath = path.join(paths.runDirectory, `${paths.reportBaseName}.xlsx`);
+      const xlsxBuilder = fileURLToPath(new URL('./report-xlsx.mjs', import.meta.url));
+      try {
+        await execFileAsync(process.execPath, [xlsxBuilder, paths.payloadPath, xlsxPath], {
+          cwd: config.root,
+          timeout: 2 * 60 * 1000,
+        });
+        paths.xlsxPath = xlsxPath;
+        await Promise.all([
+          fs.rm(`${xlsxPath}.inspect.ndjson`, { force: true }),
+          fs.rm(path.join(paths.runDirectory, '.verification'), { recursive: true, force: true }),
+        ]);
+      } catch (error) {
+        if (config.reports?.xlsx?.required) {
+          await fs.rm(paths.htmlPath, { force: true });
+          throw error;
+        }
+        paths.xlsxPath = null;
+        paths.xlsxWarning = 'XLSX writer unavailable; the HTML report was still created.';
+        console.warn(`${paths.xlsxWarning} ${error.message}`);
+      }
     }
+  } finally {
+    await fs.rm(paths.temporaryDirectory, { recursive: true, force: true });
+    delete paths.payloadPath;
+    delete paths.temporaryDirectory;
+    delete paths.reportBaseName;
   }
 
   await fs.mkdir(path.dirname(statePath), { recursive: true });

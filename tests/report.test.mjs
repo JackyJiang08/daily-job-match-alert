@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
-import { buildCsv, buildHtml } from '../src/report.mjs';
+import { buildHtml, writeReports } from '../src/report.mjs';
+import { dateWithOffset } from '../src/utils.mjs';
 
 const job = {
   source: 'fixture', roleType: 'new_grad', postedAt: '2026-08-27T10:00:00Z', discoveredAt: '2026-08-27T12:00:00Z',
@@ -11,17 +15,32 @@ const job = {
   url: 'https://example.com/jobs/1', freshnessBasis: 'jobposting_date_posted',
 };
 
-test('CSV output quotes commas and preserves posting links', () => {
-  const csv = buildCsv([job]);
-  assert.match(csv, /"Acme, Inc\."/);
-  assert.match(csv, /https:\/\/example\.com\/jobs\/1/);
-  assert.match(csv, /Use SQL, Python/);
-});
-
 test('HTML output escapes remote content and includes the original link', () => {
   const html = buildHtml([{ ...job, title: '<script>alert(1)</script>' }], { date: '2026-08-27', lookbackHours: 24 });
   assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.match(html, /https:\/\/example\.com\/jobs\/1/);
   assert.match(html, /Full captured JD/);
+});
+
+test('uses the next Central Time calendar date for the application folder', () => {
+  assert.equal(dateWithOffset(new Date('2026-08-28T01:00:00Z'), 'America/Chicago', 1), '2026-08-28');
+});
+
+test('writes only a dated HTML report plus a temporary XLSX payload', async () => {
+  const outputDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'report-output-test-'));
+  const date = '2026-08-28';
+  const runDirectory = path.join(outputDirectory, date);
+  await fs.mkdir(runDirectory, { recursive: true });
+  await fs.writeFile(path.join(outputDirectory, 'latest.html'), 'legacy');
+  await fs.writeFile(path.join(runDirectory, 'daily-job-match-alert.csv'), 'legacy');
+  try {
+    const paths = await writeReports([job], [job], { date, applicationDate: date, lookbackHours: 24 }, outputDirectory);
+    assert.deepEqual(await fs.readdir(runDirectory), [`Daily Job Match Alert - ${date}.html`]);
+    assert.equal(await fs.stat(paths.payloadPath).then(() => true), true);
+    await assert.rejects(fs.access(path.join(outputDirectory, 'latest.html')));
+    await fs.rm(paths.temporaryDirectory, { recursive: true, force: true });
+  } finally {
+    await fs.rm(outputDirectory, { recursive: true, force: true });
+  }
 });

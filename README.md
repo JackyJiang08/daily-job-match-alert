@@ -25,7 +25,7 @@ Daily Job Match Alert provides:
 - Public-source and official-alert ingestion without authenticated scraping.
 - Exact `postedAt` versus first-seen `discoveredAt` semantics.
 - Cross-source URL canonicalization and persistent deduplication.
-- Daily HTML, CSV, JSON, and XLSX reports with the complete captured JD.
+- Exactly two user-facing files per application date: HTML and XLSX, both with the complete captured JD.
 - Hard safety boundaries: no auto-apply, no screening answers, no mailbox mutation.
 
 ## Architecture
@@ -38,11 +38,11 @@ flowchart LR
   N --> JD[Resolve final URL + extract JD]
   JD --> PF[Local relevance prefilter]
   PF --> LLM[Codex or Claude subscription review]
-  LLM --> R[HTML / CSV / JSON / XLSX]
-  R --> D[Desktop every morning]
+  LLM --> R[HTML + XLSX only]
+  R --> D[Next-day application folder on Desktop]
 ```
 
-The local prefilter removes clearly unrelated roles before subscription review. Final report scores come from the configured subscription CLI; local scores remain in JSON for audit.
+The local prefilter removes clearly unrelated roles before subscription review. Final report scores come from the configured subscription CLI; intermediate structured data stays in temporary local storage and is removed after XLSX creation.
 
 ## Supported discovery paths
 
@@ -121,7 +121,7 @@ The collector only lists envelopes and reads messages with `--preview`; it does 
 
 ## Daily macOS schedule
 
-Run the pipeline successfully once before installing the schedule. Example: every day at 20:00 local time.
+Run the pipeline successfully once before installing the schedule. The default is every day at 20:00 America/Chicago.
 
 ```bash
 chmod +x scripts/run-daily.sh scripts/install-launchd.sh
@@ -132,13 +132,18 @@ The deterministic runner uses `launchd`, so collection and report generation do 
 
 ## Reports and freshness
 
-Each successful run writes a dated folder plus `latest.html` to the configured output directory. Rows include source, role type, company, title, location, Data score, AI score, recommended resume, match reasons, gaps, blockers, full captured JD, freshness basis, and original posting link.
+Each successful 20:00 Central Time run writes the **next application date** as a folder. For example, the August 27 evening run creates `2026-08-28/`. That folder contains only:
+
+- `Daily Job Match Alert - 2026-08-28.html`
+- `Daily Job Match Alert - 2026-08-28.xlsx`
+
+No `latest.html`, CSV, JSON, inspection sidecar, or verification directory remains in the Desktop output. Rows include source, role type, company, title, location, Data score, AI score, recommended resume, match reasons, gaps, blockers, full captured JD, freshness basis, and original posting link.
 
 - `postedAt` is populated only from employer or structured posting evidence.
 - `discoveredAt` records when Daily Job Match Alert first encountered the canonical URL.
 - GitHub list age is labeled approximate rather than presented as an exact timestamp.
-- A hard-blocked role remains in the JSON audit record but is excluded from high-match reports.
-- XLSX can be configured as required (as in the private nightly setup) or optional for portable installations; HTML, CSV, and JSON remain additional outputs.
+- Hard-blocked and low-match roles are excluded from both user-facing files.
+- The XLSX writer is required so a successful dated folder always satisfies the two-file contract.
 
 ## Security and ethics
 

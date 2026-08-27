@@ -1,25 +1,7 @@
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
-import { csvEscape, htmlEscape } from './utils.mjs';
-
-const COLUMNS = [
-  ['source', 'Source'], ['roleType', 'Role Type'], ['postedAt', 'Posted At'], ['discoveredAt', 'Discovered At'],
-  ['company', 'Company'], ['title', 'Title'], ['location', 'Location'], ['dataScore', 'Data Score'],
-  ['aiScore', 'AI Score'], ['bestScore', 'Best Score'], ['matchLevel', 'Match Level'], ['recommendedResume', 'Resume'],
-  ['reasons', 'Why It Matches'], ['gaps', 'Gaps'], ['blockers', 'Blockers'], ['employmentType', 'Employment Type'],
-  ['salary', 'Salary'], ['description', 'Full JD'], ['url', 'Posting Link'], ['freshnessBasis', 'Freshness Basis'],
-];
-
-function flatten(value) {
-  return Array.isArray(value) ? value.join('; ') : value ?? '';
-}
-
-export function buildCsv(jobs) {
-  return [
-    COLUMNS.map(([, label]) => csvEscape(label)).join(','),
-    ...jobs.map(job => COLUMNS.map(([key]) => csvEscape(flatten(job[key]))).join(',')),
-  ].join('\n') + '\n';
-}
+import { htmlEscape } from './utils.mjs';
 
 function jobCard(job) {
   const reasons = (job.reasons || []).map(item => `<li>${htmlEscape(item)}</li>`).join('');
@@ -44,7 +26,7 @@ function jobCard(job) {
 export function buildHtml(jobs, meta) {
   const byType = Object.fromEntries(['internship', 'new_grad', 'entry_level'].map(type => [type, jobs.filter(job => job.roleType === type).length]));
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Daily Job Match Alert — ${htmlEscape(meta.date)}</title><style>
+  <title>Daily Job Match Alert — Apply ${htmlEscape(meta.date)}</title><style>
   :root{--ink:#14213d;--muted:#64748b;--line:#dbe4ee;--accent:#0f766e;--soft:#f0fdfa;--warn:#fff7ed}*{box-sizing:border-box}
   body{margin:0;background:#f8fafc;color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.wrap{max-width:1000px;margin:auto;padding:36px 20px 64px}
   header{background:linear-gradient(135deg,#0f766e,#164e63);color:#fff;border-radius:20px;padding:28px 30px;box-shadow:0 18px 50px #0f172a22}h1{margin:0 0 4px;font-size:32px}.sub{opacity:.85;margin:0}
@@ -53,7 +35,7 @@ export function buildHtml(jobs, meta) {
   h2{font-size:21px;margin:2px 0}.eyebrow,.meta{color:var(--muted);font-size:12px}.company{margin:2px 0 10px}.chips{display:flex;gap:8px;flex-wrap:wrap}.chips span{background:#eef2ff;border-radius:999px;padding:4px 9px;font-size:12px}h3{font-size:13px;margin:14px 0 4px}ul{margin:4px 0 8px;padding-left:20px}.apply{display:inline-block;margin-top:10px;color:#fff;background:var(--accent);padding:8px 13px;border-radius:9px;text-decoration:none;font-weight:650}details{background:var(--warn);padding:8px 10px;border-radius:9px;margin-top:10px}
   .jd p{white-space:pre-wrap;max-height:360px;overflow:auto}.empty{padding:50px;text-align:center;background:#fff;border:1px dashed var(--line);border-radius:16px;color:var(--muted)}footer{color:var(--muted);font-size:12px;margin-top:30px}
   @media(max-width:650px){.stats{grid-template-columns:1fr 1fr}.job{grid-template-columns:1fr}.score{width:48px;height:48px}}
-  </style></head><body><main class="wrap"><header><h1>Daily Job Match Alert</h1><p class="sub">Data + AI/ML matches discovered in the last ${meta.lookbackHours} hours · ${htmlEscape(meta.date)}</p></header>
+  </style></head><body><main class="wrap"><header><h1>Daily Job Match Alert</h1><p class="sub">Application list for ${htmlEscape(meta.date)} · discovered in the previous ${meta.lookbackHours} hours</p></header>
   <section class="stats"><div class="stat"><b>${jobs.length}</b><span>High matches</span></div><div class="stat"><b>${byType.internship}</b><span>Internships</span></div><div class="stat"><b>${byType.new_grad}</b><span>New grad</span></div><div class="stat"><b>${byType.entry_level}</b><span>Entry level</span></div></section>
   ${jobs.length ? jobs.map(jobCard).join('\n') : '<div class="empty">No new jobs cleared the configured threshold today.</div>'}
   <footer>Generated locally. Scores are triage aids, not facts. Verify eligibility, posting date, and JD before applying. No applications were submitted.</footer></main></body></html>`;
@@ -62,16 +44,24 @@ export function buildHtml(jobs, meta) {
 export async function writeReports(jobs, allJobs, meta, outputDirectory) {
   const runDirectory = path.join(outputDirectory, meta.date);
   await fs.mkdir(runDirectory, { recursive: true });
-  const jsonPath = path.join(runDirectory, 'daily-job-match-alert.json');
-  const csvPath = path.join(runDirectory, 'daily-job-match-alert.csv');
-  const htmlPath = path.join(runDirectory, 'daily-job-match-alert.html');
+  const reportBaseName = `Daily Job Match Alert - ${meta.date}`;
+  const htmlPath = path.join(runDirectory, `${reportBaseName}.html`);
+  const legacyNames = [
+    'daily-job-match-alert.json', 'daily-job-match-alert.csv', 'daily-job-match-alert.html', 'daily-job-match-alert.xlsx',
+    'daily-job-match-alert.xlsx.inspect.ndjson',
+    'job-radar.json', 'job-radar.csv', 'job-radar.html', 'job-radar.xlsx',
+    'job-radar.xlsx.inspect.ndjson',
+  ];
   await Promise.all([
-    fs.writeFile(jsonPath, JSON.stringify({ meta, matches: jobs, reviewed: allJobs }, null, 2) + '\n'),
-    fs.writeFile(csvPath, buildCsv(jobs)),
+    ...legacyNames.map(name => fs.rm(path.join(runDirectory, name), { force: true })),
+    fs.rm(path.join(runDirectory, '.verification'), { recursive: true, force: true }),
+    fs.rm(path.join(outputDirectory, 'latest.html'), { force: true }),
+  ]);
+  const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'daily-job-match-alert-report-'));
+  const payloadPath = path.join(temporaryDirectory, 'report-payload.json');
+  await Promise.all([
+    fs.writeFile(payloadPath, JSON.stringify({ meta, matches: jobs, reviewed: allJobs }, null, 2) + '\n'),
     fs.writeFile(htmlPath, buildHtml(jobs, meta)),
   ]);
-  await fs.writeFile(path.join(outputDirectory, 'latest.html'), buildHtml(jobs, meta));
-  return { runDirectory, jsonPath, csvPath, htmlPath };
+  return { runDirectory, payloadPath, temporaryDirectory, reportBaseName, htmlPath };
 }
-
-export { COLUMNS };

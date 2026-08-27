@@ -1,5 +1,7 @@
 {
   "lookbackHours": 24,
+  "timeZone": "America/Chicago",
+  "reportDateOffsetDays": 1,
   "minimumMatchScore": 70,
   "requireFullDescription": true,
   "minimumDescriptionCharacters": 200,
@@ -15,7 +17,7 @@
   "reports": {
     "xlsx": {
       "enabled": true,
-      "required": false
+      "required": true
     }
   },
   "outputDirectory": "~/Desktop/Daily Job Match Alert",
