@@ -1,0 +1,3 @@
+# Data Resume
+
+Data analyst and early-career data scientist with experience using Python, SQL, Tableau, Excel, pandas, NumPy, statistics, experimentation, A/B testing, data visualization, ETL, dbt, Snowflake, BigQuery, Spark, Airflow, AWS, GCP, and Azure. Built dashboards and reproducible analytics pipelines, communicated findings to product partners, and used statistical modeling to guide decisions. Completed projects in customer analytics, forecasting, segmentation, and business intelligence. Comfortable with Git, documentation, stakeholder interviews, metric design, and presenting clear recommendations. Seeking internships, new-grad, and entry-level full-time Data Analyst, Product Analyst, Business Intelligence, Data Science, or Data Engineering positions.
