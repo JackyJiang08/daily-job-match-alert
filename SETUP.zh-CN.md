@@ -1,9 +1,9 @@
-# Job Radar 使用与来源决策
+# Daily Job Match Alert 使用与来源决策
 
 ## 最终分工
 
 - **career-ops**：负责 Greenhouse、Lever、Ashby、Workday 等公开 ATS 和公司 career board；保留它原有的去重与申请 pipeline。
-- **Job Radar companion**：读取 career-ops 的新记录，并直接读取两个 SimplifyJobs GitHub 列表、官方提醒邮件；保存完整 JD，先本地预筛，再调用 Codex CLI/Claude Code 的订阅登录对 Data 与 AI/ML 两版简历分别做语义评分，生成每日文件。
+- **Daily Job Match Alert companion**：读取 career-ops 的新记录，并直接读取两个 SimplifyJobs GitHub 列表、官方提醒邮件；保存完整 JD，先本地预筛，再调用 Codex CLI/Claude Code 的订阅登录对 Data 与 AI/ML 两版简历分别做语义评分，生成每日文件。
 - **OpenClaw / Himalaya**：可作为只读邮件入口和后续通知层。你的 Mac 已安装 Himalaya，但还没有配置邮箱账户。
 - **macOS launchd**：负责每天固定时间直接运行本地脚本。即使 OpenClaw Gateway 没有常驻，日报仍能生成。
 
@@ -43,7 +43,7 @@ Claude Code 也可以设为 `claude_subscription`，但必须先完成 Claude �
 himalaya account configure
 ```
 
-配置完成后，把 `config.json` 的 `sources.himalaya.enabled` 改为 `true`，填入账户别名和 folder。Job Radar 只执行 envelope list 和 `message read --preview`，不会标已读、移动、删除或发送邮件。不要把邮箱密码写进 `config.json`；使用 OAuth、App Password 搭配 macOS Keychain，或安全的 password command。
+配置完成后，把 `config.json` 的 `sources.himalaya.enabled` 改为 `true`，填入账户别名和 folder。Daily Job Match Alert 只执行 envelope list 和 `message read --preview`，不会标已读、移动、删除或发送邮件。不要把邮箱密码写进 `config.json`；使用 OAuth、App Password 搭配 macOS Keychain，或安全的 password command。
 
 ## 第一次启用
 

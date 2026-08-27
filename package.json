@@ -1,14 +1,14 @@
 {
-  "name": "job-radar",
+  "name": "daily-job-match-alert",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Subscription-only AI job discovery for Data and AI/ML roles",
+  "description": "Private, subscription-only AI job discovery for Data and AI/ML internships and new-grad roles",
   "author": "Yuqing (Jacky) Jiang",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/JackyJiang08/job-radar.git"
+    "url": "https://github.com/JackyJiang08/daily-job-match-alert.git"
   },
   "keywords": [
     "job-search",

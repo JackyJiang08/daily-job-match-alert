@@ -68,7 +68,7 @@ async function fetchWithTimeout(url, options, timeoutMs, fetchImpl) {
 
 export async function enrichJob(job, network = {}, fetchImpl = fetch) {
   const timeoutMs = Number(network.timeoutMs || 15000);
-  const headers = { 'user-agent': network.userAgent || 'JobRadarCompanion/0.1', accept: 'text/html,application/json' };
+  const headers = { 'user-agent': network.userAgent || 'DailyJobMatchAlert/0.1', accept: 'text/html,application/json' };
   try {
     const greenhouse = greenhouseApiUrl(job.url);
     if (greenhouse) {

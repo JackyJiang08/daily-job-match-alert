@@ -15,7 +15,7 @@
       "required": false
     }
   },
-  "outputDirectory": "~/Desktop/Job Radar",
+  "outputDirectory": "~/Desktop/Daily Job Match Alert",
   "resumes": {
     "data": "./resumes/data.md",
     "ai": "./resumes/ai.md"
@@ -58,6 +58,6 @@
     "fetchDescriptions": true,
     "concurrency": 3,
     "timeoutMs": 15000,
-    "userAgent": "JobRadarCompanion/0.1 (+personal job search; respectful daily polling)"
+    "userAgent": "DailyJobMatchAlert/0.1 (+personal job search; respectful daily polling)"
   }
 }

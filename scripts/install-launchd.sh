@@ -4,10 +4,10 @@ set -euo pipefail
 project_dir="${0:A:h:h}"
 hour="${1:-6}"
 minute="${2:-30}"
-node_bin="${JOB_RADAR_NODE:-$(command -v node)}"
+node_bin="${DAILY_JOB_MATCH_ALERT_NODE:-${JOB_RADAR_NODE:-$(command -v node)}}"
 agent_dir="$HOME/Library/LaunchAgents"
-agent_path="$agent_dir/com.jobradar.daily.plist"
-template="$project_dir/launchd/com.jobradar.daily.plist.template"
+agent_path="$agent_dir/com.dailyjobmatchalert.daily.plist"
+template="$project_dir/launchd/com.dailyjobmatchalert.daily.plist.template"
 
 if [[ ! "$hour" =~ '^[0-9]{1,2}$' ]] || (( hour < 0 || hour > 23 )); then
   print -u2 "Hour must be 0-23"
@@ -30,6 +30,6 @@ plutil -lint "$temp_file"
 cp "$temp_file" "$agent_path"
 launchctl bootout "gui/$(id -u)" "$agent_path" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$agent_path"
-launchctl enable "gui/$(id -u)/com.jobradar.daily"
-print "Installed daily Job Radar at ${hour}:$(printf '%02d' "$minute") local time."
+launchctl enable "gui/$(id -u)/com.dailyjobmatchalert.daily"
+print "Installed Daily Job Match Alert at ${hour}:$(printf '%02d' "$minute") local time."
 print "LaunchAgent: $agent_path"

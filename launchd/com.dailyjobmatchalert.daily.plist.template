@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>com.jobradar.daily</string>
+  <key>Label</key><string>com.dailyjobmatchalert.daily</string>
   <key>ProgramArguments</key>
   <array>
     <string>/bin/zsh</string>
@@ -10,7 +10,7 @@
   </array>
   <key>WorkingDirectory</key><string>__PROJECT_DIR__</string>
   <key>EnvironmentVariables</key>
-  <dict><key>JOB_RADAR_NODE</key><string>__NODE_BIN__</string></dict>
+  <dict><key>DAILY_JOB_MATCH_ALERT_NODE</key><string>__NODE_BIN__</string></dict>
   <key>StartCalendarInterval</key>
   <dict><key>Hour</key><integer>__HOUR__</integer><key>Minute</key><integer>__MINUTE__</integer></dict>
   <key>RunAtLoad</key><false/>

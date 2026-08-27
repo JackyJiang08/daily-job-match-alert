@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for improving Job Radar. Contributions should preserve three project boundaries:
+Thanks for improving Daily Job Match Alert. Contributions should preserve three project boundaries:
 
 1. Do not add auto-apply or screening-answer automation.
 2. Do not bypass platform access controls or add authenticated scraping for services whose terms prohibit it.

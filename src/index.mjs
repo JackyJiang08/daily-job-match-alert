@@ -103,7 +103,7 @@ async function main() {
   };
   const paths = await writeReports(matches, evaluated, meta, config.outputDirectory);
   if (config.reports?.xlsx?.enabled !== false) {
-    const xlsxPath = path.join(paths.runDirectory, 'job-radar.xlsx');
+    const xlsxPath = path.join(paths.runDirectory, 'daily-job-match-alert.xlsx');
     const xlsxBuilder = fileURLToPath(new URL('./report-xlsx.mjs', import.meta.url));
     try {
       await execFileAsync(process.execPath, [xlsxBuilder, paths.jsonPath, xlsxPath], {

@@ -199,7 +199,7 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
   if (engine === 'codex_subscription') await verifyCodexSubscription(options);
   else await verifyClaudeSubscription(options);
 
-  const tempDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'job-radar-semantic-'));
+  const tempDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'daily-job-match-alert-semantic-'));
   const schemaPath = path.join(tempDirectory, 'schema.json');
   await fs.writeFile(schemaPath, JSON.stringify(resultSchema));
   const allResults = [];
