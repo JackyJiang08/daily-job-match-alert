@@ -1,0 +1,29 @@
+{
+  "lookbackHours": 24,
+  "minimumMatchScore": 20,
+  "semanticMatching": { "engine": "local_only" },
+  "outputDirectory": "./demo-output",
+  "resumes": {
+    "data": "./data-resume.md",
+    "ai": "./ai-resume.md"
+  },
+  "preferences": {
+    "roleTypes": ["internship", "new_grad", "entry_level"],
+    "locations": ["Remote"],
+    "remoteOkay": true,
+    "maxYearsExperience": 3,
+    "needsSponsorship": null,
+    "excludeTitleTerms": ["senior", "staff", "principal", "manager", "director", "lead"]
+  },
+  "sources": {
+    "simplifyInternships": { "enabled": false },
+    "simplifyNewGrad": { "enabled": false },
+    "emailFiles": { "enabled": true, "directory": "." },
+    "careerOps": { "enabled": false }
+  },
+  "network": {
+    "fetchDescriptions": false,
+    "concurrency": 2,
+    "timeoutMs": 1000
+  }
+}
