@@ -25,6 +25,7 @@
   },
   "resumeSources": {
     "autoRefresh": true,
+    "pdftotextCommand": "pdftotext",
     "dataPdf": "~/Desktop/Your Data Resume.pdf",
     "aiPdf": "~/Desktop/Your AI Resume.pdf"
   },

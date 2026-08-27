@@ -13,10 +13,11 @@ test('refreshes private resume text when a source PDF changes', async () => {
   const config = {
     root,
     resumes: { data: path.join(root, 'resumes', 'data.md'), ai: path.join(root, 'resumes', 'ai.md') },
-    resumeSources: { autoRefresh: true, dataPdf: sources.data, aiPdf: sources.ai },
+    resumeSources: { autoRefresh: true, pdftotextCommand: '/custom/pdftotext', dataPdf: sources.data, aiPdf: sources.ai },
   };
   const calls = [];
-  const runner = async (_command, args) => {
+  const runner = async (command, args) => {
+    assert.equal(command, '/custom/pdftotext');
     calls.push(args[1]);
     return { stdout: `${path.basename(args[1])}\n${'resume evidence '.repeat(30)}` };
   };

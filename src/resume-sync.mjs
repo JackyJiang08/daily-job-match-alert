@@ -66,7 +66,10 @@ export async function syncResumes(config, options = {}) {
       continue;
     }
 
-    const text = await extractPdfText(sourcePath, options);
+    const text = await extractPdfText(sourcePath, {
+      ...options,
+      pdftotextCommand: options.pdftotextCommand || settings.pdftotextCommand || 'pdftotext',
+    });
     await fs.mkdir(path.dirname(destinationPath), { recursive: true });
     await fs.writeFile(destinationPath, privateMarkdown(track, text, sourceHash), { mode: 0o600 });
     state.sources = state.sources || {};
