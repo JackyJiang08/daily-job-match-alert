@@ -1,0 +1,32 @@
+{
+  "name": "job-radar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Subscription-only AI job discovery for Data and AI/ML roles",
+  "author": "Yuqing (Jacky) Jiang",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JackyJiang08/job-radar.git"
+  },
+  "keywords": [
+    "job-search",
+    "career",
+    "automation",
+    "codex",
+    "claude-code",
+    "data-science",
+    "machine-learning",
+    "new-grad",
+    "internships"
+  ],
+  "scripts": {
+    "run": "node src/index.mjs --config config.json",
+    "test": "node --test tests/*.test.mjs",
+    "demo": "node src/index.mjs --config tests/fixtures/config.demo.json --now 2026-08-27T12:00:00Z"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

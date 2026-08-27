@@ -1,0 +1,8 @@
+config.json
+resumes/data.md
+resumes/ai.md
+intake/eml/*.eml
+state/
+daily-reports/
+node_modules
+*.log

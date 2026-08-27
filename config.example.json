@@ -1,0 +1,63 @@
+{
+  "lookbackHours": 24,
+  "minimumMatchScore": 70,
+  "semanticMatching": {
+    "engine": "codex_subscription",
+    "required": true,
+    "batchSize": 6,
+    "maximumDescriptionCharacters": 7000,
+    "acceptedMatchLevels": ["high"],
+    "timeoutMs": 600000
+  },
+  "reports": {
+    "xlsx": {
+      "enabled": true,
+      "required": false
+    }
+  },
+  "outputDirectory": "~/Desktop/Job Radar",
+  "resumes": {
+    "data": "./resumes/data.md",
+    "ai": "./resumes/ai.md"
+  },
+  "preferences": {
+    "roleTypes": ["internship", "new_grad", "entry_level"],
+    "locations": ["United States", "Remote"],
+    "remoteOkay": true,
+    "maxYearsExperience": 3,
+    "needsSponsorship": null,
+    "excludeTitleTerms": ["senior", "staff", "principal", "manager", "director", "lead"]
+  },
+  "sources": {
+    "simplifyInternships": {
+      "enabled": true,
+      "url": "https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/dev/README.md"
+    },
+    "simplifyNewGrad": {
+      "enabled": true,
+      "url": "https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/dev/README.md"
+    },
+    "emailFiles": {
+      "enabled": true,
+      "directory": "./intake/eml"
+    },
+    "himalaya": {
+      "enabled": false,
+      "account": "personal",
+      "folder": "job-alerts",
+      "pageSize": 100
+    },
+    "careerOps": {
+      "enabled": false,
+      "projectDirectory": "../../work/career-ops",
+      "scanHistoryPath": "../../work/career-ops/data/scan-history.tsv",
+      "runScanFirst": false
+    }
+  },
+  "network": {
+    "fetchDescriptions": true,
+    "concurrency": 3,
+    "timeoutMs": 15000,
+    "userAgent": "JobRadarCompanion/0.1 (+personal job search; respectful daily polling)"
+  }
+}
