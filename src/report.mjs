@@ -5,8 +5,9 @@ import { csvEscape, htmlEscape } from './utils.mjs';
 const COLUMNS = [
   ['source', 'Source'], ['roleType', 'Role Type'], ['postedAt', 'Posted At'], ['discoveredAt', 'Discovered At'],
   ['company', 'Company'], ['title', 'Title'], ['location', 'Location'], ['dataScore', 'Data Score'],
-  ['aiScore', 'AI Score'], ['bestScore', 'Best Score'], ['recommendedResume', 'Resume'], ['reasons', 'Why It Matches'],
-  ['gaps', 'Gaps'], ['blockers', 'Blockers'], ['url', 'Posting Link'], ['freshnessBasis', 'Freshness Basis'],
+  ['aiScore', 'AI Score'], ['bestScore', 'Best Score'], ['matchLevel', 'Match Level'], ['recommendedResume', 'Resume'],
+  ['reasons', 'Why It Matches'], ['gaps', 'Gaps'], ['blockers', 'Blockers'], ['employmentType', 'Employment Type'],
+  ['salary', 'Salary'], ['description', 'Full JD'], ['url', 'Posting Link'], ['freshnessBasis', 'Freshness Basis'],
 ];
 
 function flatten(value) {
@@ -23,6 +24,7 @@ export function buildCsv(jobs) {
 function jobCard(job) {
   const reasons = (job.reasons || []).map(item => `<li>${htmlEscape(item)}</li>`).join('');
   const gaps = (job.gaps || []).map(item => `<li>${htmlEscape(item)}</li>`).join('');
+  const description = String(job.description || '').trim();
   return `<article class="job">
     <div class="score">${job.bestScore}</div>
     <div class="job-main">
@@ -32,6 +34,7 @@ function jobCard(job) {
       <div class="chips"><span>Data ${job.dataScore}</span><span>AI ${job.aiScore}</span><span>Use ${htmlEscape(job.recommendedResume)}</span></div>
       ${reasons ? `<h3>Match reasons</h3><ul>${reasons}</ul>` : ''}
       ${gaps ? `<details><summary>Gaps / verify before applying</summary><ul>${gaps}</ul></details>` : ''}
+      ${description ? `<details class="jd"><summary>Full captured JD</summary><p>${htmlEscape(description)}</p></details>` : ''}
       <p class="meta">Freshness: ${htmlEscape(job.freshnessBasis)}${job.postedAt ? ` · ${htmlEscape(job.postedAt)}` : ''}</p>
       <a class="apply" href="${htmlEscape(job.url)}">Open original posting →</a>
     </div>
@@ -48,7 +51,7 @@ export function buildHtml(jobs, meta) {
   .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0 26px}.stat{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px}.stat b{display:block;font-size:25px}.stat span{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.08em}
   .job{display:grid;grid-template-columns:68px 1fr;gap:18px;background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;margin:14px 0}.score{width:58px;height:58px;border-radius:50%;display:grid;place-items:center;background:var(--soft);color:var(--accent);font-size:22px;font-weight:750;border:2px solid #99f6e4}
   h2{font-size:21px;margin:2px 0}.eyebrow,.meta{color:var(--muted);font-size:12px}.company{margin:2px 0 10px}.chips{display:flex;gap:8px;flex-wrap:wrap}.chips span{background:#eef2ff;border-radius:999px;padding:4px 9px;font-size:12px}h3{font-size:13px;margin:14px 0 4px}ul{margin:4px 0 8px;padding-left:20px}.apply{display:inline-block;margin-top:10px;color:#fff;background:var(--accent);padding:8px 13px;border-radius:9px;text-decoration:none;font-weight:650}details{background:var(--warn);padding:8px 10px;border-radius:9px;margin-top:10px}
-  .empty{padding:50px;text-align:center;background:#fff;border:1px dashed var(--line);border-radius:16px;color:var(--muted)}footer{color:var(--muted);font-size:12px;margin-top:30px}
+  .jd p{white-space:pre-wrap;max-height:360px;overflow:auto}.empty{padding:50px;text-align:center;background:#fff;border:1px dashed var(--line);border-radius:16px;color:var(--muted)}footer{color:var(--muted);font-size:12px;margin-top:30px}
   @media(max-width:650px){.stats{grid-template-columns:1fr 1fr}.job{grid-template-columns:1fr}.score{width:48px;height:48px}}
   </style></head><body><main class="wrap"><header><h1>Daily Job Match Alert</h1><p class="sub">Data + AI/ML matches discovered in the last ${meta.lookbackHours} hours · ${htmlEscape(meta.date)}</p></header>
   <section class="stats"><div class="stat"><b>${jobs.length}</b><span>High matches</span></div><div class="stat"><b>${byType.internship}</b><span>Internships</span></div><div class="stat"><b>${byType.new_grad}</b><span>New grad</span></div><div class="stat"><b>${byType.entry_level}</b><span>Entry level</span></div></section>

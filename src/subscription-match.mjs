@@ -86,6 +86,7 @@ Evaluate every job independently against both resumes. Scores are evidence-based
 - 0-49: low fit, wrong discipline, wrong seniority, or hard eligibility conflict.
 - matchLevel "high" requires best score >= 70 and no hard blocker.
 - Use "reject" for senior/manager roles, experience above the stated maximum, or explicit work-authorization conflict.
+- Treat the configured location policy as a hard filter. Reject postings explicitly outside it; a remote role must permit work from the allowed country.
 - Do not infer a skill merely from adjacent experience. Name concise matched evidence and missing requirements.
 
 Candidate preferences:

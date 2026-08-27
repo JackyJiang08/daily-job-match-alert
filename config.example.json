@@ -1,6 +1,8 @@
 {
   "lookbackHours": 24,
   "minimumMatchScore": 70,
+  "requireFullDescription": true,
+  "minimumDescriptionCharacters": 200,
   "semanticMatching": {
     "engine": "claude_subscription",
     "claudeCommand": "claude",
@@ -29,6 +31,7 @@
   "preferences": {
     "roleTypes": ["internship", "new_grad", "entry_level"],
     "locations": ["United States", "USA", "Remote - US"],
+    "locationPolicy": "United States only, including remote roles that permit work from the USA",
     "remoteOkay": true,
     "maxYearsExperience": 3,
     "needsSponsorship": false,

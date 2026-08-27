@@ -38,7 +38,7 @@ flowchart LR
   N --> JD[Resolve final URL + extract JD]
   JD --> PF[Local relevance prefilter]
   PF --> LLM[Codex or Claude subscription review]
-  LLM --> R[HTML / CSV / JSON / optional XLSX]
+  LLM --> R[HTML / CSV / JSON / XLSX]
   R --> D[Desktop every morning]
 ```
 
@@ -138,7 +138,7 @@ Each successful run writes a dated folder plus `latest.html` to the configured o
 - `discoveredAt` records when Daily Job Match Alert first encountered the canonical URL.
 - GitHub list age is labeled approximate rather than presented as an exact timestamp.
 - A hard-blocked role remains in the JSON audit record but is excluded from high-match reports.
-- XLSX is optional and non-fatal; HTML, CSV, and JSON remain the portable baseline.
+- XLSX can be configured as required (as in the private nightly setup) or optional for portable installations; HTML, CSV, and JSON remain additional outputs.
 
 ## Security and ethics
 

@@ -6,6 +6,8 @@ const job = {
   source: 'fixture', roleType: 'new_grad', postedAt: '2026-08-27T10:00:00Z', discoveredAt: '2026-08-27T12:00:00Z',
   company: 'Acme, Inc.', title: 'Data & AI Analyst', location: 'Remote', dataScore: 82, aiScore: 74,
   bestScore: 82, recommendedResume: 'Data', reasons: ['SQL & Python'], gaps: ['Verify domain knowledge'], blockers: [],
+  matchLevel: 'high', employmentType: 'FULL_TIME', salary: 'USD 90000–110000 YEAR',
+  description: 'Use SQL, Python, and experimentation to help product teams make data-informed decisions.',
   url: 'https://example.com/jobs/1', freshnessBasis: 'jobposting_date_posted',
 };
 
@@ -13,6 +15,7 @@ test('CSV output quotes commas and preserves posting links', () => {
   const csv = buildCsv([job]);
   assert.match(csv, /"Acme, Inc\."/);
   assert.match(csv, /https:\/\/example\.com\/jobs\/1/);
+  assert.match(csv, /Use SQL, Python/);
 });
 
 test('HTML output escapes remote content and includes the original link', () => {
@@ -20,4 +23,5 @@ test('HTML output escapes remote content and includes the original link', () => 
   assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.match(html, /https:\/\/example\.com\/jobs\/1/);
+  assert.match(html, /Full captured JD/);
 });

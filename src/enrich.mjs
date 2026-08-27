@@ -45,6 +45,22 @@ function locationFromPosting(posting) {
   }).filter(Boolean).join(' / ');
 }
 
+function employmentTypeFromPosting(posting) {
+  const value = posting.employmentType;
+  return (Array.isArray(value) ? value : [value]).filter(Boolean).join(' / ');
+}
+
+function salaryFromPosting(posting) {
+  const salary = posting.baseSalary;
+  if (!salary) return '';
+  const value = salary.value || salary;
+  const minimum = value.minValue ?? value.value;
+  const maximum = value.maxValue;
+  const amount = maximum != null && maximum !== minimum ? `${minimum ?? '?'}–${maximum}` : `${minimum ?? maximum ?? ''}`;
+  if (!amount) return '';
+  return [salary.currency, amount, value.unitText].filter(Boolean).join(' ');
+}
+
 function greenhouseApiUrl(url) {
   try {
     const parsed = new URL(url);
@@ -103,6 +119,8 @@ export async function enrichJob(job, network = {}, fetchImpl = fetch) {
       company: posting?.hiringOrganization?.name || job.company,
       title: cleanText(posting?.title || htmlTitle || job.title),
       location: locationFromPosting(posting || {}) || job.location,
+      employmentType: employmentTypeFromPosting(posting || {}) || job.employmentType || '',
+      salary: salaryFromPosting(posting || {}) || job.salary || '',
       description: (postingDescription || meta(body, 'description') || meta(body, 'og:description') || job.description || '').slice(0, 50000),
       postedAt: isoDate(posting?.datePosted) || job.postedAt,
       finalUrl,

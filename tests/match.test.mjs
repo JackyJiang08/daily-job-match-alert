@@ -24,10 +24,15 @@ test('blocks roles above the configured experience ceiling', () => {
 test('treats a non-senior Data title without a stated year minimum as entry level', () => {
   const job = evaluateJob({ title: 'Data Analyst', company: 'Acme', location: 'Remote', description: 'Use SQL, Python, Tableau, and experimentation to support product decisions.', url: 'https://example.com/analyst', source: 'fixture' }, resumes, preferences);
   assert.equal(job.roleType, 'entry_level');
-  assert.equal(isEligible(job, { preferences, minimumMatchScore: 20, semanticMatching: { engine: 'local_only' } }), true);
+  assert.equal(isEligible(job, { preferences, minimumMatchScore: 20, requireFullDescription: false, semanticMatching: { engine: 'local_only' } }), true);
 });
 
 test('does not accept an unrelated software role on generic tool overlap alone', () => {
   const job = evaluateJob({ title: 'Software Engineer', company: 'Acme', location: 'Remote', description: 'Use Python, Docker, AWS and Kubernetes to build backend services.', url: 'https://example.com/swe', source: 'fixture' }, resumes, preferences);
   assert.equal(isEligible(job, { preferences: { ...preferences, roleTypes: [...preferences.roleTypes, 'unknown'] }, minimumMatchScore: 1 }), false);
+});
+
+test('requires a substantive JD before a role enters the high-match report', () => {
+  const job = evaluateJob({ title: 'Data Analyst', company: 'Acme', location: 'Remote', description: 'SQL and Python.', url: 'https://example.com/short', source: 'fixture' }, resumes, preferences);
+  assert.equal(isEligible(job, { preferences, minimumMatchScore: 1, semanticMatching: { engine: 'local_only' } }), false);
 });

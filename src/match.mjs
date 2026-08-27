@@ -113,6 +113,7 @@ export function evaluateJob(job, resumes, preferences = {}) {
 
 export function isEligible(job, config) {
   const prefs = config.preferences || {};
+  if (config.requireFullDescription !== false && String(job.description || '').trim().length < Number(config.minimumDescriptionCharacters || 200)) return false;
   if (prefs.roleTypes?.length && !prefs.roleTypes.includes(job.roleType)) return false;
   if (prefs.excludeTitleTerms?.some(term => includesPhrase(job.title, term))) return false;
   if (job.blockers?.length) return false;
