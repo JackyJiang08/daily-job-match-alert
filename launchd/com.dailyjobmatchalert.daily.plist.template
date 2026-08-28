@@ -6,15 +6,20 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/zsh</string>
-    <string>__PROJECT_DIR__/scripts/run-daily.sh</string>
+    <string>__PROJECT_DIR__/scripts/run-launchd.sh</string>
   </array>
   <key>WorkingDirectory</key><string>__PROJECT_DIR__</string>
   <key>EnvironmentVariables</key>
-  <dict><key>DAILY_JOB_MATCH_ALERT_NODE</key><string>__NODE_BIN__</string></dict>
+  <dict>
+    <key>DAILY_JOB_MATCH_ALERT_NODE</key><string>__NODE_BIN__</string>
+    <key>DAILY_JOB_MATCH_ALERT_TRIGGER</key><string>auto</string>
+    <key>DAILY_JOB_MATCH_ALERT_SCHEDULE_HOUR</key><string>__HOUR__</string>
+    <key>DAILY_JOB_MATCH_ALERT_SCHEDULE_MINUTE</key><string>__MINUTE__</string>
+  </dict>
   <key>StartCalendarInterval</key>
   <dict><key>Hour</key><integer>__HOUR__</integer><key>Minute</key><integer>__MINUTE__</integer></dict>
-  <key>RunAtLoad</key><false/>
-  <key>StandardOutPath</key><string>__PROJECT_DIR__/state/logs/launchd.out.log</string>
-  <key>StandardErrorPath</key><string>__PROJECT_DIR__/state/logs/launchd.err.log</string>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>/dev/null</string>
+  <key>StandardErrorPath</key><string>/dev/null</string>
 </dict>
 </plist>

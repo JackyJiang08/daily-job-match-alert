@@ -23,6 +23,7 @@
   ],
   "scripts": {
     "run": "node src/index.mjs --config config.json",
+    "run:catchup": "node src/catchup.mjs --config config.json",
     "resume:sync": "node src/resume-sync-cli.mjs --config config.json",
     "test": "node --test tests/*.test.mjs",
     "demo": "node src/index.mjs --config tests/fixtures/config.demo.json --now 2026-08-27T12:00:00Z"

@@ -58,3 +58,24 @@ export function markJobSeen(state, job, seenAt) {
   }
   return { attempts, completed };
 }
+
+export function pruneSeen(state, now = new Date(), retentionDays = 90) {
+  const normalized = normalizeState(state);
+  state.seen = normalized.seen;
+  const currentTime = now instanceof Date ? now.getTime() : new Date(now).getTime();
+  if (!Number.isFinite(currentTime)) throw new Error('pruneSeen now must be a valid date');
+  const cutoff = currentTime - Number(retentionDays) * 24 * 60 * 60 * 1000;
+  let removed = 0;
+
+  for (const [key, entry] of Object.entries(state.seen)) {
+    if (!entry || typeof entry !== 'object') continue;
+    // Incomplete enrichment stays retryable for 90 days after its most recent attempt,
+    // rather than being aged out from the much older first discovery date.
+    const ageBasis = entry.lastAttempt || entry.firstSeen;
+    const timestamp = ageBasis ? new Date(ageBasis).getTime() : Number.NaN;
+    if (!Number.isFinite(timestamp) || timestamp >= cutoff) continue;
+    delete state.seen[key];
+    removed += 1;
+  }
+  return removed;
+}

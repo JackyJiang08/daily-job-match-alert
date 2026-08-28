@@ -10,6 +10,8 @@ const API_CREDENTIALS = [
   'AWS_BEDROCK_API_KEY', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY',
   'GOOGLE_API_KEY', 'GOOGLE_APPLICATION_CREDENTIALS',
 ];
+// Subscription flags used below were validated against this installed Claude Code release.
+const MINIMUM_CLAUDE_CODE_VERSION = '2.1.250';
 
 export function subscriptionEnvironment(environment = process.env) {
   const safe = { ...environment };
@@ -123,8 +125,40 @@ async function verifyCodexSubscription(options = {}) {
   }
 }
 
+export function parseClaudeCodeVersion(value) {
+  const match = String(value || '').match(/\b(\d+)\.(\d+)\.(\d+)\b/);
+  return match ? match.slice(1, 4).map(Number) : null;
+}
+
+export function compareVersions(left, right) {
+  const leftParts = Array.isArray(left) ? left : parseClaudeCodeVersion(left);
+  const rightParts = Array.isArray(right) ? right : parseClaudeCodeVersion(right);
+  if (!leftParts || !rightParts) throw new Error('Could not parse semantic version');
+  for (let index = 0; index < 3; index += 1) {
+    if (leftParts[index] !== rightParts[index]) return leftParts[index] - rightParts[index];
+  }
+  return 0;
+}
+
 async function verifyClaudeSubscription(options = {}) {
-  const result = await (options.runner || run)(options.claudeCommand || 'claude', ['auth', 'status', '--json'], { timeoutMs: 30_000, env: subscriptionEnvironment() });
+  const runner = options.runner || run;
+  const command = options.claudeCommand || 'claude';
+  let versionResult;
+  try {
+    versionResult = await runner(command, ['--version'], { timeoutMs: 30_000, env: subscriptionEnvironment() });
+  } catch (error) {
+    throw new Error(`Could not verify the Claude Code version. Upgrade with \`npm i -g @anthropic-ai/claude-code@latest\`, then retry. ${errorSummary(error)}`);
+  }
+  const versionText = `${versionResult.stdout || ''}\n${versionResult.stderr || ''}`;
+  const installedVersion = parseClaudeCodeVersion(versionText);
+  if (!installedVersion) {
+    throw new Error(`Claude Code returned an unrecognized version string. Version ${MINIMUM_CLAUDE_CODE_VERSION} or newer is required; upgrade with \`npm i -g @anthropic-ai/claude-code@latest\`.`);
+  }
+  if (compareVersions(installedVersion, MINIMUM_CLAUDE_CODE_VERSION) < 0) {
+    throw new Error(`Claude Code ${installedVersion.join('.')} is older than the verified minimum ${MINIMUM_CLAUDE_CODE_VERSION}. Upgrade with \`npm i -g @anthropic-ai/claude-code@latest\`.`);
+  }
+
+  const result = await runner(command, ['auth', 'status', '--json'], { timeoutMs: 30_000, env: subscriptionEnvironment() });
   const status = JSON.parse(result.stdout);
   if (!status.loggedIn || /api.?key/i.test(String(status.authMethod || ''))) {
     throw new Error('Claude Code is not authenticated with a Claude subscription. API-key authentication is intentionally rejected.');
@@ -325,4 +359,4 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
   return jobs.map(job => mergedByUrl.get(job.url) || job);
 }
 
-export { resultSchema, verifyCodexSubscription, verifyClaudeSubscription };
+export { MINIMUM_CLAUDE_CODE_VERSION, resultSchema, verifyCodexSubscription, verifyClaudeSubscription };
