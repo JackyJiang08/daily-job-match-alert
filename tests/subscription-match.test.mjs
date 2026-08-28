@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applySubscriptionMatching, buildSemanticPrompt, expandModelAlias, extractScoringModel, MINIMUM_CLAUDE_CODE_VERSION, mergeSemanticResults, modelMatchesConfiguration, parseStructuredOutput, subscriptionEnvironment, summarizeScoringModel, verifyClaudeSubscription, verifyCodexSubscription } from '../src/subscription-match.mjs';
+import { applySubscriptionMatching, buildSemanticPrompt, expandModelAlias, extractScoringModel, MINIMUM_CLAUDE_CODE_VERSION, mergeSemanticResults, modelMatchesConfiguration, parseStructuredOutput, runSubscriptionCommand, subscriptionEnvironment, summarizeScoringModel, verifyClaudeSubscription, verifyCodexSubscription } from '../src/subscription-match.mjs';
 import { sha256 } from '../src/utils.mjs';
 
 function localCandidate(url, title = 'Data Analyst') {
@@ -257,4 +257,30 @@ test('summarizes the scoring model for meta across reviewed, fallback, and local
     { semanticReviewed: true, scoringModel: 'claude-sonnet-5' },
     { semanticReviewed: true, scoringModel: 'claude-fable-5' },
   ]), 'claude-fable-5, claude-sonnet-5');
+});
+
+test('a CLI that exits before reading its prompt is reported as a failed exit, not an EPIPE crash', async () => {
+  // 1 MB exceeds the pipe buffer, so the write is still in flight when the child has already exited.
+  const prompt = 'x'.repeat(1024 * 1024);
+  await assert.rejects(
+    runSubscriptionCommand('/bin/sh', ['-c', 'exit 3'], { input: prompt, timeoutMs: 30_000 }),
+    /exited 3/,
+  );
+  await assert.rejects(
+    runSubscriptionCommand('/nonexistent/claude-binary', ['--version'], { input: prompt, timeoutMs: 30_000 }),
+    /ENOENT/,
+  );
+});
+
+test('a claudeCommand that exits immediately degrades to local fallback with a warning', async () => {
+  const warnings = [];
+  const [job] = await applySubscriptionMatching(
+    [localCandidate('https://example.com/jobs/dead-cli')],
+    { data: 'DATA', ai: 'AI' },
+    {},
+    { engine: 'claude_subscription', claudeCommand: '/bin/sh', warnings },
+  );
+  assert.equal(job.matchLevel, 'unreviewed');
+  assert.equal(job.scoringEngine, 'local_fallback');
+  assert.ok(warnings.some(warning => /authentication check failed/.test(warning.message)));
 });

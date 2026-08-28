@@ -31,12 +31,16 @@ function run(command, args, { input = '', cwd = process.cwd(), timeoutMs = 600_0
     child.stdout.on('data', chunk => stdout.push(chunk));
     child.stderr.on('data', chunk => stderr.push(chunk));
     child.on('error', error => { clearTimeout(timer); reject(error); });
-    child.on('close', code => {
+    child.on('close', (code, signal) => {
       clearTimeout(timer);
       const result = { code, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') };
       if (code === 0) resolve(result);
-      else reject(new Error(`${command} exited ${code}: ${result.stderr.slice(-2000) || result.stdout.slice(-2000)}`));
+      else reject(new Error(`${command} exited ${code ?? signal}: ${result.stderr.slice(-2000) || result.stdout.slice(-2000)}`));
     });
+    // A CLI that exits before reading its prompt (crash, bad flag, missing binary) closes the pipe while
+    // the prompt is still being written. That EPIPE must not become an unhandled 'error' event that kills
+    // the whole nightly run; the 'close' handler above already reports the failed exit.
+    child.stdin.on('error', () => {});
     child.stdin.end(input);
   });
 }
@@ -430,4 +434,4 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
   return jobs.map(job => mergedByUrl.get(job.url) || job);
 }
 
-export { MINIMUM_CLAUDE_CODE_VERSION, resultSchema, verifyCodexSubscription, verifyClaudeSubscription };
+export { MINIMUM_CLAUDE_CODE_VERSION, resultSchema, run as runSubscriptionCommand, verifyCodexSubscription, verifyClaudeSubscription };
