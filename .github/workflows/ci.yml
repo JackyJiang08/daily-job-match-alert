@@ -20,10 +20,15 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
-      - run: npm install --ignore-scripts
+      - run: npm ci --ignore-scripts
       - run: npm test
       - name: Syntax check
         run: |
           for file in src/*.mjs src/collectors/*.mjs; do
             node --check "$file"
           done
+      - name: Build and verify XLSX smoke report
+        run: |
+          output="$RUNNER_TEMP/xlsx-smoke.xlsx"
+          node src/report-xlsx.mjs tests/fixtures/xlsx-smoke.json "$output" --verify
+          test -s "$output"

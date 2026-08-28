@@ -29,5 +29,11 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
   }
 }

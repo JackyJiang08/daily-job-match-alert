@@ -9,7 +9,7 @@ Thanks for improving Daily Job Match Alert. Contributions should preserve three 
 ## Development
 
 ```bash
-npm install --ignore-scripts
+npm ci --ignore-scripts
 npm test
 ```
 

@@ -42,7 +42,7 @@ export function canonicalUrl(raw) {
     const url = new URL(raw);
     url.hash = '';
     const trackingKeys = [...url.searchParams.keys()].filter(key =>
-      /^(utm_|ref$|ref_|source$|source_|gh_src$|gh_jid$|trk$|tracking)/i.test(key),
+      /^(utm_|ref$|ref_|source$|source_|gh_src$|trk$|tracking)/i.test(key),
     );
     for (const key of trackingKeys) url.searchParams.delete(key);
     if (url.pathname !== '/') url.pathname = url.pathname.replace(/\/+$/, '');

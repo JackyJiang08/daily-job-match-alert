@@ -13,6 +13,7 @@ import { enrichJob } from './enrich.mjs';
 import { evaluateJob, isEligible } from './match.mjs';
 import { applySubscriptionMatching } from './subscription-match.mjs';
 import { writeReports } from './report.mjs';
+import { isJobSeen, markJobSeen, normalizeState } from './state.mjs';
 import { canonicalUrl, dateWithOffset, mapLimit, sha256 } from './utils.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -23,7 +24,7 @@ function arg(name, fallback = null) {
 }
 
 async function readState(file) {
-  try { return JSON.parse(await fs.readFile(file, 'utf8')); } catch (error) {
+  try { return normalizeState(JSON.parse(await fs.readFile(file, 'utf8'))); } catch (error) {
     if (error.code === 'ENOENT') return { seen: {} };
     throw error;
   }
@@ -86,9 +87,18 @@ async function main() {
     const timestamp = job.postedAt || job.discoveredAt;
     return !timestamp || new Date(timestamp) >= cutoff;
   });
-  const newJobs = collected.filter(job => !state.seen[sha256(job.url)]);
-  const stamped = newJobs.map(job => ({ ...job, discoveredAt: job.discoveredAt || now.toISOString() }));
-  const enriched = config.network.fetchDescriptions === false ? stamped : await mapLimit(stamped, Number(config.network.concurrency || 3), job => enrichJob(job, config.network));
+  const unseenCandidates = collected.filter(job => !isJobSeen(state, job));
+  const stamped = unseenCandidates.map(job => ({
+    ...job,
+    originalUrl: job.originalUrl || job.url,
+    discoveredAt: job.discoveredAt || now.toISOString(),
+  }));
+  const enrichedCandidates = config.network.fetchDescriptions === false ? stamped : await mapLimit(stamped, Number(config.network.concurrency || 3), job => enrichJob(job, config.network));
+  const enriched = enrichedCandidates.filter(job => {
+    if (!isJobSeen(state, job)) return true;
+    markJobSeen(state, job, now.toISOString());
+    return false;
+  });
   const locallyEvaluated = enriched.map(job => evaluateJob(job, resumes, config.preferences));
   const evaluated = (await applySubscriptionMatching(locallyEvaluated, resumes, config.preferences, config.semanticMatching || {}))
     .sort((a, b) => b.bestScore - a.bestScore);
@@ -99,10 +109,19 @@ async function main() {
   const meta = {
     generatedAt: now.toISOString(), date, applicationDate: date, runDate, timeZone, lookbackHours: config.lookbackHours,
     minimumMatchScore: config.minimumMatchScore, resumeSync, collectedCount: collected.length,
-    newCount: newJobs.length, reviewedCount: evaluated.length, matchCount: matches.length,
+    newCount: enriched.length, reviewedCount: evaluated.length, matchCount: matches.length,
   };
   const paths = await writeReports(matches, evaluated, meta, config.outputDirectory);
+
+  await fs.mkdir(path.dirname(statePath), { recursive: true });
+  for (const job of evaluated) markJobSeen(state, job, now.toISOString());
+  state.lastSuccessfulRun = now.toISOString();
+  await fs.writeFile(statePath, JSON.stringify(state, null, 2) + '\n');
+
+  const xlsxFailurePath = path.join(paths.runDirectory, 'XLSX-FAILED.txt');
+  let xlsxFailure = null;
   try {
+    await fs.rm(xlsxFailurePath, { force: true });
     if (config.reports?.xlsx?.enabled !== false) {
       const xlsxPath = path.join(paths.runDirectory, `${paths.reportBaseName}.xlsx`);
       const xlsxBuilder = fileURLToPath(new URL('./report-xlsx.mjs', import.meta.url));
@@ -112,17 +131,25 @@ async function main() {
           timeout: 2 * 60 * 1000,
         });
         paths.xlsxPath = xlsxPath;
-        await Promise.all([
-          fs.rm(`${xlsxPath}.inspect.ndjson`, { force: true }),
-          fs.rm(path.join(paths.runDirectory, '.verification'), { recursive: true, force: true }),
-        ]);
       } catch (error) {
-        if (config.reports?.xlsx?.required) {
-          await fs.rm(paths.htmlPath, { force: true });
-          throw error;
-        }
+        xlsxFailure = error;
         paths.xlsxPath = null;
-        paths.xlsxWarning = 'XLSX writer unavailable; the HTML report was still created.';
+        paths.xlsxFailurePath = xlsxFailurePath;
+        paths.xlsxWarning = 'XLSX generation failed; the HTML report and persisted seen state were preserved.';
+        const failureText = [
+          'Daily Job Match Alert XLSX generation failed.',
+          `Generated at: ${now.toISOString()}`,
+          `HTML report: ${paths.htmlPath}`,
+          `Attempted XLSX: ${xlsxPath}`,
+          '',
+          error.stack || error.message || String(error),
+          '',
+        ].join('\n');
+        try {
+          await fs.writeFile(xlsxFailurePath, failureText);
+        } catch (markerError) {
+          paths.xlsxMarkerWarning = `Could not write XLSX-FAILED.txt: ${markerError.message}`;
+        }
         console.warn(`${paths.xlsxWarning} ${error.message}`);
       }
     }
@@ -133,11 +160,8 @@ async function main() {
     delete paths.reportBaseName;
   }
 
-  await fs.mkdir(path.dirname(statePath), { recursive: true });
-  for (const job of evaluated) state.seen[sha256(job.url)] = { url: job.url, firstSeen: now.toISOString() };
-  state.lastSuccessfulRun = now.toISOString();
-  await fs.writeFile(statePath, JSON.stringify(state, null, 2) + '\n');
   console.log(JSON.stringify({ meta, ...paths }, null, 2));
+  if (xlsxFailure) throw xlsxFailure;
 }
 
 main().catch(error => {

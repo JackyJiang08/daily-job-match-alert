@@ -2,6 +2,7 @@
   "lookbackHours": 24,
   "minimumMatchScore": 20,
   "semanticMatching": { "engine": "local_only" },
+  "reports": { "xlsx": { "enabled": true, "required": false } },
   "outputDirectory": "./demo-output",
   "resumes": {
     "data": "./data-resume.md",

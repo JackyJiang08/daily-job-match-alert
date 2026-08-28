@@ -17,7 +17,7 @@
   "reports": {
     "xlsx": {
       "enabled": true,
-      "required": true
+      "required": false
     }
   },
   "outputDirectory": "~/Desktop/Daily Job Match Alert",

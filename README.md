@@ -25,7 +25,7 @@ Daily Job Match Alert provides:
 - Public-source and official-alert ingestion without authenticated scraping.
 - Exact `postedAt` versus first-seen `discoveredAt` semantics.
 - Cross-source URL canonicalization and persistent deduplication.
-- Exactly two user-facing files per application date: HTML and XLSX, both with the complete captured JD.
+- Exactly two user-facing files per successful application date: HTML and XLSX, both with the complete captured JD.
 - Hard safety boundaries: no auto-apply, no screening answers, no mailbox mutation.
 
 ## Architecture
@@ -132,7 +132,7 @@ The deterministic runner uses `launchd`, so collection and report generation do 
 
 ## Reports and freshness
 
-Each successful 20:00 Central Time run writes the **next application date** as a folder. For example, the August 27 evening run creates `2026-08-28/`. That folder contains only:
+Each successful 20:00 Central Time run writes the **next application date** as a folder. For example, the August 27 evening run creates `2026-08-28/`. A successful folder contains only:
 
 - `Daily Job Match Alert - 2026-08-28.html`
 - `Daily Job Match Alert - 2026-08-28.xlsx`
@@ -143,7 +143,7 @@ No `latest.html`, CSV, JSON, inspection sidecar, or verification directory remai
 - `discoveredAt` records when Daily Job Match Alert first encountered the canonical URL.
 - GitHub list age is labeled approximate rather than presented as an exact timestamp.
 - Hard-blocked and low-match roles are excluded from both user-facing files.
-- The XLSX writer is required so a successful dated folder always satisfies the two-file contract.
+- The XLSX writer is enabled by default. If XLSX generation fails, the run exits with code 1 but preserves the HTML report and seen state, and writes `XLSX-FAILED.txt` beside the HTML with the underlying error. A later successful rerun removes that marker and restores the two-file contract.
 
 ## Security and ethics
 

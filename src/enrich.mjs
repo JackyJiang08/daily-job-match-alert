@@ -85,51 +85,53 @@ async function fetchWithTimeout(url, options, timeoutMs, fetchImpl) {
 export async function enrichJob(job, network = {}, fetchImpl = fetch) {
   const timeoutMs = Number(network.timeoutMs || 15000);
   const headers = { 'user-agent': network.userAgent || 'DailyJobMatchAlert/0.1', accept: 'text/html,application/json' };
+  const originalUrl = canonicalUrl(job.originalUrl || job.url) || job.originalUrl || job.url;
+  const originalJob = { ...job, originalUrl };
   try {
-    const greenhouse = greenhouseApiUrl(job.url);
+    const greenhouse = greenhouseApiUrl(originalJob.url);
     if (greenhouse) {
       const response = await fetchWithTimeout(greenhouse, { headers }, timeoutMs, fetchImpl);
       if (response.ok) {
         const payload = await response.json();
         return {
-          ...job,
-          company: job.company || payload.company_name || '',
-          title: payload.title || job.title,
-          location: payload.location?.name || job.location,
-          description: cleanText(payload.content || job.description),
-          postedAt: isoDate(payload.updated_at) || job.postedAt,
-          freshnessBasis: payload.updated_at ? 'greenhouse_updated_at' : job.freshnessBasis,
-          finalUrl: job.url,
+          ...originalJob,
+          company: originalJob.company || payload.company_name || '',
+          title: payload.title || originalJob.title,
+          location: payload.location?.name || originalJob.location,
+          description: cleanText(payload.content || originalJob.description),
+          postedAt: isoDate(payload.updated_at) || originalJob.postedAt,
+          freshnessBasis: payload.updated_at ? 'greenhouse_updated_at' : originalJob.freshnessBasis,
+          finalUrl: originalJob.url,
           enrichment: 'greenhouse_api',
         };
       }
     }
 
-    const response = await fetchWithTimeout(job.url, { headers }, timeoutMs, fetchImpl);
-    if (!response.ok) return { ...job, enrichment: `http_${response.status}` };
-    const finalUrl = canonicalUrl(response.url || job.url) || job.url;
+    const response = await fetchWithTimeout(originalJob.url, { headers }, timeoutMs, fetchImpl);
+    if (!response.ok) return { ...originalJob, enrichment: `http_${response.status}` };
+    const finalUrl = canonicalUrl(response.url || originalJob.url) || originalJob.url;
     const contentType = response.headers.get('content-type') || '';
     const body = await response.text();
-    if (contentType.includes('application/json')) return { ...job, finalUrl, enrichment: 'json_unparsed' };
+    if (contentType.includes('application/json')) return { ...originalJob, finalUrl, url: finalUrl, enrichment: 'json_unparsed' };
     const posting = parseJsonLd(body);
     const htmlTitle = meta(body, 'og:title') || cleanText(body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '');
     const postingDescription = posting?.description ? cleanText(posting.description) : '';
     return {
-      ...job,
-      company: posting?.hiringOrganization?.name || job.company,
-      title: cleanText(posting?.title || htmlTitle || job.title),
-      location: locationFromPosting(posting || {}) || job.location,
-      employmentType: employmentTypeFromPosting(posting || {}) || job.employmentType || '',
-      salary: salaryFromPosting(posting || {}) || job.salary || '',
-      description: (postingDescription || meta(body, 'description') || meta(body, 'og:description') || job.description || '').slice(0, 50000),
-      postedAt: isoDate(posting?.datePosted) || job.postedAt,
+      ...originalJob,
+      company: posting?.hiringOrganization?.name || originalJob.company,
+      title: cleanText(posting?.title || htmlTitle || originalJob.title),
+      location: locationFromPosting(posting || {}) || originalJob.location,
+      employmentType: employmentTypeFromPosting(posting || {}) || originalJob.employmentType || '',
+      salary: salaryFromPosting(posting || {}) || originalJob.salary || '',
+      description: (postingDescription || meta(body, 'description') || meta(body, 'og:description') || originalJob.description || '').slice(0, 50000),
+      postedAt: isoDate(posting?.datePosted) || originalJob.postedAt,
       finalUrl,
       url: finalUrl,
-      freshnessBasis: posting?.datePosted ? 'jobposting_date_posted' : job.freshnessBasis,
+      freshnessBasis: posting?.datePosted ? 'jobposting_date_posted' : originalJob.freshnessBasis,
       enrichment: posting ? 'json_ld_jobposting' : 'html_metadata',
     };
   } catch (error) {
-    return { ...job, enrichment: 'failed', enrichmentError: error.name === 'AbortError' ? 'timeout' : error.message };
+    return { ...originalJob, enrichment: 'failed', enrichmentError: error.name === 'AbortError' ? 'timeout' : error.message };
   }
 }
 

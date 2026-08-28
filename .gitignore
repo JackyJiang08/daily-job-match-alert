@@ -9,3 +9,4 @@ node_modules
 *.log
 tests/fixtures/demo-output/
 tests/fixtures/state/
+outputs/
