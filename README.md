@@ -12,7 +12,7 @@ Collect fresh roles from public ATS boards and curated GitHub lists; compare eve
 
 </div>
 
-Daily Job Match Alert is a privacy-conscious, non-auto-apply pipeline for internships, new-grad positions, and entry-level full-time roles. It uses an authenticated **Codex CLI or Claude Code subscription** for semantic matching—never a pay-as-you-go model API.
+Daily Job Match Alert is a privacy-conscious, non-auto-apply pipeline for internships, new-grad positions, and entry-level full-time roles. It uses an authenticated **Claude Code subscription** for semantic matching—never a pay-as-you-go model API.
 
 ## Why Daily Job Match Alert
 
@@ -38,7 +38,7 @@ flowchart LR
   EM[Email alerts - planned] -.-> N
   N --> JD[Resolve final URL + extract JD]
   JD --> PF[Local relevance prefilter]
-  PF --> LLM[Codex or Claude subscription review]
+  PF --> LLM[Claude subscription review]
   LLM --> R[HTML + XLSX only]
   R --> D[Next-day application folder on Desktop]
 ```
@@ -59,7 +59,7 @@ Daily Job Match Alert does not sign into or scrape Handshake, Jobright, Simplify
 
 ## Quick start
 
-Requirements: macOS or Linux, Node.js 20+, and either a ChatGPT-authenticated Codex CLI or a subscription-authenticated Claude Code **2.1.250 or newer** (older versions are rejected before any batch is sent). [career-ops](https://github.com/santifer/career-ops) and [Himalaya](https://github.com/pimalaya/himalaya) are optional.
+Requirements: macOS or Linux, Node.js 20+, and a subscription-authenticated Claude Code **2.1.250 or newer** (older versions are rejected before any batch is sent). [career-ops](https://github.com/santifer/career-ops) and [Himalaya](https://github.com/pimalaya/himalaya) are optional.
 
 ```bash
 git clone https://github.com/JackyJiang08/daily-job-match-alert.git
@@ -85,7 +85,7 @@ The default engine is `claude_subscription`. Choose the Claude.ai subscription f
 
 ### Pinning and auditing the scoring model
 
-`semanticMatching.model` is passed to `claude --model` (or `codex --model`). Use one of the Claude Code aliases—`fable`, `opus`, or `sonnet`, each resolving to the latest model in that family—or a full model name such as `claude-fable-5`. The example configuration pins `fable`.
+`semanticMatching.model` is passed to `claude --model`. Use one of the Claude Code aliases—`fable`, `opus`, or `sonnet`, each resolving to the latest model in that family—or a full model name such as `claude-fable-5`. The example configuration pins `fable`.
 
 Every batch response from `claude --print --output-format json` is parsed for the model that actually produced the scores (`modelUsage`, keyed by model id; the entry with the most output tokens is the scoring model). That value is recorded as `scoringModel` on each reviewed job, summarized as `meta.scoringModel`, and shown in the HTML header and the XLSX Run Summary as **Scoring model**. If the output does not identify a model, `scoringModel` is `unknown` and a warning is raised. If a configured model does not match the reported model after alias expansion (for example `fable` configured but `claude-sonnet-5` reported), the scores are still used for that run, but a `MODEL MISMATCH` warning appears in the HTML warning panel and the Run Summary so the configuration can be fixed. Runs without any semantic review show `local_only` or `none`.
 
@@ -108,13 +108,12 @@ Real PDFs, extracted resume text, `config.json`, state, email, logs, and generat
 
 This is an enforced runtime boundary, not just a documentation promise:
 
-- `codex_subscription` requires `codex login status` to explicitly report ChatGPT login.
-- `claude_subscription` is the default; it requires Claude Code 2.1.250+ and rejects missing or API-key authentication.
+- `claude_subscription` is the only model engine (`local_only` skips semantic review). It requires Claude Code 2.1.250+ and checks `claude auth status --json` against an allow-list: `loggedIn` must be true, `authMethod` must be `claude.ai`/`claudeai`/`subscription`, `apiProvider` (when reported) must be `firstParty`, and `subscriptionType` (when reported) must be `pro`, `max`, `team`, or `enterprise`. `console` (Anthropic Console billing), `apiKey`, Bedrock, Vertex, and anything unrecognized are rejected with the observed `authMethod` in the warning, and the run falls back to local scoring.
 - Before the CLI is spawned, every variable that could change its authentication or routing is removed from the subprocess environment: everything prefixed `ANTHROPIC_` (API key, base URL, auth token, model overrides) or `AWS_` (Bedrock credentials, profiles, regions), plus `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, `GOOGLE_APPLICATION_CREDENTIALS`, `GOOGLE_API_KEY`, `CLOUD_ML_REGION`, `CLAUDE_API_KEY`, and `OPENAI_API_KEY`.
-- There is no OpenAI Platform or Anthropic API client in the project.
+- There is no Anthropic API client in the project, and no other model CLI is wired in.
 - Authentication, version, batch, or parsing failures fall back to local scoring and appear as report warnings; they never fall back to an API.
 
-Subscription runs still count against the applicable ChatGPT or Claude plan limits.
+Subscription runs still count against the applicable Claude plan limits.
 
 ## Degraded runs and warnings
 
@@ -132,8 +131,9 @@ A nightly run is designed to finish with a report on the Desktop even when parts
 | Subscription CLI missing, wrong version, API-key auth, or a batch fails twice (10 s retry) | Affected jobs keep their local scores and are labeled `unreviewed` | Warning `llm / <engine>`; `[unreviewed]` prefix in the XLSX, orange `Match level: unreviewed` chip in the HTML |
 | The model omits job ids | One supplemental review; anything still missing becomes `unreviewed` | Warning `llm / <engine>` |
 | Reported model differs from `semanticMatching.model` | Scores kept for the run | `MODEL MISMATCH` warning |
-| XLSX generation fails | HTML report and seen-state are kept, `XLSX-FAILED.txt` is written beside the HTML, the report payload stays in `state/pending-report.json`, `lastSuccessfulRun` is not updated, the process exits 1 | Warning `report / XLSX`, marker file |
-| A run starts while `state/pending-report.json` exists | That day's HTML and XLSX are rebuilt from the payload first (no collection, no scoring), the marker is removed, `lastSuccessfulRun` is recorded; a same-day rerun folds the carried postings into its own report | Warning `report / pending report` |
+| XLSX generation fails | HTML report and seen-state are kept, `XLSX-FAILED.txt` is written beside the HTML, the day's payload stays incomplete in `state/report-payload-<date>.json`, `lastSuccessfulRun` is not updated, the process exits 1 | Warning `report / XLSX`, marker file |
+| A run starts while an earlier day's payload is incomplete | That day's HTML and XLSX are rebuilt from the payload first (no collection, no scoring), the marker is removed, `lastSuccessfulRun` is recorded | Warning `report / report payload` |
+| The same application date is run again | The run merges into the stored day payload and re-renders the whole report; zero new postings reproduce the earlier report as update #N | Footer `Daily update #N`, Run Summary `Update today` |
 | Fatal error before any report | `ERROR-<run date>.html` is written directly under the output directory and a macOS notification is attempted | The error page itself |
 
 Warnings appear in the HTML "Pipeline warnings" panel and in the XLSX Run Summary. `unreviewed` jobs are included in the report only when they clear the local score threshold, so a model outage yields a locally ranked list rather than an empty page.
@@ -173,7 +173,7 @@ How an unattended day works:
 - **Lock.** `state/.lock` holds the owner PID. A second start while the owner is alive exits cleanly; a stale lock from a dead PID is removed automatically.
 - **Workday.** Career sites on `*.myworkdayjobs.com` render job pages in the browser, so the HTML fetch never contains the description. Those postings are read through the tenant's public JSON endpoint (`/wday/cxs/...`) instead and are labeled `workday_cxs`; if that call fails, the ordinary HTML path runs unchanged.
 - **State.** `state/state.json` remembers every canonical URL (original and redirect target) so the same posting is never reported twice; entries older than 90 days since their last attempt are pruned each run. `lastSuccessfulRun` is written only after both the HTML and the XLSX exist on disk, so a run whose workbook failed stays eligible for catch-up.
-- **Pending report.** Every run copies its report payload to `state/pending-report.json` before marking postings as seen and deletes it once the XLSX is written. A run that finds the file first regenerates that date's HTML and XLSX from it, records the success, and only then collects new postings; if the pending date is the current application date, the carried postings are merged into the new report so a rerun never overwrites a good report with an empty one.
+- **Day payload.** `state/report-payload-<date>.json` accumulates everything reported for one application date. Each run merges its newly reviewed postings into it by resolved URL (a semantically reviewed copy beats a local one, a longer description beats a shorter one, otherwise the newer copy wins), writes the file before marking postings as seen, renders HTML and XLSX from the merged whole, and flips `complete` to true once both exist. A rerun with nothing new therefore reproduces the earlier report—footer `Daily update #N`, Run Summary `Update today` / `Last updated at`—instead of overwriting it with an empty page. Incomplete files from earlier dates are rebuilt at the start of the next run; files older than 90 days are pruned with the seen state.
 - **Logs.** `state/logs/daily-YYYY-MM-DD.log`, newest 30 files kept. If the log directory cannot be prepared, output falls back to `/tmp/daily-job-match-alert-<date>.log`.
 - **Fatal errors.** `ERROR-YYYY-MM-DD.html` under the output directory plus a best-effort macOS notification; the catch-up path retries later.
 

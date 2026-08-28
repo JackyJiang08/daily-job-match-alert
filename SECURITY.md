@@ -10,4 +10,4 @@ Real resumes, `config.json`, mail files, state, logs, and generated reports are 
 
 Job descriptions and email bodies are untrusted input. The semantic prompt explicitly prevents instructions embedded in postings from becoming agent instructions, and subscription CLI runs use a temporary read-only workspace.
 
-The project removes common model API credential variables before invoking Codex or Claude and refuses API-key authentication for supported subscription modes.
+The project removes common model API credential variables before invoking Claude Code and accepts only a claude.ai subscription login (Console, API-key, Bedrock, and Vertex paths are refused).

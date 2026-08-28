@@ -176,13 +176,6 @@ export function parseStructuredOutput(raw) {
   return { results: extractResults(parsed).results, scoringModel: extractScoringModel(parsed) };
 }
 
-async function verifyCodexSubscription(options = {}) {
-  const result = await (options.runner || run)(options.codexCommand || 'codex', ['login', 'status'], { timeoutMs: 30_000, env: subscriptionEnvironment() });
-  if (!/logged in using chatgpt/i.test(`${result.stdout}\n${result.stderr}`)) {
-    throw new Error('Codex is not authenticated with ChatGPT subscription. Run `codex login`; API-key authentication is intentionally rejected.');
-  }
-}
-
 export function parseClaudeCodeVersion(value) {
   const match = String(value || '').match(/\b(\d+)\.(\d+)\.(\d+)\b/);
   return match ? match.slice(1, 4).map(Number) : null;
@@ -218,25 +211,39 @@ async function verifyClaudeSubscription(options = {}) {
 
   const result = await runner(command, ['auth', 'status', '--json'], { timeoutMs: 30_000, env: subscriptionEnvironment() });
   const status = JSON.parse(result.stdout);
-  if (!status.loggedIn || /api.?key/i.test(String(status.authMethod || ''))) {
-    throw new Error('Claude Code is not authenticated with a Claude subscription. API-key authentication is intentionally rejected.');
-  }
+  const verdict = assessClaudeAuthStatus(status);
+  if (!verdict.accepted) throw new Error(verdict.reason);
 }
 
-async function codexBatch(prompt, schemaPath, outputPath, tempDirectory, options = {}) {
-  const args = [
-    'exec', '--ephemeral', '--sandbox', 'read-only', '--skip-git-repo-check',
-    '--output-schema', schemaPath, '--output-last-message', outputPath,
-  ];
-  if (options.model) args.push('--model', options.model);
-  args.push('-');
-  await (options.runner || run)(options.codexCommand || 'codex', args, {
-    input: prompt, cwd: tempDirectory, timeoutMs: Number(options.timeoutMs || 600_000), env: subscriptionEnvironment(),
+// Allow-list, not deny-list: only a claude.ai subscription login is accepted. `console` (Anthropic Console
+// billing), `apiKey`, Bedrock, Vertex, and anything unrecognized fall back to local scoring.
+const SUBSCRIPTION_AUTH_METHODS = new Set(['claude.ai', 'claudeai', 'subscription']);
+const SUBSCRIPTION_TYPES = new Set(['pro', 'max', 'team', 'enterprise']);
+
+function normalizeAuthValue(value) {
+  return String(value ?? '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+}
+
+export function assessClaudeAuthStatus(status) {
+  const reject = detail => ({
+    accepted: false,
+    reason: `Claude Code is not authenticated with a Claude subscription (${detail}). Run \`claude auth login --claudeai\`; Console, API-key, Bedrock, and Vertex billing paths are intentionally rejected.`,
   });
-  return parseStructuredOutput(await fs.readFile(outputPath, 'utf8'));
+  if (!status || typeof status !== 'object') return reject('auth status was not a JSON object');
+  const authMethod = status.authMethod == null ? '' : String(status.authMethod);
+  if (status.loggedIn !== true) return reject(`loggedIn=${JSON.stringify(status.loggedIn ?? null)}, authMethod="${authMethod}"`);
+  if (!SUBSCRIPTION_AUTH_METHODS.has(normalizeAuthValue(authMethod))) return reject(`authMethod="${authMethod}"`);
+  // The remaining fields are optional in the CLI output; when present they must agree with the login.
+  if (Object.hasOwn(status, 'apiProvider') && normalizeAuthValue(status.apiProvider) !== 'firstparty') {
+    return reject(`authMethod="${authMethod}", apiProvider="${status.apiProvider}"`);
+  }
+  if (Object.hasOwn(status, 'subscriptionType') && !SUBSCRIPTION_TYPES.has(normalizeAuthValue(status.subscriptionType))) {
+    return reject(`authMethod="${authMethod}", subscriptionType="${status.subscriptionType}"`);
+  }
+  return { accepted: true, reason: null };
 }
 
-async function claudeBatch(prompt, _schemaPath, _outputPath, tempDirectory, options = {}) {
+async function claudeBatch(prompt, tempDirectory, options = {}) {
   const args = [
     '--print', '--safe-mode', '--no-session-persistence', '--permission-mode', 'dontAsk',
     '--tools', '', '--output-format', 'json', '--json-schema', JSON.stringify(resultSchema),
@@ -324,8 +331,8 @@ export function summarizeScoringModel(jobs, engine = 'claude_subscription') {
 export async function applySubscriptionMatching(jobs, resumes, preferences, options = {}) {
   const engine = options.engine || 'claude_subscription';
   if (engine === 'local_only') return jobs.map(job => ({ ...job, scoringEngine: 'local_only' }));
-  if (!['codex_subscription', 'claude_subscription'].includes(engine)) {
-    throw new Error(`Unsupported semanticMatching.engine: ${engine}. API-backed engines are intentionally unavailable.`);
+  if (engine !== 'claude_subscription') {
+    throw new Error(`Unsupported semanticMatching.engine: ${engine}. Only claude_subscription and local_only exist; API-backed engines are intentionally unavailable.`);
   }
 
   const candidates = jobs.filter(job =>
@@ -335,8 +342,7 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
   if (!candidates.length) return jobs;
 
   try {
-    if (engine === 'codex_subscription') await verifyCodexSubscription(options);
-    else await verifyClaudeSubscription(options);
+    await verifyClaudeSubscription(options);
   } catch (error) {
     addWarning(options, `Subscription authentication check failed; ${candidates.length} jobs used local fallback: ${errorSummary(error)}`);
     const fallbackByUrl = new Map(candidates.map(job => [job.url, localFallbackJob(job)]));
@@ -348,16 +354,11 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
   const fallbackIds = new Set();
   try {
     tempDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'daily-job-match-alert-semantic-'));
-    const schemaPath = path.join(tempDirectory, 'schema.json');
-    await fs.writeFile(schemaPath, JSON.stringify(resultSchema));
-    let requestNumber = 0;
-    const invokeBatch = async batch => {
-      const prompt = buildSemanticPrompt(batch, resumes, preferences, Number(options.maximumDescriptionCharacters || 7000));
-      const outputPath = path.join(tempDirectory, `result-${requestNumber++}.json`);
-      return engine === 'codex_subscription'
-        ? codexBatch(prompt, schemaPath, outputPath, tempDirectory, options)
-        : claudeBatch(prompt, schemaPath, outputPath, tempDirectory, options);
-    };
+    const invokeBatch = batch => claudeBatch(
+      buildSemanticPrompt(batch, resumes, preferences, Number(options.maximumDescriptionCharacters || 7000)),
+      tempDirectory,
+      options,
+    );
     const observedModels = new Set();
     let unknownModelBatches = 0;
     const scoringModelFor = response => {
@@ -445,4 +446,4 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
   return jobs.map(job => mergedByUrl.get(job.url) || job);
 }
 
-export { MINIMUM_CLAUDE_CODE_VERSION, resultSchema, run as runSubscriptionCommand, verifyCodexSubscription, verifyClaudeSubscription };
+export { MINIMUM_CLAUDE_CODE_VERSION, resultSchema, run as runSubscriptionCommand, verifyClaudeSubscription };

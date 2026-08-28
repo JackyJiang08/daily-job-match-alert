@@ -48,7 +48,7 @@ export function buildHtml(jobs, meta) {
   </style></head><body><main class="wrap"><header><h1>Daily Job Match Alert</h1><p class="sub">Application list for ${htmlEscape(meta.date)} · discovered in the previous ${meta.lookbackHours} hours${meta.scoringModel ? ` · scored by ${htmlEscape(meta.scoringModel)}` : ''}</p>${exclusionLine}</header>${warningSection}
   <section class="stats"><div class="stat"><b>${jobs.length}</b><span>High matches</span></div><div class="stat"><b>${byType.internship}</b><span>Internships</span></div><div class="stat"><b>${byType.new_grad}</b><span>New grad</span></div><div class="stat"><b>${byType.entry_level}</b><span>Entry level</span></div></section>
   ${jobs.length ? jobs.map(jobCard).join('\n') : '<div class="empty">No new jobs cleared the configured threshold today.</div>'}
-  <footer>Generated locally. Scores are triage aids, not facts. Verify eligibility, posting date, and JD before applying. No applications were submitted.</footer></main></body></html>`;
+  <footer>${meta.runsToday ? `Daily update #${Number(meta.runsToday)}${meta.lastUpdatedAt ? ` · last updated ${htmlEscape(meta.lastUpdatedAt)}` : ''}. ` : ''}Generated locally. Scores are triage aids, not facts. Verify eligibility, posting date, and JD before applying. No applications were submitted.</footer></main></body></html>`;
 }
 
 export async function writeReports(jobs, allJobs, meta, outputDirectory) {

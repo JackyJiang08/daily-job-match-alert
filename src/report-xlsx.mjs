@@ -153,6 +153,8 @@ styleMergedTitle(summary, 'A1:F1', 'Daily Job Match Alert', COLORS.teal, 18, 34)
 const summaryValues = [
   ['Application date', payload.meta.applicationDate || payload.meta.date],
   ['Generated at', asDate(payload.meta.generatedAt)],
+  ['Update today', `#${Number(payload.meta.runsToday || 1)}`],
+  ['Last updated at', asDate(payload.meta.lastUpdatedAt || payload.meta.generatedAt)],
   ['Lookback hours', payload.meta.lookbackHours],
   ['Reviewed jobs', payload.meta.reviewedCount],
   ['High matches', jobs.length],
@@ -168,10 +170,10 @@ summaryValues.forEach((values, index) => {
   summary.getCell(row, 2).value = values[1];
   summary.getCell(row, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.lightSlate } };
   summary.getCell(row, 1).font = { bold: true, color: { argb: COLORS.slate } };
+  if (values[1] instanceof Date) summary.getCell(row, 2).numFmt = 'yyyy-mm-dd hh:mm';
 });
 const summaryEndRow = summaryStartRow + summaryValues.length - 1;
 applyOutsideBorder(summary, summaryStartRow, 1, summaryEndRow, 2);
-summary.getCell('B4').numFmt = 'yyyy-mm-dd hh:mm';
 
 const roleTypeHeaderRow = summaryEndRow + 2;
 const roleTypeRange = `'Matches'!$${ROLE_TYPE_LETTER}$2:$${ROLE_TYPE_LETTER}$${Math.max(2, jobs.length + 1)}`;
@@ -283,6 +285,7 @@ const noteRows = [
   ['Recommended Resume', 'Whichever track scored higher for this posting.'],
   ['Why It Matches', 'Matched evidence from the review. A leading [unreviewed] tag means semantic review was unavailable and the local score was retained; verify the fit manually.'],
   ['Gaps / Verify', 'Skills or eligibility details that were not found in the selected resume or need manual confirmation. "Location unverified" means the posting only says Remote or gives no location; confirm it permits work from the United States.'],
+  ['Update today', 'How many runs have contributed to this application date. Every run merges its findings into the day\'s stored payload and re-renders the whole report, so a later run never shrinks it.'],
   ['Excluded rows', 'Postings removed by the deterministic eligibility rules before scoring mattered: a location outside the United States, or cohort wording (class of, graduate by, full-time start) that is incompatible with the configured graduation date. They never appear in Matches.'],
   ['Posting Link', 'Clickable link to the original or final resolved posting; the cell shows the domain and the hyperlink carries the full URL.'],
   ['HTML report', 'The full captured JD, salary, employment type, source, discovery time, and freshness basis stay in the companion HTML file.'],

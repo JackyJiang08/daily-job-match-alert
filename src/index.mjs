@@ -20,7 +20,8 @@ import { canonicalUrl, dateWithOffset, htmlEscape, mapLimit, resolveFrom, sha256
 import { createWarning, errorSummary } from './warnings.mjs';
 
 const execFileAsync = promisify(execFile);
-const PENDING_REPORT_FILE = 'pending-report.json';
+const REPORT_PAYLOAD_PREFIX = 'report-payload-';
+const REPORT_PAYLOAD_PATTERN = /^report-payload-(\d{4}-\d{2}-\d{2})\.json$/;
 
 function arg(argv, name, fallback = null) {
   const index = argv.indexOf(name);
@@ -167,10 +168,6 @@ function statePathFor(config) {
   return path.join(config.root, 'state', 'state.json');
 }
 
-function pendingReportPath(config) {
-  return path.join(config.root, 'state', PENDING_REPORT_FILE);
-}
-
 async function writeState(statePath, state) {
   await fs.mkdir(path.dirname(statePath), { recursive: true });
   await fs.writeFile(statePath, JSON.stringify(state, null, 2) + '\n');
@@ -181,52 +178,148 @@ async function buildXlsx(payloadPath, xlsxPath, cwd) {
   await execFileAsync(process.execPath, [xlsxBuilder, payloadPath, xlsxPath], { cwd, timeout: 2 * 60 * 1000 });
 }
 
-// A run whose XLSX failed leaves its full report payload in state/pending-report.json. Every later run,
-// scheduled or catch-up, first rebuilds that day's HTML and XLSX from the payload (no collection, no
-// scoring), then records the success and continues with its own work.
-export async function recoverPendingReport(config, state, options = {}) {
-  const pendingPath = pendingReportPath(config);
-  const warnings = options.warnings || [];
+// One payload file per application date holds everything reported for that day so far. Every run merges
+// its own findings into it and renders the report from the merged whole, so a rerun that finds nothing
+// new reproduces the earlier report instead of replacing it with an empty one. `complete` flips to true
+// once both the HTML and the XLSX exist; an incomplete file is rebuilt at the start of the next run.
+export function reportPayloadPath(config, date) {
+  return path.join(config.root, 'state', `${REPORT_PAYLOAD_PREFIX}${date}.json`);
+}
+
+export async function readReportPayload(config, date) {
   let raw;
   try {
-    raw = await fs.readFile(pendingPath, 'utf8');
+    raw = await fs.readFile(reportPayloadPath(config, date), 'utf8');
   } catch (error) {
     if (error.code === 'ENOENT') return null;
     throw error;
   }
-  let pending;
-  try {
-    pending = JSON.parse(raw);
-    if (!pending?.meta?.date || !Array.isArray(pending.matches) || !Array.isArray(pending.reviewed)) {
-      throw new Error('payload lacks meta.date, matches[], or reviewed[]');
-    }
-  } catch (error) {
-    warnings.push(createWarning('report', 'pending report', `Discarded an unreadable ${PENDING_REPORT_FILE}: ${errorSummary(error)}`));
-    await fs.rm(pendingPath, { force: true });
-    return null;
+  const payload = JSON.parse(raw);
+  if (!payload?.meta?.date || !Array.isArray(payload.matches) || !Array.isArray(payload.reviewed)) {
+    throw new Error('payload lacks meta.date, matches[], or reviewed[]');
   }
-  const { meta, matches, reviewed } = pending;
+  return payload;
+}
+
+async function writeReportPayload(config, payload) {
+  const file = reportPayloadPath(config, payload.meta.date);
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, JSON.stringify(payload, null, 2) + '\n');
+  return file;
+}
+
+export async function listReportPayloadDates(config) {
+  let names;
   try {
-    const paths = await writeReports(matches, reviewed, meta, config.outputDirectory);
-    let xlsxPath = null;
-    try {
-      if (config.reports?.xlsx?.enabled !== false) {
-        xlsxPath = path.join(paths.runDirectory, `${paths.reportBaseName}.xlsx`);
-        await (options.xlsxBuilder || buildXlsx)(paths.payloadPath, xlsxPath, config.root);
+    names = await fs.readdir(path.join(config.root, 'state'));
+  } catch (error) {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  }
+  return names.map(name => name.match(REPORT_PAYLOAD_PATTERN)?.[1]).filter(Boolean).sort();
+}
+
+// Payload files age out with the seen state: a day older than the retention window is never rerun.
+export async function pruneReportPayloads(config, now = new Date(), retentionDays = 90) {
+  const cutoff = new Date(now.getTime() - Number(retentionDays) * 24 * 60 * 60 * 1000);
+  let removed = 0;
+  for (const date of await listReportPayloadDates(config)) {
+    const timestamp = new Date(`${date}T23:59:59Z`).getTime();
+    if (!Number.isFinite(timestamp) || timestamp >= cutoff.getTime()) continue;
+    await fs.rm(reportPayloadPath(config, date), { force: true });
+    removed += 1;
+  }
+  return removed;
+}
+
+export function reportJobKey(job) {
+  return sha256(canonicalUrl(job.finalUrl || job.url) || job.finalUrl || job.url);
+}
+
+// When the same posting is reported twice in one day, keep the copy with more information: a semantic
+// review beats a local score, a longer captured description beats a shorter one, and otherwise the newer
+// copy wins.
+export function preferReportJob(existing, incoming) {
+  const rank = job => (job.semanticReviewed ? 2 : 0) + (String(job.description || '').length > 0 ? 1 : 0);
+  if (rank(incoming) !== rank(existing)) return rank(incoming) > rank(existing) ? incoming : existing;
+  const incomingLength = String(incoming.description || '').length;
+  const existingLength = String(existing.description || '').length;
+  return incomingLength >= existingLength ? incoming : existing;
+}
+
+export function mergeReviewedJobs(existing, incoming) {
+  const merged = new Map(existing.map(job => [reportJobKey(job), job]));
+  for (const job of incoming) {
+    const key = reportJobKey(job);
+    const current = merged.get(key);
+    merged.set(key, current ? preferReportJob(current, job) : job);
+  }
+  return [...merged.values()];
+}
+
+async function renderReports(config, payload, options = {}) {
+  const { meta, matches, reviewed } = payload;
+  const paths = await writeReports(matches, reviewed, meta, config.outputDirectory);
+  const result = {
+    runDirectory: paths.runDirectory,
+    htmlPath: paths.htmlPath,
+    xlsxPath: null,
+    attemptedXlsxPath: null,
+    xlsxError: null,
+    xlsxFailurePath: path.join(paths.runDirectory, 'XLSX-FAILED.txt'),
+  };
+  try {
+    if (config.reports?.xlsx?.enabled !== false) {
+      result.attemptedXlsxPath = path.join(paths.runDirectory, `${paths.reportBaseName}.xlsx`);
+      try {
+        await (options.xlsxBuilder || buildXlsx)(paths.payloadPath, result.attemptedXlsxPath, config.root);
+        result.xlsxPath = result.attemptedXlsxPath;
+      } catch (error) {
+        result.xlsxError = error;
       }
-      await fs.rm(path.join(paths.runDirectory, 'XLSX-FAILED.txt'), { force: true });
-    } finally {
-      await fs.rm(paths.temporaryDirectory, { recursive: true, force: true });
     }
-    await fs.rm(pendingPath, { force: true });
-    if (meta.generatedAt) state.lastSuccessfulRun = meta.generatedAt;
-    await writeState(statePathFor(config), state);
-    warnings.push(createWarning('report', 'pending report', `Regenerated the ${meta.date} HTML and XLSX from the payload left by the run at ${meta.generatedAt || 'an earlier time'}; no postings were collected or scored again`));
-    return { date: meta.date, htmlPath: paths.htmlPath, xlsxPath, recovered: true, payload: pending };
-  } catch (error) {
-    warnings.push(createWarning('report', 'pending report', `Could not regenerate the ${meta.date} reports from ${PENDING_REPORT_FILE}; the payload was kept for the next run: ${errorSummary(error)}`));
-    return { date: meta.date, htmlPath: null, xlsxPath: null, recovered: false, payload: pending };
+  } finally {
+    await fs.rm(paths.temporaryDirectory, { recursive: true, force: true });
   }
+  if (!result.xlsxError) await fs.rm(result.xlsxFailurePath, { force: true });
+  return result;
+}
+
+async function markPayloadComplete(config, payload, state, successAt) {
+  payload.complete = true;
+  await writeReportPayload(config, payload);
+  state.lastSuccessfulRun = successAt;
+  await writeState(statePathFor(config), state);
+}
+
+// Payload files left incomplete by an earlier day (its XLSX failed, or the run died before rendering) are
+// rebuilt here without collecting or scoring anything. The current application date is skipped because
+// the normal flow below merges into it and renders it anyway.
+export async function recoverIncompleteReports(config, state, options = {}) {
+  const warnings = options.warnings || [];
+  const recovered = [];
+  for (const date of await listReportPayloadDates(config)) {
+    if (date === options.currentDate) continue;
+    let payload;
+    try {
+      payload = await readReportPayload(config, date);
+    } catch (error) {
+      warnings.push(createWarning('report', 'report payload', `Discarded an unreadable ${REPORT_PAYLOAD_PREFIX}${date}.json: ${errorSummary(error)}`));
+      await fs.rm(reportPayloadPath(config, date), { force: true });
+      continue;
+    }
+    if (!payload || payload.complete === true) continue;
+    const rendered = await renderReports(config, payload, options).catch(error => ({ xlsxError: error, htmlPath: null, xlsxPath: null }));
+    if (rendered.xlsxError) {
+      warnings.push(createWarning('report', 'report payload', `Could not rebuild the ${date} reports from ${REPORT_PAYLOAD_PREFIX}${date}.json; it was kept for the next run: ${errorSummary(rendered.xlsxError)}`));
+      recovered.push({ date, recovered: false, htmlPath: rendered.htmlPath, xlsxPath: null });
+      continue;
+    }
+    await markPayloadComplete(config, payload, state, payload.meta.lastUpdatedAt || payload.meta.generatedAt || state.lastSuccessfulRun);
+    warnings.push(createWarning('report', 'report payload', `Rebuilt the ${date} HTML and XLSX from ${REPORT_PAYLOAD_PREFIX}${date}.json (update #${payload.meta.runsToday || 1} of that day); no postings were collected or scored again`));
+    recovered.push({ date, recovered: true, htmlPath: rendered.htmlPath, xlsxPath: rendered.xlsxPath });
+  }
+  return recovered;
 }
 
 async function runPipeline(config, clock) {
@@ -241,11 +334,8 @@ async function runPipeline(config, clock) {
   const debug = {};
   const prefs = config.preferences || {};
 
-  const recovered = await recoverPendingReport(config, state, { warnings });
-  if (recovered) debug.pendingReport = { date: recovered.date, recovered: recovered.recovered, htmlPath: recovered.htmlPath, xlsxPath: recovered.xlsxPath };
-  // A pending payload for the same application date is folded into this run so the day ends with one
-  // report instead of an empty rerun overwriting the recovered one.
-  const carried = recovered?.date === date ? recovered.payload : null;
+  const recoveredReports = await recoverIncompleteReports(config, state, { warnings, currentDate: date });
+  if (recoveredReports.length) debug.recoveredReports = recoveredReports;
   if (!prefs.graduationDate) {
     warnings.push(createWarning('eligibility', 'graduation window', 'preferences.graduationDate is not set, so the graduation-window hard filter is disabled and only the semantic review checks cohort wording'));
   }
@@ -301,102 +391,87 @@ async function runPipeline(config, clock) {
   }
   // Deterministic eligibility is applied after semantic review so the location gap survives the merge.
   evaluated = evaluated.map(job => annotateEligibility(job, prefs));
-  let carriedCount = 0;
-  if (carried) {
-    const current = new Set(evaluated.map(job => sha256(canonicalUrl(job.url) || job.url)));
-    const carriedReviewed = carried.reviewed
-      .filter(job => !current.has(sha256(canonicalUrl(job.url) || job.url)))
-      .map(job => annotateEligibility(job, prefs));
-    carriedCount = carriedReviewed.length;
-    evaluated = [...carriedReviewed, ...evaluated];
-    for (const warning of carried.meta.warnings || []) {
-      if (!warnings.some(item => warningTextEquals(item, warning))) warnings.push(warning);
-    }
+
+  // Fold this run into whatever the day already holds; the report is rendered from the merged whole.
+  let previous = null;
+  try {
+    previous = await readReportPayload(config, date);
+  } catch (error) {
+    warnings.push(createWarning('report', 'report payload', `Ignored an unreadable ${REPORT_PAYLOAD_PREFIX}${date}.json and started the day's report over: ${errorSummary(error)}`));
   }
-  evaluated.sort((a, b) => b.bestScore - a.bestScore);
-  const matches = evaluated.filter(job => isEligible(job, config));
-  const exclusions = summarizeExclusions(evaluated);
-  if (exclusions.total) {
-    const detail = exclusions.examples.slice(0, 5).join('; ') + (exclusions.examples.length > 5 ? '; …' : '');
-    warnings.push(createWarning('eligibility', 'hard filter', `Excluded ${exclusions.total} posting(s) deterministically: ${exclusions.counts.location} outside the United States, ${exclusions.counts.graduation} outside the graduation window. ${detail}`));
+  const reviewed = previous ? mergeReviewedJobs(previous.reviewed, evaluated) : evaluated;
+  for (const warning of previous?.meta?.warnings || []) {
+    if (!warnings.some(item => warningTextEquals(item, warning))) warnings.push(warning);
   }
+  reviewed.sort((a, b) => b.bestScore - a.bestScore);
+  const matches = reviewed.filter(job => isEligible(job, config));
+  const exclusions = summarizeExclusions(reviewed);
+  const exclusionWarning = exclusions.total
+    ? createWarning('eligibility', 'hard filter', `Excluded ${exclusions.total} posting(s) deterministically: ${exclusions.counts.location} outside the United States, ${exclusions.counts.graduation} outside the graduation window. ${exclusions.examples.slice(0, 5).join('; ')}${exclusions.examples.length > 5 ? '; …' : ''}`)
+    : null;
+  // The day's totals supersede any exclusion summary carried over from an earlier run today.
+  const finalWarnings = warnings.filter(warning => !(warning.stage === 'eligibility' && warning.source === 'hard filter'));
+  if (exclusionWarning) finalWarnings.push(exclusionWarning);
   const timeZone = config.timeZone || 'America/Chicago';
+  const runsToday = Number(previous?.meta?.runsToday || 0) + 1;
   const meta = {
     generatedAt: now.toISOString(), date, applicationDate: date, runDate, timeZone, lookbackHours: config.lookbackHours,
     minimumMatchScore: config.minimumMatchScore, resumeSync, collectedCount: collected.length,
-    newCount: enriched.length + carriedCount, reviewedCount: evaluated.length, matchCount: matches.length, warnings,
+    newCount: reviewed.length, newThisRun: enriched.length, reviewedCount: reviewed.length, matchCount: matches.length,
+    warnings: finalWarnings,
+    runsToday, firstGeneratedAt: previous?.meta?.firstGeneratedAt || now.toISOString(), lastUpdatedAt: now.toISOString(),
     eligibilityExclusions: exclusions.counts,
-    scoringModel: summarizeScoringModel(evaluated, config.semanticMatching?.engine || 'claude_subscription'),
+    scoringModel: summarizeScoringModel(reviewed, config.semanticMatching?.engine || 'claude_subscription'),
   };
-  const paths = await writeReports(matches, evaluated, meta, config.outputDirectory);
+  const payload = { meta, matches, reviewed, complete: false };
 
-  // The payload outlives the temporary directory until both report files exist, so a failed XLSX can be
-  // rebuilt by the next run even though the postings below are already marked as seen.
-  const pendingPath = pendingReportPath(config);
-  await fs.mkdir(path.dirname(statePath), { recursive: true });
-  await fs.copyFile(paths.payloadPath, pendingPath);
-  for (const job of evaluated) {
+  // The payload is persisted before the postings are marked as seen, so a rerun can always rebuild the
+  // day's report even though its postings will no longer be collected.
+  await writeReportPayload(config, payload);
+  for (const job of reviewed) {
     if (job.enrichment !== 'failed') markJobSeen(state, job, now.toISOString());
   }
   pruneSeen(state, now, 90);
+  await pruneReportPayloads(config, now, 90);
   await writeState(statePath, state);
 
-  const xlsxFailurePath = path.join(paths.runDirectory, 'XLSX-FAILED.txt');
-  let xlsxFailure = null;
-  try {
-    await fs.rm(xlsxFailurePath, { force: true });
-    if (config.reports?.xlsx?.enabled !== false) {
-      const xlsxPath = path.join(paths.runDirectory, `${paths.reportBaseName}.xlsx`);
-      try {
-        await buildXlsx(paths.payloadPath, xlsxPath, config.root);
-        paths.xlsxPath = xlsxPath;
-      } catch (error) {
-        xlsxFailure = error;
-        paths.xlsxPath = null;
-        paths.xlsxFailurePath = xlsxFailurePath;
-        paths.xlsxWarning = `XLSX generation failed; the HTML report and persisted seen state were preserved, and the report payload was kept in state/${PENDING_REPORT_FILE} so the next run rebuilds both files.`;
-        warnings.push(createWarning('report', 'XLSX', `${paths.xlsxWarning} ${errorSummary(error)}`));
-        const failureText = [
-          'Daily Job Match Alert XLSX generation failed.',
-          `Generated at: ${now.toISOString()}`,
-          `HTML report: ${paths.htmlPath}`,
-          `Attempted XLSX: ${xlsxPath}`,
-          `Pending payload: ${pendingPath}`,
-          '',
-          error.stack || error.message || String(error),
-          '',
-        ].join('\n');
-        try {
-          await fs.writeFile(xlsxFailurePath, failureText);
-        } catch (markerError) {
-          paths.xlsxMarkerWarning = `Could not write XLSX-FAILED.txt: ${markerError.message}`;
-          warnings.push(createWarning('report', 'XLSX failure marker', paths.xlsxMarkerWarning));
-        }
-        try {
-          await fs.writeFile(paths.htmlPath, buildHtml(matches, meta));
-        } catch (htmlUpdateError) {
-          console.warn(`Could not add the XLSX warning to HTML: ${errorSummary(htmlUpdateError)}`);
-        }
-        console.warn(`${paths.xlsxWarning} ${error.message}`);
-      }
+  const rendered = await renderReports(config, payload);
+  const paths = { runDirectory: rendered.runDirectory, htmlPath: rendered.htmlPath, xlsxPath: rendered.xlsxPath };
+  if (rendered.xlsxError) {
+    const error = rendered.xlsxError;
+    paths.xlsxFailurePath = rendered.xlsxFailurePath;
+    paths.xlsxWarning = `XLSX generation failed; the HTML report and persisted seen state were preserved, and the day's payload stays in state/${REPORT_PAYLOAD_PREFIX}${date}.json so the next run rebuilds both files.`;
+    finalWarnings.push(createWarning('report', 'XLSX', `${paths.xlsxWarning} ${errorSummary(error)}`));
+    const failureText = [
+      'Daily Job Match Alert XLSX generation failed.',
+      `Generated at: ${now.toISOString()}`,
+      `HTML report: ${paths.htmlPath}`,
+      `Attempted XLSX: ${rendered.attemptedXlsxPath}`,
+      `Day payload: ${reportPayloadPath(config, date)}`,
+      '',
+      error.stack || error.message || String(error),
+      '',
+    ].join('\n');
+    try {
+      await fs.writeFile(rendered.xlsxFailurePath, failureText);
+    } catch (markerError) {
+      paths.xlsxMarkerWarning = `Could not write XLSX-FAILED.txt: ${markerError.message}`;
+      finalWarnings.push(createWarning('report', 'XLSX failure marker', paths.xlsxMarkerWarning));
     }
-  } finally {
-    await fs.rm(paths.temporaryDirectory, { recursive: true, force: true });
-    delete paths.payloadPath;
-    delete paths.temporaryDirectory;
-    delete paths.reportBaseName;
-  }
-
-  // Only a run that left both files on disk counts as a success for the catch-up logic.
-  if (!xlsxFailure) {
-    state.lastSuccessfulRun = now.toISOString();
-    await writeState(statePath, state);
-    await fs.rm(pendingPath, { force: true });
+    try {
+      await fs.writeFile(paths.htmlPath, buildHtml(matches, meta));
+    } catch (htmlUpdateError) {
+      console.warn(`Could not add the XLSX warning to HTML: ${errorSummary(htmlUpdateError)}`);
+    }
+    console.warn(`${paths.xlsxWarning} ${error.message}`);
+  } else {
+    // Only a run that left both files on disk counts as a success for the catch-up logic.
+    await markPayloadComplete(config, payload, state, now.toISOString());
   }
 
   const summary = { meta, ...paths, ...(Object.keys(debug).length ? { debug } : {}) };
   console.log(JSON.stringify(summary, null, 2));
-  if (xlsxFailure) throw xlsxFailure;
+  if (rendered.xlsxError) throw rendered.xlsxError;
   return summary;
 }
 

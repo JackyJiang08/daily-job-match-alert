@@ -3,7 +3,7 @@
 ## 最终分工
 
 - **career-ops**：负责 Greenhouse、Lever、Ashby、Workday 等公开 ATS 和公司 career board；保留它原有的去重与申请 pipeline。本项目通过 `sources.careerOps` 可选读取它的 scan history。
-- **Daily Job Match Alert**：直接读取两个 SimplifyJobs GitHub 列表（默认启用），保存完整 JD，先本地预筛，再调用 Claude Code / Codex CLI 的订阅登录对 Data 与 AI/ML 两版简历分别做语义评分，生成每日文件。
+- **Daily Job Match Alert**：直接读取两个 SimplifyJobs GitHub 列表（默认启用），保存完整 JD，先本地预筛，再调用 Claude Code 的订阅登录对 Data 与 AI/ML 两版简历分别做语义评分，生成每日文件。
 - **邮件提醒通道（规划中，未启用）**：`intake/eml` 的 `.eml` 解析器每晚都会运行，但目前没有任何邮件被投递进去；Himalaya 邮箱读取已实现但 `sources.himalaya.enabled` 为 `false`。Handshake、Simplify、Wellfound、ZipRecruiter、Jobright 目前都不在采集范围内。
 - **macOS launchd**：负责每天固定时间直接运行本地脚本，不依赖 OpenClaw Gateway 常驻。
 
@@ -39,8 +39,9 @@ Workday 招聘站（`*.myworkdayjobs.com`）的岗位页由浏览器端渲染，
 | Claude CLI 缺失 / 版本过低 / API-key 登录 / batch 重试后仍失败 | 相关岗位保留本地分数并标记 `unreviewed` | warning `llm / <engine>`；XLSX 前缀 `[unreviewed]`，HTML 橙色 `Match level: unreviewed` |
 | 模型漏答岗位 id | 补审一次，仍缺的标为 `unreviewed` | warning `llm / <engine>` |
 | 实际模型与 `semanticMatching.model` 不一致 | 本次结果照用 | `MODEL MISMATCH` warning |
-| XLSX 生成失败 | 保留 HTML 与去重 state，同目录写入 `XLSX-FAILED.txt`，报告 payload 留在 `state/pending-report.json`，不更新 `lastSuccessfulRun`，进程 exit 1 | warning `report / XLSX` + 标记文件 |
-| 启动时发现 `state/pending-report.json` | 先用它重建该日期的 HTML 与 XLSX（不采集、不评分），清除标记并记录 `lastSuccessfulRun`；若与本次投递日期相同则并入本次报告 | warning `report / pending report` |
+| XLSX 生成失败 | 保留 HTML 与去重 state，同目录写入 `XLSX-FAILED.txt`，当日 payload 在 `state/report-payload-<日期>.json` 中保持未完成，不更新 `lastSuccessfulRun`，进程 exit 1 | warning `report / XLSX` + 标记文件 |
+| 启动时发现更早日期的 payload 未完成 | 先用它重建该日期的 HTML 与 XLSX（不采集、不评分），清除标记并记录 `lastSuccessfulRun` | warning `report / report payload` |
+| 同一投递日期再次运行 | 合并进当日 payload 并从全量重新渲染；零新岗位时输出与上次一致，页脚显示 `Daily update #N` | HTML 页脚、Run Summary `Update today` |
 | 报告生成前的致命错误 | 输出目录直接写 `ERROR-<运行日期>.html`，并尽力发 macOS 通知 | 错误页本身 |
 
 LLM batch 失败会在 10 秒后重试一次。`unreviewed` 岗位只有本地分数达到阈值才会进入报告，因此模型故障当晚得到的是一份本地排序的清单，而不是空页面。修复后再次成功运行，`XLSX-FAILED.txt` 会自动移除。
@@ -70,7 +71,7 @@ LLM batch 失败会在 10 秒后重试一次。`unreviewed` 岗位只有本地�
 
 默认 `semanticMatching.engine` 是 `claude_subscription`，要求 Claude Code **2.1.250 或更新版本**（更旧版本在发送任何 batch 之前就会被拒绝并降级为本地评分）。先运行 `claude auth login --claudeai`，不要选择 `--console`（后者是 API 计费入口）。程序运行前检查 Claude 订阅登录，并在启动子进程前移除所有可能改变认证或路由的环境变量：`ANTHROPIC_` 与 `AWS_` 前缀全部，以及 `CLAUDE_CODE_USE_BEDROCK`、`CLAUDE_CODE_USE_VERTEX`、`GOOGLE_APPLICATION_CREDENTIALS`、`GOOGLE_API_KEY`、`CLOUD_ML_REGION`、`CLAUDE_API_KEY`、`OPENAI_API_KEY`。认证方式不符时相关岗位降级为 `unreviewed` 并记录 warning，不会自动切换为按量 API。
 
-Codex 的 ChatGPT 订阅登录仍可作为可选引擎 `codex_subscription`。订阅 CLI 的运行会消耗对应计划额度，但不会产生 OpenAI Platform/Anthropic API 按量账单。
+订阅校验采用白名单：`claude auth status --json` 必须 `loggedIn: true`，`authMethod` 属于 `claude.ai`/`claudeai`/`subscription`，若返回 `apiProvider` 必须是 `firstParty`，若返回 `subscriptionType` 必须属于 pro/max/team/enterprise；`console`（Console 计费）、`apiKey`、Bedrock、Vertex 一律拒绝并降级为本地评分，warning 中写明实际 `authMethod`。`local_only` 之外只有 `claude_subscription` 一个引擎。订阅 CLI 的运行会消耗对应计划额度，但不会产生 Anthropic API 按量账单。
 
 ## 模型固定与审计
 

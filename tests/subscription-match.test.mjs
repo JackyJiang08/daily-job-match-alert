@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applySubscriptionMatching, buildSemanticPrompt, expandModelAlias, extractScoringModel, MINIMUM_CLAUDE_CODE_VERSION, mergeSemanticResults, modelMatchesConfiguration, parseStructuredOutput, runSubscriptionCommand, subscriptionEnvironment, summarizeScoringModel, verifyClaudeSubscription, verifyCodexSubscription } from '../src/subscription-match.mjs';
+import { applySubscriptionMatching, assessClaudeAuthStatus, buildSemanticPrompt, expandModelAlias, extractScoringModel, MINIMUM_CLAUDE_CODE_VERSION, mergeSemanticResults, modelMatchesConfiguration, parseStructuredOutput, runSubscriptionCommand, subscriptionEnvironment, summarizeScoringModel, verifyClaudeSubscription } from '../src/subscription-match.mjs';
 import { sha256 } from '../src/utils.mjs';
 
 function localCandidate(url, title = 'Data Analyst') {
@@ -35,14 +35,6 @@ test('removes API credentials from subscription subprocess environment', () => {
   assert.equal(env.PATH, '/bin');
   assert.equal(env.OPENAI_API_KEY, undefined);
   assert.equal(env.ANTHROPIC_API_KEY, undefined);
-});
-
-test('requires explicit ChatGPT authentication for Codex', async () => {
-  await verifyCodexSubscription({ runner: async () => ({ stdout: 'Logged in using ChatGPT', stderr: '' }) });
-  await assert.rejects(
-    verifyCodexSubscription({ runner: async () => ({ stdout: 'Logged in using API key', stderr: '' }) }),
-    /not authenticated with ChatGPT subscription/,
-  );
 });
 
 test('accepts Claude subscription auth and rejects API-key auth', async () => {
@@ -94,7 +86,7 @@ test('semantic prompt treats postings as untrusted and includes both resumes', (
 
 test('merges structured semantic scores while preserving local audit scores', () => {
   const jobs = [{ semanticId: 'abc', url: 'https://example.com', dataScore: 40, aiScore: 60, bestScore: 60, blockers: [], roleType: 'new_grad' }];
-  const merged = mergeSemanticResults(jobs, [{ id: 'abc', roleType: 'new_grad', dataScore: 30, aiScore: 88, recommendedResume: 'AI', matchLevel: 'high', reasons: ['PyTorch match'], gaps: [], blockers: [] }], 'codex_subscription');
+  const merged = mergeSemanticResults(jobs, [{ id: 'abc', roleType: 'new_grad', dataScore: 30, aiScore: 88, recommendedResume: 'AI', matchLevel: 'high', reasons: ['PyTorch match'], gaps: [], blockers: [] }], 'claude_subscription');
   assert.equal(merged[0].bestScore, 88);
   assert.equal(merged[0].semanticReviewed, true);
   assert.equal(merged[0].localScores.aiScore, 60);
@@ -317,4 +309,55 @@ test('strips every auth or routing override, by prefix and by name, before spawn
     assert.equal(Object.hasOwn(env, 'CLAUDE_CODE_USE_BEDROCK'), false);
     assert.equal(env.PATH, process.env.PATH);
   }
+});
+
+test('accepts only claude.ai subscription logins and names the rejected authMethod', async () => {
+  const accepted = [
+    { loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty', subscriptionType: 'max' },
+    { loggedIn: true, authMethod: 'claude.ai' },
+    { loggedIn: true, authMethod: 'claudeai', subscriptionType: 'pro' },
+    { loggedIn: true, authMethod: 'subscription', apiProvider: 'firstParty', subscriptionType: 'Team' },
+  ];
+  for (const status of accepted) assert.equal(assessClaudeAuthStatus(status).accepted, true, JSON.stringify(status));
+
+  const rejected = [
+    [{ loggedIn: true, authMethod: 'console', apiProvider: 'firstParty', subscriptionType: 'max' }, /authMethod="console"/],
+    [{ loggedIn: true, authMethod: 'apiKey' }, /authMethod="apiKey"/],
+    [{ loggedIn: true, authMethod: 'bedrock', apiProvider: 'bedrock' }, /authMethod="bedrock"/],
+    [{ loggedIn: true, authMethod: 'claude.ai', apiProvider: 'bedrock' }, /apiProvider="bedrock"/],
+    [{ loggedIn: true, authMethod: 'claude.ai', subscriptionType: 'console' }, /subscriptionType="console"/],
+    [{ loggedIn: false, authMethod: 'claude.ai' }, /loggedIn=false/],
+    [{ loggedIn: true }, /authMethod=""/],
+    [null, /not a JSON object/],
+  ];
+  for (const [status, pattern] of rejected) {
+    const verdict = assessClaudeAuthStatus(status);
+    assert.equal(verdict.accepted, false, JSON.stringify(status));
+    assert.match(verdict.reason, /not authenticated with a Claude subscription/);
+    assert.match(verdict.reason, pattern);
+  }
+
+  const runner = status => async (_command, args) => args[0] === '--version'
+    ? { stdout: `${MINIMUM_CLAUDE_CODE_VERSION} (Claude Code)`, stderr: '' }
+    : { stdout: JSON.stringify(status), stderr: '' };
+  await verifyClaudeSubscription({ runner: runner({ loggedIn: true, authMethod: 'claude.ai', subscriptionType: 'max' }) });
+  await assert.rejects(verifyClaudeSubscription({ runner: runner({ loggedIn: true, authMethod: 'console' }) }), /authMethod="console"/);
+
+  const warnings = [];
+  const [job] = await applySubscriptionMatching(
+    [localCandidate('https://example.com/jobs/console-login')],
+    { data: 'DATA', ai: 'AI' },
+    {},
+    { engine: 'claude_subscription', warnings, runner: runner({ loggedIn: true, authMethod: 'console', subscriptionType: 'max' }) },
+  );
+  assert.equal(job.matchLevel, 'unreviewed');
+  assert.equal(job.scoringEngine, 'local_fallback');
+  assert.match(warnings[0].message, /authMethod="console"/);
+});
+
+test('codex_subscription is no longer an engine', async () => {
+  await assert.rejects(
+    applySubscriptionMatching([localCandidate('https://example.com/jobs/codex')], { data: 'DATA', ai: 'AI' }, {}, { engine: 'codex_subscription' }),
+    /Unsupported semanticMatching.engine: codex_subscription/,
+  );
 });

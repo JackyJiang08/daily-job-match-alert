@@ -277,7 +277,7 @@ const scenarios = {
     const runDirectory = path.join(config.outputDirectory, '2026-08-27');
     const xlsxPath = path.join(runDirectory, 'Daily Job Match Alert - 2026-08-27.xlsx');
     const statePath = path.join(directory, 'state', 'state.json');
-    const pendingPath = path.join(directory, 'state', 'pending-report.json');
+    const payloadPath = path.join(directory, 'state', 'report-payload-2026-08-27.json');
     // A directory squatting on the workbook name makes only the xlsx step fail.
     await fs.mkdir(xlsxPath, { recursive: true });
     const failed = await runPipeline(configPath);
@@ -286,7 +286,8 @@ const scenarios = {
     assert.equal(failed.exitCode, 1, `xlsx failure should exit 1, got ${failed.exitCode}`);
     assert.equal(failedArtifacts.xlsxPath, null);
     assert.ok(await exists(path.join(runDirectory, 'XLSX-FAILED.txt')), 'missing XLSX-FAILED.txt marker');
-    assert.ok(await exists(pendingPath), 'failed run left no pending-report.json');
+    assert.ok(await exists(payloadPath), 'failed run left no report-payload-2026-08-27.json');
+    assert.equal(JSON.parse(await fs.readFile(payloadPath, 'utf8')).complete, false, 'day payload should stay incomplete after the xlsx failure');
     const failedState = JSON.parse(await fs.readFile(statePath, 'utf8'));
     assert.equal(failedState.lastSuccessfulRun, undefined, 'lastSuccessfulRun was recorded despite the xlsx failure');
     assert.ok(failed.summary.meta.matchCount >= 1, 'the failed run produced no matches to carry forward');
@@ -295,20 +296,22 @@ const scenarios = {
     const artifacts = await assertDesktopArtifacts(config, recovered);
     assert.equal(recovered.exitCode, 0, `recovery run exited ${recovered.exitCode}`);
     assert.ok(artifacts.xlsxPath, 'recovery run did not rebuild the xlsx');
-    assert.equal(await exists(pendingPath), false, 'pending-report.json was not consumed');
+    assert.equal(JSON.parse(await fs.readFile(payloadPath, 'utf8')).complete, true, 'day payload was not marked complete');
     assert.equal(await exists(path.join(runDirectory, 'XLSX-FAILED.txt')), false, 'XLSX-FAILED.txt was not cleared');
     const recoveredState = JSON.parse(await fs.readFile(statePath, 'utf8'));
     assert.equal(recoveredState.lastSuccessfulRun, '2026-08-27T13:00:00.000Z');
-    assert.equal(recovered.summary.debug?.pendingReport?.recovered, true, 'summary does not report the recovery');
+    assert.equal(recovered.summary.meta.runsToday, 2, 'second run should be update #2 of the day');
+    assert.equal(recovered.summary.meta.newThisRun, 0, 'the rerun should not have re-scored anything');
     assert.equal(recovered.summary.meta.matchCount, failed.summary.meta.matchCount, 'carried matches were lost in the same-day rerun');
     const { sheet, headers } = await readMatches(artifacts.xlsxPath);
     assert.deepEqual(headers, EXPECTED_HEADERS);
     assert.equal(sheet.actualRowCount, failed.summary.meta.matchCount + 1);
+    assert.match(artifacts.html, /Daily update #2/);
     assert.ok(
-      artifacts.warnings.some(warning => warning.source === 'pending report' && /Regenerated the 2026-08-27/.test(warning.message)),
-      `no recovery warning: ${warningLines(artifacts.warnings).join(' | ')}`,
+      !artifacts.warnings.some(warning => warning.source === 'XLSX'),
+      `the rebuilt report still carries the xlsx failure warning: ${warningLines(artifacts.warnings).join(' | ')}`,
     );
-    return `xlsx failure kept ${failed.summary.meta.matchCount} match(es) pending; next run rebuilt HTML + xlsx and recorded lastSuccessfulRun`;
+    return `xlsx failure kept ${failed.summary.meta.matchCount} match(es) in the day payload; next run rebuilt HTML + xlsx as update #2 and recorded lastSuccessfulRun`;
   },
 };
 
