@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { sha256, unique } from './utils.mjs';
+import { createWarning, errorSummary } from './warnings.mjs';
 
 const API_CREDENTIALS = [
   'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'CLAUDE_API_KEY',
@@ -161,6 +162,43 @@ function chunks(items, size) {
   return output;
 }
 
+function addWarning(options, message) {
+  if (Array.isArray(options.warnings)) options.warnings.push(createWarning('llm', options.engine || 'subscription', message));
+}
+
+function wait(milliseconds) {
+  return new Promise(resolve => setTimeout(resolve, milliseconds));
+}
+
+export function localFallbackJob(job) {
+  return {
+    ...job,
+    matchLevel: 'unreviewed',
+    semanticReviewed: false,
+    scoringEngine: 'local_fallback',
+  };
+}
+
+function validateBatchResults(batch, results) {
+  const expectedIds = new Set(batch.map(job => job.semanticId));
+  const returnedIds = new Set();
+  const accepted = [];
+  const ignoredIds = [];
+  for (const item of Array.isArray(results) ? results : []) {
+    if (!expectedIds.has(item.id) || returnedIds.has(item.id)) {
+      ignoredIds.push(item.id || '(missing id)');
+      continue;
+    }
+    returnedIds.add(item.id);
+    accepted.push(item);
+  }
+  return {
+    accepted,
+    missing: batch.filter(job => !returnedIds.has(job.semanticId)),
+    ignoredIds,
+  };
+}
+
 export function mergeSemanticResults(jobs, results, engine) {
   const byId = new Map(results.map(item => [item.id, item]));
   return jobs.map(job => {
@@ -197,28 +235,93 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
   ).map(job => ({ ...job, semanticId: sha256(job.url).slice(0, 16) }));
   if (!candidates.length) return jobs;
 
-  if (engine === 'codex_subscription') await verifyCodexSubscription(options);
-  else await verifyClaudeSubscription(options);
-
-  const tempDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'daily-job-match-alert-semantic-'));
-  const schemaPath = path.join(tempDirectory, 'schema.json');
-  await fs.writeFile(schemaPath, JSON.stringify(resultSchema));
-  const allResults = [];
   try {
+    if (engine === 'codex_subscription') await verifyCodexSubscription(options);
+    else await verifyClaudeSubscription(options);
+  } catch (error) {
+    addWarning(options, `Subscription authentication check failed; ${candidates.length} jobs used local fallback: ${errorSummary(error)}`);
+    const fallbackByUrl = new Map(candidates.map(job => [job.url, localFallbackJob(job)]));
+    return jobs.map(job => fallbackByUrl.get(job.url) || job);
+  }
+
+  let tempDirectory;
+  const allResults = [];
+  const fallbackIds = new Set();
+  try {
+    tempDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'daily-job-match-alert-semantic-'));
+    const schemaPath = path.join(tempDirectory, 'schema.json');
+    await fs.writeFile(schemaPath, JSON.stringify(resultSchema));
+    let requestNumber = 0;
+    const invokeBatch = async batch => {
+      const prompt = buildSemanticPrompt(batch, resumes, preferences, Number(options.maximumDescriptionCharacters || 7000));
+      const outputPath = path.join(tempDirectory, `result-${requestNumber++}.json`);
+      return engine === 'codex_subscription'
+        ? codexBatch(prompt, schemaPath, outputPath, tempDirectory, options)
+        : claudeBatch(prompt, schemaPath, outputPath, tempDirectory, options);
+    };
+    const invokeWithRetry = async batch => {
+      let lastError;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          return { response: await invokeBatch(batch), error: null };
+        } catch (error) {
+          lastError = error;
+          if (attempt === 1) await (options.sleep || wait)(Number(options.retryDelayMs ?? 10_000));
+        }
+      }
+      return { response: null, error: lastError };
+    };
+
+    const missingJobs = [];
     let batchNumber = 0;
     for (const batch of chunks(candidates, Number(options.batchSize || 6))) {
-      const prompt = buildSemanticPrompt(batch, resumes, preferences, Number(options.maximumDescriptionCharacters || 7000));
-      const outputPath = path.join(tempDirectory, `result-${batchNumber++}.json`);
-      const response = engine === 'codex_subscription'
-        ? await codexBatch(prompt, schemaPath, outputPath, tempDirectory, options)
-        : await claudeBatch(prompt, schemaPath, outputPath, tempDirectory, options);
-      allResults.push(...response.results);
+      batchNumber += 1;
+      const { response, error } = await invokeWithRetry(batch);
+      if (error) {
+        for (const job of batch) fallbackIds.add(job.semanticId);
+        addWarning(options, `Batch ${batchNumber} failed twice; ${batch.length} jobs used local fallback: ${errorSummary(error)}`);
+        continue;
+      }
+      const validation = validateBatchResults(batch, response.results);
+      allResults.push(...validation.accepted);
+      missingJobs.push(...validation.missing);
+      if (validation.ignoredIds.length) {
+        addWarning(options, `Batch ${batchNumber} returned unexpected or duplicate ids that were ignored: ${validation.ignoredIds.join(', ')}`);
+      }
     }
+
+    if (missingJobs.length) {
+      let supplemental;
+      try {
+        supplemental = validateBatchResults(missingJobs, (await invokeBatch(missingJobs)).results);
+        allResults.push(...supplemental.accepted);
+        if (supplemental.ignoredIds.length) {
+          addWarning(options, `Supplemental review returned unexpected or duplicate ids that were ignored: ${supplemental.ignoredIds.join(', ')}`);
+        }
+      } catch (error) {
+        supplemental = { missing: missingJobs };
+        addWarning(options, `Supplemental review failed; ${missingJobs.length} omitted jobs used local fallback: ${errorSummary(error)}`);
+      }
+      for (const job of supplemental.missing) fallbackIds.add(job.semanticId);
+      if (supplemental.missing.length) {
+        addWarning(options, `The model still omitted ${supplemental.missing.length} job ids after supplemental review; they were marked unreviewed and kept with local scores.`);
+      } else {
+        addWarning(options, `The model initially omitted ${missingJobs.length} job ids; supplemental review recovered all of them.`);
+      }
+    }
+  } catch (error) {
+    for (const job of candidates) fallbackIds.add(job.semanticId);
+    addWarning(options, `Semantic matching setup failed; ${candidates.length} jobs used local fallback: ${errorSummary(error)}`);
   } finally {
-    await fs.rm(tempDirectory, { recursive: true, force: true });
+    if (tempDirectory) await fs.rm(tempDirectory, { recursive: true, force: true });
   }
+
+  const resultIds = new Set(allResults.map(result => result.id));
   const candidateResults = mergeSemanticResults(candidates, allResults, engine);
-  const mergedByUrl = new Map(candidateResults.map(job => [job.url, job]));
+  const mergedByUrl = new Map(candidateResults.map(job => [
+    job.url,
+    fallbackIds.has(job.semanticId) || !resultIds.has(job.semanticId) ? localFallbackJob(job) : job,
+  ]));
   return jobs.map(job => mergedByUrl.get(job.url) || job);
 }
 

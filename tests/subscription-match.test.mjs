@@ -1,6 +1,34 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildSemanticPrompt, mergeSemanticResults, subscriptionEnvironment, verifyClaudeSubscription, verifyCodexSubscription } from '../src/subscription-match.mjs';
+import { applySubscriptionMatching, buildSemanticPrompt, mergeSemanticResults, subscriptionEnvironment, verifyClaudeSubscription, verifyCodexSubscription } from '../src/subscription-match.mjs';
+import { sha256 } from '../src/utils.mjs';
+
+function localCandidate(url, title = 'Data Analyst') {
+  return {
+    url,
+    source: 'fixture',
+    company: 'Acme',
+    title,
+    location: 'Remote - US',
+    roleType: 'new_grad',
+    description: 'Use SQL and Python for analytics and machine learning.'.repeat(8),
+    dataScore: 82,
+    aiScore: 68,
+    bestScore: 82,
+    recommendedResume: 'Data',
+    reasons: ['SQL'],
+    gaps: [],
+    blockers: [],
+    scoreDetails: { data: { roleRelevance: 25 }, ai: { roleRelevance: 14 } },
+  };
+}
+
+function semanticResult(id, score = 85) {
+  return {
+    id, roleType: 'new_grad', dataScore: score, aiScore: 70, recommendedResume: 'Data', matchLevel: 'high',
+    reasons: ['Strong overlap'], gaps: [], blockers: [],
+  };
+}
 
 test('removes API credentials from subscription subprocess environment', () => {
   const env = subscriptionEnvironment({ PATH: '/bin', OPENAI_API_KEY: 'secret', ANTHROPIC_API_KEY: 'secret2' });
@@ -38,4 +66,55 @@ test('merges structured semantic scores while preserving local audit scores', ()
   assert.equal(merged[0].bestScore, 88);
   assert.equal(merged[0].semanticReviewed, true);
   assert.equal(merged[0].localScores.aiScore, 60);
+});
+
+test('retries a failed LLM batch once after 10 seconds then keeps jobs as local unreviewed fallback', async () => {
+  const warnings = [];
+  const delays = [];
+  let batchCalls = 0;
+  const runner = async (_command, args) => {
+    if (args.includes('auth')) return { stdout: JSON.stringify({ loggedIn: true, authMethod: 'claude.ai' }), stderr: '' };
+    batchCalls += 1;
+    throw new Error('subscription unavailable');
+  };
+  const [job] = await applySubscriptionMatching(
+    [localCandidate('https://example.com/jobs/1')],
+    { data: 'DATA', ai: 'AI' },
+    {},
+    { engine: 'claude_subscription', runner, warnings, sleep: async milliseconds => delays.push(milliseconds) },
+  );
+
+  assert.equal(batchCalls, 2);
+  assert.deepEqual(delays, [10_000]);
+  assert.equal(job.bestScore, 82);
+  assert.equal(job.matchLevel, 'unreviewed');
+  assert.equal(job.scoringEngine, 'local_fallback');
+  assert.match(warnings[0].message, /failed twice/);
+});
+
+test('validates returned ids and sends omitted jobs through one supplemental review before fallback', async () => {
+  const warnings = [];
+  const first = localCandidate('https://example.com/jobs/1');
+  const second = localCandidate('https://example.com/jobs/2', 'ML Engineer');
+  let modelCalls = 0;
+  const runner = async (_command, args) => {
+    if (args.includes('auth')) return { stdout: JSON.stringify({ loggedIn: true, authMethod: 'claude.ai' }), stderr: '' };
+    modelCalls += 1;
+    if (modelCalls === 1) {
+      return { stdout: JSON.stringify({ results: [semanticResult(sha256(first.url).slice(0, 16))] }), stderr: '' };
+    }
+    return { stdout: JSON.stringify({ results: [] }), stderr: '' };
+  };
+  const jobs = await applySubscriptionMatching(
+    [first, second],
+    { data: 'DATA', ai: 'AI' },
+    {},
+    { engine: 'claude_subscription', runner, warnings, batchSize: 2 },
+  );
+
+  assert.equal(modelCalls, 2);
+  assert.equal(jobs[0].semanticReviewed, true);
+  assert.equal(jobs[1].matchLevel, 'unreviewed');
+  assert.equal(jobs[1].scoringEngine, 'local_fallback');
+  assert.ok(warnings.some(warning => /still omitted 1 job ids/.test(warning.message)));
 });

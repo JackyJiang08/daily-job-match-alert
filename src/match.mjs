@@ -120,8 +120,11 @@ export function isEligible(job, config) {
   if (Math.max(job.scoreDetails?.data?.roleRelevance || 0, job.scoreDetails?.ai?.roleRelevance || 0) < 14) return false;
   const semantic = config.semanticMatching || {};
   if ((semantic.engine || 'claude_subscription') !== 'local_only') {
-    if (!job.semanticReviewed) return false;
-    if (!(semantic.acceptedMatchLevels || ['high']).includes(job.matchLevel)) return false;
+    const locallyFallbacked = job.matchLevel === 'unreviewed' || job.scoringEngine === 'local_fallback';
+    if (!locallyFallbacked) {
+      if (!job.semanticReviewed) return false;
+      if (!(semantic.acceptedMatchLevels || ['high']).includes(job.matchLevel)) return false;
+    }
   }
   return job.bestScore >= Number(config.minimumMatchScore || 60);
 }

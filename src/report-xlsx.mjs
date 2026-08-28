@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import ExcelJS from 'exceljs';
+import { warningText } from './warnings.mjs';
 
 const [jsonPath, outputPath, verifyFlag] = process.argv.slice(2);
 if (!jsonPath || !outputPath) {
@@ -19,6 +20,9 @@ const COLORS = {
   red: 'FFFEE2E2',
   yellow: 'FFFEF3C7',
   green: 'FFCCFBF1',
+  orange: 'FFEA580C',
+  lightOrange: 'FFFFF7ED',
+  orangeText: 'FF7C2D12',
 };
 
 const thinBorder = { style: 'thin', color: { argb: COLORS.border } };
@@ -131,6 +135,21 @@ for (let row = 1; row <= 13; row++) {
   for (let column = 1; column <= 6; column++) summary.getCell(row, column).alignment = { vertical: 'top', wrapText: true };
 }
 
+styleMergedTitle(summary, 'A15:F15', 'Warnings', COLORS.orange, 13, 26);
+const warnings = payload.meta.warnings || [];
+const warningLines = warnings.length ? warnings.map(warningText) : ['None'];
+warningLines.forEach((warning, index) => {
+  const row = index + 16;
+  summary.mergeCells(row, 1, row, 6);
+  const cell = summary.getCell(row, 1);
+  cell.value = warning;
+  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.lightOrange } };
+  cell.font = { color: { argb: COLORS.orangeText } };
+  cell.alignment = { vertical: 'top', wrapText: true };
+  summary.getRow(row).height = Math.min(96, Math.max(36, 18 * Math.ceil(String(warning).length / 100)));
+});
+for (const column of ['C', 'D', 'E', 'F']) summary.getColumn(column).width = 12;
+
 const headers = ['Source', 'Role Type', 'Posted At', 'Discovered At', 'Company', 'Title', 'Location', 'Employment Type', 'Salary', 'Data Score', 'AI Score', 'Best Score', 'Match Level', 'Recommended Resume', 'Why It Matches', 'Gaps / Verify', 'Blockers', 'Full JD', 'Posting Link', 'Freshness Basis'];
 const rows = jobs.map(job => [
   job.source,
@@ -208,8 +227,10 @@ widths.forEach((width, index) => {
 styleMergedTitle(notes, 'A1:F1', 'How to read this report', COLORS.darkTeal, 16, 32);
 const noteRows = [
   ['Field', 'Meaning'],
+  ['Warnings', 'Source, enrichment, or subscription failures that were downgraded so the nightly report could still be generated.'],
   ['Data / AI Score', 'Local triage score against the corresponding resume; not a probability of getting an interview.'],
   ['Best Score', 'Higher of the two track scores.'],
+  ['Match Level', 'High/medium/low/reject from subscription review. Unreviewed means the local score was retained because semantic review was unavailable.'],
   ['Freshness Basis', 'Whether freshness came from an employer date, source age, email receipt, or first discovery.'],
   ['Gaps / Verify', 'Skills or eligibility details that were not found in the selected resume or need manual confirmation.'],
   ['Full JD', 'Complete captured job description used for matching. Excel cells are capped below 32,767 characters.'],

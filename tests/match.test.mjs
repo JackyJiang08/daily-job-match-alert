@@ -36,3 +36,22 @@ test('requires a substantive JD before a role enters the high-match report', () 
   const job = evaluateJob({ title: 'Data Analyst', company: 'Acme', location: 'Remote', description: 'SQL and Python.', url: 'https://example.com/short', source: 'fixture' }, resumes, preferences);
   assert.equal(isEligible(job, { preferences, minimumMatchScore: 1, semanticMatching: { engine: 'local_only' } }), false);
 });
+
+test('keeps an unreviewed local fallback when its local score clears the threshold', () => {
+  const evaluated = evaluateJob({
+    title: 'Data Analyst - New Grad', company: 'Acme', location: 'Remote',
+    description: 'Use SQL, Python, Tableau, statistics, experimentation, and data visualization to support product decisions. '.repeat(4),
+    url: 'https://example.com/unreviewed', source: 'fixture',
+  }, resumes, preferences);
+  const job = { ...evaluated, matchLevel: 'unreviewed', scoringEngine: 'local_fallback', semanticReviewed: false };
+  assert.equal(isEligible(job, {
+    preferences,
+    minimumMatchScore: job.bestScore,
+    semanticMatching: { engine: 'claude_subscription', acceptedMatchLevels: ['high'] },
+  }), true);
+  assert.equal(isEligible(job, {
+    preferences,
+    minimumMatchScore: job.bestScore + 1,
+    semanticMatching: { engine: 'claude_subscription', acceptedMatchLevels: ['high'] },
+  }), false);
+});

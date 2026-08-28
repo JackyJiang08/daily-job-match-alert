@@ -21,6 +21,8 @@
 
 如果 XLSX 生成失败，pipeline 会以 exit code 1 结束，但不会删除已经生成的 HTML，也不会回滚当日去重 state；同目录会出现包含错误详情的 `XLSX-FAILED.txt`。问题修复后重新运行成功，失败标记会自动移除并恢复为 HTML、XLSX 两个文件。
 
+采集源、JD enrich 或订阅模型的单点失败不会阻止日报生成：HTML 顶部和 XLSX 的 Run Summary 会显示 warning。LLM batch 失败会在 10 秒后重试一次；仍失败或补审后仍漏答的岗位保留本地分数并标记为 `unreviewed`。Enrich 失败会在 state 中累计 attempts，前两次留到次日重试，第三次失败后终止并在 warning 中明确列出。
+
 ## 各来源怎么自动化
 
 | 来源 | 推荐方式 | 是否直接抓登录网站 |

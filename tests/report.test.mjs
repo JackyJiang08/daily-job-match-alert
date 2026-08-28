@@ -21,6 +21,19 @@ test('HTML output escapes remote content and includes the original link', () => 
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.match(html, /https:\/\/example\.com\/jobs\/1/);
   assert.match(html, /Full captured JD/);
+  assert.doesNotMatch(html, /Pipeline warnings/);
+});
+
+test('renders pipeline warnings and clearly labels unreviewed jobs', () => {
+  const html = buildHtml([{ ...job, matchLevel: 'unreviewed', scoringEngine: 'local_fallback' }], {
+    date: '2026-08-27',
+    lookbackHours: 24,
+    warnings: [{ stage: 'collector', source: 'Job board', message: 'network unavailable' }],
+  });
+  assert.match(html, /Pipeline warnings/);
+  assert.match(html, /collector \/ Job board/);
+  assert.match(html, /network unavailable/);
+  assert.match(html, /Match level: unreviewed/);
 });
 
 test('uses the next Central Time calendar date for the application folder', () => {

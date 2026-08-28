@@ -11,10 +11,11 @@ import { collectHimalaya } from './collectors/himalaya.mjs';
 import { collectCareerOps } from './collectors/career-ops.mjs';
 import { enrichJob } from './enrich.mjs';
 import { evaluateJob, isEligible } from './match.mjs';
-import { applySubscriptionMatching } from './subscription-match.mjs';
-import { writeReports } from './report.mjs';
+import { applySubscriptionMatching, localFallbackJob } from './subscription-match.mjs';
+import { buildHtml, writeReports } from './report.mjs';
 import { isJobSeen, markJobSeen, normalizeState } from './state.mjs';
 import { canonicalUrl, dateWithOffset, mapLimit, sha256 } from './utils.mjs';
+import { createWarning, errorSummary } from './warnings.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -30,18 +31,76 @@ async function readState(file) {
   }
 }
 
-async function optionallyRunCareerOps(config) {
+async function optionallyRunCareerOps(config, runner = execFileAsync) {
   const source = config.sources.careerOps;
   if (!source?.enabled || !source.runScanFirst) return;
-  await execFileAsync(process.execPath, ['scan.mjs', '--since', String(Math.max(1, Math.ceil(config.lookbackHours / 24)))], {
+  await runner(process.execPath, ['scan.mjs', '--since', String(Math.max(1, Math.ceil(config.lookbackHours / 24)))], {
     cwd: source.projectDirectory,
     timeout: 20 * 60 * 1000,
   });
 }
 
+export async function collectEnabledSources(config, cutoff, options = {}) {
+  const warnings = options.warnings || [];
+  const collectors = {
+    simplify: collectSimplifyList,
+    emailFiles: collectEmailFiles,
+    himalaya: collectHimalaya,
+    careerOps: collectCareerOps,
+    ...options.collectors,
+  };
+  const sources = [];
+  if (config.sources.simplifyInternships?.enabled) sources.push({
+    name: 'SimplifyJobs Summer Internships',
+    collect: () => collectors.simplify({
+      ...config.sources.simplifyInternships, source: 'SimplifyJobs Summer Internships', roleType: 'internship',
+    }),
+  });
+  if (config.sources.simplifyNewGrad?.enabled) sources.push({
+    name: 'SimplifyJobs New Grad',
+    collect: () => collectors.simplify({
+      ...config.sources.simplifyNewGrad, source: 'SimplifyJobs New Grad', roleType: 'new_grad',
+    }),
+  });
+  if (config.sources.emailFiles?.enabled) sources.push({
+    name: 'Email files',
+    collect: () => collectors.emailFiles(config.sources.emailFiles.directory),
+  });
+  if (config.sources.himalaya?.enabled) sources.push({
+    name: 'Himalaya job-alert mailbox',
+    collect: () => collectors.himalaya(config.sources.himalaya, cutoff),
+  });
+  if (config.sources.careerOps?.enabled) {
+    if (config.sources.careerOps.runScanFirst) {
+      try {
+        await optionallyRunCareerOps(config, options.careerOpsRunner);
+      } catch (error) {
+        warnings.push(createWarning('collector', 'career-ops scan', errorSummary(error)));
+      }
+    }
+    sources.push({
+      name: 'career-ops history',
+      collect: () => collectors.careerOps(config.sources.careerOps.scanHistoryPath, cutoff),
+    });
+  }
+
+  const batches = await Promise.all(sources.map(async source => {
+    try {
+      const jobs = await source.collect();
+      if (!Array.isArray(jobs)) throw new Error('collector returned a non-array result');
+      return jobs;
+    } catch (error) {
+      warnings.push(createWarning('collector', source.name, errorSummary(error)));
+      return [];
+    }
+  }));
+  return batches.flat();
+}
+
 function dedupe(jobs) {
   const found = new Map();
   for (const job of jobs) {
+    if (!job) continue;
     const url = canonicalUrl(job.url);
     if (!url) continue;
     const key = sha256(url);
@@ -51,14 +110,14 @@ function dedupe(jobs) {
       ...job,
       source: [...new Set(`${existing.source}|${job.source}`.split('|'))].join(' | '),
       company: job.company || existing.company,
-      description: job.description.length > existing.description.length ? job.description : existing.description,
+      description: String(job.description || '').length > String(existing.description || '').length ? job.description : existing.description,
       url,
     } : { ...job, url });
   }
   return [...found.values()];
 }
 
-async function main() {
+export async function main() {
   const configPath = arg('--config', 'config.json');
   const now = new Date(arg('--now', new Date().toISOString()));
   if (Number.isNaN(now.getTime())) throw new Error('--now must be a valid ISO date');
@@ -69,20 +128,9 @@ async function main() {
   const statePath = path.join(config.root, 'state', 'state.json');
   const state = await readState(statePath);
   const cutoff = new Date(now.getTime() - config.lookbackHours * 60 * 60 * 1000);
+  const warnings = [];
 
-  await optionallyRunCareerOps(config);
-  const tasks = [];
-  if (config.sources.simplifyInternships?.enabled) tasks.push(collectSimplifyList({
-    ...config.sources.simplifyInternships, source: 'SimplifyJobs Summer Internships', roleType: 'internship',
-  }));
-  if (config.sources.simplifyNewGrad?.enabled) tasks.push(collectSimplifyList({
-    ...config.sources.simplifyNewGrad, source: 'SimplifyJobs New Grad', roleType: 'new_grad',
-  }));
-  if (config.sources.emailFiles?.enabled) tasks.push(collectEmailFiles(config.sources.emailFiles.directory));
-  if (config.sources.himalaya?.enabled) tasks.push(collectHimalaya(config.sources.himalaya, cutoff));
-  if (config.sources.careerOps?.enabled) tasks.push(collectCareerOps(config.sources.careerOps.scanHistoryPath, cutoff));
-
-  const collected = dedupe((await Promise.all(tasks)).flat()).filter(job => {
+  const collected = dedupe(await collectEnabledSources(config, cutoff, { warnings })).filter(job => {
     if (job.sourceAgeDays != null && job.sourceAgeDays > Math.ceil(config.lookbackHours / 24)) return false;
     const timestamp = job.postedAt || job.discoveredAt;
     return !timestamp || new Date(timestamp) >= cutoff;
@@ -93,15 +141,46 @@ async function main() {
     originalUrl: job.originalUrl || job.url,
     discoveredAt: job.discoveredAt || now.toISOString(),
   }));
-  const enrichedCandidates = config.network.fetchDescriptions === false ? stamped : await mapLimit(stamped, Number(config.network.concurrency || 3), job => enrichJob(job, config.network));
+  const enrichedCandidates = config.network.fetchDescriptions === false ? stamped : await mapLimit(
+    stamped,
+    Number(config.network.concurrency || 3),
+    async job => {
+      try {
+        return await enrichJob(job, config.network);
+      } catch (error) {
+        return { ...job, enrichment: 'failed', enrichmentError: errorSummary(error) };
+      }
+    },
+  );
   const enriched = enrichedCandidates.filter(job => {
     if (!isJobSeen(state, job)) return true;
     markJobSeen(state, job, now.toISOString());
     return false;
+  }).map(job => {
+    if (job.enrichment !== 'failed') return job;
+    const status = markJobSeen(state, job, now.toISOString());
+    const label = [job.company, job.title].filter(Boolean).join(' — ') || job.url;
+    warnings.push(createWarning(
+      'enrichment',
+      job.source || 'job posting',
+      status.completed
+        ? `${label} failed enrichment ${status.attempts} times and will not be retried: ${job.enrichmentError || 'unknown error'}`
+        : `${label} enrichment attempt ${status.attempts}/3 failed and will be retried next run: ${job.enrichmentError || 'unknown error'}`,
+    ));
+    return { ...job, enrichmentAttempts: status.attempts, enrichmentTerminal: status.completed };
   });
   const locallyEvaluated = enriched.map(job => evaluateJob(job, resumes, config.preferences));
-  const evaluated = (await applySubscriptionMatching(locallyEvaluated, resumes, config.preferences, config.semanticMatching || {}))
-    .sort((a, b) => b.bestScore - a.bestScore);
+  let evaluated;
+  try {
+    evaluated = await applySubscriptionMatching(locallyEvaluated, resumes, config.preferences, {
+      ...(config.semanticMatching || {}),
+      warnings,
+    });
+  } catch (error) {
+    warnings.push(createWarning('llm', config.semanticMatching?.engine || 'subscription', `Semantic matching failed; all jobs used local fallback: ${errorSummary(error)}`));
+    evaluated = locallyEvaluated.map(localFallbackJob);
+  }
+  evaluated.sort((a, b) => b.bestScore - a.bestScore);
   const matches = evaluated.filter(job => isEligible(job, config));
   const timeZone = config.timeZone || 'America/Chicago';
   const runDate = dateWithOffset(now, timeZone, 0);
@@ -109,12 +188,14 @@ async function main() {
   const meta = {
     generatedAt: now.toISOString(), date, applicationDate: date, runDate, timeZone, lookbackHours: config.lookbackHours,
     minimumMatchScore: config.minimumMatchScore, resumeSync, collectedCount: collected.length,
-    newCount: enriched.length, reviewedCount: evaluated.length, matchCount: matches.length,
+    newCount: enriched.length, reviewedCount: evaluated.length, matchCount: matches.length, warnings,
   };
   const paths = await writeReports(matches, evaluated, meta, config.outputDirectory);
 
   await fs.mkdir(path.dirname(statePath), { recursive: true });
-  for (const job of evaluated) markJobSeen(state, job, now.toISOString());
+  for (const job of evaluated) {
+    if (job.enrichment !== 'failed') markJobSeen(state, job, now.toISOString());
+  }
   state.lastSuccessfulRun = now.toISOString();
   await fs.writeFile(statePath, JSON.stringify(state, null, 2) + '\n');
 
@@ -136,6 +217,7 @@ async function main() {
         paths.xlsxPath = null;
         paths.xlsxFailurePath = xlsxFailurePath;
         paths.xlsxWarning = 'XLSX generation failed; the HTML report and persisted seen state were preserved.';
+        warnings.push(createWarning('report', 'XLSX', `${paths.xlsxWarning} ${errorSummary(error)}`));
         const failureText = [
           'Daily Job Match Alert XLSX generation failed.',
           `Generated at: ${now.toISOString()}`,
@@ -149,6 +231,12 @@ async function main() {
           await fs.writeFile(xlsxFailurePath, failureText);
         } catch (markerError) {
           paths.xlsxMarkerWarning = `Could not write XLSX-FAILED.txt: ${markerError.message}`;
+          warnings.push(createWarning('report', 'XLSX failure marker', paths.xlsxMarkerWarning));
+        }
+        try {
+          await fs.writeFile(paths.htmlPath, buildHtml(matches, meta));
+        } catch (htmlUpdateError) {
+          console.warn(`Could not add the XLSX warning to HTML: ${errorSummary(htmlUpdateError)}`);
         }
         console.warn(`${paths.xlsxWarning} ${error.message}`);
       }
@@ -164,7 +252,9 @@ async function main() {
   if (xlsxFailure) throw xlsxFailure;
 }
 
-main().catch(error => {
-  console.error(error.stack || error.message);
-  process.exitCode = 1;
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch(error => {
+    console.error(error.stack || error.message);
+    process.exitCode = 1;
+  });
+}

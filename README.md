@@ -25,6 +25,7 @@ Daily Job Match Alert provides:
 - Public-source and official-alert ingestion without authenticated scraping.
 - Exact `postedAt` versus first-seen `discoveredAt` semantics.
 - Cross-source URL canonicalization and persistent deduplication.
+- Failure-isolated collectors, retrying subscription batches, and visible report warnings instead of an empty nightly run.
 - Exactly two user-facing files per successful application date: HTML and XLSX, both with the complete captured JD.
 - Hard safety boundaries: no auto-apply, no screening answers, no mailbox mutation.
 
@@ -143,6 +144,8 @@ No `latest.html`, CSV, JSON, inspection sidecar, or verification directory remai
 - `discoveredAt` records when Daily Job Match Alert first encountered the canonical URL.
 - GitHub list age is labeled approximate rather than presented as an exact timestamp.
 - Hard-blocked and low-match roles are excluded from both user-facing files.
+- Collector, enrichment, or subscription failures appear in a warning panel in HTML and in the XLSX Run Summary. Subscription batches retry once after 10 seconds; unresolved jobs keep their local score and are labeled `unreviewed`.
+- Failed enrichment remains retryable across nightly runs. State records the attempt count and only closes the posting after three failed enrichment attempts, with each degraded attempt disclosed in the report.
 - The XLSX writer is enabled by default. If XLSX generation fails, the run exits with code 1 but preserves the HTML report and seen state, and writes `XLSX-FAILED.txt` beside the HTML with the underlying error. A later successful rerun removes that marker and restores the two-file contract.
 
 ## Security and ethics

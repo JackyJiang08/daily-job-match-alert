@@ -108,11 +108,11 @@ export async function enrichJob(job, network = {}, fetchImpl = fetch) {
     }
 
     const response = await fetchWithTimeout(originalJob.url, { headers }, timeoutMs, fetchImpl);
-    if (!response.ok) return { ...originalJob, enrichment: `http_${response.status}` };
+    if (!response.ok) return { ...originalJob, enrichment: 'failed', enrichmentError: `http_${response.status}` };
     const finalUrl = canonicalUrl(response.url || originalJob.url) || originalJob.url;
     const contentType = response.headers.get('content-type') || '';
     const body = await response.text();
-    if (contentType.includes('application/json')) return { ...originalJob, finalUrl, url: finalUrl, enrichment: 'json_unparsed' };
+    if (contentType.includes('application/json')) return { ...originalJob, finalUrl, url: finalUrl, enrichment: 'failed', enrichmentError: 'json_unparsed' };
     const posting = parseJsonLd(body);
     const htmlTitle = meta(body, 'og:title') || cleanText(body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '');
     const postingDescription = posting?.description ? cleanText(posting.description) : '';

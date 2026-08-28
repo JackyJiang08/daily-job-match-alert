@@ -5,7 +5,10 @@
     "generatedAt": "2026-08-27T20:00:00.000-05:00",
     "lookbackHours": 24,
     "reviewedCount": 1,
-    "minimumMatchScore": 70
+    "minimumMatchScore": 70,
+    "warnings": [
+      { "stage": "collector", "source": "CI fixture", "message": "sample degraded source" }
+    ]
   },
   "matches": [
     {
@@ -20,7 +23,8 @@
       "salary": "USD 90000–110000 YEAR",
       "dataScore": 86,
       "aiScore": 78,
-      "matchLevel": "high",
+      "matchLevel": "unreviewed",
+      "scoringEngine": "local_fallback",
       "reasons": ["SQL", "Python"],
       "gaps": ["Verify domain experience"],
       "blockers": [],
