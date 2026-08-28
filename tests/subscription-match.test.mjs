@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applySubscriptionMatching, buildSemanticPrompt, MINIMUM_CLAUDE_CODE_VERSION, mergeSemanticResults, subscriptionEnvironment, verifyClaudeSubscription, verifyCodexSubscription } from '../src/subscription-match.mjs';
+import { applySubscriptionMatching, buildSemanticPrompt, expandModelAlias, extractScoringModel, MINIMUM_CLAUDE_CODE_VERSION, mergeSemanticResults, modelMatchesConfiguration, parseStructuredOutput, subscriptionEnvironment, summarizeScoringModel, verifyClaudeSubscription, verifyCodexSubscription } from '../src/subscription-match.mjs';
 import { sha256 } from '../src/utils.mjs';
 
 function localCandidate(url, title = 'Data Analyst') {
@@ -151,4 +151,110 @@ test('validates returned ids and sends omitted jobs through one supplemental rev
   assert.equal(jobs[1].matchLevel, 'unreviewed');
   assert.equal(jobs[1].scoringEngine, 'local_fallback');
   assert.ok(warnings.some(warning => /still omitted 1 job ids/.test(warning.message)));
+});
+
+function claudeJsonOutput(results, modelUsage) {
+  return JSON.stringify({
+    type: 'result', subtype: 'success', is_error: false,
+    result: JSON.stringify({ results }), structured_output: { results },
+    modelUsage,
+  });
+}
+
+const fableUsage = {
+  'claude-haiku-4-5-20251001': { inputTokens: 900, outputTokens: 11, canonicalModel: 'claude-haiku-4-5' },
+  'claude-fable-5': { inputTokens: 5000, outputTokens: 640, cacheCreationInputTokens: 2000, canonicalModel: 'claude-fable-5' },
+};
+const sonnetUsage = {
+  'claude-haiku-4-5-20251001': { inputTokens: 900, outputTokens: 11, canonicalModel: 'claude-haiku-4-5' },
+  'claude-sonnet-5': { inputTokens: 5000, outputTokens: 640, canonicalModel: 'claude-sonnet-5' },
+};
+
+function claudeRunner(batchOutput) {
+  return async (_command, args) => {
+    if (args.includes('--version')) return { stdout: `${MINIMUM_CLAUDE_CODE_VERSION} (Claude Code)`, stderr: '' };
+    if (args.includes('auth')) return { stdout: JSON.stringify({ loggedIn: true, authMethod: 'claude.ai' }), stderr: '' };
+    return { stdout: typeof batchOutput === 'function' ? batchOutput(args) : batchOutput, stderr: '' };
+  };
+}
+
+test('expands claude --model aliases to canonical model prefixes and compares by prefix', () => {
+  assert.equal(expandModelAlias('fable'), 'claude-fable');
+  assert.equal(expandModelAlias('Opus'), 'claude-opus');
+  assert.equal(expandModelAlias('claude-sonnet-5'), 'claude-sonnet-5');
+  assert.equal(expandModelAlias('claude-opus-4-8[1m]'), 'claude-opus-4-8');
+  assert.equal(modelMatchesConfiguration('fable', 'claude-fable-5'), true);
+  assert.equal(modelMatchesConfiguration('opus', 'claude-opus-4-8'), true);
+  assert.equal(modelMatchesConfiguration('claude-fable-5', 'claude-fable-5'), true);
+  assert.equal(modelMatchesConfiguration('fable', 'claude-sonnet-5'), false);
+  assert.equal(modelMatchesConfiguration('claude-opus-4-8', 'claude-opus-5'), false);
+  assert.equal(modelMatchesConfiguration('', 'claude-sonnet-5'), true);
+  assert.equal(modelMatchesConfiguration('fable', 'unknown'), true);
+});
+
+test('extracts the scoring model from modelUsage by output tokens and falls back to null', () => {
+  assert.equal(extractScoringModel({ modelUsage: fableUsage }), 'claude-fable-5');
+  assert.equal(extractScoringModel({ modelUsage: { 'claude-opus-4-8': { outputTokens: 5 } } }), 'claude-opus-4-8');
+  assert.equal(extractScoringModel({ model: 'claude-sonnet-5' }), 'claude-sonnet-5');
+  assert.equal(extractScoringModel({ results: [] }), null);
+  const parsed = parseStructuredOutput(claudeJsonOutput([semanticResult('abc')], sonnetUsage));
+  assert.equal(parsed.results.length, 1);
+  assert.equal(parsed.scoringModel, 'claude-sonnet-5');
+  assert.equal(parseStructuredOutput(JSON.stringify({ results: [] })).scoringModel, null);
+});
+
+test('records the reported model on reviewed jobs without warning when it matches the configured alias', async () => {
+  const warnings = [];
+  const job = localCandidate('https://example.com/jobs/model-ok');
+  const [reviewed] = await applySubscriptionMatching(
+    [job], { data: 'DATA', ai: 'AI' }, {},
+    { engine: 'claude_subscription', model: 'fable', warnings, runner: claudeRunner(claudeJsonOutput([semanticResult(sha256(job.url).slice(0, 16))], fableUsage)) },
+  );
+  assert.equal(reviewed.semanticReviewed, true);
+  assert.equal(reviewed.scoringModel, 'claude-fable-5');
+  assert.deepEqual(warnings, []);
+  assert.equal(summarizeScoringModel([reviewed]), 'claude-fable-5');
+});
+
+test('flags a configured model that does not match the model the CLI actually used', async () => {
+  const warnings = [];
+  const first = localCandidate('https://example.com/jobs/mismatch-1');
+  const second = localCandidate('https://example.com/jobs/mismatch-2', 'ML Engineer');
+  const runner = claudeRunner(claudeJsonOutput([
+    semanticResult(sha256(first.url).slice(0, 16)),
+    semanticResult(sha256(second.url).slice(0, 16)),
+  ], sonnetUsage));
+  const jobs = await applySubscriptionMatching(
+    [first, second], { data: 'DATA', ai: 'AI' }, {},
+    { engine: 'claude_subscription', model: 'fable', warnings, batchSize: 1, runner },
+  );
+  assert.equal(jobs[0].scoringModel, 'claude-sonnet-5');
+  assert.equal(jobs[0].bestScore, 85);
+  const mismatch = warnings.filter(warning => /MODEL MISMATCH/.test(warning.message));
+  assert.equal(mismatch.length, 1);
+  assert.match(mismatch[0].message, /"fable".*"claude-sonnet-5"/);
+  assert.equal(mismatch[0].stage, 'llm');
+  assert.equal(summarizeScoringModel(jobs), 'claude-sonnet-5');
+});
+
+test('records unknown with a warning when the CLI output carries no model information', async () => {
+  const warnings = [];
+  const job = localCandidate('https://example.com/jobs/no-model');
+  const [reviewed] = await applySubscriptionMatching(
+    [job], { data: 'DATA', ai: 'AI' }, {},
+    { engine: 'claude_subscription', model: 'fable', warnings, runner: claudeRunner(JSON.stringify({ results: [semanticResult(sha256(job.url).slice(0, 16))] })) },
+  );
+  assert.equal(reviewed.scoringModel, 'unknown');
+  assert.ok(warnings.some(warning => /did not identify the model.*"unknown"/.test(warning.message)));
+  assert.ok(!warnings.some(warning => /MODEL MISMATCH/.test(warning.message)));
+});
+
+test('summarizes the scoring model for meta across reviewed, fallback, and local-only runs', () => {
+  assert.equal(summarizeScoringModel([{ semanticReviewed: false, scoringModel: 'claude-fable-5' }]), 'none');
+  assert.equal(summarizeScoringModel([], 'local_only'), 'local_only');
+  assert.equal(summarizeScoringModel([
+    { semanticReviewed: true, scoringModel: 'claude-fable-5' },
+    { semanticReviewed: true, scoringModel: 'claude-sonnet-5' },
+    { semanticReviewed: true, scoringModel: 'claude-fable-5' },
+  ]), 'claude-fable-5, claude-sonnet-5');
 });

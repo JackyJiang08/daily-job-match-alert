@@ -19,6 +19,8 @@
 
 桌面日报目录不保留 `latest.html`、CSV、JSON、检查文件或验证图片。JSON 只在系统临时目录中用于构建 XLSX，完成后自动删除。
 
+XLSX 的 `Matches` 表固定 11 列：Company、Title、Location、Role Type、Posted At、Data Score、AI Score、Recommended Resume、Why It Matches、Gaps / Verify、Posting Link。Posting Link 显示域名、点击打开完整 URL；两列分数共用三色色阶。因语义评审不可用而保留本地分数的岗位，会在 Why It Matches 开头标注 `[unreviewed]`。完整 JD、薪资、雇佣类型、来源、发现时间和 freshness 依据只保留在 HTML 报告中。`Run Summary` 表另有 Scoring model 一行。
+
 如果 XLSX 生成失败，pipeline 会以 exit code 1 结束，但不会删除已经生成的 HTML，也不会回滚当日去重 state；同目录会出现包含错误详情的 `XLSX-FAILED.txt`。问题修复后重新运行成功，失败标记会自动移除并恢复为 HTML、XLSX 两个文件。
 
 采集源、JD enrich 或订阅模型的单点失败不会阻止日报生成：HTML 顶部和 XLSX 的 Run Summary 会显示 warning。LLM batch 失败会在 10 秒后重试一次；仍失败或补审后仍漏答的岗位保留本地分数并标记为 `unreviewed`。Enrich 失败会在 state 中累计 attempts，前两次留到次日重试，第三次失败后终止并在 warning 中明确列出。
@@ -47,6 +49,10 @@
 默认 `semanticMatching.engine` 是 `claude_subscription`。先运行 `claude auth login --claudeai`，不要选择 `--console`（后者是 API 计费入口）。程序运行前检查 Claude 订阅登录，并从子进程环境中移除 OpenAI、Anthropic、Bedrock、Vertex、Google 的 API key 变量。认证方式不符时任务直接失败，不会自动切换为按量 API。
 
 Codex 的 ChatGPT 订阅登录仍可作为可选引擎 `codex_subscription`。订阅 CLI 的运行会消耗对应计划额度，但不会产生 OpenAI Platform/Anthropic API 按量账单。
+
+## 模型固定与审计
+
+`semanticMatching.model` 会传给 `claude --model`。可填 Claude Code 别名 `fable`、`opus`、`sonnet`（各自解析为该系列最新模型），或完整模型名如 `claude-fable-5`；示例配置固定为 `fable`。每个 batch 的 `claude --print --output-format json` 返回都会解析实际使用的模型（`modelUsage` 中输出 token 最多的条目），记录为每个岗位的 `scoringModel`，并显示在 HTML 页眉和 XLSX Run Summary 的 Scoring model 行。无法解析时记为 `unknown` 并给出 warning；若配置的模型与实际模型在别名展开后前缀不一致（例如配置 `fable` 但实际是 `claude-sonnet-5`），当批结果照常使用，但会在 warning 面板中显著提示 `MODEL MISMATCH`。
 
 ## 推荐的邮箱设置
 

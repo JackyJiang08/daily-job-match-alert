@@ -23,7 +23,29 @@ const COLORS = {
   orange: 'FFEA580C',
   lightOrange: 'FFFFF7ED',
   orangeText: 'FF7C2D12',
+  link: 'FF1D4ED8',
 };
+
+// Matches sheet layout. Column letters are referenced by formulas and conditional formatting below.
+const MATCH_COLUMNS = [
+  { header: 'Company', width: 22 },
+  { header: 'Title', width: 38 },
+  { header: 'Location', width: 22 },
+  { header: 'Role Type', width: 13 },
+  { header: 'Posted At', width: 18 },
+  { header: 'Data Score', width: 11 },
+  { header: 'AI Score', width: 10 },
+  { header: 'Recommended Resume', width: 18 },
+  { header: 'Why It Matches', width: 45, wrap: true },
+  { header: 'Gaps / Verify', width: 45, wrap: true },
+  { header: 'Posting Link', width: 30 },
+];
+const MATCH_HEADERS = MATCH_COLUMNS.map(column => column.header);
+const COLUMN = Object.fromEntries(MATCH_HEADERS.map((header, index) => [header, index + 1]));
+const ROLE_TYPE_LETTER = 'D';
+const DATA_SCORE_LETTER = 'F';
+const AI_SCORE_LETTER = 'G';
+const UNREVIEWED_PREFIX = '[unreviewed]';
 
 const thinBorder = { style: 'thin', color: { argb: COLORS.border } };
 
@@ -31,6 +53,24 @@ function asDate(value) {
   if (!value) return '';
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? String(value) : parsed;
+}
+
+function linkCell(url) {
+  const href = String(url || '').trim();
+  if (!href) return '';
+  let text = href;
+  try {
+    text = new URL(href).hostname.replace(/^www\./, '') || href;
+  } catch {
+    return href;
+  }
+  return { text, hyperlink: href, tooltip: href };
+}
+
+function whyItMatches(job) {
+  const reasons = (job.reasons || []).join('; ');
+  if (job.matchLevel !== 'unreviewed') return reasons;
+  return reasons ? `${UNREVIEWED_PREFIX} ${reasons}` : UNREVIEWED_PREFIX;
 }
 
 function styleMergedTitle(sheet, range, title, fill, size, height) {
@@ -81,11 +121,20 @@ async function verifyWorkbook(filePath, expectedMatchCount) {
   for (const sheetName of ['Run Summary', 'Matches', 'Notes']) {
     assert.ok(verification.getWorksheet(sheetName), `Missing worksheet: ${sheetName}`);
   }
+  const matchesSheet = verification.getWorksheet('Matches');
   assert.equal(
-    verification.getWorksheet('Matches').actualRowCount,
+    matchesSheet.actualRowCount,
     expectedMatchCount + 1,
     'Matches row count does not equal header plus payload matches',
   );
+  const headerRow = matchesSheet.getRow(1);
+  const actualHeaders = [];
+  headerRow.eachCell({ includeEmpty: false }, cell => actualHeaders.push(String(cell.value)));
+  assert.deepEqual(actualHeaders, MATCH_HEADERS, 'Matches header row does not match the expected 11 columns');
+  for (let row = 2; row <= expectedMatchCount + 1; row++) {
+    const link = matchesSheet.getCell(row, COLUMN['Posting Link']).value;
+    assert.ok(link && typeof link === 'object' && link.hyperlink, `Matches!K${row} is not a hyperlink cell`);
+  }
   verifyNoFormulaErrorStrings(verification);
 }
 
@@ -108,38 +157,45 @@ const summaryValues = [
   ['Reviewed jobs', payload.meta.reviewedCount],
   ['High matches', jobs.length],
   ['Minimum score', payload.meta.minimumMatchScore],
+  ['Scoring model', payload.meta.scoringModel || 'unknown'],
 ];
+const summaryStartRow = 3;
 summaryValues.forEach((values, index) => {
-  const row = index + 3;
+  const row = summaryStartRow + index;
   summary.getCell(row, 1).value = values[0];
   summary.getCell(row, 2).value = values[1];
   summary.getCell(row, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.lightSlate } };
   summary.getCell(row, 1).font = { bold: true, color: { argb: COLORS.slate } };
 });
-applyOutsideBorder(summary, 3, 1, 8, 2);
+const summaryEndRow = summaryStartRow + summaryValues.length - 1;
+applyOutsideBorder(summary, summaryStartRow, 1, summaryEndRow, 2);
 summary.getCell('B4').numFmt = 'yyyy-mm-dd hh:mm';
 
+const roleTypeHeaderRow = summaryEndRow + 2;
+const roleTypeRange = `'Matches'!$${ROLE_TYPE_LETTER}$2:$${ROLE_TYPE_LETTER}$${Math.max(2, jobs.length + 1)}`;
 summary.addRows([
   [],
   ['Role type', 'Count'],
-  ['Internship', { formula: `COUNTIF('Matches'!$B$2:$B$${Math.max(2, jobs.length + 1)},"internship")`, result: roleCount(jobs, 'internship') }],
-  ['New grad', { formula: `COUNTIF('Matches'!$B$2:$B$${Math.max(2, jobs.length + 1)},"new_grad")`, result: roleCount(jobs, 'new_grad') }],
-  ['Entry level', { formula: `COUNTIF('Matches'!$B$2:$B$${Math.max(2, jobs.length + 1)},"entry_level")`, result: roleCount(jobs, 'entry_level') }],
+  ['Internship', { formula: `COUNTIF(${roleTypeRange},"internship")`, result: roleCount(jobs, 'internship') }],
+  ['New grad', { formula: `COUNTIF(${roleTypeRange},"new_grad")`, result: roleCount(jobs, 'new_grad') }],
+  ['Entry level', { formula: `COUNTIF(${roleTypeRange},"entry_level")`, result: roleCount(jobs, 'entry_level') }],
 ]);
-summary.getRow(10).eachCell(cell => {
+summary.getRow(roleTypeHeaderRow).eachCell(cell => {
   cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.darkTeal } };
   cell.font = { bold: true, color: { argb: COLORS.white } };
 });
+const roleTypeEndRow = roleTypeHeaderRow + 3;
 for (const column of ['A', 'B']) summary.getColumn(column).width = 22;
-for (let row = 1; row <= 13; row++) {
+for (let row = 1; row <= roleTypeEndRow; row++) {
   for (let column = 1; column <= 6; column++) summary.getCell(row, column).alignment = { vertical: 'top', wrapText: true };
 }
 
-styleMergedTitle(summary, 'A15:F15', 'Warnings', COLORS.orange, 13, 26);
+const warningsTitleRow = roleTypeEndRow + 2;
+styleMergedTitle(summary, `A${warningsTitleRow}:F${warningsTitleRow}`, 'Warnings', COLORS.orange, 13, 26);
 const warnings = payload.meta.warnings || [];
 const warningLines = warnings.length ? warnings.map(warningText) : ['None'];
 warningLines.forEach((warning, index) => {
-  const row = index + 16;
+  const row = warningsTitleRow + 1 + index;
   summary.mergeCells(row, 1, row, 6);
   const cell = summary.getCell(row, 1);
   cell.value = warning;
@@ -150,28 +206,18 @@ warningLines.forEach((warning, index) => {
 });
 for (const column of ['C', 'D', 'E', 'F']) summary.getColumn(column).width = 12;
 
-const headers = ['Source', 'Role Type', 'Posted At', 'Discovered At', 'Company', 'Title', 'Location', 'Employment Type', 'Salary', 'Data Score', 'AI Score', 'Best Score', 'Match Level', 'Recommended Resume', 'Why It Matches', 'Gaps / Verify', 'Blockers', 'Full JD', 'Posting Link', 'Freshness Basis'];
 const rows = jobs.map(job => [
-  job.source,
-  job.roleType,
-  asDate(job.postedAt),
-  asDate(job.discoveredAt),
   job.company,
   job.title,
   job.location,
-  job.employmentType || '',
-  job.salary || '',
+  job.roleType,
+  asDate(job.postedAt),
   job.dataScore,
   job.aiScore,
   null,
-  job.matchLevel || '',
-  null,
-  (job.reasons || []).join('; '),
+  whyItMatches(job),
   (job.gaps || []).join('; '),
-  (job.blockers || []).join('; '),
-  String(job.description || '').slice(0, 32700),
-  job.url,
-  job.freshnessBasis,
+  linkCell(job.url),
 ]);
 
 if (jobs.length) {
@@ -180,11 +226,11 @@ if (jobs.length) {
     ref: 'A1',
     headerRow: true,
     style: { theme: 'TableStyleMedium2', showRowStripes: true },
-    columns: headers.map(name => ({ name })),
+    columns: MATCH_HEADERS.map(name => ({ name })),
     rows,
   });
 } else {
-  matches.addRow(headers);
+  matches.addRow(MATCH_HEADERS);
 }
 
 matches.getRow(1).eachCell(cell => {
@@ -198,19 +244,22 @@ for (let index = 0; index < jobs.length; index++) {
   const rowNumber = index + 2;
   const dataScore = Number(jobs[index].dataScore || 0);
   const aiScore = Number(jobs[index].aiScore || 0);
-  matches.getCell(rowNumber, 12).value = { formula: `MAX(J${rowNumber},K${rowNumber})`, result: Math.max(dataScore, aiScore) };
-  matches.getCell(rowNumber, 14).value = { formula: `IF(J${rowNumber}>=K${rowNumber},"Data","AI")`, result: dataScore >= aiScore ? 'Data' : 'AI' };
-  matches.getRow(rowNumber).height = 96;
-  for (let column = 1; column <= headers.length; column++) {
-    matches.getCell(rowNumber, column).alignment = { vertical: 'top', wrapText: true };
-  }
-  for (const column of [3, 4]) matches.getCell(rowNumber, column).numFmt = 'yyyy-mm-dd hh:mm';
-  for (const column of [10, 11, 12]) matches.getCell(rowNumber, column).numFmt = '0';
+  matches.getCell(rowNumber, COLUMN['Recommended Resume']).value = {
+    formula: `IF(${DATA_SCORE_LETTER}${rowNumber}>=${AI_SCORE_LETTER}${rowNumber},"Data","AI")`,
+    result: dataScore >= aiScore ? 'Data' : 'AI',
+  };
+  MATCH_COLUMNS.forEach((column, columnIndex) => {
+    matches.getCell(rowNumber, columnIndex + 1).alignment = { vertical: 'top', wrapText: Boolean(column.wrap) };
+  });
+  matches.getCell(rowNumber, COLUMN['Posted At']).numFmt = 'yyyy-mm-dd hh:mm';
+  for (const header of ['Data Score', 'AI Score']) matches.getCell(rowNumber, COLUMN[header]).numFmt = '0';
+  const link = matches.getCell(rowNumber, COLUMN['Posting Link']);
+  if (link.value && typeof link.value === 'object') link.font = { color: { argb: COLORS.link }, underline: true };
 }
 
 if (jobs.length) {
   matches.addConditionalFormatting({
-    ref: `L2:L${jobs.length + 1}`,
+    ref: `${DATA_SCORE_LETTER}2:${AI_SCORE_LETTER}${jobs.length + 1}`,
     rules: [{
       type: 'colorScale',
       cfvo: [{ type: 'min' }, { type: 'percentile', value: 50 }, { type: 'max' }],
@@ -219,22 +268,21 @@ if (jobs.length) {
   });
 }
 
-const widths = [19, 13, 18, 18, 22, 38, 22, 17, 18, 11, 10, 11, 13, 18, 42, 38, 28, 72, 55, 24];
-widths.forEach((width, index) => {
-  matches.getColumn(index + 1).width = width;
+MATCH_COLUMNS.forEach((column, index) => {
+  matches.getColumn(index + 1).width = column.width;
 });
 
 styleMergedTitle(notes, 'A1:F1', 'How to read this report', COLORS.darkTeal, 16, 32);
 const noteRows = [
   ['Field', 'Meaning'],
-  ['Warnings', 'Source, enrichment, or subscription failures that were downgraded so the nightly report could still be generated.'],
-  ['Data / AI Score', 'Local triage score against the corresponding resume; not a probability of getting an interview.'],
-  ['Best Score', 'Higher of the two track scores.'],
-  ['Match Level', 'High/medium/low/reject from subscription review. Unreviewed means the local score was retained because semantic review was unavailable.'],
-  ['Freshness Basis', 'Whether freshness came from an employer date, source age, email receipt, or first discovery.'],
+  ['Warnings', 'Source, enrichment, subscription, or model-configuration issues that were downgraded so the nightly report could still be generated.'],
+  ['Scoring model', 'Model reported by the subscription CLI for semantic review. "unknown" means the CLI output did not identify a model; "local_only" or "none" means no subscription review happened.'],
+  ['Data / AI Score', 'Fit score against the corresponding resume from subscription review, or the local triage score for unreviewed rows; not a probability of getting an interview.'],
+  ['Recommended Resume', 'Whichever track scored higher for this posting.'],
+  ['Why It Matches', 'Matched evidence from the review. A leading [unreviewed] tag means semantic review was unavailable and the local score was retained; verify the fit manually.'],
   ['Gaps / Verify', 'Skills or eligibility details that were not found in the selected resume or need manual confirmation.'],
-  ['Full JD', 'Complete captured job description used for matching. Excel cells are capped below 32,767 characters.'],
-  ['Posting Link', 'Original or final resolved posting URL.'],
+  ['Posting Link', 'Clickable link to the original or final resolved posting; the cell shows the domain and the hyperlink carries the full URL.'],
+  ['HTML report', 'The full captured JD, salary, employment type, source, discovery time, and freshness basis stay in the companion HTML file.'],
   ['Safety', 'This workbook never submits an application.'],
 ];
 noteRows.forEach((values, index) => {

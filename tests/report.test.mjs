@@ -36,6 +36,15 @@ test('renders pipeline warnings and clearly labels unreviewed jobs', () => {
   assert.match(html, /Match level: unreviewed/);
 });
 
+test('shows the scoring model in the header only when meta provides one', () => {
+  const withModel = buildHtml([job], { date: '2026-08-27', lookbackHours: 24, scoringModel: 'claude-fable-5' });
+  assert.match(withModel, /<header>[\s\S]*scored by claude-fable-5[\s\S]*<\/header>/);
+  const withoutModel = buildHtml([job], { date: '2026-08-27', lookbackHours: 24 });
+  assert.doesNotMatch(withoutModel, /scored by/);
+  const escaped = buildHtml([job], { date: '2026-08-27', lookbackHours: 24, scoringModel: '<b>x</b>' });
+  assert.doesNotMatch(escaped, /<b>x<\/b>/);
+});
+
 test('uses the next Central Time calendar date for the application folder', () => {
   assert.equal(dateWithOffset(new Date('2026-08-28T01:00:00Z'), 'America/Chicago', 1), '2026-08-28');
 });

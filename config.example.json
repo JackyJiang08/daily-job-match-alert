@@ -8,6 +8,7 @@
   "semanticMatching": {
     "engine": "claude_subscription",
     "claudeCommand": "claude",
+    "model": "fable",
     "required": true,
     "batchSize": 6,
     "maximumDescriptionCharacters": 7000,

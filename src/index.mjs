@@ -11,7 +11,7 @@ import { collectHimalaya } from './collectors/himalaya.mjs';
 import { collectCareerOps } from './collectors/career-ops.mjs';
 import { enrichJob } from './enrich.mjs';
 import { evaluateJob, isEligible } from './match.mjs';
-import { applySubscriptionMatching, localFallbackJob } from './subscription-match.mjs';
+import { applySubscriptionMatching, localFallbackJob, summarizeScoringModel } from './subscription-match.mjs';
 import { buildHtml, writeReports } from './report.mjs';
 import { isJobSeen, markJobSeen, normalizeState, pruneSeen } from './state.mjs';
 import { acquireRunLock, releaseRunLock } from './lock.mjs';
@@ -209,6 +209,7 @@ async function runPipeline(config, clock) {
     generatedAt: now.toISOString(), date, applicationDate: date, runDate, timeZone, lookbackHours: config.lookbackHours,
     minimumMatchScore: config.minimumMatchScore, resumeSync, collectedCount: collected.length,
     newCount: enriched.length, reviewedCount: evaluated.length, matchCount: matches.length, warnings,
+    scoringModel: summarizeScoringModel(evaluated, config.semanticMatching?.engine || 'claude_subscription'),
   };
   const paths = await writeReports(matches, evaluated, meta, config.outputDirectory);
 

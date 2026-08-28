@@ -6,6 +6,7 @@
     "lookbackHours": 24,
     "reviewedCount": 1,
     "minimumMatchScore": 70,
+    "scoringModel": "none",
     "warnings": [
       { "stage": "collector", "source": "CI fixture", "message": "sample degraded source" }
     ]

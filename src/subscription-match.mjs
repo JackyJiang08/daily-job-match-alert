@@ -109,13 +109,56 @@ JOBS:
 ${JSON.stringify(jobs, null, 2)}`;
 }
 
-function parseStructuredOutput(raw) {
-  const parsed = JSON.parse(raw.trim());
+// Aliases accepted by `claude --model`; each expands to the prefix of the canonical model family.
+const MODEL_ALIASES = { fable: 'claude-fable', opus: 'claude-opus', sonnet: 'claude-sonnet', haiku: 'claude-haiku' };
+
+export function normalizeModelName(value) {
+  return String(value || '').trim().toLowerCase().replace(/\[\s*1m\s*\]$/, '');
+}
+
+export function expandModelAlias(value) {
+  const normalized = normalizeModelName(value);
+  return MODEL_ALIASES[normalized] || normalized;
+}
+
+export function modelMatchesConfiguration(configured, actual) {
+  const expected = expandModelAlias(configured);
+  const reported = normalizeModelName(actual);
+  if (!expected || !reported || reported === 'unknown') return true;
+  return reported.startsWith(expected);
+}
+
+// `claude --print --output-format json` reports usage per model id under modelUsage; the scoring model is the
+// entry that produced the most output tokens (helper calls such as Haiku title generation are much smaller).
+export function extractScoringModel(parsed) {
+  const usage = parsed?.modelUsage;
+  if (usage && typeof usage === 'object') {
+    let best = null;
+    for (const [id, stats] of Object.entries(usage)) {
+      const outputTokens = Number(stats?.outputTokens || 0);
+      const inputTokens = Number(stats?.inputTokens || 0) + Number(stats?.cacheReadInputTokens || 0) + Number(stats?.cacheCreationInputTokens || 0);
+      const candidate = { name: String(stats?.canonicalModel || id), outputTokens, inputTokens };
+      if (!best || candidate.outputTokens > best.outputTokens || (candidate.outputTokens === best.outputTokens && candidate.inputTokens > best.inputTokens)) {
+        best = candidate;
+      }
+    }
+    if (best?.name) return best.name;
+  }
+  if (typeof parsed?.model === 'string' && parsed.model.trim()) return parsed.model.trim();
+  return null;
+}
+
+function extractResults(parsed) {
   if (parsed?.results) return parsed;
   if (parsed?.structured_output?.results) return parsed.structured_output;
   if (typeof parsed?.result === 'string') return JSON.parse(parsed.result);
   if (parsed?.result?.results) return parsed.result;
   throw new Error('subscription CLI returned JSON without results[]');
+}
+
+export function parseStructuredOutput(raw) {
+  const parsed = JSON.parse(raw.trim());
+  return { results: extractResults(parsed).results, scoringModel: extractScoringModel(parsed) };
 }
 
 async function verifyCodexSubscription(options = {}) {
@@ -252,8 +295,15 @@ export function mergeSemanticResults(jobs, results, engine) {
       blockers: unique([...(job.blockers || []), ...item.blockers]),
       semanticReviewed: true,
       scoringEngine: engine,
+      scoringModel: item.scoringModel || 'unknown',
     };
   });
+}
+
+export function summarizeScoringModel(jobs, engine = 'claude_subscription') {
+  const models = unique(jobs.filter(job => job.semanticReviewed).map(job => job.scoringModel).filter(Boolean));
+  if (models.length) return models.join(', ');
+  return engine === 'local_only' ? 'local_only' : 'none';
 }
 
 export async function applySubscriptionMatching(jobs, resumes, preferences, options = {}) {
@@ -293,6 +343,23 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
         ? codexBatch(prompt, schemaPath, outputPath, tempDirectory, options)
         : claudeBatch(prompt, schemaPath, outputPath, tempDirectory, options);
     };
+    const observedModels = new Set();
+    let unknownModelBatches = 0;
+    const scoringModelFor = response => {
+      const model = response?.scoringModel || null;
+      if (!model) {
+        unknownModelBatches += 1;
+        return 'unknown';
+      }
+      if (!observedModels.has(model)) {
+        observedModels.add(model);
+        if (options.model && !modelMatchesConfiguration(options.model, model)) {
+          addWarning(options, `MODEL MISMATCH: semanticMatching.model is "${options.model}" but the subscription CLI reported "${model}". Scores from this run were kept; fix the model configuration before the next run.`);
+        }
+      }
+      return model;
+    };
+    const stampModel = (items, model) => items.map(item => ({ ...item, scoringModel: model }));
     const invokeWithRetry = async batch => {
       let lastError;
       for (let attempt = 1; attempt <= 2; attempt++) {
@@ -317,7 +384,7 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
         continue;
       }
       const validation = validateBatchResults(batch, response.results);
-      allResults.push(...validation.accepted);
+      allResults.push(...stampModel(validation.accepted, scoringModelFor(response)));
       missingJobs.push(...validation.missing);
       if (validation.ignoredIds.length) {
         addWarning(options, `Batch ${batchNumber} returned unexpected or duplicate ids that were ignored: ${validation.ignoredIds.join(', ')}`);
@@ -327,8 +394,9 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
     if (missingJobs.length) {
       let supplemental;
       try {
-        supplemental = validateBatchResults(missingJobs, (await invokeBatch(missingJobs)).results);
-        allResults.push(...supplemental.accepted);
+        const response = await invokeBatch(missingJobs);
+        supplemental = validateBatchResults(missingJobs, response.results);
+        allResults.push(...stampModel(supplemental.accepted, scoringModelFor(response)));
         if (supplemental.ignoredIds.length) {
           addWarning(options, `Supplemental review returned unexpected or duplicate ids that were ignored: ${supplemental.ignoredIds.join(', ')}`);
         }
@@ -342,6 +410,9 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
       } else {
         addWarning(options, `The model initially omitted ${missingJobs.length} job ids; supplemental review recovered all of them.`);
       }
+    }
+    if (unknownModelBatches) {
+      addWarning(options, `The subscription CLI output did not identify the model for ${unknownModelBatches} batch(es); scoringModel was recorded as "unknown".`);
     }
   } catch (error) {
     for (const job of candidates) fallbackIds.add(job.semanticId);

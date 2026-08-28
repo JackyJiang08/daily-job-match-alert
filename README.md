@@ -26,7 +26,7 @@ Daily Job Match Alert provides:
 - Exact `postedAt` versus first-seen `discoveredAt` semantics.
 - Cross-source URL canonicalization and persistent deduplication.
 - Failure-isolated collectors, retrying subscription batches, and visible report warnings instead of an empty nightly run.
-- Exactly two user-facing files per successful application date: HTML and XLSX, both with the complete captured JD.
+- Exactly two user-facing files per successful application date: an HTML report with the complete captured JD and a compact 11-column XLSX with clickable posting links.
 - Hard safety boundaries: no auto-apply, no screening answers, no mailbox mutation.
 
 ## Architecture
@@ -85,6 +85,12 @@ npm run run
 
 The default engine is `claude_subscription`. Choose the Claude.ai subscription flow—never `--console`, which is the API-billed path. If `claude` is outside the non-interactive system `PATH`, set `semanticMatching.claudeCommand` to its absolute executable path.
 
+### Pinning and auditing the scoring model
+
+`semanticMatching.model` is passed to `claude --model` (or `codex --model`). Use one of the Claude Code aliases—`fable`, `opus`, or `sonnet`, each resolving to the latest model in that family—or a full model name such as `claude-fable-5`. The example configuration pins `fable`.
+
+Every batch response from `claude --print --output-format json` is parsed for the model that actually produced the scores (`modelUsage`, keyed by model id; the entry with the most output tokens is the scoring model). That value is recorded as `scoringModel` on each reviewed job, summarized as `meta.scoringModel`, and shown in the HTML header and the XLSX Run Summary as **Scoring model**. If the output does not identify a model, `scoringModel` is `unknown` and a warning is raised. If a configured model does not match the reported model after alias expansion (for example `fable` configured but `claude-sonnet-5` reported), the scores are still used for that run, but a `MODEL MISMATCH` warning appears in the HTML warning panel and the Run Summary so the configuration can be fixed.
+
 ## Private resume updates
 
 `resumeSources.autoRefresh` makes resume updates non-fixed. Before every run, the project hashes both source PDFs and refreshes the gitignored `resumes/data.md` and `resumes/ai.md` whenever either PDF changes. Replacing a PDF at the same path requires no configuration change; if its filename or folder changes, update only your private `config.json`.
@@ -140,7 +146,9 @@ Each successful 20:00 Central Time run writes the **next application date** as a
 - `Daily Job Match Alert - 2026-08-28.html`
 - `Daily Job Match Alert - 2026-08-28.xlsx`
 
-No `latest.html`, CSV, JSON, inspection sidecar, or verification directory remains in the Desktop output. Rows include source, role type, company, title, location, Data score, AI score, recommended resume, match reasons, gaps, blockers, full captured JD, freshness basis, and original posting link.
+No `latest.html`, CSV, JSON, inspection sidecar, or verification directory remains in the Desktop output.
+
+The XLSX `Matches` sheet has 11 columns: Company, Title, Location, Role Type, Posted At, Data Score, AI Score, Recommended Resume, Why It Matches, Gaps / Verify, and Posting Link. The link cell shows the posting domain and opens the full URL; both score columns share a three-color scale. Rows that kept a local score because semantic review was unavailable start their **Why It Matches** text with `[unreviewed]`. The `Run Summary` sheet lists counts, the scoring model, and every warning. The HTML report keeps everything the sheet omits: the full captured JD in a collapsible section, salary, employment type, source, discovery time, and freshness basis.
 
 - `postedAt` is populated only from employer or structured posting evidence.
 - `discoveredAt` records when Daily Job Match Alert first encountered the canonical URL.
