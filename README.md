@@ -99,7 +99,7 @@ This is an enforced runtime boundary, not just a documentation promise:
 - `claude_subscription` rejects missing or API-key authentication and is the default.
 - OpenAI, Anthropic, Bedrock, Vertex, and Google API credential variables are removed from the model subprocess environment.
 - There is no OpenAI Platform or Anthropic API client in the project.
-- Authentication mismatch stops the run; it never falls back to an API.
+- Authentication or supported-CLI-version failures fall back to local scoring and appear as report warnings; they never fall back to an API.
 
 Subscription runs still count against the applicable ChatGPT or Claude plan limits.
 
@@ -129,7 +129,9 @@ chmod +x scripts/run-daily.sh scripts/install-launchd.sh
 ./scripts/install-launchd.sh 20 0
 ```
 
-The deterministic runner uses `launchd`, so collection and report generation do not depend on an OpenClaw gateway staying awake. OpenClaw can still provide mailbox tooling or downstream notifications.
+The deterministic runner uses `launchd`, so collection and report generation do not depend on an OpenClaw gateway staying awake. `RunAtLoad` is enabled: a normal 20:00 trigger performs the complete run, while a startup trigger uses the same logic exposed by `npm run run:catchup` and runs only when `state.lastSuccessfulRun` is more than 26 hours old. Through 14:00 local time, a late catch-up writes the current application date; later runs keep the next-day date. OpenClaw can still provide mailbox tooling or downstream notifications.
+
+Concurrent invocations are guarded by `state/.lock`; a live owner causes the duplicate invocation to exit cleanly, and a stale PID is removed automatically. launchd output is stored in `state/logs/daily-YYYY-MM-DD.log`, with the newest 30 log files retained. A fatal error before the normal report can be completed writes `ERROR-YYYY-MM-DD.html` directly under the configured output directory and attempts a macOS notification.
 
 ## Reports and freshness
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applySubscriptionMatching, buildSemanticPrompt, mergeSemanticResults, subscriptionEnvironment, verifyClaudeSubscription, verifyCodexSubscription } from '../src/subscription-match.mjs';
+import { applySubscriptionMatching, buildSemanticPrompt, MINIMUM_CLAUDE_CODE_VERSION, mergeSemanticResults, subscriptionEnvironment, verifyClaudeSubscription, verifyCodexSubscription } from '../src/subscription-match.mjs';
 import { sha256 } from '../src/utils.mjs';
 
 function localCandidate(url, title = 'Data Analyst') {
@@ -46,11 +46,43 @@ test('requires explicit ChatGPT authentication for Codex', async () => {
 });
 
 test('accepts Claude subscription auth and rejects API-key auth', async () => {
-  await verifyClaudeSubscription({ runner: async () => ({ stdout: JSON.stringify({ loggedIn: true, authMethod: 'claude.ai' }), stderr: '' }) });
+  const runner = authMethod => async (_command, args) => args.includes('--version')
+    ? { stdout: `${MINIMUM_CLAUDE_CODE_VERSION} (Claude Code)`, stderr: '' }
+    : { stdout: JSON.stringify({ loggedIn: true, authMethod }), stderr: '' };
+  await verifyClaudeSubscription({ runner: runner('claude.ai') });
   await assert.rejects(
-    verifyClaudeSubscription({ runner: async () => ({ stdout: JSON.stringify({ loggedIn: true, authMethod: 'apiKey' }), stderr: '' }) }),
+    verifyClaudeSubscription({ runner: runner('apiKey') }),
     /not authenticated with a Claude subscription/,
   );
+});
+
+test('rejects an old Claude Code CLI before auth with an upgrade instruction', async () => {
+  const calls = [];
+  await assert.rejects(
+    verifyClaudeSubscription({ runner: async (_command, args) => {
+      calls.push(args);
+      return { stdout: '2.1.100 (Claude Code)', stderr: '' };
+    } }),
+    /older than the verified minimum.*npm i -g/s,
+  );
+  assert.deepEqual(calls, [['--version']]);
+});
+
+test('an old Claude Code CLI degrades the whole semantic review to warning-backed local fallback', async () => {
+  const warnings = [];
+  const [job] = await applySubscriptionMatching(
+    [localCandidate('https://example.com/jobs/version-fallback')],
+    { data: 'DATA', ai: 'AI' },
+    {},
+    {
+      engine: 'claude_subscription',
+      warnings,
+      runner: async () => ({ stdout: '2.1.100 (Claude Code)', stderr: '' }),
+    },
+  );
+  assert.equal(job.scoringEngine, 'local_fallback');
+  assert.equal(job.matchLevel, 'unreviewed');
+  assert.ok(warnings.some(warning => /verified minimum.*npm i -g/.test(warning.message)));
 });
 
 test('semantic prompt treats postings as untrusted and includes both resumes', () => {
@@ -73,6 +105,7 @@ test('retries a failed LLM batch once after 10 seconds then keeps jobs as local 
   const delays = [];
   let batchCalls = 0;
   const runner = async (_command, args) => {
+    if (args.includes('--version')) return { stdout: `${MINIMUM_CLAUDE_CODE_VERSION} (Claude Code)`, stderr: '' };
     if (args.includes('auth')) return { stdout: JSON.stringify({ loggedIn: true, authMethod: 'claude.ai' }), stderr: '' };
     batchCalls += 1;
     throw new Error('subscription unavailable');
@@ -98,6 +131,7 @@ test('validates returned ids and sends omitted jobs through one supplemental rev
   const second = localCandidate('https://example.com/jobs/2', 'ML Engineer');
   let modelCalls = 0;
   const runner = async (_command, args) => {
+    if (args.includes('--version')) return { stdout: `${MINIMUM_CLAUDE_CODE_VERSION} (Claude Code)`, stderr: '' };
     if (args.includes('auth')) return { stdout: JSON.stringify({ loggedIn: true, authMethod: 'claude.ai' }), stderr: '' };
     modelCalls += 1;
     if (modelCalls === 1) {

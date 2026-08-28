@@ -71,7 +71,9 @@ chmod +x scripts/run-daily.sh scripts/install-launchd.sh
 ./scripts/install-launchd.sh 20 0
 ```
 
-先手动成功运行一次，以确认网络、Desktop 文件夹权限和邮箱读取权限都正常，再安装定时任务。
+先手动成功运行一次，以确认网络、Desktop 文件夹权限和邮箱读取权限都正常，再安装定时任务。LaunchAgent 会在每天 20:00 完整运行，并在 Mac 开机或登录时执行 `run:catchup` 检查；只有上次成功运行距今超过 26 小时才补跑。凌晨到 14:00（含）的补跑使用当天作为投递日期，14:00 后仍生成次日目录。
+
+`state/.lock` 会阻止两个实例同时运行，陈旧 PID 锁会自动清除。launchd 日志按 `state/logs/daily-YYYY-MM-DD.log` 保存并仅保留最近 30 个；若主流程在正常报告生成前发生致命错误，输出目录会留下 `ERROR-YYYY-MM-DD.html`，macOS 通知中心也会收到尽力而为的失败提醒。
 
 ## 参考链接
 

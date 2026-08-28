@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { enrichJob } from '../src/enrich.mjs';
-import { isJobSeen, jobSeenStatus, markJobSeen } from '../src/state.mjs';
+import { isJobSeen, jobSeenStatus, markJobSeen, pruneSeen } from '../src/state.mjs';
 import { canonicalUrl, sha256 } from '../src/utils.mjs';
 
 test('records both a tracked original URL and its redirect target so the next day is not new', async () => {
@@ -36,6 +36,18 @@ test('records both a tracked original URL and its redirect target so the next da
   assert.equal(isJobSeen(legacyState, enriched), true);
   markJobSeen(legacyState, enriched, '2026-08-27T20:00:00.000Z');
   assert.ok(legacyState.seen[sha256(collectedUrl)]);
+});
+
+test('prunes 90-day seen state while aging unfinished entries from their last attempt', () => {
+  const state = { seen: {
+    completedOld: { completed: true, firstSeen: '2026-01-01T00:00:00.000Z', lastAttempt: '2026-01-01T00:00:00.000Z' },
+    completedRecent: { completed: true, firstSeen: '2026-08-01T00:00:00.000Z', lastAttempt: '2026-08-01T00:00:00.000Z' },
+    unfinishedRetried: { completed: false, attempts: 2, firstSeen: '2026-01-01T00:00:00.000Z', lastAttempt: '2026-08-26T00:00:00.000Z' },
+    unfinishedAbandoned: { completed: false, attempts: 2, firstSeen: '2026-01-01T00:00:00.000Z', lastAttempt: '2026-02-01T00:00:00.000Z' },
+  } };
+
+  assert.equal(pruneSeen(state, new Date('2026-08-27T20:00:00.000Z'), 90), 2);
+  assert.deepEqual(Object.keys(state.seen).sort(), ['completedRecent', 'unfinishedRetried']);
 });
 
 test('failed enrichment is retried until the third failed attempt', async () => {
