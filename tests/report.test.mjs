@@ -66,3 +66,15 @@ test('writes only a dated HTML report plus a temporary XLSX payload', async () =
     await fs.rm(outputDirectory, { recursive: true, force: true });
   }
 });
+
+test('flags an unverified location with a chip and lists the hard-filter counts in the header', () => {
+  const unverified = { ...job, location: 'Remote', gaps: ['Location unverified — confirm US eligibility'], eligibility: { location: { verdict: 'unverified', marker: null }, exclusion: null } };
+  const html = buildHtml([unverified], { date: '2026-08-27', lookbackHours: 24, eligibilityExclusions: { location: 2, graduation: 1 } });
+  assert.match(html, /<span class="location-unverified">Location unverified<\/span>/);
+  assert.match(html, /Location unverified — confirm US eligibility/);
+  assert.match(html, /<header>[\s\S]*excluded 3 posting\(s\): 2 outside the United States · 1 outside the graduation window[\s\S]*<\/header>/);
+
+  const verified = buildHtml([{ ...job, eligibility: { location: { verdict: 'us', marker: 'US' }, exclusion: null } }], { date: '2026-08-27', lookbackHours: 24 });
+  assert.doesNotMatch(verified, /<span class="location-unverified">/);
+  assert.doesNotMatch(verified, /Hard eligibility filter/);
+});

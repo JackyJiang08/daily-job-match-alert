@@ -1,4 +1,5 @@
 import { classifyRole, minimumYears } from './classify.mjs';
+import { assessEligibility } from './eligibility.mjs';
 import { unique } from './utils.mjs';
 
 const STOP = new Set('a an and are as at be by for from has have in into is it its of on or that the their this to using with you your we our will work role team experience skills preferred required responsibilities qualifications'.split(' '));
@@ -113,6 +114,8 @@ export function evaluateJob(job, resumes, preferences = {}) {
 
 export function isEligible(job, config) {
   const prefs = config.preferences || {};
+  // Deterministic eligibility runs first and for every posting, regardless of which engine scored it.
+  if ((job.eligibility || assessEligibility(job, prefs)).exclusion) return false;
   if (config.requireFullDescription !== false && String(job.description || '').trim().length < Number(config.minimumDescriptionCharacters || 200)) return false;
   if (prefs.roleTypes?.length && !prefs.roleTypes.includes(job.roleType)) return false;
   if (prefs.excludeTitleTerms?.some(term => includesPhrase(job.title, term))) return false;

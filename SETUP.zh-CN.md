@@ -23,18 +23,24 @@ XLSX 的 `Matches` 表固定 11 列：Company、Title、Location、Role Type、P
 
 Workday 招聘站（`*.myworkdayjobs.com`）的岗位页由浏览器端渲染，HTML 抓取拿不到 JD。这类岗位改走租户公开的 JSON 接口（`/wday/cxs/...`），enrichment 记为 `workday_cxs`；接口失败时回退到原有 HTML 路径。
 
+地点与毕业窗口是确定性资格，由 `src/eligibility.mjs` 在 `isEligible` 中对每个岗位强制执行，与评分引擎无关：地点含明确非美国家/地区/城市标识（列表 `NON_US_LOCATION_MARKERS` 可扩展）即排除，含美国标识即通过（同一字符串中美国标识优先），仅写 `Remote` 或为空则通过但在 Gaps 追加 "Location unverified — confirm US eligibility"，HTML 卡片显示黄色 chip。毕业窗口由 `preferences.graduationDate`（示例 `2027-05`）驱动，规则见 `GRADUATION_EXCLUSION_RULES`，仅在命中的所有日期都过早时才排除；表述有歧义交给语义层。缺少 `graduationDate` 时该规则关闭并给出 warning。
+
 ## 降级语义：任何单点故障，桌面仍有产物
 
 | 故障 | 行为 | 在哪里看到 |
 |---|---|---|
 | 某个采集源抛错 | 该源为空，其他源继续 | warning `collector / <源名>` |
+| SimplifyJobs 榜单返回 200 但解析出 0 行 | 视为上游格式可能变更，其他源继续 | warning `collector / <源名>`，提示检查解析器 |
+| 同一轮里两个追踪链接指向同一岗位 | 保留首个并合并来源标签，丢弃项写入运行摘要 `debug.droppedDuplicateFinalUrls` | stderr 每条一行 |
+| 岗位地点在美国之外，或毕业窗口不符 | 本地代码确定性排除（与评分引擎无关），Run Summary 分列计数 | warning `eligibility / hard filter` 汇总一条 |
 | 岗位页面抓不到（429、5xx、超时、JSON 无法解析） | 保留到后续夜晚重试，最多 3 次后关闭 | warning `enrichment / <源>`，含 attempts 计数 |
 | 站点拒绝抓取（HTTP 403）或岗位已下线（404、410） | 首次即关闭，不再重试 | warning `enrichment / <源>`，注明岗位名及 `blocked` / `removed` |
 | `.eml` 文件畸形或超过 5 MB | 只跳过该文件，同目录其他文件照常解析 | warning `collector / Email files` |
 | Claude CLI 缺失 / 版本过低 / API-key 登录 / batch 重试后仍失败 | 相关岗位保留本地分数并标记 `unreviewed` | warning `llm / <engine>`；XLSX 前缀 `[unreviewed]`，HTML 橙色 `Match level: unreviewed` |
 | 模型漏答岗位 id | 补审一次，仍缺的标为 `unreviewed` | warning `llm / <engine>` |
 | 实际模型与 `semanticMatching.model` 不一致 | 本次结果照用 | `MODEL MISMATCH` warning |
-| XLSX 生成失败 | 保留 HTML 与去重 state，同目录写入 `XLSX-FAILED.txt`，进程 exit 1 | warning `report / XLSX` + 标记文件 |
+| XLSX 生成失败 | 保留 HTML 与去重 state，同目录写入 `XLSX-FAILED.txt`，报告 payload 留在 `state/pending-report.json`，不更新 `lastSuccessfulRun`，进程 exit 1 | warning `report / XLSX` + 标记文件 |
+| 启动时发现 `state/pending-report.json` | 先用它重建该日期的 HTML 与 XLSX（不采集、不评分），清除标记并记录 `lastSuccessfulRun`；若与本次投递日期相同则并入本次报告 | warning `report / pending report` |
 | 报告生成前的致命错误 | 输出目录直接写 `ERROR-<运行日期>.html`，并尽力发 macOS 通知 | 错误页本身 |
 
 LLM batch 失败会在 10 秒后重试一次。`unreviewed` 岗位只有本地分数达到阈值才会进入报告，因此模型故障当晚得到的是一份本地排序的清单，而不是空页面。修复后再次成功运行，`XLSX-FAILED.txt` 会自动移除。
@@ -62,7 +68,7 @@ LLM batch 失败会在 10 秒后重试一次。`unreviewed` 岗位只有本地�
 
 ## 费用保护
 
-默认 `semanticMatching.engine` 是 `claude_subscription`，要求 Claude Code **2.1.250 或更新版本**（更旧版本在发送任何 batch 之前就会被拒绝并降级为本地评分）。先运行 `claude auth login --claudeai`，不要选择 `--console`（后者是 API 计费入口）。程序运行前检查 Claude 订阅登录，并从子进程环境中移除 OpenAI、Anthropic、Bedrock、Vertex、Google 的 API key 变量。认证方式不符时相关岗位降级为 `unreviewed` 并记录 warning，不会自动切换为按量 API。
+默认 `semanticMatching.engine` 是 `claude_subscription`，要求 Claude Code **2.1.250 或更新版本**（更旧版本在发送任何 batch 之前就会被拒绝并降级为本地评分）。先运行 `claude auth login --claudeai`，不要选择 `--console`（后者是 API 计费入口）。程序运行前检查 Claude 订阅登录，并在启动子进程前移除所有可能改变认证或路由的环境变量：`ANTHROPIC_` 与 `AWS_` 前缀全部，以及 `CLAUDE_CODE_USE_BEDROCK`、`CLAUDE_CODE_USE_VERTEX`、`GOOGLE_APPLICATION_CREDENTIALS`、`GOOGLE_API_KEY`、`CLOUD_ML_REGION`、`CLAUDE_API_KEY`、`OPENAI_API_KEY`。认证方式不符时相关岗位降级为 `unreviewed` 并记录 warning，不会自动切换为按量 API。
 
 Codex 的 ChatGPT 订阅登录仍可作为可选引擎 `codex_subscription`。订阅 CLI 的运行会消耗对应计划额度，但不会产生 OpenAI Platform/Anthropic API 按量账单。
 

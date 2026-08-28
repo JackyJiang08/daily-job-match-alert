@@ -28,12 +28,12 @@ Record the date and commit next to each item when it passes.
   Posting Link; the Posting Link cell is a clickable hyperlink; Run Summary shows
   `Scoring model: local_only`.
 
-- [ ] **Chaos check passes all four scenarios**
+- [ ] **Chaos check passes all five scenarios**
   ```bash
   npm run chaos
   ```
-  Expected summary: `4 passed, 0 failed` for `baseline`, `offline`, `llm-down`, and
-  `bad-input`. Every scenario runs against a temporary config, state, and output directory;
+  Expected summary: `5 passed, 0 failed` for `baseline`, `offline`, `llm-down`, `bad-input`,
+  and `xlsx-recovery`. Every scenario runs against a temporary config, state, and output directory;
   nothing is written to the Desktop or to the real `state/`, and no subscription call is made.
   Use `npm run chaos -- --keep` to inspect the generated reports.
 

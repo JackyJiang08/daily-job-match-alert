@@ -5,17 +5,28 @@ import { spawn } from 'node:child_process';
 import { sha256, unique } from './utils.mjs';
 import { createWarning, errorSummary } from './warnings.mjs';
 
-const API_CREDENTIALS = [
-  'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'CLAUDE_API_KEY',
-  'AWS_BEDROCK_API_KEY', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY',
-  'GOOGLE_API_KEY', 'GOOGLE_APPLICATION_CREDENTIALS',
+// The subscription CLI must never be steered to an API key, a Bedrock/Vertex gateway, or a proxy by the
+// launching shell. Prefixes catch every current and future ANTHROPIC_* (API key, base URL, auth token,
+// custom headers, model overrides) and AWS_* (Bedrock credentials, profiles, regions) variable; the explicit
+// list covers the routing switches that live outside those prefixes.
+const CREDENTIAL_ENV_PREFIXES = ['ANTHROPIC_', 'AWS_'];
+const CREDENTIAL_ENV_KEYS = [
+  'OPENAI_API_KEY', 'CLAUDE_API_KEY',
+  'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX',
+  'GOOGLE_API_KEY', 'GOOGLE_APPLICATION_CREDENTIALS', 'CLOUD_ML_REGION',
 ];
 // Subscription flags used below were validated against this installed Claude Code release.
 const MINIMUM_CLAUDE_CODE_VERSION = '2.1.250';
 
+export function isCredentialEnvironmentKey(key) {
+  return CREDENTIAL_ENV_KEYS.includes(key) || CREDENTIAL_ENV_PREFIXES.some(prefix => key.startsWith(prefix));
+}
+
 export function subscriptionEnvironment(environment = process.env) {
-  const safe = { ...environment };
-  for (const key of API_CREDENTIALS) delete safe[key];
+  const safe = {};
+  for (const [key, value] of Object.entries(environment)) {
+    if (!isCredentialEnvironmentKey(key)) safe[key] = value;
+  }
   return safe;
 }
 

@@ -284,3 +284,37 @@ test('a claudeCommand that exits immediately degrades to local fallback with a w
   assert.equal(job.scoringEngine, 'local_fallback');
   assert.ok(warnings.some(warning => /authentication check failed/.test(warning.message)));
 });
+
+test('strips every auth or routing override, by prefix and by name, before spawning the subscription CLI', async () => {
+  const env = subscriptionEnvironment({
+    PATH: '/bin', HOME: '/Users/me', LANG: 'en_US.UTF-8',
+    ANTHROPIC_API_KEY: 'k', ANTHROPIC_BASE_URL: 'https://proxy.example', ANTHROPIC_AUTH_TOKEN: 't', ANTHROPIC_MODEL: 'x',
+    CLAUDE_CODE_USE_BEDROCK: '1', CLAUDE_CODE_USE_VERTEX: '1', CLAUDE_API_KEY: 'k',
+    AWS_ACCESS_KEY_ID: 'a', AWS_SECRET_ACCESS_KEY: 'b', AWS_PROFILE: 'p', AWS_REGION: 'us-east-1', AWS_BEARER_TOKEN_BEDROCK: 'z',
+    GOOGLE_APPLICATION_CREDENTIALS: '/creds.json', GOOGLE_API_KEY: 'g', CLOUD_ML_REGION: 'us-east5', OPENAI_API_KEY: 'o',
+  });
+  assert.deepEqual(env, { PATH: '/bin', HOME: '/Users/me', LANG: 'en_US.UTF-8' });
+
+  const previous = { ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL, CLAUDE_CODE_USE_BEDROCK: process.env.CLAUDE_CODE_USE_BEDROCK };
+  process.env.ANTHROPIC_BASE_URL = 'https://gateway.example';
+  process.env.CLAUDE_CODE_USE_BEDROCK = '1';
+  const seen = [];
+  try {
+    await verifyClaudeSubscription({ runner: async (_command, args, options) => {
+      seen.push(options.env);
+      return args[0] === '--version'
+        ? { stdout: `${MINIMUM_CLAUDE_CODE_VERSION} (Claude Code)`, stderr: '' }
+        : { stdout: JSON.stringify({ loggedIn: true, authMethod: 'claude.ai' }), stderr: '' };
+    } });
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
+  assert.equal(seen.length, 2);
+  for (const env of seen) {
+    assert.equal(Object.hasOwn(env, 'ANTHROPIC_BASE_URL'), false);
+    assert.equal(Object.hasOwn(env, 'CLAUDE_CODE_USE_BEDROCK'), false);
+    assert.equal(env.PATH, process.env.PATH);
+  }
+});

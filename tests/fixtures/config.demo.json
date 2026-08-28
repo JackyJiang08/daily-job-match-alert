@@ -14,6 +14,7 @@
     "remoteOkay": true,
     "maxYearsExperience": 3,
     "needsSponsorship": null,
+    "graduationDate": "2027-05",
     "excludeTitleTerms": ["senior", "staff", "principal", "manager", "director", "lead"]
   },
   "sources": {

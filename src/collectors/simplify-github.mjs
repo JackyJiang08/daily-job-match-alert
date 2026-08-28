@@ -1,4 +1,5 @@
 import { canonicalUrl, cleanText } from '../utils.mjs';
+import { createWarning } from '../warnings.mjs';
 
 function firstHref(html) {
   const matches = [...String(html).matchAll(/href=["']([^"']+)["']/gi)].map(match => match[1]);
@@ -47,10 +48,16 @@ function parseRows(markdown, source, defaultRoleType) {
   return jobs;
 }
 
-export async function collectSimplifyList({ url, source, roleType, fetchImpl = fetch }) {
+export async function collectSimplifyList({ url, source, roleType, fetchImpl = fetch, warnings = null }) {
   const response = await fetchImpl(url, { headers: { accept: 'text/plain' } });
   if (!response.ok) throw new Error(`${source}: HTTP ${response.status}`);
-  return parseRows(await response.text(), source, roleType);
+  const jobs = parseRows(await response.text(), source, roleType);
+  // These lists always carry rows; an empty parse after a successful fetch means the README layout changed
+  // and the parser is silently missing every posting.
+  if (!jobs.length && Array.isArray(warnings)) {
+    warnings.push(createWarning('collector', source, `HTTP ${response.status} but no job rows were parsed; the upstream README format may have changed, check the source and the parser`));
+  }
+  return jobs;
 }
 
 export { parseRows as parseSimplifyRows };

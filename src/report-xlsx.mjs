@@ -156,6 +156,8 @@ const summaryValues = [
   ['Lookback hours', payload.meta.lookbackHours],
   ['Reviewed jobs', payload.meta.reviewedCount],
   ['High matches', jobs.length],
+  ['Excluded: location outside US', Number(payload.meta.eligibilityExclusions?.location || 0)],
+  ['Excluded: graduation window', Number(payload.meta.eligibilityExclusions?.graduation || 0)],
   ['Minimum score', payload.meta.minimumMatchScore],
   ['Scoring model', payload.meta.scoringModel || 'unknown'],
 ];
@@ -280,7 +282,8 @@ const noteRows = [
   ['Data / AI Score', 'Fit score against the corresponding resume from subscription review, or the local triage score for unreviewed rows; not a probability of getting an interview.'],
   ['Recommended Resume', 'Whichever track scored higher for this posting.'],
   ['Why It Matches', 'Matched evidence from the review. A leading [unreviewed] tag means semantic review was unavailable and the local score was retained; verify the fit manually.'],
-  ['Gaps / Verify', 'Skills or eligibility details that were not found in the selected resume or need manual confirmation.'],
+  ['Gaps / Verify', 'Skills or eligibility details that were not found in the selected resume or need manual confirmation. "Location unverified" means the posting only says Remote or gives no location; confirm it permits work from the United States.'],
+  ['Excluded rows', 'Postings removed by the deterministic eligibility rules before scoring mattered: a location outside the United States, or cohort wording (class of, graduate by, full-time start) that is incompatible with the configured graduation date. They never appear in Matches.'],
   ['Posting Link', 'Clickable link to the original or final resolved posting; the cell shows the domain and the hyperlink carries the full URL.'],
   ['HTML report', 'The full captured JD, salary, employment type, source, discovery time, and freshness basis stay in the companion HTML file.'],
   ['Safety', 'This workbook never submits an application.'],

@@ -130,3 +130,31 @@ test('an empty match list still writes the 11-column header and passes --verify'
     await fs.rm(directory, { recursive: true, force: true });
   }
 });
+
+test('Run Summary lists the hard-filter exclusion counts and the Gaps column carries the location note', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'xlsx-exclusions-test-'));
+  const payloadPath = path.join(directory, 'payload.json');
+  const outputPath = path.join(directory, 'report.xlsx');
+  const builderPath = fileURLToPath(new URL('../src/report-xlsx.mjs', import.meta.url));
+  const payload = {
+    meta: { applicationDate: '2026-08-28', date: '2026-08-28', generatedAt: '2026-08-27T20:00:00.000-05:00', lookbackHours: 24, reviewedCount: 4, minimumMatchScore: 70, scoringModel: 'local_only', warnings: [], eligibilityExclusions: { location: 2, graduation: 1 } },
+    matches: [{
+      source: 'fixture', roleType: 'new_grad', postedAt: '2026-08-27T15:00:00.000Z', company: 'Acme', title: 'Data Analyst', location: 'Remote',
+      dataScore: 88, aiScore: 74, matchLevel: 'high', reasons: ['SQL'], gaps: ['JD skill not found in resume: dbt', 'Location unverified — confirm US eligibility'], blockers: [],
+      description: 'Analyze.', url: 'https://www.example.com/jobs/42', freshnessBasis: 'jobposting_date_posted',
+    }],
+  };
+  try {
+    await fs.writeFile(payloadPath, JSON.stringify(payload));
+    await execFileAsync(process.execPath, [builderPath, payloadPath, outputPath, '--verify']);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(outputPath);
+    const summaryRows = {};
+    workbook.getWorksheet('Run Summary').eachRow(row => { if (typeof row.getCell(1).value === 'string') summaryRows[row.getCell(1).value] = row.getCell(2).value; });
+    assert.equal(summaryRows['Excluded: location outside US'], 2);
+    assert.equal(summaryRows['Excluded: graduation window'], 1);
+    assert.equal(workbook.getWorksheet('Matches').getCell('J2').value, 'JD skill not found in resume: dbt; Location unverified — confirm US eligibility');
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});

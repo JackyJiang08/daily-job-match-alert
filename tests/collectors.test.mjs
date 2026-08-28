@@ -85,3 +85,27 @@ test('a malformed .eml is skipped with a warning while sibling files still yield
     await fs.rm(directory, { recursive: true, force: true });
   }
 });
+
+test('a Simplify list that returns 200 with no parsable rows raises a format-change warning', async () => {
+  const { collectSimplifyList } = await import('../src/collectors/simplify-github.mjs');
+  const warnings = [];
+  const empty = await collectSimplifyList({
+    url: 'https://example.com/README.md', source: 'SimplifyJobs New Grad', roleType: 'new_grad', warnings,
+    fetchImpl: async () => new Response('# New Grad Positions\n\nThe table moved to a JSON file.', { status: 200 }),
+  });
+  assert.deepEqual(empty, []);
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0].stage, 'collector');
+  assert.equal(warnings[0].source, 'SimplifyJobs New Grad');
+  assert.match(warnings[0].message, /no job rows were parsed.*format may have changed/);
+
+  const fixture = await fs.readFile(new URL('./fixtures/simplify-sample.md', import.meta.url), 'utf8');
+  const healthyWarnings = [];
+  const jobs = await collectSimplifyList({
+    url: 'https://example.com/README.md', source: 'SimplifyJobs New Grad', roleType: 'new_grad', warnings: healthyWarnings,
+    fetchImpl: async () => new Response(fixture, { status: 200 }),
+  });
+  assert.equal(jobs.length, 2);
+  assert.deepEqual(healthyWarnings, []);
+  await assert.rejects(collectSimplifyList({ url: 'x', source: 'S', roleType: 'new_grad', warnings, fetchImpl: async () => new Response('', { status: 503 }) }), /HTTP 503/);
+});

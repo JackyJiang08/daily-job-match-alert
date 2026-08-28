@@ -89,6 +89,15 @@ The default engine is `claude_subscription`. Choose the Claude.ai subscription f
 
 Every batch response from `claude --print --output-format json` is parsed for the model that actually produced the scores (`modelUsage`, keyed by model id; the entry with the most output tokens is the scoring model). That value is recorded as `scoringModel` on each reviewed job, summarized as `meta.scoringModel`, and shown in the HTML header and the XLSX Run Summary as **Scoring model**. If the output does not identify a model, `scoringModel` is `unknown` and a warning is raised. If a configured model does not match the reported model after alias expansion (for example `fable` configured but `claude-sonnet-5` reported), the scores are still used for that run, but a `MODEL MISMATCH` warning appears in the HTML warning panel and the Run Summary so the configuration can be fixed. Runs without any semantic review show `local_only` or `none`.
 
+## Deterministic eligibility filter
+
+Two constraints are facts, not judgment calls, so they are enforced in code (`src/eligibility.mjs`) inside `isEligible` for every posting, whether it was scored by the subscription model, kept as a local fallback, or run with `engine: local_only`:
+
+- **Location.** A location naming a non-US country, region, or city (`Canada`, `Remote – UK`, `Bengaluru, India`, `Remote - Europe`, …; the list `NON_US_LOCATION_MARKERS` is meant to be extended) excludes the posting. Any US marker (`United States`, `USA`, `US`, a state name, a `, ST` code, or a well-known US city) passes, and it wins over a non-US marker in the same string so multi-location postings reach the semantic review. A location that only says `Remote`, or is empty, passes but carries the gap **Location unverified — confirm US eligibility**, a yellow `Location unverified` chip on the HTML card, and the same text in the XLSX Gaps column.
+- **Graduation window.** `preferences.graduationDate` (`2027-05` in the example) drives a short list of rules, each documented in `GRADUATION_EXCLUSION_RULES`: `Class of 2026`, `graduating by/before/no later than <date before the graduation month>`, `graduation date between … and <earlier date>`, and `must be able to start/work full-time <before the month after graduation>` (skipped for internships). A rule only fires when every date it finds is too early; `Class of 2026 or 2027`, `by 2027`, `December 2026 or later`, and single-date phrases without a bound are left to the semantic review. When `graduationDate` is missing, the rule set is disabled and a warning says so.
+
+Excluded postings are counted, not listed one by one: a single `eligibility / hard filter` warning carries the totals and up to five examples, and both the HTML header and the XLSX Run Summary show **Excluded: location outside US** and **Excluded: graduation window**. Excluded postings are still marked as seen.
+
 ## Private resume updates
 
 `resumeSources.autoRefresh` makes resume updates non-fixed. Before every run, the project hashes both source PDFs and refreshes the gitignored `resumes/data.md` and `resumes/ai.md` whenever either PDF changes. Replacing a PDF at the same path requires no configuration change; if its filename or folder changes, update only your private `config.json`.
@@ -101,7 +110,7 @@ This is an enforced runtime boundary, not just a documentation promise:
 
 - `codex_subscription` requires `codex login status` to explicitly report ChatGPT login.
 - `claude_subscription` is the default; it requires Claude Code 2.1.250+ and rejects missing or API-key authentication.
-- OpenAI, Anthropic, Bedrock, Vertex, and Google API credential variables are removed from the model subprocess environment.
+- Before the CLI is spawned, every variable that could change its authentication or routing is removed from the subprocess environment: everything prefixed `ANTHROPIC_` (API key, base URL, auth token, model overrides) or `AWS_` (Bedrock credentials, profiles, regions), plus `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, `GOOGLE_APPLICATION_CREDENTIALS`, `GOOGLE_API_KEY`, `CLOUD_ML_REGION`, `CLAUDE_API_KEY`, and `OPENAI_API_KEY`.
 - There is no OpenAI Platform or Anthropic API client in the project.
 - Authentication, version, batch, or parsing failures fall back to local scoring and appear as report warnings; they never fall back to an API.
 
@@ -114,13 +123,17 @@ A nightly run is designed to finish with a report on the Desktop even when parts
 | Failure | Behavior | Where it is disclosed |
 |---|---|---|
 | A collector throws or returns garbage | That source contributes nothing; the others continue | Warning `collector / <source name>` |
+| A SimplifyJobs list returns HTTP 200 but zero parsable rows | Treated as a probable upstream format change; the other sources continue | Warning `collector / <source name>` asking for a parser check |
 | A posting cannot be fetched (429, 5xx, timeout, unparsed JSON) | The job is retried on later nights (up to 3 attempts) and then closed | Warning `enrichment / <source>` with the attempt count |
 | The site refuses the fetch (HTTP 403) or the posting is gone (404, 410) | The job is closed on the first attempt; nothing is retried | Warning `enrichment / <source>` naming the job and whether it was `blocked` or `removed` |
+| Two tracked links resolve to the same posting in one run | The first is kept with both source labels; the duplicate is listed under `debug.droppedDuplicateFinalUrls` in the run summary | stderr line per drop |
+| A posting is outside the US or the graduation window | Excluded deterministically, counted in the Run Summary | Warning `eligibility / hard filter` with totals |
 | A malformed or oversized `.eml` | Only that file is skipped; sibling files still yield jobs | Warning `collector / Email files` |
 | Subscription CLI missing, wrong version, API-key auth, or a batch fails twice (10 s retry) | Affected jobs keep their local scores and are labeled `unreviewed` | Warning `llm / <engine>`; `[unreviewed]` prefix in the XLSX, orange `Match level: unreviewed` chip in the HTML |
 | The model omits job ids | One supplemental review; anything still missing becomes `unreviewed` | Warning `llm / <engine>` |
 | Reported model differs from `semanticMatching.model` | Scores kept for the run | `MODEL MISMATCH` warning |
-| XLSX generation fails | HTML report and seen-state are kept, `XLSX-FAILED.txt` is written beside the HTML, the process exits 1 | Warning `report / XLSX`, marker file |
+| XLSX generation fails | HTML report and seen-state are kept, `XLSX-FAILED.txt` is written beside the HTML, the report payload stays in `state/pending-report.json`, `lastSuccessfulRun` is not updated, the process exits 1 | Warning `report / XLSX`, marker file |
+| A run starts while `state/pending-report.json` exists | That day's HTML and XLSX are rebuilt from the payload first (no collection, no scoring), the marker is removed, `lastSuccessfulRun` is recorded; a same-day rerun folds the carried postings into its own report | Warning `report / pending report` |
 | Fatal error before any report | `ERROR-<run date>.html` is written directly under the output directory and a macOS notification is attempted | The error page itself |
 
 Warnings appear in the HTML "Pipeline warnings" panel and in the XLSX Run Summary. `unreviewed` jobs are included in the report only when they clear the local score threshold, so a model outage yields a locally ranked list rather than an empty page.
@@ -159,7 +172,8 @@ How an unattended day works:
 - **Application date.** A run through 14:00 local time writes the current calendar date; a run after 14:00 writes the next day. So the normal 20:00 run creates tomorrow's folder, and a morning catch-up after a missed night still fills today's.
 - **Lock.** `state/.lock` holds the owner PID. A second start while the owner is alive exits cleanly; a stale lock from a dead PID is removed automatically.
 - **Workday.** Career sites on `*.myworkdayjobs.com` render job pages in the browser, so the HTML fetch never contains the description. Those postings are read through the tenant's public JSON endpoint (`/wday/cxs/...`) instead and are labeled `workday_cxs`; if that call fails, the ordinary HTML path runs unchanged.
-- **State.** `state/state.json` remembers every canonical URL (original and redirect target) so the same posting is never reported twice; entries older than 90 days since their last attempt are pruned each run.
+- **State.** `state/state.json` remembers every canonical URL (original and redirect target) so the same posting is never reported twice; entries older than 90 days since their last attempt are pruned each run. `lastSuccessfulRun` is written only after both the HTML and the XLSX exist on disk, so a run whose workbook failed stays eligible for catch-up.
+- **Pending report.** Every run copies its report payload to `state/pending-report.json` before marking postings as seen and deletes it once the XLSX is written. A run that finds the file first regenerates that date's HTML and XLSX from it, records the success, and only then collects new postings; if the pending date is the current application date, the carried postings are merged into the new report so a rerun never overwrites a good report with an empty one.
 - **Logs.** `state/logs/daily-YYYY-MM-DD.log`, newest 30 files kept. If the log directory cannot be prepared, output falls back to `/tmp/daily-job-match-alert-<date>.log`.
 - **Fatal errors.** `ERROR-YYYY-MM-DD.html` under the output directory plus a best-effort macOS notification; the catch-up path retries later.
 

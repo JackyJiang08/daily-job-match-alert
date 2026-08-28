@@ -1,7 +1,7 @@
 // One chaos scenario: build an isolated config under <workRoot>/<scenario>, run src/index.mjs
 // against it, and assert that the Desktop-equivalent output folder still holds a usable report.
 //
-//   node scripts/chaos-scenario.mjs <baseline|offline|llm-down|bad-input> <workRoot>
+//   node scripts/chaos-scenario.mjs <baseline|offline|llm-down|bad-input|xlsx-recovery> <workRoot>
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -53,6 +53,7 @@ function baseConfig(directory) {
       remoteOkay: true,
       maxYearsExperience: 3,
       needsSponsorship: null,
+      graduationDate: '2027-05',
       excludeTitleTerms: ['senior', 'staff', 'principal', 'manager', 'director', 'lead'],
     },
     sources: {
@@ -105,14 +106,16 @@ async function writeConfig(directory, config) {
   return configPath;
 }
 
-async function runPipeline(configPath) {
+async function runPipeline(configPath, now = NOW) {
   const env = { ...process.env };
-  for (const key of ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'CLAUDE_API_KEY']) delete env[key];
+  for (const key of Object.keys(env)) {
+    if (/^(?:ANTHROPIC_|AWS_)/.test(key) || ['OPENAI_API_KEY', 'CLAUDE_API_KEY', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'GOOGLE_APPLICATION_CREDENTIALS', 'CLOUD_ML_REGION'].includes(key)) delete env[key];
+  }
   let stdout = '';
   let stderr = '';
   let exitCode = 0;
   try {
-    ({ stdout, stderr } = await execFileAsync(process.execPath, [path.join(projectDirectory, 'src', 'index.mjs'), '--config', configPath, '--now', NOW], {
+    ({ stdout, stderr } = await execFileAsync(process.execPath, [path.join(projectDirectory, 'src', 'index.mjs'), '--config', configPath, '--now', now], {
       cwd: projectDirectory,
       env,
       timeout: 5 * 60 * 1000,
@@ -265,6 +268,47 @@ const scenarios = {
     assert.ok(run.summary.meta.matchCount >= 1, 'the well-formed email next to the corrupted one did not survive');
     assert.match(artifacts.html, /Skipped corrupted\.eml/);
     return `corrupted.eml skipped with warning, ${run.summary.meta.matchCount} match(es) from the healthy email`;
+  },
+  async 'xlsx-recovery'() {
+    const directory = await prepareDirectory('xlsx-recovery');
+    await addFixtureEmail(directory, 'demo-new-grad-alert.eml');
+    const config = baseConfig(directory);
+    const configPath = await writeConfig(directory, config);
+    const runDirectory = path.join(config.outputDirectory, '2026-08-27');
+    const xlsxPath = path.join(runDirectory, 'Daily Job Match Alert - 2026-08-27.xlsx');
+    const statePath = path.join(directory, 'state', 'state.json');
+    const pendingPath = path.join(directory, 'state', 'pending-report.json');
+    // A directory squatting on the workbook name makes only the xlsx step fail.
+    await fs.mkdir(xlsxPath, { recursive: true });
+    const failed = await runPipeline(configPath);
+    await fs.rm(xlsxPath, { recursive: true, force: true });
+    const failedArtifacts = await assertDesktopArtifacts(config, failed);
+    assert.equal(failed.exitCode, 1, `xlsx failure should exit 1, got ${failed.exitCode}`);
+    assert.equal(failedArtifacts.xlsxPath, null);
+    assert.ok(await exists(path.join(runDirectory, 'XLSX-FAILED.txt')), 'missing XLSX-FAILED.txt marker');
+    assert.ok(await exists(pendingPath), 'failed run left no pending-report.json');
+    const failedState = JSON.parse(await fs.readFile(statePath, 'utf8'));
+    assert.equal(failedState.lastSuccessfulRun, undefined, 'lastSuccessfulRun was recorded despite the xlsx failure');
+    assert.ok(failed.summary.meta.matchCount >= 1, 'the failed run produced no matches to carry forward');
+
+    const recovered = await runPipeline(configPath, '2026-08-27T13:00:00Z');
+    const artifacts = await assertDesktopArtifacts(config, recovered);
+    assert.equal(recovered.exitCode, 0, `recovery run exited ${recovered.exitCode}`);
+    assert.ok(artifacts.xlsxPath, 'recovery run did not rebuild the xlsx');
+    assert.equal(await exists(pendingPath), false, 'pending-report.json was not consumed');
+    assert.equal(await exists(path.join(runDirectory, 'XLSX-FAILED.txt')), false, 'XLSX-FAILED.txt was not cleared');
+    const recoveredState = JSON.parse(await fs.readFile(statePath, 'utf8'));
+    assert.equal(recoveredState.lastSuccessfulRun, '2026-08-27T13:00:00.000Z');
+    assert.equal(recovered.summary.debug?.pendingReport?.recovered, true, 'summary does not report the recovery');
+    assert.equal(recovered.summary.meta.matchCount, failed.summary.meta.matchCount, 'carried matches were lost in the same-day rerun');
+    const { sheet, headers } = await readMatches(artifacts.xlsxPath);
+    assert.deepEqual(headers, EXPECTED_HEADERS);
+    assert.equal(sheet.actualRowCount, failed.summary.meta.matchCount + 1);
+    assert.ok(
+      artifacts.warnings.some(warning => warning.source === 'pending report' && /Regenerated the 2026-08-27/.test(warning.message)),
+      `no recovery warning: ${warningLines(artifacts.warnings).join(' | ')}`,
+    );
+    return `xlsx failure kept ${failed.summary.meta.matchCount} match(es) pending; next run rebuilt HTML + xlsx and recorded lastSuccessfulRun`;
   },
 };
 

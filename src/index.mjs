@@ -11,6 +11,7 @@ import { collectHimalaya } from './collectors/himalaya.mjs';
 import { collectCareerOps } from './collectors/career-ops.mjs';
 import { enrichJob, enrichmentWarningMessage } from './enrich.mjs';
 import { evaluateJob, isEligible } from './match.mjs';
+import { annotateEligibility, summarizeExclusions } from './eligibility.mjs';
 import { applySubscriptionMatching, localFallbackJob, summarizeScoringModel } from './subscription-match.mjs';
 import { buildHtml, writeReports } from './report.mjs';
 import { isJobSeen, markJobSeen, normalizeState, pruneSeen } from './state.mjs';
@@ -19,6 +20,7 @@ import { canonicalUrl, dateWithOffset, htmlEscape, mapLimit, resolveFrom, sha256
 import { createWarning, errorSummary } from './warnings.mjs';
 
 const execFileAsync = promisify(execFile);
+const PENDING_REPORT_FILE = 'pending-report.json';
 
 function arg(argv, name, fallback = null) {
   const index = argv.indexOf(name);
@@ -78,13 +80,13 @@ export async function collectEnabledSources(config, cutoff, options = {}) {
   if (config.sources.simplifyInternships?.enabled) sources.push({
     name: 'SimplifyJobs Summer Internships',
     collect: () => collectors.simplify({
-      ...config.sources.simplifyInternships, source: 'SimplifyJobs Summer Internships', roleType: 'internship',
+      ...config.sources.simplifyInternships, source: 'SimplifyJobs Summer Internships', roleType: 'internship', warnings,
     }),
   });
   if (config.sources.simplifyNewGrad?.enabled) sources.push({
     name: 'SimplifyJobs New Grad',
     collect: () => collectors.simplify({
-      ...config.sources.simplifyNewGrad, source: 'SimplifyJobs New Grad', roleType: 'new_grad',
+      ...config.sources.simplifyNewGrad, source: 'SimplifyJobs New Grad', roleType: 'new_grad', warnings,
     }),
   });
   if (config.sources.emailFiles?.enabled) sources.push({
@@ -142,15 +144,111 @@ function dedupe(jobs) {
   return [...found.values()];
 }
 
+// Two tracked links that resolve to the same posting must not become two report rows; the first one wins
+// and inherits the other's source label.
+export function dedupeByFinalUrl(jobs) {
+  const kept = new Map();
+  const dropped = [];
+  for (const job of jobs) {
+    const key = sha256(canonicalUrl(job.finalUrl || job.url) || job.url);
+    const existing = kept.get(key);
+    if (!existing) {
+      kept.set(key, job);
+      continue;
+    }
+    const sources = [...new Set(`${existing.source}|${job.source}`.split('|').map(item => item.trim()).filter(Boolean))];
+    kept.set(key, { ...existing, source: sources.join(' | ') });
+    dropped.push({ url: job.originalUrl || job.url, finalUrl: job.finalUrl || job.url, source: job.source, duplicateOf: existing.originalUrl || existing.url });
+  }
+  return { jobs: [...kept.values()], dropped };
+}
+
+function statePathFor(config) {
+  return path.join(config.root, 'state', 'state.json');
+}
+
+function pendingReportPath(config) {
+  return path.join(config.root, 'state', PENDING_REPORT_FILE);
+}
+
+async function writeState(statePath, state) {
+  await fs.mkdir(path.dirname(statePath), { recursive: true });
+  await fs.writeFile(statePath, JSON.stringify(state, null, 2) + '\n');
+}
+
+async function buildXlsx(payloadPath, xlsxPath, cwd) {
+  const xlsxBuilder = fileURLToPath(new URL('./report-xlsx.mjs', import.meta.url));
+  await execFileAsync(process.execPath, [xlsxBuilder, payloadPath, xlsxPath], { cwd, timeout: 2 * 60 * 1000 });
+}
+
+// A run whose XLSX failed leaves its full report payload in state/pending-report.json. Every later run,
+// scheduled or catch-up, first rebuilds that day's HTML and XLSX from the payload (no collection, no
+// scoring), then records the success and continues with its own work.
+export async function recoverPendingReport(config, state, options = {}) {
+  const pendingPath = pendingReportPath(config);
+  const warnings = options.warnings || [];
+  let raw;
+  try {
+    raw = await fs.readFile(pendingPath, 'utf8');
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+  let pending;
+  try {
+    pending = JSON.parse(raw);
+    if (!pending?.meta?.date || !Array.isArray(pending.matches) || !Array.isArray(pending.reviewed)) {
+      throw new Error('payload lacks meta.date, matches[], or reviewed[]');
+    }
+  } catch (error) {
+    warnings.push(createWarning('report', 'pending report', `Discarded an unreadable ${PENDING_REPORT_FILE}: ${errorSummary(error)}`));
+    await fs.rm(pendingPath, { force: true });
+    return null;
+  }
+  const { meta, matches, reviewed } = pending;
+  try {
+    const paths = await writeReports(matches, reviewed, meta, config.outputDirectory);
+    let xlsxPath = null;
+    try {
+      if (config.reports?.xlsx?.enabled !== false) {
+        xlsxPath = path.join(paths.runDirectory, `${paths.reportBaseName}.xlsx`);
+        await (options.xlsxBuilder || buildXlsx)(paths.payloadPath, xlsxPath, config.root);
+      }
+      await fs.rm(path.join(paths.runDirectory, 'XLSX-FAILED.txt'), { force: true });
+    } finally {
+      await fs.rm(paths.temporaryDirectory, { recursive: true, force: true });
+    }
+    await fs.rm(pendingPath, { force: true });
+    if (meta.generatedAt) state.lastSuccessfulRun = meta.generatedAt;
+    await writeState(statePathFor(config), state);
+    warnings.push(createWarning('report', 'pending report', `Regenerated the ${meta.date} HTML and XLSX from the payload left by the run at ${meta.generatedAt || 'an earlier time'}; no postings were collected or scored again`));
+    return { date: meta.date, htmlPath: paths.htmlPath, xlsxPath, recovered: true, payload: pending };
+  } catch (error) {
+    warnings.push(createWarning('report', 'pending report', `Could not regenerate the ${meta.date} reports from ${PENDING_REPORT_FILE}; the payload was kept for the next run: ${errorSummary(error)}`));
+    return { date: meta.date, htmlPath: null, xlsxPath: null, recovered: false, payload: pending };
+  }
+}
+
 async function runPipeline(config, clock) {
   const { now, runDate, applicationDate: date } = clock;
   const resumeSync = await syncResumes(config);
   const resumes = await loadResumes(config);
   await fs.mkdir(config.outputDirectory, { recursive: true });
-  const statePath = path.join(config.root, 'state', 'state.json');
+  const statePath = statePathFor(config);
   const state = await readState(statePath);
   const cutoff = new Date(now.getTime() - config.lookbackHours * 60 * 60 * 1000);
   const warnings = [];
+  const debug = {};
+  const prefs = config.preferences || {};
+
+  const recovered = await recoverPendingReport(config, state, { warnings });
+  if (recovered) debug.pendingReport = { date: recovered.date, recovered: recovered.recovered, htmlPath: recovered.htmlPath, xlsxPath: recovered.xlsxPath };
+  // A pending payload for the same application date is folded into this run so the day ends with one
+  // report instead of an empty rerun overwriting the recovered one.
+  const carried = recovered?.date === date ? recovered.payload : null;
+  if (!prefs.graduationDate) {
+    warnings.push(createWarning('eligibility', 'graduation window', 'preferences.graduationDate is not set, so the graduation-window hard filter is disabled and only the semantic review checks cohort wording'));
+  }
 
   const collected = dedupe(await collectEnabledSources(config, cutoff, { warnings })).filter(job => {
     if (job.sourceAgeDays != null && job.sourceAgeDays > Math.ceil(config.lookbackHours / 24)) return false;
@@ -174,20 +272,26 @@ async function runPipeline(config, clock) {
       }
     },
   );
-  const enriched = enrichedCandidates.filter(job => {
+  const unseenEnriched = enrichedCandidates.filter(job => {
     if (!isJobSeen(state, job)) return true;
     markJobSeen(state, job, now.toISOString());
     return false;
-  }).map(job => {
+  });
+  const deduped = dedupeByFinalUrl(unseenEnriched);
+  if (deduped.dropped.length) {
+    debug.droppedDuplicateFinalUrls = deduped.dropped;
+    for (const item of deduped.dropped) console.warn(`Dropped ${item.url} (${item.source}): same final URL as ${item.duplicateOf}`);
+  }
+  const enriched = deduped.jobs.map(job => {
     if (job.enrichment !== 'failed') return job;
     const status = markJobSeen(state, job, now.toISOString());
     warnings.push(createWarning('enrichment', job.source || 'job posting', enrichmentWarningMessage(job, status)));
     return { ...job, enrichmentAttempts: status.attempts, enrichmentTerminal: status.completed };
   });
-  const locallyEvaluated = enriched.map(job => evaluateJob(job, resumes, config.preferences));
+  const locallyEvaluated = enriched.map(job => evaluateJob(job, resumes, prefs));
   let evaluated;
   try {
-    evaluated = await applySubscriptionMatching(locallyEvaluated, resumes, config.preferences, {
+    evaluated = await applySubscriptionMatching(locallyEvaluated, resumes, prefs, {
       ...(config.semanticMatching || {}),
       warnings,
     });
@@ -195,24 +299,47 @@ async function runPipeline(config, clock) {
     warnings.push(createWarning('llm', config.semanticMatching?.engine || 'subscription', `Semantic matching failed; all jobs used local fallback: ${errorSummary(error)}`));
     evaluated = locallyEvaluated.map(localFallbackJob);
   }
+  // Deterministic eligibility is applied after semantic review so the location gap survives the merge.
+  evaluated = evaluated.map(job => annotateEligibility(job, prefs));
+  let carriedCount = 0;
+  if (carried) {
+    const current = new Set(evaluated.map(job => sha256(canonicalUrl(job.url) || job.url)));
+    const carriedReviewed = carried.reviewed
+      .filter(job => !current.has(sha256(canonicalUrl(job.url) || job.url)))
+      .map(job => annotateEligibility(job, prefs));
+    carriedCount = carriedReviewed.length;
+    evaluated = [...carriedReviewed, ...evaluated];
+    for (const warning of carried.meta.warnings || []) {
+      if (!warnings.some(item => warningTextEquals(item, warning))) warnings.push(warning);
+    }
+  }
   evaluated.sort((a, b) => b.bestScore - a.bestScore);
   const matches = evaluated.filter(job => isEligible(job, config));
+  const exclusions = summarizeExclusions(evaluated);
+  if (exclusions.total) {
+    const detail = exclusions.examples.slice(0, 5).join('; ') + (exclusions.examples.length > 5 ? '; …' : '');
+    warnings.push(createWarning('eligibility', 'hard filter', `Excluded ${exclusions.total} posting(s) deterministically: ${exclusions.counts.location} outside the United States, ${exclusions.counts.graduation} outside the graduation window. ${detail}`));
+  }
   const timeZone = config.timeZone || 'America/Chicago';
   const meta = {
     generatedAt: now.toISOString(), date, applicationDate: date, runDate, timeZone, lookbackHours: config.lookbackHours,
     minimumMatchScore: config.minimumMatchScore, resumeSync, collectedCount: collected.length,
-    newCount: enriched.length, reviewedCount: evaluated.length, matchCount: matches.length, warnings,
+    newCount: enriched.length + carriedCount, reviewedCount: evaluated.length, matchCount: matches.length, warnings,
+    eligibilityExclusions: exclusions.counts,
     scoringModel: summarizeScoringModel(evaluated, config.semanticMatching?.engine || 'claude_subscription'),
   };
   const paths = await writeReports(matches, evaluated, meta, config.outputDirectory);
 
+  // The payload outlives the temporary directory until both report files exist, so a failed XLSX can be
+  // rebuilt by the next run even though the postings below are already marked as seen.
+  const pendingPath = pendingReportPath(config);
   await fs.mkdir(path.dirname(statePath), { recursive: true });
+  await fs.copyFile(paths.payloadPath, pendingPath);
   for (const job of evaluated) {
     if (job.enrichment !== 'failed') markJobSeen(state, job, now.toISOString());
   }
-  state.lastSuccessfulRun = now.toISOString();
   pruneSeen(state, now, 90);
-  await fs.writeFile(statePath, JSON.stringify(state, null, 2) + '\n');
+  await writeState(statePath, state);
 
   const xlsxFailurePath = path.join(paths.runDirectory, 'XLSX-FAILED.txt');
   let xlsxFailure = null;
@@ -220,24 +347,21 @@ async function runPipeline(config, clock) {
     await fs.rm(xlsxFailurePath, { force: true });
     if (config.reports?.xlsx?.enabled !== false) {
       const xlsxPath = path.join(paths.runDirectory, `${paths.reportBaseName}.xlsx`);
-      const xlsxBuilder = fileURLToPath(new URL('./report-xlsx.mjs', import.meta.url));
       try {
-        await execFileAsync(process.execPath, [xlsxBuilder, paths.payloadPath, xlsxPath], {
-          cwd: config.root,
-          timeout: 2 * 60 * 1000,
-        });
+        await buildXlsx(paths.payloadPath, xlsxPath, config.root);
         paths.xlsxPath = xlsxPath;
       } catch (error) {
         xlsxFailure = error;
         paths.xlsxPath = null;
         paths.xlsxFailurePath = xlsxFailurePath;
-        paths.xlsxWarning = 'XLSX generation failed; the HTML report and persisted seen state were preserved.';
+        paths.xlsxWarning = `XLSX generation failed; the HTML report and persisted seen state were preserved, and the report payload was kept in state/${PENDING_REPORT_FILE} so the next run rebuilds both files.`;
         warnings.push(createWarning('report', 'XLSX', `${paths.xlsxWarning} ${errorSummary(error)}`));
         const failureText = [
           'Daily Job Match Alert XLSX generation failed.',
           `Generated at: ${now.toISOString()}`,
           `HTML report: ${paths.htmlPath}`,
           `Attempted XLSX: ${xlsxPath}`,
+          `Pending payload: ${pendingPath}`,
           '',
           error.stack || error.message || String(error),
           '',
@@ -263,9 +387,21 @@ async function runPipeline(config, clock) {
     delete paths.reportBaseName;
   }
 
-  console.log(JSON.stringify({ meta, ...paths }, null, 2));
+  // Only a run that left both files on disk counts as a success for the catch-up logic.
+  if (!xlsxFailure) {
+    state.lastSuccessfulRun = now.toISOString();
+    await writeState(statePath, state);
+    await fs.rm(pendingPath, { force: true });
+  }
+
+  const summary = { meta, ...paths, ...(Object.keys(debug).length ? { debug } : {}) };
+  console.log(JSON.stringify(summary, null, 2));
   if (xlsxFailure) throw xlsxFailure;
-  return { meta, ...paths };
+  return summary;
+}
+
+function warningTextEquals(left, right) {
+  return left?.stage === right?.stage && left?.source === right?.source && left?.message === right?.message;
 }
 
 export async function main(options = {}) {
