@@ -89,7 +89,7 @@ export async function collectEnabledSources(config, cutoff, options = {}) {
   });
   if (config.sources.emailFiles?.enabled) sources.push({
     name: 'Email files',
-    collect: () => collectors.emailFiles(config.sources.emailFiles.directory),
+    collect: () => collectors.emailFiles(config.sources.emailFiles.directory, { warnings }),
   });
   if (config.sources.himalaya?.enabled) sources.push({
     name: 'Himalaya job-alert mailbox',

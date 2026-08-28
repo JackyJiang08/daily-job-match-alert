@@ -32,3 +32,5 @@ jobs:
           output="$RUNNER_TEMP/xlsx-smoke.xlsx"
           node src/report-xlsx.mjs tests/fixtures/xlsx-smoke.json "$output" --verify
           test -s "$output"
+      - name: Chaos check (offline, LLM down, malformed input)
+        run: npm run chaos

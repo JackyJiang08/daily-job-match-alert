@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import { parseAgeDays, parseSimplifyRows } from '../src/collectors/simplify-github.mjs';
-import { parseEml } from '../src/collectors/email-files.mjs';
+import { collectEmailFiles, parseEml } from '../src/collectors/email-files.mjs';
 import { parseCareerOpsHistory } from '../src/collectors/career-ops.mjs';
 import { collectHimalaya } from '../src/collectors/himalaya.mjs';
 
@@ -48,4 +50,38 @@ test('reads Himalaya messages in preview mode and extracts job links', async () 
   assert.equal(jobs[0].source, 'Wellfound email alert');
   assert.equal(jobs[0].url, 'https://example.com/jobs/42');
   assert.ok(calls[1].includes('--preview'));
+});
+
+test('decodes base64 alert bodies and rejects truncated base64 or undated messages', () => {
+  const body = Buffer.from('<p>Apply: https://example.com/jobs/77?utm_source=simplify</p>').toString('base64');
+  const headers = 'From: alerts@simplify.jobs\nDate: Thu, 27 Aug 2026 06:00:00 -0500\nSubject: Matches\nContent-Transfer-Encoding: base64\n\n';
+  const jobs = parseEml(`${headers}${body}\n`, 'ok.eml');
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0].url, 'https://example.com/jobs/77');
+  assert.equal(jobs[0].source, 'Simplify email alert');
+  assert.throws(() => parseEml(`${headers}${body.slice(0, -3)}\n`, 'cut.eml'), /truncated or invalid/);
+  assert.throws(() => parseEml('From: a@b.c\nSubject: no date\n\nhttps://example.com/x', 'undated.eml'), /missing Date header/);
+  assert.throws(() => parseEml('From: a@b.c\nDate: yesterday-ish\n\nhttps://example.com/x', 'bad-date.eml'), /unparseable Date header/);
+});
+
+test('a malformed .eml is skipped with a warning while sibling files still yield jobs', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'email-files-test-'));
+  try {
+    await fs.copyFile(new URL('./fixtures/sample.eml', import.meta.url), path.join(directory, 'good.eml'));
+    await fs.writeFile(path.join(directory, 'broken.eml'), [
+      'From: alerts@joinhandshake.com', 'Date: Thu, 27 Aug 2026 08:00:00 -0500', 'Subject: Corrupted',
+      'Content-Transfer-Encoding: base64', '', `<html><body>${'x'.repeat(50_000)}</body></html>QUJD`, '',
+    ].join('\n'));
+    await fs.writeFile(path.join(directory, 'README.txt'), 'ignored');
+    const warnings = [];
+    const jobs = await collectEmailFiles(directory, { warnings });
+    assert.equal(jobs.length, 1);
+    assert.equal(jobs[0].emailFile, 'good.eml');
+    assert.equal(warnings.length, 1);
+    assert.equal(warnings[0].source, 'Email files');
+    assert.match(warnings[0].message, /Skipped broken\.eml/);
+    assert.deepEqual(await collectEmailFiles(directory), jobs, 'omitting the warnings sink still returns the healthy jobs');
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
 });

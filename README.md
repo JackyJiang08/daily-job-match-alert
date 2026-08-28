@@ -4,7 +4,7 @@
 
 **Subscription-only AI job discovery for Data and AI/ML candidates.**
 
-Collect fresh roles from public ATS boards, curated GitHub lists, and official email alerts; compare every relevant JD against two resumes; wake up to a ranked local report.
+Collect fresh roles from public ATS boards and curated GitHub lists; compare every relevant JD against two resumes; wake up to a ranked local report even when a source, the model, or an input file fails overnight.
 
 [![CI](https://github.com/JackyJiang08/daily-job-match-alert/actions/workflows/ci.yml/badge.svg)](https://github.com/JackyJiang08/daily-job-match-alert/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -21,11 +21,11 @@ Job boards fragment discovery across ATS pages, curated lists, account alerts, a
 Daily Job Match Alert provides:
 
 - Dual-resume evaluation with independent Data and AI/ML scores.
-- Subscription-only semantic review with structured, auditable output.
-- Public-source and official-alert ingestion without authenticated scraping.
+- Subscription-only semantic review with structured, auditable output and a recorded scoring model.
+- Public-source ingestion without authenticated scraping; an email-alert channel is planned but not enabled yet.
 - Exact `postedAt` versus first-seen `discoveredAt` semantics.
 - Cross-source URL canonicalization and persistent deduplication.
-- Failure-isolated collectors, retrying subscription batches, and visible report warnings instead of an empty nightly run.
+- Degrade-don't-die operation: failed collectors, unreachable postings, an unavailable model, or a corrupted input file become report warnings instead of a missing nightly report. `npm run chaos` proves this on every CI run.
 - Exactly two user-facing files per successful application date: an HTML report with the complete captured JD and a compact 11-column XLSX with clickable posting links.
 - Hard safety boundaries: no auto-apply, no screening answers, no mailbox mutation.
 
@@ -35,7 +35,7 @@ Daily Job Match Alert provides:
 flowchart LR
   ATS[Public ATS / career-ops] --> N[Normalize + deduplicate]
   GH[SimplifyJobs GitHub lists] --> N
-  EM[Official alert email] --> N
+  EM[Email alerts - planned] -.-> N
   N --> JD[Resolve final URL + extract JD]
   JD --> PF[Local relevance prefilter]
   PF --> LLM[Codex or Claude subscription review]
@@ -45,24 +45,21 @@ flowchart LR
 
 The local prefilter removes clearly unrelated roles before subscription review. Final report scores come from the configured subscription CLI; intermediate structured data stays in temporary local storage and is removed after XLSX creation.
 
-## Supported discovery paths
+## Discovery paths
 
-| Source | Method | Access model |
+| Source | Method | Status |
 |---|---|---|
-| Greenhouse and other supported ATS | `career-ops` public providers and final employer links | Public endpoints |
-| SimplifyJobs Summer Internships | Public GitHub README polling | Public repository |
-| SimplifyJobs New Grad | Public GitHub README polling | Public repository |
-| Handshake | Saved-search alert email | Official account feature |
-| Simplify | Match-preference alert email | Official account feature |
-| Wellfound | Saved-search alert email | Official account feature |
-| ZipRecruiter | Job alert email | Official account feature |
-| Jobright | Email alert when available; otherwise supplemental manual discovery | Official alert surface |
+| SimplifyJobs Summer Internships | Public GitHub README polling | Enabled by default |
+| SimplifyJobs New Grad | Public GitHub README polling | Enabled by default |
+| Greenhouse and other supported ATS | `career-ops` scan history and final employer links | Optional (`sources.careerOps`) |
+| `.eml` drop folder (`intake/eml`) | Local files parsed nightly | Collector runs, no mail is routed to it yet |
+| Handshake / Simplify / Wellfound / ZipRecruiter / Jobright alerts | Official alert email via a Himalaya mailbox folder | **Planned, not enabled** (`sources.himalaya.enabled: false`) |
 
-Daily Job Match Alert does not sign into or scrape Handshake, Jobright, Simplify, Wellfound, or ZipRecruiter. Alert email is a discovery mechanism; once a link resolves to a public employer ATS, the employer posting becomes the preferred source.
+Daily Job Match Alert does not sign into or scrape Handshake, Jobright, Simplify, Wellfound, or ZipRecruiter. When the email channel is enabled, alert email is only a discovery mechanism; once a link resolves to a public employer ATS, the employer posting becomes the preferred source.
 
 ## Quick start
 
-Requirements: macOS or Linux, Node.js 20+, a ChatGPT-authenticated Codex CLI or subscription-authenticated Claude Code, and optionally [career-ops](https://github.com/santifer/career-ops) and [Himalaya](https://github.com/pimalaya/himalaya).
+Requirements: macOS or Linux, Node.js 20+, and either a ChatGPT-authenticated Codex CLI or a subscription-authenticated Claude Code **2.1.250 or newer** (older versions are rejected before any batch is sent). [career-ops](https://github.com/santifer/career-ops) and [Himalaya](https://github.com/pimalaya/himalaya) are optional.
 
 ```bash
 git clone https://github.com/JackyJiang08/daily-job-match-alert.git
@@ -77,6 +74,7 @@ Point `resumeSources.dataPdf` and `resumeSources.aiPdf` at your private PDFs, ed
 ```bash
 claude auth login --claudeai
 claude auth status --json
+claude --version
 
 npm run resume:sync
 npm test
@@ -89,7 +87,7 @@ The default engine is `claude_subscription`. Choose the Claude.ai subscription f
 
 `semanticMatching.model` is passed to `claude --model` (or `codex --model`). Use one of the Claude Code aliases—`fable`, `opus`, or `sonnet`, each resolving to the latest model in that family—or a full model name such as `claude-fable-5`. The example configuration pins `fable`.
 
-Every batch response from `claude --print --output-format json` is parsed for the model that actually produced the scores (`modelUsage`, keyed by model id; the entry with the most output tokens is the scoring model). That value is recorded as `scoringModel` on each reviewed job, summarized as `meta.scoringModel`, and shown in the HTML header and the XLSX Run Summary as **Scoring model**. If the output does not identify a model, `scoringModel` is `unknown` and a warning is raised. If a configured model does not match the reported model after alias expansion (for example `fable` configured but `claude-sonnet-5` reported), the scores are still used for that run, but a `MODEL MISMATCH` warning appears in the HTML warning panel and the Run Summary so the configuration can be fixed.
+Every batch response from `claude --print --output-format json` is parsed for the model that actually produced the scores (`modelUsage`, keyed by model id; the entry with the most output tokens is the scoring model). That value is recorded as `scoringModel` on each reviewed job, summarized as `meta.scoringModel`, and shown in the HTML header and the XLSX Run Summary as **Scoring model**. If the output does not identify a model, `scoringModel` is `unknown` and a warning is raised. If a configured model does not match the reported model after alias expansion (for example `fable` configured but `claude-sonnet-5` reported), the scores are still used for that run, but a `MODEL MISMATCH` warning appears in the HTML warning panel and the Run Summary so the configuration can be fixed. Runs without any semantic review show `local_only` or `none`.
 
 ## Private resume updates
 
@@ -102,12 +100,31 @@ Real PDFs, extracted resume text, `config.json`, state, email, logs, and generat
 This is an enforced runtime boundary, not just a documentation promise:
 
 - `codex_subscription` requires `codex login status` to explicitly report ChatGPT login.
-- `claude_subscription` rejects missing or API-key authentication and is the default.
+- `claude_subscription` is the default; it requires Claude Code 2.1.250+ and rejects missing or API-key authentication.
 - OpenAI, Anthropic, Bedrock, Vertex, and Google API credential variables are removed from the model subprocess environment.
 - There is no OpenAI Platform or Anthropic API client in the project.
-- Authentication or supported-CLI-version failures fall back to local scoring and appear as report warnings; they never fall back to an API.
+- Authentication, version, batch, or parsing failures fall back to local scoring and appear as report warnings; they never fall back to an API.
 
 Subscription runs still count against the applicable ChatGPT or Claude plan limits.
+
+## Degraded runs and warnings
+
+A nightly run is designed to finish with a report on the Desktop even when parts of it fail:
+
+| Failure | Behavior | Where it is disclosed |
+|---|---|---|
+| A collector throws or returns garbage | That source contributes nothing; the others continue | Warning `collector / <source name>` |
+| A posting cannot be fetched | The job is retried on later nights (up to 3 attempts) and then closed | Warning `enrichment / <source>` with the attempt count |
+| A malformed or oversized `.eml` | Only that file is skipped; sibling files still yield jobs | Warning `collector / Email files` |
+| Subscription CLI missing, wrong version, API-key auth, or a batch fails twice (10 s retry) | Affected jobs keep their local scores and are labeled `unreviewed` | Warning `llm / <engine>`; `[unreviewed]` prefix in the XLSX, orange `Match level: unreviewed` chip in the HTML |
+| The model omits job ids | One supplemental review; anything still missing becomes `unreviewed` | Warning `llm / <engine>` |
+| Reported model differs from `semanticMatching.model` | Scores kept for the run | `MODEL MISMATCH` warning |
+| XLSX generation fails | HTML report and seen-state are kept, `XLSX-FAILED.txt` is written beside the HTML, the process exits 1 | Warning `report / XLSX`, marker file |
+| Fatal error before any report | `ERROR-<run date>.html` is written directly under the output directory and a macOS notification is attempted | The error page itself |
+
+Warnings appear in the HTML "Pipeline warnings" panel and in the XLSX Run Summary. `unreviewed` jobs are included in the report only when they clear the local score threshold, so a model outage yields a locally ranked list rather than an empty page.
+
+`npm run chaos` (`scripts/chaos-check.sh`) exercises four of these paths with isolated temporary configs, state, and output directories—baseline, all collectors offline, subscription CLI unavailable, and a corrupted `.eml`—and asserts that each still produces the dated folder with an HTML report. It never writes to the Desktop or to the real `state/`, and it never calls the subscription CLI.
 
 ## career-ops integration
 
@@ -115,48 +132,61 @@ Subscription runs still count against the applicable ChatGPT or Claude plan limi
 
 After onboarding career-ops and configuring `portals.yml`, enable `sources.careerOps` in `config.json` and point `scanHistoryPath` at its `data/scan-history.tsv`. Set `runScanFirst` to `true` only after `node scan.mjs --since 1` succeeds manually.
 
-## Unattended email ingestion
+## Email alert ingestion (planned, not enabled)
 
-For a smoke test, save `.eml` files under `intake/eml`. For a fully unattended workflow:
+The email channel is not part of the current nightly run. What exists today:
 
-1. Create a dedicated `job-alerts` mailbox folder or label.
-2. Route official job-alert messages into it.
-3. Configure Himalaya with secure credentials: `himalaya account configure`.
-4. Enable `sources.himalaya` in `config.json`.
+- The `.eml` collector (`sources.emailFiles`) parses any files dropped into `intake/eml`. It runs every night, so it is hardened against stray input: files over 5 MB, files without a parseable `Date` header, and bodies that declare base64 but are truncated are skipped individually with a warning.
+- The Himalaya mailbox collector is implemented but disabled (`sources.himalaya.enabled: false`). It only lists envelopes and reads messages with `--preview`; it does not mark, move, delete, reply to, or send mail.
 
-The collector only lists envelopes and reads messages with `--preview`; it does not mark, move, delete, reply to, or send mail. Keep credentials in the OS keychain or a secure password command—not in this repository.
+Enabling the channel later means creating a dedicated `job-alerts` mailbox folder, routing official alert messages into it, running `himalaya account configure` with keychain-backed credentials, and flipping `sources.himalaya.enabled` to `true`. Until then, Handshake, Simplify, Wellfound, ZipRecruiter, and Jobright are not ingested.
 
 ## Daily macOS schedule
 
-Run the pipeline successfully once before installing the schedule. The default is every day at 20:00 America/Chicago.
+Run the pipeline successfully once before installing the schedule.
 
 ```bash
-chmod +x scripts/run-daily.sh scripts/install-launchd.sh
+chmod +x scripts/run-launchd.sh scripts/install-launchd.sh
 ./scripts/install-launchd.sh 20 0
 ```
 
-The deterministic runner uses `launchd`, so collection and report generation do not depend on an OpenClaw gateway staying awake. `RunAtLoad` is enabled: a normal 20:00 trigger performs the complete run, while a startup trigger uses the same logic exposed by `npm run run:catchup` and runs only when `state.lastSuccessfulRun` is more than 26 hours old. Through 14:00 local time, a late catch-up writes the current application date; later runs keep the next-day date. OpenClaw can still provide mailbox tooling or downstream notifications.
+`install-launchd.sh` renders `launchd/com.dailyjobmatchalert.daily.plist.template` into `~/Library/LaunchAgents`, reloads it, and enables it. Pass the hour and minute explicitly (the script's own fallback is 06:30); 20:00 America/Chicago is the recommended slot so the report is ready before the next application day. Reinstalling replaces any older agent definition.
 
-Concurrent invocations are guarded by `state/.lock`; a live owner causes the duplicate invocation to exit cleanly, and a stale PID is removed automatically. launchd output is stored in `state/logs/daily-YYYY-MM-DD.log`, with the newest 30 log files retained. A fatal error before the normal report can be completed writes `ERROR-YYYY-MM-DD.html` directly under the configured output directory and attempts a macOS notification.
+How an unattended day works:
+
+- **Trigger.** The agent runs `scripts/run-launchd.sh`, which prepares a dated log and calls `src/launchd-dispatch.mjs`. At or after the scheduled time with no success yet that day, the dispatcher runs the full pipeline (`scheduled`). Any other start—`RunAtLoad` at login or boot, a manual load—runs `catchup`, which only executes when `state.lastSuccessfulRun` is more than 26 hours old.
+- **Application date.** A run through 14:00 local time writes the current calendar date; a run after 14:00 writes the next day. So the normal 20:00 run creates tomorrow's folder, and a morning catch-up after a missed night still fills today's.
+- **Lock.** `state/.lock` holds the owner PID. A second start while the owner is alive exits cleanly; a stale lock from a dead PID is removed automatically.
+- **State.** `state/state.json` remembers every canonical URL (original and redirect target) so the same posting is never reported twice; entries older than 90 days since their last attempt are pruned each run.
+- **Logs.** `state/logs/daily-YYYY-MM-DD.log`, newest 30 files kept. If the log directory cannot be prepared, output falls back to `/tmp/daily-job-match-alert-<date>.log`.
+- **Fatal errors.** `ERROR-YYYY-MM-DD.html` under the output directory plus a best-effort macOS notification; the catch-up path retries later.
 
 ## Reports and freshness
 
-Each successful 20:00 Central Time run writes the **next application date** as a folder. For example, the August 27 evening run creates `2026-08-28/`. A successful folder contains only:
+Each successful evening run writes the **next application date** as a folder. For example, the August 27 evening run creates `2026-08-28/`. A successful folder contains only:
 
 - `Daily Job Match Alert - 2026-08-28.html`
 - `Daily Job Match Alert - 2026-08-28.xlsx`
 
 No `latest.html`, CSV, JSON, inspection sidecar, or verification directory remains in the Desktop output.
 
-The XLSX `Matches` sheet has 11 columns: Company, Title, Location, Role Type, Posted At, Data Score, AI Score, Recommended Resume, Why It Matches, Gaps / Verify, and Posting Link. The link cell shows the posting domain and opens the full URL; both score columns share a three-color scale. Rows that kept a local score because semantic review was unavailable start their **Why It Matches** text with `[unreviewed]`. The `Run Summary` sheet lists counts, the scoring model, and every warning. The HTML report keeps everything the sheet omits: the full captured JD in a collapsible section, salary, employment type, source, discovery time, and freshness basis.
+The XLSX `Matches` sheet has 11 columns: Company, Title, Location, Role Type, Posted At, Data Score, AI Score, Recommended Resume, Why It Matches, Gaps / Verify, and Posting Link. The link cell shows the posting domain and opens the full URL; both score columns share a three-color scale. Rows that kept a local score because semantic review was unavailable start their **Why It Matches** text with `[unreviewed]`. The `Run Summary` sheet lists counts, the scoring model, and every warning; the `Notes` sheet explains each field. The HTML report keeps everything the sheet omits: the full captured JD in a collapsible section, salary, employment type, source, discovery time, and freshness basis.
 
 - `postedAt` is populated only from employer or structured posting evidence.
 - `discoveredAt` records when Daily Job Match Alert first encountered the canonical URL.
 - GitHub list age is labeled approximate rather than presented as an exact timestamp.
 - Hard-blocked and low-match roles are excluded from both user-facing files.
-- Collector, enrichment, or subscription failures appear in a warning panel in HTML and in the XLSX Run Summary. Subscription batches retry once after 10 seconds; unresolved jobs keep their local score and are labeled `unreviewed`.
-- Failed enrichment remains retryable across nightly runs. State records the attempt count and only closes the posting after three failed enrichment attempts, with each degraded attempt disclosed in the report.
-- The XLSX writer is enabled by default. If XLSX generation fails, the run exits with code 1 but preserves the HTML report and seen state, and writes `XLSX-FAILED.txt` beside the HTML with the underlying error. A later successful rerun removes that marker and restores the two-file contract.
+- If XLSX generation fails, the HTML report and seen state are preserved, `XLSX-FAILED.txt` is written beside the HTML with the underlying error, and the run exits 1. A later successful rerun removes the marker and writes the xlsx again.
+
+## Verifying a deployment
+
+```bash
+npm test        # unit and integration tests
+npm run demo    # local-only run on fixtures -> tests/fixtures/demo-output/
+npm run chaos   # four failure scenarios in temporary directories
+```
+
+[VERIFICATION.md](VERIFICATION.md) is the sign-off checklist, including the owner-only steps (a real `npm run run` and a launchd reinstall) that automation must not perform.
 
 ## Security and ethics
 
@@ -167,6 +197,7 @@ Daily Job Match Alert never submits applications or answers screening questions.
 ## Documentation
 
 - [Chinese setup and source decision guide](SETUP.zh-CN.md)
+- [Verification checklist](VERIFICATION.md)
 - [Example configuration](config.example.json)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
