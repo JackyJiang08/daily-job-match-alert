@@ -9,7 +9,7 @@ import { collectSimplifyList } from './collectors/simplify-github.mjs';
 import { collectEmailFiles } from './collectors/email-files.mjs';
 import { collectHimalaya } from './collectors/himalaya.mjs';
 import { collectCareerOps } from './collectors/career-ops.mjs';
-import { enrichJob } from './enrich.mjs';
+import { enrichJob, enrichmentWarningMessage } from './enrich.mjs';
 import { evaluateJob, isEligible } from './match.mjs';
 import { applySubscriptionMatching, localFallbackJob, summarizeScoringModel } from './subscription-match.mjs';
 import { buildHtml, writeReports } from './report.mjs';
@@ -181,14 +181,7 @@ async function runPipeline(config, clock) {
   }).map(job => {
     if (job.enrichment !== 'failed') return job;
     const status = markJobSeen(state, job, now.toISOString());
-    const label = [job.company, job.title].filter(Boolean).join(' — ') || job.url;
-    warnings.push(createWarning(
-      'enrichment',
-      job.source || 'job posting',
-      status.completed
-        ? `${label} failed enrichment ${status.attempts} times and will not be retried: ${job.enrichmentError || 'unknown error'}`
-        : `${label} enrichment attempt ${status.attempts}/3 failed and will be retried next run: ${job.enrichmentError || 'unknown error'}`,
-    ));
+    warnings.push(createWarning('enrichment', job.source || 'job posting', enrichmentWarningMessage(job, status)));
     return { ...job, enrichmentAttempts: status.attempts, enrichmentTerminal: status.completed };
   });
   const locallyEvaluated = enriched.map(job => evaluateJob(job, resumes, config.preferences));

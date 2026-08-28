@@ -68,3 +68,34 @@ test('failed enrichment is retried until the third failed attempt', async () => 
   assert.equal(isJobSeen(state, failed), true);
   assert.deepEqual(jobSeenStatus(state, failed), third);
 });
+
+test('unrecoverable HTTP failures are closed on the first attempt', async () => {
+  for (const status of [403, 404, 410]) {
+    const blocked = await enrichJob({
+      url: `https://example.com/jobs/${status}`, title: 'Data Analyst', company: 'Acme', location: 'Remote', description: '',
+    }, {}, async () => new Response('', { status }));
+    assert.equal(blocked.enrichment, 'failed');
+    assert.equal(blocked.enrichmentRetryable, false);
+
+    const state = { seen: {} };
+    assert.deepEqual(markJobSeen(state, blocked, '2026-08-27T20:00:00.000Z'), { attempts: 1, completed: true });
+    assert.equal(isJobSeen(state, blocked), true);
+    assert.equal(state.seen[sha256(canonicalUrl(blocked.url))].lastError, `http_${status}`);
+  }
+});
+
+test('retryable HTTP failures keep the three-attempt budget', async () => {
+  for (const status of [429, 500, 503]) {
+    const flaky = await enrichJob({
+      url: `https://example.com/jobs/${status}`, title: 'Data Analyst', company: 'Acme', location: 'Remote', description: '',
+    }, {}, async () => new Response('', { status }));
+    assert.equal(flaky.enrichment, 'failed');
+    assert.equal(flaky.enrichmentRetryable, true);
+
+    const state = { seen: {} };
+    assert.deepEqual(markJobSeen(state, flaky, '2026-08-27T20:00:00.000Z'), { attempts: 1, completed: false });
+    assert.equal(isJobSeen(state, flaky), false);
+    markJobSeen(state, flaky, '2026-08-28T20:00:00.000Z');
+    assert.deepEqual(markJobSeen(state, flaky, '2026-08-29T20:00:00.000Z'), { attempts: 3, completed: true });
+  }
+});

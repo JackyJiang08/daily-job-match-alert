@@ -40,7 +40,8 @@ export function markJobSeen(state, job, seenAt) {
   const previous = jobSeenStatus(state, job);
   const enrichmentFailed = job.enrichment === 'failed';
   const attempts = previous.completed ? previous.attempts : previous.attempts + 1;
-  const completed = previous.completed || !enrichmentFailed || attempts >= 3;
+  const unrecoverable = enrichmentFailed && job.enrichmentRetryable === false;
+  const completed = previous.completed || !enrichmentFailed || unrecoverable || attempts >= 3;
   for (const url of unique([originalUrl, finalUrl])) {
     const key = sha256(url);
     state.seen[key] = {

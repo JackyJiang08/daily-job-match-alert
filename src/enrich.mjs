@@ -72,6 +72,113 @@ function greenhouseApiUrl(url) {
   }
 }
 
+const WORKDAY_HOST = /^([a-z0-9-]+)\.(wd\d+)\.myworkdayjobs\.com$/i;
+const WORKDAY_LOCALE = /^[a-z]{2}-[A-Z]{2}$/;
+
+// Workday career sites render job pages client-side, but every tenant also exposes a public
+// JSON endpoint under /wday/cxs/ that returns the posting the page would render.
+function workdayCxsUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.match(WORKDAY_HOST);
+    if (!host) return null;
+    const segments = parsed.pathname.split('/').filter(Boolean);
+    if (segments.length && WORKDAY_LOCALE.test(segments[0])) segments.shift();
+    const [site, marker, ...rest] = segments;
+    if (!site || marker !== 'job' || rest.length === 0) return null;
+    const jobId = rest[rest.length - 1];
+    if (!jobId) return null;
+    const tenant = host[1].toLowerCase();
+    return `https://${tenant}.${host[2].toLowerCase()}.myworkdayjobs.com/wday/cxs/${tenant}/${site}/job/${jobId}`;
+  } catch {
+    return null;
+  }
+}
+
+// Workday reports freshness as "Posted Today", "Posted Yesterday", "Posted 3 Days Ago", or
+// "Posted 30+ Days Ago"; the open-ended form has no usable date.
+function workdayPostedOn(text, now = new Date()) {
+  const value = cleanText(text).toLowerCase();
+  if (!value) return null;
+  let daysAgo = null;
+  if (/\btoday\b/.test(value)) daysAgo = 0;
+  else if (/\byesterday\b/.test(value)) daysAgo = 1;
+  else {
+    const match = value.match(/(\d+)\s*days?\s+ago/);
+    if (match && !value.includes(`${match[1]}+`)) daysAgo = Number(match[1]);
+  }
+  if (daysAgo == null) return null;
+  return new Date(now.getTime() - daysAgo * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function workdayLocation(info) {
+  const extra = Array.isArray(info.additionalLocations) ? info.additionalLocations : [];
+  return [info.location, ...extra].map(item => cleanText(item || '')).filter(Boolean).join(' / ');
+}
+
+async function fetchWorkdayPosting(cxsUrl, headers, timeoutMs, fetchImpl) {
+  try {
+    const response = await fetchWithTimeout(cxsUrl, { headers: { ...headers, accept: 'application/json' } }, timeoutMs, fetchImpl);
+    if (!response.ok) return null;
+    const payload = await response.json();
+    const info = payload?.jobPostingInfo;
+    if (!info || typeof info !== 'object' || typeof info.jobDescription !== 'string') return null;
+    return { info, company: cleanText(payload.hiringOrganization?.name || '') };
+  } catch {
+    return null;
+  }
+}
+
+function workdayEnrichment(originalJob, posting, finalUrl) {
+  const { info, company } = posting;
+  const startDate = isoDate(info.startDate);
+  const postedOn = startDate ? null : workdayPostedOn(info.postedOn);
+  return {
+    ...originalJob,
+    company: company || originalJob.company,
+    title: cleanText(info.title || originalJob.title),
+    location: workdayLocation(info) || originalJob.location,
+    employmentType: cleanText(info.timeType || '') || originalJob.employmentType || '',
+    salary: originalJob.salary || '',
+    description: (cleanText(info.jobDescription) || originalJob.description || '').slice(0, 50000),
+    postedAt: startDate || postedOn || originalJob.postedAt,
+    freshnessBasis: startDate ? 'workday_start_date' : postedOn ? 'workday_posted_on' : originalJob.freshnessBasis,
+    finalUrl,
+    url: finalUrl,
+    enrichment: 'workday_cxs',
+  };
+}
+
+// The site refused us or the posting is gone; another night will not change that.
+const UNRECOVERABLE_HTTP = { 403: 'blocked', 404: 'removed', 410: 'removed' };
+
+function enrichmentFailure(job, enrichmentError, reason = null) {
+  return {
+    ...job,
+    enrichment: 'failed',
+    enrichmentError,
+    enrichmentRetryable: !reason,
+    ...(reason ? { enrichmentReason: reason } : {}),
+  };
+}
+
+function httpFailure(job, status) {
+  return enrichmentFailure(job, `http_${status}`, UNRECOVERABLE_HTTP[status] || null);
+}
+
+export function enrichmentWarningMessage(job, status) {
+  const label = [job.company, job.title].filter(Boolean).join(' — ') || job.url;
+  const origin = job.source ? ` (${job.source})` : '';
+  const error = job.enrichmentError || 'unknown error';
+  if (job.enrichmentRetryable === false) {
+    const outcome = job.enrichmentReason === 'blocked' ? 'blocked: the site refused the fetch' : 'removed: the posting is no longer available';
+    return `${label}${origin} ${outcome} (${error}); marked as seen and will not be retried`;
+  }
+  return status.completed
+    ? `${label}${origin} failed enrichment ${status.attempts} times and will not be retried: ${error}`
+    : `${label}${origin} enrichment attempt ${status.attempts}/3 failed and will be retried next run: ${error}`;
+}
+
 async function fetchWithTimeout(url, options, timeoutMs, fetchImpl) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -107,12 +214,23 @@ export async function enrichJob(job, network = {}, fetchImpl = fetch) {
       }
     }
 
+    const directCxs = workdayCxsUrl(originalJob.url);
+    if (directCxs) {
+      const posting = await fetchWorkdayPosting(directCxs, headers, timeoutMs, fetchImpl);
+      if (posting) return workdayEnrichment(originalJob, posting, originalJob.url);
+    }
+
     const response = await fetchWithTimeout(originalJob.url, { headers }, timeoutMs, fetchImpl);
-    if (!response.ok) return { ...originalJob, enrichment: 'failed', enrichmentError: `http_${response.status}` };
     const finalUrl = canonicalUrl(response.url || originalJob.url) || originalJob.url;
+    const redirectedCxs = workdayCxsUrl(finalUrl);
+    if (redirectedCxs && redirectedCxs !== directCxs) {
+      const posting = await fetchWorkdayPosting(redirectedCxs, headers, timeoutMs, fetchImpl);
+      if (posting) return workdayEnrichment(originalJob, posting, finalUrl);
+    }
+    if (!response.ok) return httpFailure(originalJob, response.status);
     const contentType = response.headers.get('content-type') || '';
     const body = await response.text();
-    if (contentType.includes('application/json')) return { ...originalJob, finalUrl, url: finalUrl, enrichment: 'failed', enrichmentError: 'json_unparsed' };
+    if (contentType.includes('application/json')) return enrichmentFailure({ ...originalJob, finalUrl, url: finalUrl }, 'json_unparsed');
     const posting = parseJsonLd(body);
     const htmlTitle = meta(body, 'og:title') || cleanText(body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '');
     const postingDescription = posting?.description ? cleanText(posting.description) : '';
@@ -131,8 +249,8 @@ export async function enrichJob(job, network = {}, fetchImpl = fetch) {
       enrichment: posting ? 'json_ld_jobposting' : 'html_metadata',
     };
   } catch (error) {
-    return { ...originalJob, enrichment: 'failed', enrichmentError: error.name === 'AbortError' ? 'timeout' : error.message };
+    return enrichmentFailure(originalJob, error.name === 'AbortError' ? 'timeout' : error.message);
   }
 }
 
-export { greenhouseApiUrl, parseJsonLd };
+export { greenhouseApiUrl, parseJsonLd, workdayCxsUrl, workdayPostedOn };

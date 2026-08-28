@@ -30,6 +30,9 @@ export function cleanText(value = '') {
 export function decodeEntities(value = '') {
   const named = {
     amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+    ndash: '–', mdash: '—', hellip: '…', bull: '•', middot: '·',
+    lsquo: '\u2018', rsquo: '\u2019', ldquo: '\u201c', rdquo: '\u201d',
+    copy: '©', reg: '®', trade: '™',
   };
   return String(value)
     .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))

@@ -21,12 +21,15 @@
 
 XLSX 的 `Matches` 表固定 11 列：Company、Title、Location、Role Type、Posted At、Data Score、AI Score、Recommended Resume、Why It Matches、Gaps / Verify、Posting Link。Posting Link 显示域名、点击打开完整 URL；两列分数共用三色色阶。因语义评审不可用而保留本地分数的岗位，会在 Why It Matches 开头标注 `[unreviewed]`。完整 JD、薪资、雇佣类型、来源、发现时间和 freshness 依据只保留在 HTML 报告中。`Run Summary` 表列出计数、Scoring model 和全部 warning，`Notes` 表解释各字段。
 
+Workday 招聘站（`*.myworkdayjobs.com`）的岗位页由浏览器端渲染，HTML 抓取拿不到 JD。这类岗位改走租户公开的 JSON 接口（`/wday/cxs/...`），enrichment 记为 `workday_cxs`；接口失败时回退到原有 HTML 路径。
+
 ## 降级语义：任何单点故障，桌面仍有产物
 
 | 故障 | 行为 | 在哪里看到 |
 |---|---|---|
 | 某个采集源抛错 | 该源为空，其他源继续 | warning `collector / <源名>` |
-| 岗位页面抓不到 | 保留到后续夜晚重试，最多 3 次后关闭 | warning `enrichment / <源>`，含 attempts 计数 |
+| 岗位页面抓不到（429、5xx、超时、JSON 无法解析） | 保留到后续夜晚重试，最多 3 次后关闭 | warning `enrichment / <源>`，含 attempts 计数 |
+| 站点拒绝抓取（HTTP 403）或岗位已下线（404、410） | 首次即关闭，不再重试 | warning `enrichment / <源>`，注明岗位名及 `blocked` / `removed` |
 | `.eml` 文件畸形或超过 5 MB | 只跳过该文件，同目录其他文件照常解析 | warning `collector / Email files` |
 | Claude CLI 缺失 / 版本过低 / API-key 登录 / batch 重试后仍失败 | 相关岗位保留本地分数并标记 `unreviewed` | warning `llm / <engine>`；XLSX 前缀 `[unreviewed]`，HTML 橙色 `Match level: unreviewed` |
 | 模型漏答岗位 id | 补审一次，仍缺的标为 `unreviewed` | warning `llm / <engine>` |

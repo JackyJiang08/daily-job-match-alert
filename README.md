@@ -114,7 +114,8 @@ A nightly run is designed to finish with a report on the Desktop even when parts
 | Failure | Behavior | Where it is disclosed |
 |---|---|---|
 | A collector throws or returns garbage | That source contributes nothing; the others continue | Warning `collector / <source name>` |
-| A posting cannot be fetched | The job is retried on later nights (up to 3 attempts) and then closed | Warning `enrichment / <source>` with the attempt count |
+| A posting cannot be fetched (429, 5xx, timeout, unparsed JSON) | The job is retried on later nights (up to 3 attempts) and then closed | Warning `enrichment / <source>` with the attempt count |
+| The site refuses the fetch (HTTP 403) or the posting is gone (404, 410) | The job is closed on the first attempt; nothing is retried | Warning `enrichment / <source>` naming the job and whether it was `blocked` or `removed` |
 | A malformed or oversized `.eml` | Only that file is skipped; sibling files still yield jobs | Warning `collector / Email files` |
 | Subscription CLI missing, wrong version, API-key auth, or a batch fails twice (10 s retry) | Affected jobs keep their local scores and are labeled `unreviewed` | Warning `llm / <engine>`; `[unreviewed]` prefix in the XLSX, orange `Match level: unreviewed` chip in the HTML |
 | The model omits job ids | One supplemental review; anything still missing becomes `unreviewed` | Warning `llm / <engine>` |
@@ -157,6 +158,7 @@ How an unattended day works:
 - **Trigger.** The agent runs `scripts/run-launchd.sh`, which prepares a dated log and calls `src/launchd-dispatch.mjs`. At or after the scheduled time with no success yet that day, the dispatcher runs the full pipeline (`scheduled`). Any other start—`RunAtLoad` at login or boot, a manual load—runs `catchup`, which only executes when `state.lastSuccessfulRun` is more than 26 hours old.
 - **Application date.** A run through 14:00 local time writes the current calendar date; a run after 14:00 writes the next day. So the normal 20:00 run creates tomorrow's folder, and a morning catch-up after a missed night still fills today's.
 - **Lock.** `state/.lock` holds the owner PID. A second start while the owner is alive exits cleanly; a stale lock from a dead PID is removed automatically.
+- **Workday.** Career sites on `*.myworkdayjobs.com` render job pages in the browser, so the HTML fetch never contains the description. Those postings are read through the tenant's public JSON endpoint (`/wday/cxs/...`) instead and are labeled `workday_cxs`; if that call fails, the ordinary HTML path runs unchanged.
 - **State.** `state/state.json` remembers every canonical URL (original and redirect target) so the same posting is never reported twice; entries older than 90 days since their last attempt are pruned each run.
 - **Logs.** `state/logs/daily-YYYY-MM-DD.log`, newest 30 files kept. If the log directory cannot be prepared, output falls back to `/tmp/daily-job-match-alert-<date>.log`.
 - **Fatal errors.** `ERROR-YYYY-MM-DD.html` under the output directory plus a best-effort macOS notification; the catch-up path retries later.
