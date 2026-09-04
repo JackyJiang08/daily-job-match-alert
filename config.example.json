@@ -23,14 +23,13 @@
   },
   "outputDirectory": "~/Desktop/Daily Job Match Alert",
   "resumes": {
-    "data": "./resumes/data.md",
-    "ai": "./resumes/ai.md"
-  },
-  "resumeSources": {
     "autoRefresh": true,
     "pdftotextCommand": "pdftotext",
-    "dataPdf": "~/Desktop/Your Data Resume.pdf",
-    "aiPdf": "~/Desktop/Your AI Resume.pdf"
+    "tracks": [
+      { "id": "data", "label": "Data", "pdf": "~/Desktop/Your Data Resume.pdf", "enabled": true },
+      { "id": "llm", "label": "LLM", "pdf": "~/Desktop/Your LLM Resume.pdf", "enabled": true },
+      { "id": "agent", "label": "AI Agent", "pdf": "~/Desktop/Your AI Agent Resume.pdf", "enabled": true }
+    ]
   },
   "preferences": {
     "roleTypes": ["internship", "new_grad", "entry_level"],

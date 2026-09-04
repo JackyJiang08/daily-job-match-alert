@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Private, subscription-only AI job discovery for Data and AI/ML internships and new-grad roles",
+  "description": "Private, subscription-only AI job discovery for internships and new-grad roles, scored against any number of resume tracks",
   "author": "Yuqing (Jacky) Jiang",
   "license": "MIT",
   "repository": {

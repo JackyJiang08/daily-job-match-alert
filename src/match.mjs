@@ -1,10 +1,14 @@
 import { classifyRole, minimumYears } from './classify.mjs';
 import { assessEligibility } from './eligibility.mjs';
+import { pickBestTrack, resumeTrackList } from './resume-tracks.mjs';
 import { unique } from './utils.mjs';
 
 const STOP = new Set('a an and are as at be by for from has have in into is it its of on or that the their this to using with you your we our will work role team experience skills preferred required responsibilities qualifications'.split(' '));
 
-const TRACKS = {
+// Keyword profiles for the local (pre-review) score, keyed by track id. A track whose id has no
+// profile of its own is scored against the union of every profile, so any custom track still gets a
+// sensible triage score; the subscription review supplies the real per-track judgment.
+const LOCAL_PROFILES = {
   data: {
     title: ['data analyst', 'data scientist', 'analytics', 'business intelligence', 'bi analyst', 'product analyst', 'decision scientist', 'data engineer'],
     skills: ['sql', 'python', ' r ', 'tableau', 'power bi', 'excel', 'pandas', 'numpy', 'statistics', 'statistical modeling', 'data visualization', 'etl', 'dbt', 'snowflake', 'bigquery', 'spark', 'airflow', 'experimentation', 'a/b testing', 'aws', 'gcp', 'azure'],
@@ -13,7 +17,24 @@ const TRACKS = {
     title: ['machine learning', 'ml engineer', 'ai engineer', 'ai research', 'research scientist', 'applied scientist', 'nlp', 'computer vision', 'generative ai', 'data scientist'],
     skills: ['python', 'pytorch', 'tensorflow', 'transformers', 'llm', 'large language model', 'rag', 'retrieval augmented generation', 'nlp', 'computer vision', 'machine learning', 'deep learning', 'scikit-learn', 'mlops', 'docker', 'kubernetes', 'aws', 'gcp', 'azure', 'hugging face'],
   },
+  llm: {
+    title: ['llm', 'large language model', 'generative ai', 'ai engineer', 'nlp', 'machine learning', 'ml engineer', 'applied scientist', 'research scientist', 'prompt engineer'],
+    skills: ['python', 'pytorch', 'transformers', 'llm', 'large language model', 'rag', 'retrieval augmented generation', 'fine-tuning', 'lora', 'evaluation', 'embeddings', 'vector database', 'prompt engineering', 'hugging face', 'openai', 'anthropic', 'nlp', 'deep learning', 'docker', 'aws', 'gcp', 'azure'],
+  },
+  agent: {
+    title: ['ai agent', 'agentic', 'agent engineer', 'ai engineer', 'llm', 'generative ai', 'automation engineer', 'machine learning', 'ml engineer', 'applied scientist', 'forward deployed'],
+    skills: ['python', 'typescript', 'llm', 'large language model', 'agents', 'agentic', 'tool use', 'function calling', 'mcp', 'model context protocol', 'langchain', 'langgraph', 'rag', 'retrieval augmented generation', 'orchestration', 'evaluation', 'prompt engineering', 'api', 'docker', 'kubernetes', 'aws', 'gcp', 'azure'],
+  },
 };
+
+const UNION_PROFILE = {
+  title: unique(Object.values(LOCAL_PROFILES).flatMap(profile => profile.title)),
+  skills: unique(Object.values(LOCAL_PROFILES).flatMap(profile => profile.skills)),
+};
+
+export function localProfileFor(trackId) {
+  return LOCAL_PROFILES[String(trackId || '').toLowerCase()] || UNION_PROFILE;
+}
 
 function normalized(text) {
   return ` ${String(text).toLowerCase().replace(/[^a-z0-9+#./-]+/g, ' ').replace(/\s+/g, ' ').trim()} `;
@@ -52,8 +73,9 @@ function blockers(job, preferences) {
   return found;
 }
 
-function scoreTrack(job, resume, track, preferences) {
-  const rules = TRACKS[track];
+function scoreTrack(job, track, preferences) {
+  const rules = localProfileFor(track.id);
+  const resume = String(track.text || '');
   const titleMatches = rules.title.filter(phrase => includesPhrase(job.title, phrase));
   const descriptionTitleMatches = rules.title.filter(phrase => includesPhrase(job.description, phrase));
   const roleRelevance = titleMatches.length ? 25 : descriptionTitleMatches.length ? 14 : 0;
@@ -76,7 +98,7 @@ function scoreTrack(job, resume, track, preferences) {
   const score = Math.max(0, Math.min(100, roleRelevance + skillScore + keywordScore + experienceScore + location.score - penalty));
 
   const reasons = unique([
-    titleMatches.length ? `title aligns with ${track.toUpperCase()}: ${titleMatches.slice(0, 3).join(', ')}` : null,
+    titleMatches.length ? `title aligns with ${track.label}: ${titleMatches.slice(0, 3).join(', ')}` : null,
     matchedSkills.length ? `matched skills: ${matchedSkills.slice(0, 8).join(', ')}` : null,
     overlap.length ? `resume/JD keyword overlap: ${overlap.slice(0, 6).join(', ')}` : null,
     location.reason?.includes('matches') ? location.reason : null,
@@ -88,27 +110,40 @@ function scoreTrack(job, resume, track, preferences) {
   return { score, roleRelevance, titleMatches, reasons, gaps, blockers: hardBlockers, matchedSkills, jdSkills };
 }
 
+export function maxRoleRelevance(job) {
+  return Math.max(0, ...Object.values(job?.scoreDetails || {}).map(detail => Number(detail?.roleRelevance) || 0));
+}
+
+// Scores one posting against every enabled track. `scores` is keyed by track id; the recommended
+// resume is the label of the highest-scoring track, with ties resolved by configured order.
 export function evaluateJob(job, resumes, preferences = {}) {
+  const tracks = resumeTrackList(resumes);
+  if (!tracks.length) throw new Error('evaluateJob needs at least one resume track');
   let roleType = classifyRole(job);
   const years = minimumYears(`${job.title} ${job.description}`);
   if (roleType === 'unknown' && /\b(data|analytics|machine learning|ml|ai|artificial intelligence|nlp|computer vision|applied scientist|research scientist)\b/i.test(job.title)) {
     if (years == null || years <= (preferences.maxYearsExperience ?? 3)) roleType = 'entry_level';
   }
-  const data = scoreTrack(job, resumes.data, 'data', preferences);
-  const ai = scoreTrack(job, resumes.ai, 'ai', preferences);
-  const recommendedResume = data.score >= ai.score ? 'Data' : 'AI';
-  const best = Math.max(data.score, ai.score);
+  const scoreDetails = {};
+  const scores = {};
+  for (const track of tracks) {
+    const detail = scoreTrack(job, track, preferences);
+    scoreDetails[track.id] = detail;
+    scores[track.id] = detail.score;
+  }
+  const best = pickBestTrack(scores, tracks);
+  const bestDetail = scoreDetails[best.id];
   return {
     ...job,
     roleType,
-    dataScore: data.score,
-    aiScore: ai.score,
-    bestScore: best,
-    recommendedResume,
-    reasons: recommendedResume === 'Data' ? data.reasons : ai.reasons,
-    gaps: recommendedResume === 'Data' ? data.gaps : ai.gaps,
-    blockers: unique([...data.blockers, ...ai.blockers]),
-    scoreDetails: { data, ai },
+    scores,
+    bestScore: best.score,
+    recommendedTrack: best.id,
+    recommendedResume: best.label,
+    reasons: bestDetail.reasons,
+    gaps: bestDetail.gaps,
+    blockers: unique(tracks.flatMap(track => scoreDetails[track.id].blockers)),
+    scoreDetails,
   };
 }
 
@@ -120,7 +155,7 @@ export function isEligible(job, config) {
   if (prefs.roleTypes?.length && !prefs.roleTypes.includes(job.roleType)) return false;
   if (prefs.excludeTitleTerms?.some(term => includesPhrase(job.title, term))) return false;
   if (job.blockers?.length) return false;
-  if (Math.max(job.scoreDetails?.data?.roleRelevance || 0, job.scoreDetails?.ai?.roleRelevance || 0) < 14) return false;
+  if (maxRoleRelevance(job) < 14) return false;
   const semantic = config.semanticMatching || {};
   if ((semantic.engine || 'claude_subscription') !== 'local_only') {
     const locallyFallbacked = job.matchLevel === 'unreviewed' || job.scoringEngine === 'local_fallback';

@@ -21,10 +21,19 @@ const NOW = '2026-08-27T12:00:00Z';
 // Port 9 (discard) has no listener on developer machines or CI runners, so every request is
 // refused immediately without changing any system network setting.
 const DEAD_ORIGIN = 'http://127.0.0.1:9';
+// Resume tracks used by every scenario; the xlsx grows one "<label> Score" column per enabled track.
+const TRACKS = [
+  { id: 'data', label: 'Data', file: 'data-resume.md' },
+  { id: 'ai', label: 'AI', file: 'ai-resume.md' },
+  { id: 'agent', label: 'AI Agent', file: 'agent-resume.md' },
+];
 const EXPECTED_HEADERS = [
-  'Company', 'Title', 'Location', 'Role Type', 'Posted At', 'Data Score', 'AI Score',
+  'Company', 'Title', 'Location', 'Role Type', 'Posted At',
+  ...TRACKS.map(track => `${track.label} Score`),
   'Recommended Resume', 'Why It Matches', 'Gaps / Verify', 'Posting Link',
 ];
+const LINK_COLUMN = EXPECTED_HEADERS.indexOf('Posting Link') + 1;
+const WHY_COLUMN = EXPECTED_HEADERS.indexOf('Why It Matches') + 1;
 
 if (!scenarioName || !workRootArgument) {
   console.error('Usage: node scripts/chaos-scenario.mjs <scenario> <workRoot>');
@@ -44,8 +53,8 @@ function baseConfig(directory) {
     reports: { xlsx: { enabled: true, required: false } },
     outputDirectory: path.join(directory, 'output'),
     resumes: {
-      data: path.join(directory, 'data-resume.md'),
-      ai: path.join(directory, 'ai-resume.md'),
+      autoRefresh: false,
+      tracks: TRACKS.map(track => ({ id: track.id, label: track.label, profile: path.join(directory, track.file), enabled: true })),
     },
     preferences: {
       roleTypes: ['internship', 'new_grad', 'entry_level'],
@@ -72,8 +81,7 @@ async function prepareDirectory(name) {
   await fs.rm(directory, { recursive: true, force: true });
   await fs.mkdir(path.join(directory, 'intake'), { recursive: true });
   await fs.mkdir(path.join(directory, 'output'), { recursive: true });
-  await fs.copyFile(path.join(fixturesDirectory, 'data-resume.md'), path.join(directory, 'data-resume.md'));
-  await fs.copyFile(path.join(fixturesDirectory, 'ai-resume.md'), path.join(directory, 'ai-resume.md'));
+  for (const track of TRACKS) await fs.copyFile(path.join(fixturesDirectory, track.file), path.join(directory, track.file));
   return directory;
 }
 
@@ -190,9 +198,10 @@ const scenarios = {
     const { sheet, headers } = await readMatches(artifacts.xlsxPath);
     assert.deepEqual(headers, EXPECTED_HEADERS);
     assert.equal(sheet.actualRowCount, run.summary.meta.matchCount + 1);
-    assert.ok(sheet.getCell(2, 11).value?.hyperlink, 'posting link is not a hyperlink cell');
+    assert.ok(sheet.getCell(2, LINK_COLUMN).value?.hyperlink, 'posting link is not a hyperlink cell');
     assert.equal(run.summary.meta.scoringModel, 'local_only');
-    return `${run.summary.meta.matchCount} match(es), 11-column xlsx, no warnings`;
+    assert.deepEqual(run.summary.meta.resumeTracks, TRACKS.map(track => ({ id: track.id, label: track.label })));
+    return `${run.summary.meta.matchCount} match(es), ${EXPECTED_HEADERS.length}-column xlsx (${TRACKS.length} tracks), no warnings`;
   },
 
   async offline() {
@@ -248,7 +257,7 @@ const scenarios = {
     if (artifacts.xlsxPath) {
       const { sheet } = await readMatches(artifacts.xlsxPath);
       for (let row = 2; row <= sheet.actualRowCount; row++) {
-        assert.match(String(sheet.getCell(row, 9).value), /^\[unreviewed\]/, `xlsx row ${row} lacks the [unreviewed] prefix`);
+        assert.match(String(sheet.getCell(row, WHY_COLUMN).value), /^\[unreviewed\]/, `xlsx row ${row} lacks the [unreviewed] prefix`);
       }
     }
     return `${cards} job(s) all unreviewed, llm warning disclosed, scoring model "none"`;

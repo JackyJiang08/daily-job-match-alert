@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import ExcelJS from 'exceljs';
+import { reportTracks, scoreHeader, trackScore } from './resume-tracks.mjs';
 import { warningText } from './warnings.mjs';
 
 const [jsonPath, outputPath, verifyFlag] = process.argv.slice(2);
@@ -25,27 +26,36 @@ const COLORS = {
   orangeText: 'FF7C2D12',
   link: 'FF1D4ED8',
 };
-
-// Matches sheet layout. Column letters are referenced by formulas and conditional formatting below.
-const MATCH_COLUMNS = [
-  { header: 'Company', width: 22 },
-  { header: 'Title', width: 38 },
-  { header: 'Location', width: 22 },
-  { header: 'Role Type', width: 13 },
-  { header: 'Posted At', width: 18 },
-  { header: 'Data Score', width: 11 },
-  { header: 'AI Score', width: 10 },
-  { header: 'Recommended Resume', width: 18 },
-  { header: 'Why It Matches', width: 45, wrap: true },
-  { header: 'Gaps / Verify', width: 45, wrap: true },
-  { header: 'Posting Link', width: 30 },
-];
-const MATCH_HEADERS = MATCH_COLUMNS.map(column => column.header);
-const COLUMN = Object.fromEntries(MATCH_HEADERS.map((header, index) => [header, index + 1]));
-const ROLE_TYPE_LETTER = 'D';
-const DATA_SCORE_LETTER = 'F';
-const AI_SCORE_LETTER = 'G';
 const UNREVIEWED_PREFIX = '[unreviewed]';
+
+// Matches sheet layout: five fixed columns, one "<Label> Score" column per enabled resume track (in
+// configured order), then the recommendation and text columns. Column letters for formulas and the
+// color scale are derived from this list, so the sheet adapts to any number of tracks.
+export function matchColumnsFor(tracks) {
+  return [
+    { header: 'Company', width: 22 },
+    { header: 'Title', width: 38 },
+    { header: 'Location', width: 22 },
+    { header: 'Role Type', width: 13 },
+    { header: 'Posted At', width: 18 },
+    ...tracks.map(track => ({ header: scoreHeader(track), width: Math.max(10, Math.min(18, track.label.length + 7)), score: track.id })),
+    { header: 'Recommended Resume', width: 18 },
+    { header: 'Why It Matches', width: 45, wrap: true },
+    { header: 'Gaps / Verify', width: 45, wrap: true },
+    { header: 'Posting Link', width: 30 },
+  ];
+}
+
+function columnLetter(index) {
+  let value = '';
+  let current = index;
+  while (current > 0) {
+    const remainder = (current - 1) % 26;
+    value = String.fromCharCode(65 + remainder) + value;
+    current = Math.floor((current - 1) / 26);
+  }
+  return value;
+}
 
 const thinBorder = { style: 'thin', color: { argb: COLORS.border } };
 
@@ -71,6 +81,10 @@ function whyItMatches(job) {
   const reasons = (job.reasons || []).join('; ');
   if (job.matchLevel !== 'unreviewed') return reasons;
   return reasons ? `${UNREVIEWED_PREFIX} ${reasons}` : UNREVIEWED_PREFIX;
+}
+
+function excelString(value) {
+  return `"${String(value).replace(/"/g, '""')}"`;
 }
 
 function styleMergedTitle(sheet, range, title, fill, size, height) {
@@ -115,7 +129,7 @@ function verifyNoFormulaErrorStrings(workbook) {
   }
 }
 
-async function verifyWorkbook(filePath, expectedMatchCount) {
+async function verifyWorkbook(filePath, expectedMatchCount, headers, linkColumn) {
   const verification = new ExcelJS.Workbook();
   await verification.xlsx.readFile(filePath);
   for (const sheetName of ['Run Summary', 'Matches', 'Notes']) {
@@ -130,16 +144,25 @@ async function verifyWorkbook(filePath, expectedMatchCount) {
   const headerRow = matchesSheet.getRow(1);
   const actualHeaders = [];
   headerRow.eachCell({ includeEmpty: false }, cell => actualHeaders.push(String(cell.value)));
-  assert.deepEqual(actualHeaders, MATCH_HEADERS, 'Matches header row does not match the expected 11 columns');
+  assert.deepEqual(actualHeaders, headers, `Matches header row does not match the expected ${headers.length} columns`);
   for (let row = 2; row <= expectedMatchCount + 1; row++) {
-    const link = matchesSheet.getCell(row, COLUMN['Posting Link']).value;
-    assert.ok(link && typeof link === 'object' && link.hyperlink, `Matches!K${row} is not a hyperlink cell`);
+    const link = matchesSheet.getCell(row, linkColumn).value;
+    assert.ok(link && typeof link === 'object' && link.hyperlink, `Matches!${columnLetter(linkColumn)}${row} is not a hyperlink cell`);
   }
   verifyNoFormulaErrorStrings(verification);
 }
 
 const payload = JSON.parse(await fs.readFile(jsonPath, 'utf8'));
 const jobs = payload.matches || [];
+const tracks = reportTracks(payload.meta, jobs);
+const MATCH_COLUMNS = matchColumnsFor(tracks);
+const MATCH_HEADERS = MATCH_COLUMNS.map(column => column.header);
+const COLUMN = Object.fromEntries(MATCH_HEADERS.map((header, index) => [header, index + 1]));
+const ROLE_TYPE_LETTER = columnLetter(COLUMN['Role Type']);
+const SCORE_COLUMNS = MATCH_COLUMNS.map((column, index) => ({ ...column, index: index + 1 })).filter(column => column.score);
+const FIRST_SCORE_LETTER = columnLetter(SCORE_COLUMNS[0].index);
+const LAST_SCORE_LETTER = columnLetter(SCORE_COLUMNS[SCORE_COLUMNS.length - 1].index);
+
 const workbook = new ExcelJS.Workbook();
 workbook.creator = 'Daily Job Match Alert';
 workbook.created = asDate(payload.meta?.generatedAt) || new Date();
@@ -161,6 +184,7 @@ const summaryValues = [
   ['Excluded: location outside US', Number(payload.meta.eligibilityExclusions?.location || 0)],
   ['Excluded: graduation window', Number(payload.meta.eligibilityExclusions?.graduation || 0)],
   ['Minimum score', payload.meta.minimumMatchScore],
+  ['Resume tracks', tracks.map(track => track.label).join(', ')],
   ['Scoring model', payload.meta.scoringModel || 'unknown'],
 ];
 const summaryStartRow = 3;
@@ -216,8 +240,7 @@ const rows = jobs.map(job => [
   job.location,
   job.roleType,
   asDate(job.postedAt),
-  job.dataScore,
-  job.aiScore,
+  ...tracks.map(track => trackScore(job, track.id)),
   null,
   whyItMatches(job),
   (job.gaps || []).join('; '),
@@ -244,26 +267,41 @@ matches.getRow(1).eachCell(cell => {
 });
 matches.getRow(1).height = 30;
 
+// The recommendation is the label of the first score column holding the row maximum, so a tie
+// resolves to the earliest configured track, matching the pipeline's own choice.
+function recommendedFormula(rowNumber) {
+  const range = `${FIRST_SCORE_LETTER}${rowNumber}:${LAST_SCORE_LETTER}${rowNumber}`;
+  const labels = tracks.map(track => excelString(track.label)).join(',');
+  return `CHOOSE(MATCH(MAX(${range}),${range},0),${labels})`;
+}
+
+function recommendedLabel(job) {
+  let best = null;
+  for (const track of tracks) {
+    const score = trackScore(job, track.id);
+    if (!best || score > best.score) best = { label: track.label, score };
+  }
+  return best ? best.label : '';
+}
+
 for (let index = 0; index < jobs.length; index++) {
   const rowNumber = index + 2;
-  const dataScore = Number(jobs[index].dataScore || 0);
-  const aiScore = Number(jobs[index].aiScore || 0);
   matches.getCell(rowNumber, COLUMN['Recommended Resume']).value = {
-    formula: `IF(${DATA_SCORE_LETTER}${rowNumber}>=${AI_SCORE_LETTER}${rowNumber},"Data","AI")`,
-    result: dataScore >= aiScore ? 'Data' : 'AI',
+    formula: recommendedFormula(rowNumber),
+    result: recommendedLabel(jobs[index]),
   };
   MATCH_COLUMNS.forEach((column, columnIndex) => {
     matches.getCell(rowNumber, columnIndex + 1).alignment = { vertical: 'top', wrapText: Boolean(column.wrap) };
   });
   matches.getCell(rowNumber, COLUMN['Posted At']).numFmt = 'yyyy-mm-dd hh:mm';
-  for (const header of ['Data Score', 'AI Score']) matches.getCell(rowNumber, COLUMN[header]).numFmt = '0';
+  for (const column of SCORE_COLUMNS) matches.getCell(rowNumber, column.index).numFmt = '0';
   const link = matches.getCell(rowNumber, COLUMN['Posting Link']);
   if (link.value && typeof link.value === 'object') link.font = { color: { argb: COLORS.link }, underline: true };
 }
 
 if (jobs.length) {
   matches.addConditionalFormatting({
-    ref: `${DATA_SCORE_LETTER}2:${AI_SCORE_LETTER}${jobs.length + 1}`,
+    ref: `${FIRST_SCORE_LETTER}2:${LAST_SCORE_LETTER}${jobs.length + 1}`,
     rules: [{
       type: 'colorScale',
       cfvo: [{ type: 'min' }, { type: 'percentile', value: 50 }, { type: 'max' }],
@@ -277,12 +315,14 @@ MATCH_COLUMNS.forEach((column, index) => {
 });
 
 styleMergedTitle(notes, 'A1:F1', 'How to read this report', COLORS.darkTeal, 16, 32);
+const scoreColumnNames = tracks.map(track => scoreHeader(track)).join(' / ');
 const noteRows = [
   ['Field', 'Meaning'],
   ['Warnings', 'Source, enrichment, subscription, or model-configuration issues that were downgraded so the nightly report could still be generated.'],
+  ['Resume tracks', `The enabled resume tracks this report was scored against, in configured order: ${tracks.map(track => track.label).join(', ')}. Disabled tracks are not extracted, scored, or shown.`],
   ['Scoring model', 'Model reported by the subscription CLI for semantic review. "unknown" means the CLI output did not identify a model; "local_only" or "none" means no subscription review happened.'],
-  ['Data / AI Score', 'Fit score against the corresponding resume from subscription review, or the local triage score for unreviewed rows; not a probability of getting an interview.'],
-  ['Recommended Resume', 'Whichever track scored higher for this posting.'],
+  [scoreColumnNames, 'Fit score against the corresponding resume track from subscription review, or the local triage score for unreviewed rows; not a probability of getting an interview.'],
+  ['Recommended Resume', 'Whichever track scored higher for this posting; ties go to the earlier configured track.'],
   ['Why It Matches', 'Matched evidence from the review. A leading [unreviewed] tag means semantic review was unavailable and the local score was retained; verify the fit manually.'],
   ['Gaps / Verify', 'Skills or eligibility details that were not found in the selected resume or need manual confirmation. "Location unverified" means the posting only says Remote or gives no location; confirm it permits work from the United States.'],
   ['Update today', 'How many runs have contributed to this application date. Every run merges its findings into the day\'s stored payload and re-renders the whole report, so a later run never shrinks it.'],
@@ -307,6 +347,6 @@ notes.getColumn('B').width = 70;
 await fs.mkdir(path.dirname(outputPath), { recursive: true });
 await workbook.xlsx.writeFile(outputPath);
 
-if (verifyFlag === '--verify') await verifyWorkbook(outputPath, jobs.length);
+if (verifyFlag === '--verify') await verifyWorkbook(outputPath, jobs.length, MATCH_HEADERS, COLUMN['Posting Link']);
 
 console.log(outputPath);

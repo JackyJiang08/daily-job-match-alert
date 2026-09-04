@@ -1,6 +1,6 @@
 config.json
-resumes/data.md
-resumes/ai.md
+resumes/*.md
+!resumes/*.example.md
 resumes/*.pdf
 intake/eml/*.eml
 state/

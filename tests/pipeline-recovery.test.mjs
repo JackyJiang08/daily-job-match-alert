@@ -25,7 +25,7 @@ async function prepareProject() {
     semanticMatching: { engine: 'claude_subscription', claudeCommand: fakeClaude, required: true, batchSize: 6, acceptedMatchLevels: ['high'], timeoutMs: 30_000 },
     reports: { xlsx: { enabled: true, required: false } },
     outputDirectory: './output',
-    resumes: { data: './data-resume.md', ai: './ai-resume.md' },
+    resumes: { tracks: [{ id: 'data', label: 'Data', profile: './data-resume.md' }, { id: 'ai', label: 'AI', profile: './ai-resume.md' }] },
     preferences: { roleTypes: ['internship', 'new_grad', 'entry_level'], locations: ['Remote'], remoteOkay: true, maxYearsExperience: 3, needsSponsorship: null, graduationDate: '2027-05', excludeTitleTerms: [] },
     sources: { simplifyInternships: { enabled: false }, simplifyNewGrad: { enabled: false }, emailFiles: { enabled: true, directory: './intake' }, himalaya: { enabled: false }, careerOps: { enabled: false } },
     network: { fetchDescriptions: false, concurrency: 2, timeoutMs: 1000 },
@@ -184,7 +184,7 @@ test('recoverIncompleteReports rebuilds an earlier incomplete day, skips today, 
   const earlier = reportPayloadPath(config, '2026-08-26');
   const today = reportPayloadPath(config, '2026-08-27');
   try {
-    const job = { source: 'fixture', roleType: 'new_grad', company: 'Acme', title: 'Data Analyst', location: 'Remote - US', dataScore: 80, aiScore: 60, bestScore: 80, recommendedResume: 'Data', reasons: [], gaps: [], blockers: [], description: 'x', url: 'https://example.com/jobs/1', matchLevel: 'high' };
+    const job = { source: 'fixture', roleType: 'new_grad', company: 'Acme', title: 'Data Analyst', location: 'Remote - US', scores: { data: 80, ai: 60 }, bestScore: 80, recommendedTrack: 'data', recommendedResume: 'Data', reasons: [], gaps: [], blockers: [], description: 'x', url: 'https://example.com/jobs/1', matchLevel: 'high' };
     const meta = { date: '2026-08-26', applicationDate: '2026-08-26', generatedAt: '2026-08-25T20:00:00.000Z', lastUpdatedAt: '2026-08-25T20:00:00.000Z', runsToday: 1, lookbackHours: 24, warnings: [], reviewedCount: 1, matchCount: 1 };
     await fs.writeFile(earlier, JSON.stringify({ meta, matches: [job], reviewed: [job], complete: false }));
     await fs.writeFile(today, JSON.stringify({ meta: { ...meta, date: '2026-08-27', applicationDate: '2026-08-27' }, matches: [job], reviewed: [job], complete: false }));

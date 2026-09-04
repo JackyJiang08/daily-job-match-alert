@@ -2,9 +2,9 @@
 
 # Daily Job Match Alert
 
-**Subscription-only AI job discovery for Data and AI/ML candidates.**
+**Subscription-only AI job discovery for Data, LLM, and AI-agent candidates.**
 
-Collect fresh roles from public ATS boards and curated GitHub lists; compare every relevant JD against two resumes; wake up to a ranked local report even when a source, the model, or an input file fails overnight.
+Collect fresh roles from public ATS boards and curated GitHub lists; compare every relevant JD against every resume track you enable (one, two, or N private resumes); wake up to a ranked local report even when a source, the model, or an input file fails overnight.
 
 [![CI](https://github.com/JackyJiang08/daily-job-match-alert/actions/workflows/ci.yml/badge.svg)](https://github.com/JackyJiang08/daily-job-match-alert/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -16,17 +16,17 @@ Daily Job Match Alert is a privacy-conscious, non-auto-apply pipeline for intern
 
 ## Why Daily Job Match Alert
 
-Job boards fragment discovery across ATS pages, curated lists, account alerts, and email. A single generic resume score also hides whether a role fits a Data profile or an AI/ML profile better.
+Job boards fragment discovery across ATS pages, curated lists, account alerts, and email. A single generic resume score also hides which of your resumes a role fits best, such as a Data profile, an LLM profile, or an AI-agent profile.
 
 Daily Job Match Alert provides:
 
-- Dual-resume evaluation with independent Data and AI/ML scores.
+- Multi-resume evaluation: every enabled track in `resumes.tracks` gets its own score, and the best-scoring track is recommended per posting. Tracks can be added or disabled in configuration without code changes.
 - Subscription-only semantic review with structured, auditable output and a recorded scoring model.
 - Public-source ingestion without authenticated scraping; an email-alert channel is planned but not enabled yet.
 - Exact `postedAt` versus first-seen `discoveredAt` semantics.
 - Cross-source URL canonicalization and persistent deduplication.
 - Degrade-don't-die operation: failed collectors, unreachable postings, an unavailable model, or a corrupted input file become report warnings instead of a missing nightly report. `npm run chaos` proves this on every CI run.
-- Exactly two user-facing files per successful application date: an HTML report with the complete captured JD and a compact 11-column XLSX with clickable posting links.
+- Exactly two user-facing files per successful application date: an HTML report with the complete captured JD and a compact XLSX (one score column per enabled track) with clickable posting links.
 - Hard safety boundaries: no auto-apply, no screening answers, no mailbox mutation.
 
 ## Architecture
@@ -65,11 +65,9 @@ Requirements: macOS or Linux, Node.js 20+, and a subscription-authenticated Clau
 git clone https://github.com/JackyJiang08/daily-job-match-alert.git
 cd daily-job-match-alert
 cp config.example.json config.json
-cp resumes/data.example.md resumes/data.md
-cp resumes/ai.example.md resumes/ai.md
 ```
 
-Point `resumeSources.dataPdf` and `resumeSources.aiPdf` at your private PDFs, edit the preferences in `config.json`, then sign in to Claude Code with your Claude subscription:
+Define your resume tracks under `resumes.tracks` in `config.json` (the example ships with `data`, `llm`, and `agent`), point each track's `pdf` at your private PDF, edit the preferences, then sign in to Claude Code with your Claude subscription:
 
 ```bash
 claude auth login --claudeai
@@ -98,9 +96,33 @@ Two constraints are facts, not judgment calls, so they are enforced in code (`sr
 
 Excluded postings are counted, not listed one by one: a single `eligibility / hard filter` warning carries the totals and up to five examples, and both the HTML header and the XLSX Run Summary show **Excluded: location outside US** and **Excluded: graduation window**. Excluded postings are still marked as seen.
 
+## Resume tracks
+
+Resumes are configured as an ordered list of tracks:
+
+```json
+"resumes": {
+  "autoRefresh": true,
+  "pdftotextCommand": "pdftotext",
+  "tracks": [
+    { "id": "data",  "label": "Data",     "pdf": "~/Desktop/Your Data Resume.pdf",     "enabled": true },
+    { "id": "llm",   "label": "LLM",      "pdf": "~/Desktop/Your LLM Resume.pdf",      "enabled": true },
+    { "id": "agent", "label": "AI Agent", "pdf": "~/Desktop/Your AI Agent Resume.pdf", "enabled": true }
+  ]
+}
+```
+
+- `id` is the internal key: it names the extracted profile (`resumes/<id>.md`, override with `profile`), the per-track `scores.<id>` field in the semantic response, and the hash entry in `state/resume-sources.json`. Letters, digits, `_`, and `-` are allowed.
+- `label` is what the reports show: the `<label> Score` column in the XLSX, the chips on each HTML card, and the **Recommended Resume** value. It defaults to the capitalized id.
+- `enabled: false` removes a track from extraction, scoring, the subscription prompt, and both reports; nothing is read from its PDF or profile. Any number of enabled tracks from one upward works. No enabled track at all is a fatal configuration error, the same path as a missing resume.
+- Order matters: score columns and chips follow the list order, and a tie in the best score goes to the earlier track.
+- Local (pre-review) scoring uses built-in keyword profiles for the ids `data`, `ai`, `llm`, and `agent`; any other id is triaged against the union of those profiles, and the subscription review supplies the real per-track judgment.
+
+The pre-track layout (`resumes: { data, ai }` plus `resumeSources`) is still read: it is migrated in memory to two tracks named Data and AI, and a one-line notice on stderr asks you to move to `resumes.tracks`.
+
 ## Private resume updates
 
-`resumeSources.autoRefresh` makes resume updates non-fixed. Before every run, the project hashes both source PDFs and refreshes the gitignored `resumes/data.md` and `resumes/ai.md` whenever either PDF changes. Replacing a PDF at the same path requires no configuration change; if its filename or folder changes, update only your private `config.json`.
+`resumes.autoRefresh` makes resume updates non-fixed. Before every run, the project hashes the PDF of every enabled track and refreshes the gitignored `resumes/<id>.md` whenever that PDF changes. Replacing a PDF at the same path requires no configuration change; if its filename or folder changes, update only your private `config.json`.
 
 Real PDFs, extracted resume text, `config.json`, state, email, logs, and generated reports are excluded from Git. The public repository contains examples and extraction code only.
 
@@ -142,7 +164,7 @@ Warnings appear in the HTML "Pipeline warnings" panel and in the XLSX Run Summar
 
 ## career-ops integration
 
-[career-ops](https://github.com/santifer/career-ops) is a strong upstream engine for public ATS discovery, portal health, deduplication, and application pipeline management. Daily Job Match Alert stays separate so career-ops can update normally while this project retains full JD text, two resume tracks, semantic scores, and daily report state.
+[career-ops](https://github.com/santifer/career-ops) is a strong upstream engine for public ATS discovery, portal health, deduplication, and application pipeline management. Daily Job Match Alert stays separate so career-ops can update normally while this project retains full JD text, N resume tracks, semantic scores, and daily report state.
 
 After onboarding career-ops and configuring `portals.yml`, enable `sources.careerOps` in `config.json` and point `scanHistoryPath` at its `data/scan-history.tsv`. Set `runScanFirst` to `true` only after `node scan.mjs --since 1` succeeds manually.
 
@@ -186,7 +208,7 @@ Each successful evening run writes the **next application date** as a folder. Fo
 
 No `latest.html`, CSV, JSON, inspection sidecar, or verification directory remains in the Desktop output.
 
-The XLSX `Matches` sheet has 11 columns: Company, Title, Location, Role Type, Posted At, Data Score, AI Score, Recommended Resume, Why It Matches, Gaps / Verify, and Posting Link. The link cell shows the posting domain and opens the full URL; both score columns share a three-color scale. Rows that kept a local score because semantic review was unavailable start their **Why It Matches** text with `[unreviewed]`. The `Run Summary` sheet lists counts, the scoring model, and every warning; the `Notes` sheet explains each field. The HTML report keeps everything the sheet omits: the full captured JD in a collapsible section, salary, employment type, source, discovery time, and freshness basis.
+The XLSX `Matches` sheet has five fixed columns (Company, Title, Location, Role Type, Posted At), then one `<label> Score` column per enabled resume track in configured order, then Recommended Resume, Why It Matches, Gaps / Verify, and Posting Link. With the three example tracks that is 12 columns; with a single track, 10. The link cell shows the posting domain and opens the full URL; all score columns share one three-color scale, and Recommended Resume is a formula that picks the label of the highest score (ties go to the earlier track). Rows that kept a local score because semantic review was unavailable start their **Why It Matches** text with `[unreviewed]`. The `Run Summary` sheet lists counts, the enabled resume tracks, the scoring model, and every warning; the `Notes` sheet explains each field. The HTML report keeps everything the sheet omits: the full captured JD in a collapsible section, salary, employment type, source, discovery time, and freshness basis.
 
 - `postedAt` is populated only from employer or structured posting evidence.
 - `discoveredAt` records when Daily Job Match Alert first encountered the canonical URL.

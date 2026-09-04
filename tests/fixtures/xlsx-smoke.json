@@ -7,6 +7,11 @@
     "reviewedCount": 1,
     "minimumMatchScore": 70,
     "scoringModel": "none",
+    "resumeTracks": [
+      { "id": "data", "label": "Data" },
+      { "id": "llm", "label": "LLM" },
+      { "id": "agent", "label": "AI Agent" }
+    ],
     "warnings": [
       { "stage": "collector", "source": "CI fixture", "message": "sample degraded source" }
     ]
@@ -22,8 +27,10 @@
       "location": "Remote - US",
       "employmentType": "FULL_TIME",
       "salary": "USD 90000–110000 YEAR",
-      "dataScore": 86,
-      "aiScore": 78,
+      "scores": { "data": 86, "llm": 78, "agent": 71 },
+      "bestScore": 86,
+      "recommendedTrack": "data",
+      "recommendedResume": "Data",
       "matchLevel": "unreviewed",
       "scoringEngine": "local_fallback",
       "reasons": ["SQL", "Python"],

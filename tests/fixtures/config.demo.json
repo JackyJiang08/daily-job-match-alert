@@ -5,8 +5,12 @@
   "reports": { "xlsx": { "enabled": true, "required": false } },
   "outputDirectory": "./demo-output",
   "resumes": {
-    "data": "./data-resume.md",
-    "ai": "./ai-resume.md"
+    "autoRefresh": false,
+    "tracks": [
+      { "id": "data", "label": "Data", "profile": "./data-resume.md", "enabled": true },
+      { "id": "llm", "label": "LLM", "profile": "./llm-resume.md", "enabled": true },
+      { "id": "agent", "label": "AI Agent", "profile": "./agent-resume.md", "enabled": true }
+    ]
   },
   "preferences": {
     "roleTypes": ["internship", "new_grad", "entry_level"],

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { loadConfig, loadResumes } from './config.mjs';
+import { enabledResumeTracks, loadConfig, loadResumes } from './config.mjs';
 import { syncResumes } from './resume-sync.mjs';
 import { collectSimplifyList } from './collectors/simplify-github.mjs';
 import { collectEmailFiles } from './collectors/email-files.mjs';
@@ -326,6 +326,9 @@ async function runPipeline(config, clock) {
   const { now, runDate, applicationDate: date } = clock;
   const resumeSync = await syncResumes(config);
   const resumes = await loadResumes(config);
+  const resumeTracks = enabledResumeTracks(config).map(track => ({ id: track.id, label: track.label }));
+  const disabledTracks = (config.resumes?.tracks || []).filter(track => track.enabled === false).map(track => track.label);
+  console.error(`Resume tracks: ${resumeTracks.map(track => track.label).join(', ')}${disabledTracks.length ? ` (disabled: ${disabledTracks.join(', ')})` : ''}`);
   await fs.mkdir(config.outputDirectory, { recursive: true });
   const statePath = statePathFor(config);
   const state = await readState(statePath);
@@ -416,7 +419,7 @@ async function runPipeline(config, clock) {
   const runsToday = Number(previous?.meta?.runsToday || 0) + 1;
   const meta = {
     generatedAt: now.toISOString(), date, applicationDate: date, runDate, timeZone, lookbackHours: config.lookbackHours,
-    minimumMatchScore: config.minimumMatchScore, resumeSync, collectedCount: collected.length,
+    minimumMatchScore: config.minimumMatchScore, resumeSync, resumeTracks, collectedCount: collected.length,
     newCount: reviewed.length, newThisRun: enriched.length, reviewedCount: reviewed.length, matchCount: matches.length,
     warnings: finalWarnings,
     runsToday, firstGeneratedAt: previous?.meta?.firstGeneratedAt || now.toISOString(), lastUpdatedAt: now.toISOString(),

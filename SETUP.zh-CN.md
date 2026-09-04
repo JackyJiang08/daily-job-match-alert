@@ -19,7 +19,7 @@
 
 桌面日报目录不保留 `latest.html`、CSV、JSON、检查文件或验证图片。JSON 只在系统临时目录中用于构建 XLSX，完成后自动删除。
 
-XLSX 的 `Matches` 表固定 11 列：Company、Title、Location、Role Type、Posted At、Data Score、AI Score、Recommended Resume、Why It Matches、Gaps / Verify、Posting Link。Posting Link 显示域名、点击打开完整 URL；两列分数共用三色色阶。因语义评审不可用而保留本地分数的岗位，会在 Why It Matches 开头标注 `[unreviewed]`。完整 JD、薪资、雇佣类型、来源、发现时间和 freshness 依据只保留在 HTML 报告中。`Run Summary` 表列出计数、Scoring model 和全部 warning，`Notes` 表解释各字段。
+XLSX 的 `Matches` 表列数随启用的简历轨道数变化：前 5 列固定为 Company、Title、Location、Role Type、Posted At，接着每个启用轨道一列 `<label> Score`（按配置顺序），然后是 Recommended Resume、Why It Matches、Gaps / Verify、Posting Link。示例配置的三条轨道（Data、LLM、AI Agent）共 12 列，单轨道为 10 列。Posting Link 显示域名、点击打开完整 URL；所有分数列共用一个三色色阶；Recommended Resume 是公式，取分数最高轨道的 label，并列时取靠前的轨道。因语义评审不可用而保留本地分数的岗位，会在 Why It Matches 开头标注 `[unreviewed]`。完整 JD、薪资、雇佣类型、来源、发现时间和 freshness 依据只保留在 HTML 报告中。`Run Summary` 表列出计数、Resume tracks（启用轨道列表）、Scoring model 和全部 warning，`Notes` 表解释各字段。
 
 Workday 招聘站（`*.myworkdayjobs.com`）的岗位页由浏览器端渲染，HTML 抓取拿不到 JD。这类岗位改走租户公开的 JSON 接口（`/wday/cxs/...`），enrichment 记为 `workday_cxs`；接口失败时回退到原有 HTML 路径。
 
@@ -63,9 +63,27 @@ LLM batch 失败会在 10 秒后重试一次。`unreviewed` 岗位只有本地�
 
 不直接抓登录网站的原因不是技术上完全做不到，而是这些平台的条款通常明确限制机器人、脚本或 scraping。登录态浏览器自动化也容易遇到 MFA、验证码、页面变更和封号风险。邮件通道启用后也只用于"发现链接"；一旦链接落到公开 Greenhouse/Lever/Ashby 等 ATS，后续优先直接监控雇主端。
 
-## 私有简历与更新窗口
+## 简历轨道与更新窗口
 
-在私有 `config.json` 的 `resumeSources.dataPdf` 和 `resumeSources.aiPdf` 中保存两份 PDF 路径。每次任务运行前都会比较 SHA-256；覆盖同一路径的 PDF 后，下一次运行会自动更新 gitignored 的文本简历。如果文件名或目录改变，只需修改私有配置。PDF、提取文本、配置、邮件、日志、状态和报告都不会被 Git 跟踪。
+简历在私有 `config.json` 的 `resumes.tracks` 中按顺序配置，数量不限（1..N）：
+
+```json
+"resumes": {
+  "autoRefresh": true,
+  "pdftotextCommand": "pdftotext",
+  "tracks": [
+    { "id": "data",  "label": "Data",     "pdf": "~/Desktop/Your Data Resume.pdf",     "enabled": true },
+    { "id": "llm",   "label": "LLM",      "pdf": "~/Desktop/Your LLM Resume.pdf",      "enabled": true },
+    { "id": "agent", "label": "AI Agent", "pdf": "~/Desktop/Your AI Agent Resume.pdf", "enabled": true }
+  ]
+}
+```
+
+`id` 是内部键：决定提取文本的文件名 `resumes/<id>.md`（可用 `profile` 覆盖）、语义评审结果里的 `scores.<id>` 字段，以及 `state/resume-sources.json` 中的哈希记录。`label` 用于展示：XLSX 的 `<label> Score` 列、HTML 卡片上的分数 chip 和 Recommended Resume 的取值。`enabled: false` 的轨道完全不参与抽取、打分、prompt 和报告，连它的 PDF 和 profile 都不会被读取；全部轨道都停用或列表为空会按简历缺失处理（fatal）。轨道顺序决定列顺序，最高分并列时取靠前的轨道。本地（评审前）打分对 `data`、`ai`、`llm`、`agent` 四个 id 有内置关键词画像，其他 id 使用四者的并集做粗筛，真正的逐轨判断由订阅评审给出。
+
+旧版布局（`resumes: { data, ai }` + `resumeSources`）仍可读取：程序会在内存中迁移为 Data、AI 两条轨道，并在 stderr 打印一行升级提示。
+
+每次任务运行前都会比较每个启用轨道 PDF 的 SHA-256；覆盖同一路径的 PDF 后，下一次运行会自动更新 gitignored 的文本简历。如果文件名或目录改变，只需修改私有配置。PDF、提取文本、配置、邮件、日志、状态和报告都不会被 Git 跟踪。
 
 ## 费用保护
 

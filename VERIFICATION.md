@@ -17,16 +17,25 @@ Record the date and commit next to each item when it passes.
   ```
   Expected: `npm test` reports 0 failures.
 
-- [ ] **Demo run writes HTML plus the 11-column xlsx**
+- [ ] **Demo run writes HTML plus the xlsx with one score column per track**
   ```bash
   npm run demo
   ```
   Expected: `tests/fixtures/demo-output/2026-08-27/` contains
   `Daily Job Match Alert - 2026-08-27.html` and `Daily Job Match Alert - 2026-08-27.xlsx`.
-  The xlsx `Matches` sheet has exactly these headers: Company, Title, Location, Role Type,
-  Posted At, Data Score, AI Score, Recommended Resume, Why It Matches, Gaps / Verify,
+  The demo config enables three resume tracks (Data, LLM, AI Agent), so the xlsx `Matches`
+  sheet has exactly these 12 headers: Company, Title, Location, Role Type, Posted At,
+  Data Score, LLM Score, AI Agent Score, Recommended Resume, Why It Matches, Gaps / Verify,
   Posting Link; the Posting Link cell is a clickable hyperlink; Run Summary shows
-  `Scoring model: local_only`.
+  `Resume tracks: Data, LLM, AI Agent` and `Scoring model: local_only`; the HTML header
+  lists the same tracks and each card carries one score chip per track.
+
+- [ ] **Track configurations are covered by tests**
+  `tests/resume-tracks.test.mjs` runs the pipeline end to end with three tracks, one track,
+  a disabled track (its profile is deleted and must not be read; it never appears in the
+  reports), the legacy `resumes: { data, ai }` + `resumeSources` layout (migrated in memory
+  with an upgrade notice), and an all-disabled list (fatal before any report is written).
+  `tests/config.test.mjs` covers the normalization rules.
 
 - [ ] **Chaos check passes all five scenarios**
   ```bash
