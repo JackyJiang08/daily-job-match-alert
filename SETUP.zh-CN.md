@@ -85,6 +85,8 @@ LLM batch 失败会在 10 秒后重试一次。`unreviewed` 岗位只有本地�
 
 每次任务运行前都会比较每个启用轨道 PDF 的 SHA-256；覆盖同一路径的 PDF 后，下一次运行会自动更新 gitignored 的文本简历。如果文件名或目录改变，只需修改私有配置。PDF、提取文本、配置、邮件、日志、状态和报告都不会被 Git 跟踪。
 
+简历 PDF 放在 iCloud 同步目录（桌面、文稿）时，macOS 的"优化储存空间"可能把本地副本回收为仅云端占位符，读取会报 `Unknown system error -11`/`EAGAIN` 或读到空内容。夜间运行遇到这种情况会自动执行 `brctl download <路径>`，然后每 2 秒重试读取，最长等待 60 秒；取回成功后照常继续，并在报告的 warning 面板里留下一条 info 级提示"<轨道> 简历曾被 iCloud 云端化，已自动取回"。60 秒内仍未取回则按现有 fatal 路径失败，错误信息会给出具体路径并提示在 Finder 中右键该文件选择"立即下载"，或把简历移出 iCloud 同步目录。非 macOS 环境或没有 `brctl` 时该机制静默跳过，行为与以前一致。
+
 ## 费用保护
 
 默认 `semanticMatching.engine` 是 `claude_subscription`，要求 Claude Code **2.1.250 或更新版本**（更旧版本在发送任何 batch 之前就会被拒绝并降级为本地评分）。先运行 `claude auth login --claudeai`，不要选择 `--console`（后者是 API 计费入口）。程序运行前检查 Claude 订阅登录，并在启动子进程前移除所有可能改变认证或路由的环境变量：`ANTHROPIC_` 与 `AWS_` 前缀全部，以及 `CLAUDE_CODE_USE_BEDROCK`、`CLAUDE_CODE_USE_VERTEX`、`GOOGLE_APPLICATION_CREDENTIALS`、`GOOGLE_API_KEY`、`CLOUD_ML_REGION`、`CLAUDE_API_KEY`、`OPENAI_API_KEY`。认证方式不符时相关岗位降级为 `unreviewed` 并记录 warning，不会自动切换为按量 API。

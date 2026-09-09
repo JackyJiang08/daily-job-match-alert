@@ -124,6 +124,8 @@ The pre-track layout (`resumes: { data, ai }` plus `resumeSources`) is still rea
 
 `resumes.autoRefresh` makes resume updates non-fixed. Before every run, the project hashes the PDF of every enabled track and refreshes the gitignored `resumes/<id>.md` whenever that PDF changes. Replacing a PDF at the same path requires no configuration change; if its filename or folder changes, update only your private `config.json`.
 
+If a PDF lives on an iCloud-synced Desktop or Documents folder, macOS may evict the local copy and leave a cloud-only placeholder; the nightly run detects that (errno -11, `EAGAIN`, or an empty read of a non-empty file), asks iCloud to download the file with `brctl download`, and retries for up to a minute before giving up with a plain-language error. A successful recovery is disclosed as an info notice in the report warnings panel and in `meta.resumeSync.recovered`.
+
 Real PDFs, extracted resume text, `config.json`, state, email, logs, and generated reports are excluded from Git. The public repository contains examples and extraction code only.
 
 ## Subscription-only cost guard
@@ -150,6 +152,7 @@ A nightly run is designed to finish with a report on the Desktop even when parts
 | Two tracked links resolve to the same posting in one run | The first is kept with both source labels; the duplicate is listed under `debug.droppedDuplicateFinalUrls` in the run summary | stderr line per drop |
 | A posting is outside the US or the graduation window | Excluded deterministically, counted in the Run Summary | Warning `eligibility / hard filter` with totals |
 | A malformed or oversized `.eml` | Only that file is skipped; sibling files still yield jobs | Warning `collector / Email files` |
+| A resume PDF sits in an iCloud-synced folder and "Optimize Mac Storage" evicted the local copy (read fails with errno -11 / EAGAIN, or returns no bytes) | `brctl download <pdf>` is issued and the read is retried every 2 s for up to 60 s; the run then continues normally | Info notice `resume / <label> resume` saying the resume was recovered from iCloud. If the download does not finish in time the run fails fatally with a message that names the file and tells you to download it in Finder or move it out of iCloud. Off macOS, or without `brctl`, the original read error is reported unchanged |
 | Subscription CLI missing, wrong version, API-key auth, or a batch fails twice (10 s retry) | Affected jobs keep their local scores and are labeled `unreviewed` | Warning `llm / <engine>`; `[unreviewed]` prefix in the XLSX, orange `Match level: unreviewed` chip in the HTML |
 | The model omits job ids | One supplemental review; anything still missing becomes `unreviewed` | Warning `llm / <engine>` |
 | Reported model differs from `semanticMatching.model` | Scores kept for the run | `MODEL MISMATCH` warning |

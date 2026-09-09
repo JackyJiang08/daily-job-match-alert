@@ -324,7 +324,9 @@ export async function recoverIncompleteReports(config, state, options = {}) {
 
 async function runPipeline(config, clock) {
   const { now, runDate, applicationDate: date } = clock;
-  const resumeSync = await syncResumes(config);
+  const warnings = [];
+  // Resume sync may recover an iCloud-evicted PDF; that disclosure belongs in the day's report.
+  const resumeSync = await syncResumes(config, { warnings });
   const resumes = await loadResumes(config);
   const resumeTracks = enabledResumeTracks(config).map(track => ({ id: track.id, label: track.label }));
   const disabledTracks = (config.resumes?.tracks || []).filter(track => track.enabled === false).map(track => track.label);
@@ -333,7 +335,6 @@ async function runPipeline(config, clock) {
   const statePath = statePathFor(config);
   const state = await readState(statePath);
   const cutoff = new Date(now.getTime() - config.lookbackHours * 60 * 60 * 1000);
-  const warnings = [];
   const debug = {};
   const prefs = config.preferences || {};
 
