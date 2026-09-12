@@ -81,7 +81,7 @@ test('three enabled tracks flow through extraction, scoring, and both reports en
     assert.equal(matches.actualRowCount, summary.meta.matchCount + 1);
     assert.equal(summaryRows['Resume tracks'], 'Data, LLM, AI Agent');
     assert.match(html, /<dt>Resume tracks<\/dt><dd>Data, LLM, AI Agent<\/dd>/);
-    assert.match(html, /<span class="track best" data-track="data">Data <b>\d+<\/b><\/span><span class="sep">·<\/span><span class="track" data-track="llm">LLM <b>\d+<\/b><\/span><span class="sep">·<\/span><span class="track" data-track="agent">AI Agent <b>\d+<\/b><\/span><span class="recommend">Apply with Data resume<\/span>/);
+    assert.match(html, /<span class="track best" data-track="data">Data <b>\d+<\/b><\/span><span class="sep">·<\/span><span class="track" data-track="llm">LLM <b>\d+<\/b><\/span><span class="sep">·<\/span><span class="track" data-track="agent">AI Agent <b>\d+<\/b><\/span><span class="recommend">Apply with Data Resume<\/span>/);
     const job = payload.matches[0];
     assert.deepEqual(Object.keys(job.scores), ['data', 'llm', 'agent']);
     assert.equal(job.recommendedTrack, 'data');
@@ -103,7 +103,7 @@ test('a single enabled track produces a complete report with one score column', 
     const { html, headers, summaryRows, payload } = await readOutputs(root, summary);
     assert.deepEqual(headers, ['Company', 'Title', 'Location', 'Role Type', 'Posted At', 'Data Score', 'Recommended Resume', 'Why It Matches', 'Gaps / Verify', 'Posting Link']);
     assert.equal(summaryRows['Resume tracks'], 'Data');
-    assert.match(html, /<span class="track best" data-track="data">Data <b>\d+<\/b><\/span><span class="recommend">Apply with Data resume<\/span>/);
+    assert.match(html, /<span class="track best" data-track="data">Data <b>\d+<\/b><\/span><span class="recommend">Apply with Data Resume<\/span>/);
     assert.deepEqual(Object.keys(payload.matches[0].scores), ['data']);
   } finally {
     await fs.rm(root, { recursive: true, force: true });

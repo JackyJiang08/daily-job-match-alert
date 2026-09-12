@@ -89,7 +89,7 @@ test('fetches a Workday posting through the CXS endpoint and returns a clean JD'
   assert.equal(job.enrichment, 'workday_cxs');
   assert.equal(job.company, 'Wells Fargo');
   assert.equal(job.title, 'Software Engineer');
-  assert.equal(job.location, 'Charlotte, North Carolina / Chandler, Arizona');
+  assert.equal(job.location, 'Charlotte, North Carolina · Chandler, Arizona');
   assert.equal(job.employmentType, 'Full time');
   assert.equal(job.description, "About this role: Build & ship 'data' pipelines. Partner with analysts – daily.");
   assert.equal(job.postedAt, '2026-08-26T00:00:00.000Z');

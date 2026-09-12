@@ -82,10 +82,12 @@ a{color:inherit}
 .toolbar input,.toolbar select{font:inherit;font-size:var(--fs-body);color:var(--ink);background:var(--surface);border:1px solid var(--line-2);border-radius:var(--radius-sm);padding:6px 9px;min-height:32px}
 .toolbar input[type=search]{flex:1 1 200px;min-width:160px}
 .toolbar select{flex:0 0 auto}
+.toolbar .control{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-meta);color:var(--ink-3)}
+.toolbar .control select{font-size:var(--fs-body)}
 .toolbar input:focus,.toolbar select:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
 .toolbar .count{margin-left:auto;font-size:var(--fs-meta);color:var(--ink-3);font-variant-numeric:tabular-nums}
 .toolbar.quiet{gap:var(--space-1) var(--space-2);margin-bottom:var(--space-3);opacity:.9}
-.toolbar.quiet input,.toolbar.quiet select{font-size:var(--fs-meta);min-height:28px;padding:4px 7px;background:transparent}
+.toolbar.quiet .control select,.toolbar.quiet input,.toolbar.quiet select{font-size:var(--fs-meta);min-height:28px;padding:4px 7px;background:transparent}
 .toolbar.quiet input[type=search]{flex-basis:160px}
 .toolbar.quiet .count{display:none}
 

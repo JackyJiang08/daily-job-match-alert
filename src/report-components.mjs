@@ -5,6 +5,8 @@ import { htmlEscape } from './utils.mjs';
 import { REPORT_SCRIPT, REPORT_STYLES } from './report-theme.mjs';
 
 const VISIBLE_FACTS = 2;
+// Every link out of the report opens a new tab so the shortlist itself is never navigated away.
+export const EXTERNAL_LINK = 'target="_blank" rel="noopener noreferrer"';
 
 export function renderMasthead({ title, dateLabel, matchLabel }) {
   return `<header class="masthead"><h1>${htmlEscape(title)}</h1><p class="sub">${htmlEscape(dateLabel)} · ${htmlEscape(matchLabel)}</p></header>`;
@@ -17,9 +19,9 @@ function option(value, label, selected = false) {
 export function renderToolbar({ roleTypes, tracks, quiet, total }) {
   return `<form class="toolbar${quiet ? ' quiet' : ''}" id="toolbar" autocomplete="off">
     <input type="search" id="q" placeholder="Search company or title" aria-label="Search company or title">
-    <select id="sort" aria-label="Sort by">${option('score', 'Sort: best score', true)}${option('company', 'Sort: company')}${option('posted', 'Sort: posted time')}</select>
-    <select id="role" aria-label="Role type">${option('', 'All role types')}${roleTypes.map(item => option(item.value, item.label)).join('')}</select>
-    <select id="track" aria-label="Recommended resume">${option('', 'All resumes')}${tracks.map(track => option(track.id, `${track.label} resume`)).join('')}</select>
+    <label class="control"><span>Sort by</span><select id="sort">${option('score', 'Best Score', true)}${option('company', 'Company')}${option('posted', 'Posted Time')}</select></label>
+    <select id="role" aria-label="Role type">${option('', 'All Role Types')}${roleTypes.map(item => option(item.value, item.label)).join('')}</select>
+    <label class="control"><span>Resume</span><select id="track">${option('', 'All Resumes')}${tracks.map(track => option(track.id, track.label)).join('')}</select></label>
     <span class="count" id="count">${total} shown</span>
   </form>`;
 }
@@ -61,19 +63,19 @@ export function renderJobCard(card) {
   ].join(' ');
   const badges = card.badges.length ? `<div class="badges">${card.badges.map(renderBadge).join('')}</div>` : '';
   const description = card.description
-    ? `<details class="jd"><summary>Full captured JD</summary><p>${htmlEscape(card.description)}</p></details>`
+    ? `<details class="jd"><summary>Full Captured JD</summary><p>${htmlEscape(card.description)}</p></details>`
     : '';
   return `<article class="job" ${attributes}>
     ${renderScoreRing(card.bestScore)}
     <div class="job-body">
-      <h2 class="job-title"><a href="${htmlEscape(card.url)}">${htmlEscape(card.title)}</a></h2>
+      <h2 class="job-title"><a ${EXTERNAL_LINK} href="${htmlEscape(card.url)}">${htmlEscape(card.title)}</a></h2>
       <p class="job-meta">${htmlEscape(card.company)} · ${htmlEscape(card.location)} · ${htmlEscape(card.roleLabel)}</p>
       ${renderScores(card)}
       ${badges}
-      ${renderFacts('Why it matches', card.reasons, 'reasons')}
-      ${renderFacts('Gaps / verify', card.gaps, 'gaps')}
+      ${renderFacts('Why It Matches', card.reasons, 'reasons')}
+      ${renderFacts('Gaps / Verify', card.gaps, 'gaps')}
       ${description}
-      <div class="actions"><a class="apply" href="${htmlEscape(card.url)}">Open posting</a><span class="meta">${htmlEscape(card.footnote)}</span></div>
+      <div class="actions"><a class="apply" ${EXTERNAL_LINK} href="${htmlEscape(card.url)}">Open Posting</a><span class="meta">${htmlEscape(card.footnote)}</span></div>
     </div>
   </article>`;
 }
@@ -83,7 +85,7 @@ export function renderRunDetails({ rows }) {
     const list = row.items?.length ? `<ul>${row.items.map(item => `<li>${htmlEscape(item)}</li>`).join('')}</ul>` : '';
     return `<dt>${htmlEscape(row.term)}</dt><dd>${htmlEscape(row.detail)}${list}</dd>`;
   }).join('');
-  return `<details class="run" id="run-details"><summary>Run details</summary><dl>${items}</dl></details>`;
+  return `<details class="run" id="run-details"><summary>Run Details</summary><dl>${items}</dl></details>`;
 }
 
 export function renderEmptyState(message) {

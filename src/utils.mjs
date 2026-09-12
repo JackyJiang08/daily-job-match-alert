@@ -100,3 +100,37 @@ export async function mapLimit(items, limit, mapper) {
 export function unique(values) {
   return [...new Set(values.filter(Boolean))];
 }
+
+// Multiple locations are stored as one string joined with LOCATION_SEPARATOR; the HTML card and the
+// xlsx Location column print that string verbatim. Sources that hand over several locations in one
+// cell (Simplify's "3 locations" details block, or "Boston, MA Johnston, RI" flattened by cleanText)
+// are split at ", ST" state-code boundaries and joined consistently here.
+export const LOCATION_SEPARATOR = ' · ';
+const LOCATION_COUNT_PREFIX = /^\d+\s+locations?\b:?\s*/i;
+
+// A ", ST" boundary counts only when a new "City, ST" (or "Remote") follows it, so "Toronto, ON Canada"
+// and "Austin, TX 78701" stay whole.
+const STATE_CODE_BOUNDARY = /,\s*([A-Z]{2})\s+(?=(?:[A-Z][A-Za-z.'\- ]*,\s*[A-Z]{2}\b)|Remote\b)/g;
+
+export function splitLocations(value) {
+  const text = cleanText(String(value ?? '')).replace(LOCATION_COUNT_PREFIX, '');
+  if (!text) return [];
+  return unique(text
+    .split(/\s*(?:\u00b7|\||;|\/|\u2022)\s*/)
+    .flatMap(part => part.replace(STATE_CODE_BOUNDARY, ', $1\u0000').split('\u0000'))
+    .map(part => part.trim())
+    .filter(Boolean));
+}
+
+export function normalizeLocation(value) {
+  const values = Array.isArray(value) ? value.flatMap(splitLocations) : splitLocations(value);
+  return unique(values).join(LOCATION_SEPARATOR);
+}
+
+// Splits an HTML table cell into its locations before tags are flattened, so line breaks survive.
+export function locationsFromHtmlCell(html) {
+  const pieces = String(html ?? '')
+    .replace(/<summary\b[^>]*>[\s\S]*?<\/summary>/gi, ' ')
+    .split(/<\s*\/?\s*br\s*\/?\s*>|\n/gi);
+  return normalizeLocation(pieces.flatMap(splitLocations));
+}

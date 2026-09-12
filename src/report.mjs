@@ -11,7 +11,7 @@ import { warningText } from './warnings.mjs';
 export const REPORT_TITLE = 'Daily Job Match Alert';
 export const WARNINGS_FILE_NAME = 'warnings.txt';
 
-const ROLE_LABELS = { internship: 'Internship', new_grad: 'New grad', entry_level: 'Entry level', unknown: 'Role type unknown' };
+const ROLE_LABELS = { internship: 'Internship', new_grad: 'New Grad', entry_level: 'Entry Level', unknown: 'Unknown Role Type' };
 const ENRICHMENT_BADGES = {
   blocked: { key: 'blocked', label: 'Fetch blocked', tone: 'bad', title: 'The site refused the description fetch; only the alert text was scored' },
   removed: { key: 'removed', label: 'Posting removed', tone: 'bad', title: 'The posting returned 404 or 410 when fetched' },
@@ -19,7 +19,7 @@ const ENRICHMENT_BADGES = {
 };
 
 export function roleLabel(roleType) {
-  return ROLE_LABELS[roleType] || String(roleType || 'unknown').replace(/_/g, ' ');
+  return ROLE_LABELS[roleType] || String(roleType || 'unknown').replace(/_/g, ' ').replace(/\b[a-z]/g, letter => letter.toUpperCase());
 }
 
 // "September 11, 2026" from a YYYY-MM-DD application date; falls back to the raw value.
@@ -101,7 +101,7 @@ export function cardView(job, tracks) {
     bestScore: Number(job.bestScore) || 0,
     scores,
     recommendedTrack,
-    recommendation: recommendedLabel ? `Apply with ${recommendedLabel} resume` : 'No resume recommended',
+    recommendation: recommendedLabel ? `Apply with ${recommendedLabel} Resume` : 'No Resume Recommended',
     badges: jobBadges(job),
     reasons: (job.reasons || []).map(String),
     gaps: (job.gaps || []).map(String),

@@ -16,6 +16,16 @@ test('parses Simplify HTML tables and carries repeated company names', async () 
   assert.equal(jobs[0].url, 'https://job-boards.greenhouse.io/acme/jobs/123');
 });
 
+test('joins a Simplify multi-location cell with the shared separator', () => {
+  const rows = [
+    '<tr><td><strong><a href="https://simplify.jobs/c/Fidelity">Fidelity</a></strong></td><td>Data Analyst Intern</td><td><details><summary><strong>3 locations</strong></summary>Boston, MA</br>Johnston, RI</br>Columbus, OH</details></td><td><a href="https://jobs.example.com/1?utm_source=Simplify">Apply</a></td><td>2d</td></tr>',
+    '<tr><td>↳</td><td>ML Intern</td><td>Chicago, IL<br>Remote in USA</td><td><a href="https://jobs.example.com/2">Apply</a></td><td>3d</td></tr>',
+    '<tr><td>↳</td><td>BI Intern</td><td>Boston, MA Johnston, RI</td><td><a href="https://jobs.example.com/3">Apply</a></td><td>4d</td></tr>',
+  ].join('');
+  const jobs = parseSimplifyRows(`<table><tbody>${rows}</tbody></table>`, 'fixture', 'internship');
+  assert.deepEqual(jobs.map(job => job.location), ['Boston, MA · Johnston, RI · Columbus, OH', 'Chicago, IL · Remote in USA', 'Boston, MA · Johnston, RI']);
+});
+
 test('normalizes month and week ages from public lists', () => {
   assert.equal(parseAgeDays('1mo'), 30);
   assert.equal(parseAgeDays('2w'), 14);

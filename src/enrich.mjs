@@ -1,4 +1,4 @@
-import { canonicalUrl, cleanText, isoDate } from './utils.mjs';
+import { LOCATION_SEPARATOR, normalizeLocation, canonicalUrl, cleanText, isoDate } from './utils.mjs';
 
 function meta(html, key) {
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -42,7 +42,7 @@ function locationFromPosting(posting) {
   return locations.filter(Boolean).map(item => {
     const address = item.address || item;
     return [address.addressLocality, address.addressRegion, address.addressCountry].filter(Boolean).join(', ');
-  }).filter(Boolean).join(' / ');
+  }).filter(Boolean).join(LOCATION_SEPARATOR);
 }
 
 function employmentTypeFromPosting(posting) {
@@ -113,7 +113,7 @@ function workdayPostedOn(text, now = new Date()) {
 
 function workdayLocation(info) {
   const extra = Array.isArray(info.additionalLocations) ? info.additionalLocations : [];
-  return [info.location, ...extra].map(item => cleanText(item || '')).filter(Boolean).join(' / ');
+  return normalizeLocation([info.location, ...extra].map(item => cleanText(item || '')).filter(Boolean));
 }
 
 async function fetchWorkdayPosting(cxsUrl, headers, timeoutMs, fetchImpl) {
@@ -204,7 +204,7 @@ export async function enrichJob(job, network = {}, fetchImpl = fetch) {
           ...originalJob,
           company: originalJob.company || payload.company_name || '',
           title: payload.title || originalJob.title,
-          location: payload.location?.name || originalJob.location,
+          location: normalizeLocation(payload.location?.name || '') || originalJob.location,
           description: cleanText(payload.content || originalJob.description),
           postedAt: isoDate(payload.updated_at) || originalJob.postedAt,
           freshnessBasis: payload.updated_at ? 'greenhouse_updated_at' : originalJob.freshnessBasis,

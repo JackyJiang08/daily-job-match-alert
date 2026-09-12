@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises';
-import { canonicalUrl, isoDate } from '../utils.mjs';
+import { canonicalUrl, isoDate, normalizeLocation } from '../utils.mjs';
 
 export function parseCareerOpsHistory(tsv, cutoff) {
   const jobs = [];
@@ -16,7 +16,7 @@ export function parseCareerOpsHistory(tsv, cutoff) {
       sourceKind: 'career_ops_scan',
       company: company || '',
       title,
-      location: location || '',
+      location: normalizeLocation(location || ''),
       url,
       roleType: null,
       postedAt: isoDate(postedAt),

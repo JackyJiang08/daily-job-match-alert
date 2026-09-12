@@ -45,7 +45,7 @@ async function addSecondEmail(root) {
 }
 
 function jobCards(html) {
-  return [...html.matchAll(/<a class="apply" href="([^"]+)">/g)].map(match => match[1]);
+  return [...html.matchAll(/<a class="apply"[^>]*href="([^"]+)">/g)].map(match => match[1]);
 }
 
 async function claudeCalls(logPath) {

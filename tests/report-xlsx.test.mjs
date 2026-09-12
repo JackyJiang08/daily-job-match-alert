@@ -63,7 +63,7 @@ test('writes and re-reads the ExcelJS workbook with one score column per enabled
       description: 'x'.repeat(40_000), url: 'https://www.example.com/jobs/42?utm=1', freshnessBasis: 'jobposting_date_posted',
     }, {
       source: 'fixture', roleType: 'internship', postedAt: '2026-08-27T16:00:00.000Z', discoveredAt: '2026-08-27T20:00:00.000Z',
-      company: 'Beta', title: 'Agent Intern', location: 'Remote - US', scores: { data: 60, llm: 85, agent: 91 }, bestScore: 91,
+      company: 'Beta', title: 'Agent Intern', location: 'Boston, MA · Johnston, RI · Columbus, OH', scores: { data: 60, llm: 85, agent: 91 }, bestScore: 91,
       recommendedTrack: 'agent', recommendedResume: 'AI Agent', matchLevel: 'high',
       scoringEngine: 'claude_subscription', scoringModel: 'claude-fable-5', reasons: ['Tool use', 'Evaluation loops'],
       gaps: ['Verify sponsorship'], blockers: [], description: 'Build agents.', url: 'https://jobs.beta.io/agent-intern', freshnessBasis: 'jobposting_date_posted',
@@ -79,6 +79,7 @@ test('writes and re-reads the ExcelJS workbook with one score column per enabled
     assert.equal(matches.actualColumnCount, 12);
     assert.equal(matches.getCell('A2').value, 'Acme');
     assert.equal(matches.getCell('D2').value, 'new_grad');
+    assert.equal(matches.getCell('C3').value, 'Boston, MA · Johnston, RI · Columbus, OH', 'the Location column prints the joined list verbatim');
     assert.deepEqual([matches.getCell('F2').value, matches.getCell('G2').value, matches.getCell('H2').value], [88, 74, 88]);
     assert.deepEqual([matches.getCell('F3').value, matches.getCell('G3').value, matches.getCell('H3').value], [60, 85, 91]);
     assert.equal(matches.getCell('I2').value.formula, 'CHOOSE(MATCH(MAX(F2:H2),F2:H2,0),"Data","LLM","AI Agent")');

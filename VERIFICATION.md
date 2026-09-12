@@ -36,7 +36,7 @@ Record the date and commit next to each item when it passes.
   no banner; the toolbar sorts, filters by role type and recommended resume, and searches
   company or title (it is rendered in its quiet style because the demo has fewer than five
   matches); each card shows the score ring, `company · location · role type`, one line of
-  per-track scores with an `Apply with <label> resume` tag, and the folded JD; **Run details**
+  per-track scores with an `Apply with <label> Resume` tag, and the folded JD; **Run Details**
   at the bottom is collapsed and lists the tracks, scoring model, and status; switching the
   OS to dark mode restyles the page without a reload.
 
@@ -65,7 +65,7 @@ Record the date and commit next to each item when it passes.
   npm run run
   ```
   Expected: `~/Desktop/Daily Job Match Alert/<application date>/` contains the HTML and xlsx;
-  the xlsx Run Summary `Scoring model` row and the HTML **Run details** show a `claude-fable-*` model;
+  the xlsx Run Summary `Scoring model` row and the HTML **Run Details** show a `claude-fable-*` model;
   no `MODEL MISMATCH` warning; no `XLSX-FAILED.txt`.
 
 - [ ] **launchd reinstalled and the next scheduled run succeeded** (owner)

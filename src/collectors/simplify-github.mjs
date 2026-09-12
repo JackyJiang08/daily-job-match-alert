@@ -1,4 +1,4 @@
-import { canonicalUrl, cleanText } from '../utils.mjs';
+import { canonicalUrl, cleanText, locationsFromHtmlCell } from '../utils.mjs';
 import { createWarning } from '../warnings.mjs';
 
 function firstHref(html) {
@@ -27,7 +27,7 @@ function parseRows(markdown, source, defaultRoleType) {
     if (companyCell && companyCell !== '↳') currentCompany = companyCell.replace(/[🔥🛂🇺🇸🎓🔒]/gu, '').trim();
     const company = companyCell === '↳' ? currentCompany : currentCompany;
     const title = cleanText(cells[1]).replace(/[🔥🛂🇺🇸🎓🔒]/gu, '').trim();
-    const location = cleanText(cells[2]);
+    const location = locationsFromHtmlCell(cells[2]);
     const url = canonicalUrl(firstHref(cells[3]));
     const ageText = cleanText(cells[4]);
     const ageDays = parseAgeDays(ageText);

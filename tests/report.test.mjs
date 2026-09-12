@@ -25,8 +25,10 @@ test('HTML output escapes remote content, links the posting, and keeps the JD fo
   assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.match(html, /data-search="a &quot;quoted&quot; co &lt;script&gt;alert\(1\)&lt;\/script&gt;"/);
-  assert.match(html, /<a class="apply" href="https:\/\/example\.com\/jobs\/1">Open posting<\/a>/);
-  assert.match(html, /<details class="jd"><summary>Full captured JD<\/summary>/);
+  assert.match(html, /<a class="apply" target="_blank" rel="noopener noreferrer" href="https:\/\/example\.com\/jobs\/1">Open Posting<\/a>/);
+  assert.match(html, /<h2 class="job-title"><a target="_blank" rel="noopener noreferrer" href="https:\/\/example\.com\/jobs\/1">/);
+  assert.equal((html.match(/<a /g) || []).length, (html.match(/<a (?:class="apply" )?target="_blank" rel="noopener noreferrer" href=/g) || []).length, 'every link opens in a new tab');
+  assert.match(html, /<details class="jd"><summary>Full Captured JD<\/summary>/);
   assert.doesNotMatch(html, /Pipeline warnings/);
   assert.doesNotMatch(html, /<link |src="http|https:\/\/cdn/);
 });
@@ -60,7 +62,7 @@ test('run metadata lives only in the collapsed Run details block, including the 
     resumeSync: { recovered: ['data'] },
     warnings: [{ stage: 'collector', source: 'Job board', message: 'network unavailable' }, { stage: 'llm', source: 'claude_subscription', message: 'batch fallback' }],
   });
-  const details = html.match(/<details class="run" id="run-details"><summary>Run details<\/summary>([\s\S]*?)<\/details>/)[1];
+  const details = html.match(/<details class="run" id="run-details"><summary>Run Details<\/summary>([\s\S]*?)<\/details>/)[1];
   assert.ok(details, 'Run details block is missing');
   assert.doesNotMatch(html, /<details class="run"[^>]*\bopen\b/, 'Run details must be collapsed by default');
   assert.match(details, /<dt>Application date<\/dt><dd>August 27, 2026 \(run on August 26, 2026\)<\/dd>/);
@@ -94,16 +96,19 @@ test('cards carry the ring score, compact track scores, the recommendation, and 
   const html = buildHtml([threeTrack], { ...meta, resumeTracks: tracks });
   assert.match(html, /<article class="job" data-score="87" data-company="acme, inc\." data-posted="\d+" data-role="new_grad" data-track="llm" data-search="acme, inc\. data &amp; ai analyst">/);
   assert.match(html, /<div class="ring" style="--score:87" role="img" aria-label="Best score 87"><b>87<\/b><\/div>/);
-  assert.match(html, /<h2 class="job-title"><a href="https:\/\/example\.com\/jobs\/1">Data &amp; AI Analyst<\/a><\/h2>/);
-  assert.match(html, /<p class="job-meta">Acme, Inc\. · Remote · New grad<\/p>/);
-  assert.match(html, /<div class="scores"><span class="track" data-track="data">Data <b>74<\/b><\/span><span class="sep">·<\/span><span class="track best" data-track="llm">LLM <b>87<\/b><\/span><span class="sep">·<\/span><span class="track" data-track="agent">AI Agent <b>85<\/b><\/span><span class="recommend">Apply with LLM resume<\/span><\/div>/);
-  assert.match(html, /<div class="facts-label">Why it matches<\/div><ul class="facts reasons"><li>one<\/li><li>two<\/li><\/ul><details class="more"><summary>2 more<\/summary><ul class="facts reasons"><li>three<\/li><li>four<\/li><\/ul><\/details>/);
-  assert.match(html, /<div class="facts-label">Gaps \/ verify<\/div><ul class="facts gaps"><li>a<\/li><li>b<\/li><\/ul><details class="more"><summary>1 more<\/summary>/);
+  assert.match(html, /<h2 class="job-title"><a target="_blank" rel="noopener noreferrer" href="https:\/\/example\.com\/jobs\/1">Data &amp; AI Analyst<\/a><\/h2>/);
+  assert.match(html, /<p class="job-meta">Acme, Inc\. · Remote · New Grad<\/p>/);
+  assert.match(html, /<div class="scores"><span class="track" data-track="data">Data <b>74<\/b><\/span><span class="sep">·<\/span><span class="track best" data-track="llm">LLM <b>87<\/b><\/span><span class="sep">·<\/span><span class="track" data-track="agent">AI Agent <b>85<\/b><\/span><span class="recommend">Apply with LLM Resume<\/span><\/div>/);
+  assert.match(html, /<div class="facts-label">Why It Matches<\/div><ul class="facts reasons"><li>one<\/li><li>two<\/li><\/ul><details class="more"><summary>2 more<\/summary><ul class="facts reasons"><li>three<\/li><li>four<\/li><\/ul><\/details>/);
+  assert.match(html, /<div class="facts-label">Gaps \/ Verify<\/div><ul class="facts gaps"><li>a<\/li><li>b<\/li><\/ul><details class="more"><summary>1 more<\/summary>/);
   assert.match(html, /<span class="meta">Posted 2026-08-27 · fixture<\/span>/);
-  assert.doesNotMatch(html, /Match level:|Use LLM/);
+  assert.doesNotMatch(html, /Match level:|Use LLM|Apply with LLM resume/);
+
+  const multi = buildHtml([{ ...job, location: 'Boston, MA · Johnston, RI · Columbus, OH' }], meta);
+  assert.match(multi, /<p class="job-meta">Acme, Inc\. · Boston, MA · Johnston, RI · Columbus, OH · New Grad<\/p>/);
 
   const single = buildHtml([{ ...job, scores: { data: 82 } }], { ...meta, resumeTracks: [{ id: 'data', label: 'Data' }] });
-  assert.match(single, /<div class="scores"><span class="track best" data-track="data">Data <b>82<\/b><\/span><span class="recommend">Apply with Data resume<\/span><\/div>/);
+  assert.match(single, /<div class="scores"><span class="track best" data-track="data">Data <b>82<\/b><\/span><span class="recommend">Apply with Data Resume<\/span><\/div>/);
 
   const legacy = buildHtml([{ ...job, scores: undefined, dataScore: 82, aiScore: 74 }], meta);
   assert.match(legacy, /<span class="track best" data-track="data">Data <b>82<\/b><\/span><span class="sep">·<\/span><span class="track" data-track="ai">AI <b>74<\/b><\/span>/);
@@ -115,9 +120,10 @@ test('the toolbar offers sort, role and resume filters, and search, and turns qu
   const html = buildHtml(many, { ...meta, resumeTracks: tracks });
   assert.match(html, /<form class="toolbar" id="toolbar" autocomplete="off">/);
   assert.match(html, /<input type="search" id="q" placeholder="Search company or title"/);
-  assert.match(html, /<select id="sort" aria-label="Sort by"><option value="score" selected>Sort: best score<\/option><option value="company">Sort: company<\/option><option value="posted">Sort: posted time<\/option><\/select>/);
-  assert.match(html, /<select id="role" aria-label="Role type"><option value="">All role types<\/option><option value="new_grad">New grad<\/option><option value="internship">Internship<\/option><\/select>/);
-  assert.match(html, /<select id="track" aria-label="Recommended resume"><option value="">All resumes<\/option><option value="data">Data resume<\/option><option value="llm">LLM resume<\/option><\/select>/);
+  assert.match(html, /<label class="control"><span>Sort by<\/span><select id="sort"><option value="score" selected>Best Score<\/option><option value="company">Company<\/option><option value="posted">Posted Time<\/option><\/select><\/label>/);
+  assert.match(html, /<select id="role" aria-label="Role type"><option value="">All Role Types<\/option><option value="new_grad">New Grad<\/option><option value="internship">Internship<\/option><\/select>/);
+  assert.match(html, /<label class="control"><span>Resume<\/span><select id="track"><option value="">All Resumes<\/option><option value="data">Data<\/option><option value="llm">LLM<\/option><\/select><\/label>/);
+  assert.doesNotMatch(html, /Sort: |Data resume<\/option>|All role types|All resumes/);
   assert.match(html, /<span class="count" id="count">5 shown<\/span>/);
   assert.match(html, /<div class="empty" id="no-results" hidden>/);
   assert.match(html, /<script>[\s\S]*getElementById\('jobs'\)[\s\S]*localeCompare[\s\S]*<\/script>/);
