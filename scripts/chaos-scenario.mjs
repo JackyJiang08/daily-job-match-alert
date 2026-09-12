@@ -170,6 +170,11 @@ async function assertDesktopArtifacts(config, run) {
   return { html, xlsxPath: (await exists(xlsxPath)) ? xlsxPath : null, warnings };
 }
 
+async function readWarningsFile(config, run) {
+  const file = path.join(config.outputDirectory, run.summary.meta.date, 'warnings.txt');
+  return (await exists(file)) ? fs.readFile(file, 'utf8') : null;
+}
+
 async function readMatches(xlsxPath) {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(xlsxPath);
@@ -193,6 +198,8 @@ const scenarios = {
     const artifacts = await assertDesktopArtifacts(config, run);
     assert.equal(run.exitCode, 0, `baseline exited ${run.exitCode}`);
     assert.deepEqual(artifacts.warnings, [], `baseline produced warnings: ${warningLines(artifacts.warnings).join(' | ')}`);
+    assert.equal(await readWarningsFile(config, run), null, 'a warning-free run must not write warnings.txt');
+    assert.match(artifacts.html, /<p class="sub">August 27, 2026 · \d+ match/);
     assert.ok(run.summary.meta.matchCount >= 1, 'baseline produced no matches');
     assert.ok(artifacts.xlsxPath, 'baseline did not write the xlsx');
     const { sheet, headers } = await readMatches(artifacts.xlsxPath);
@@ -222,9 +229,14 @@ const scenarios = {
       artifacts.warnings.some(warning => warning.stage === 'enrichment'),
       `no enrichment warning for the unreachable posting: ${warningLines(artifacts.warnings).join(' | ')}`,
     );
-    assert.match(artifacts.html, /Pipeline warnings/);
-    assert.match(artifacts.html, /SimplifyJobs Summer Internships/);
-    return `${failedSources.length} collector failure(s) + enrichment failure disclosed, HTML still written`;
+    assert.doesNotMatch(artifacts.html, /Pipeline warnings/);
+    assert.match(artifacts.html, /\d+ pipeline warning\(s\), see warnings\.txt beside this file/);
+    const warningsText = await readWarningsFile(config, run);
+    assert.ok(warningsText, 'warnings.txt is missing although the run produced warnings');
+    assert.match(warningsText, /^Daily Job Match Alert — 2026-08-27 — \d+ warnings?\n/);
+    assert.match(warningsText, /^\[collector \/ SimplifyJobs Summer Internships\] /m);
+    assert.equal(warningsText.trim().split('\n').length - 1, artifacts.warnings.length, 'warnings.txt must carry one line per warning');
+    return `${failedSources.length} collector failure(s) + enrichment failure disclosed in warnings.txt, HTML still written`;
   },
 
   async 'llm-down'() {
@@ -248,11 +260,11 @@ const scenarios = {
       artifacts.warnings.some(warning => warning.stage === 'llm' && /local fallback/.test(warning.message)),
       `no llm fallback warning: ${warningLines(artifacts.warnings).join(' | ')}`,
     );
-    const cards = (artifacts.html.match(/<article class="job">/g) || []).length;
-    const unreviewed = (artifacts.html.match(/Match level: unreviewed/g) || []).length;
+    const cards = (artifacts.html.match(/<article class="job"/g) || []).length;
+    const unreviewed = (artifacts.html.match(/data-badge="unreviewed"/g) || []).length;
     assert.equal(cards, run.summary.meta.matchCount);
-    assert.equal(unreviewed, cards, `${cards} job card(s) but only ${unreviewed} labeled unreviewed`);
-    assert.doesNotMatch(artifacts.html, /Match level: high/);
+    assert.equal(unreviewed, cards, `${cards} job card(s) but only ${unreviewed} carry the unreviewed badge`);
+    assert.match(artifacts.html, /kept local scores because semantic review was unavailable/);
     assert.equal(run.summary.meta.scoringModel, 'none');
     if (artifacts.xlsxPath) {
       const { sheet } = await readMatches(artifacts.xlsxPath);
@@ -275,7 +287,8 @@ const scenarios = {
     const skipped = artifacts.warnings.filter(warning => warning.source === 'Email files' && /Skipped corrupted\.eml/.test(warning.message));
     assert.equal(skipped.length, 1, `expected one skip warning for corrupted.eml: ${warningLines(artifacts.warnings).join(' | ')}`);
     assert.ok(run.summary.meta.matchCount >= 1, 'the well-formed email next to the corrupted one did not survive');
-    assert.match(artifacts.html, /Skipped corrupted\.eml/);
+    assert.doesNotMatch(artifacts.html, /Skipped corrupted\.eml/);
+    assert.match(await readWarningsFile(config, run) || '', /^\[collector \/ Email files\] .*Skipped corrupted\.eml/m);
     return `corrupted.eml skipped with warning, ${run.summary.meta.matchCount} match(es) from the healthy email`;
   },
   async 'xlsx-recovery'() {

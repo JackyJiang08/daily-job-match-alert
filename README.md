@@ -2,7 +2,7 @@
 
 # Daily Job Match Alert
 
-**Subscription-only AI job discovery for Data, LLM, and AI-agent candidates.**
+**A nightly local pipeline that turns fresh job postings into two files per day, an HTML shortlist and an XLSX workbook, with every posting scored against each of the N resume tracks you configure.**
 
 Collect fresh roles from public ATS boards and curated GitHub lists; compare every relevant JD against every resume track you enable (one, two, or N private resumes); wake up to a ranked local report even when a source, the model, or an input file fails overnight.
 
@@ -26,7 +26,7 @@ Daily Job Match Alert provides:
 - Exact `postedAt` versus first-seen `discoveredAt` semantics.
 - Cross-source URL canonicalization and persistent deduplication.
 - Degrade-don't-die operation: failed collectors, unreachable postings, an unavailable model, or a corrupted input file become report warnings instead of a missing nightly report. `npm run chaos` proves this on every CI run.
-- Exactly two user-facing files per successful application date: an HTML report with the complete captured JD and a compact XLSX (one score column per enabled track) with clickable posting links.
+- Exactly two user-facing files per successful application date: a self-contained HTML shortlist (sortable, filterable, offline) with the complete captured JD, and a compact XLSX (one score column per enabled track) with clickable posting links. A `warnings.txt` appears beside them only when the run had something to disclose.
 - Hard safety boundaries: no auto-apply, no screening answers, no mailbox mutation.
 
 ## Architecture
@@ -85,13 +85,13 @@ The default engine is `claude_subscription`. Choose the Claude.ai subscription f
 
 `semanticMatching.model` is passed to `claude --model`. Use one of the Claude Code aliases—`fable`, `opus`, or `sonnet`, each resolving to the latest model in that family—or a full model name such as `claude-fable-5`. The example configuration pins `fable`.
 
-Every batch response from `claude --print --output-format json` is parsed for the model that actually produced the scores (`modelUsage`, keyed by model id; the entry with the most output tokens is the scoring model). That value is recorded as `scoringModel` on each reviewed job, summarized as `meta.scoringModel`, and shown in the HTML header and the XLSX Run Summary as **Scoring model**. If the output does not identify a model, `scoringModel` is `unknown` and a warning is raised. If a configured model does not match the reported model after alias expansion (for example `fable` configured but `claude-sonnet-5` reported), the scores are still used for that run, but a `MODEL MISMATCH` warning appears in the HTML warning panel and the Run Summary so the configuration can be fixed. Runs without any semantic review show `local_only` or `none`.
+Every batch response from `claude --print --output-format json` is parsed for the model that actually produced the scores (`modelUsage`, keyed by model id; the entry with the most output tokens is the scoring model). That value is recorded as `scoringModel` on each reviewed job, summarized as `meta.scoringModel`, and shown under **Run details** at the bottom of the HTML and in the XLSX Run Summary as **Scoring model**. If the output does not identify a model, `scoringModel` is `unknown` and a warning is raised. If a configured model does not match the reported model after alias expansion (for example `fable` configured but `claude-sonnet-5` reported), the scores are still used for that run, but a `MODEL MISMATCH` warning is written to `warnings.txt` and counted in the Run Summary so the configuration can be fixed. Runs without any semantic review show `local_only` or `none`.
 
 ## Deterministic eligibility filter
 
 Two constraints are facts, not judgment calls, so they are enforced in code (`src/eligibility.mjs`) inside `isEligible` for every posting, whether it was scored by the subscription model, kept as a local fallback, or run with `engine: local_only`:
 
-- **Location.** A location naming a non-US country, region, or city (`Canada`, `Remote – UK`, `Bengaluru, India`, `Remote - Europe`, …; the list `NON_US_LOCATION_MARKERS` is meant to be extended) excludes the posting. Any US marker (`United States`, `USA`, `US`, a state name, a `, ST` code, or a well-known US city) passes, and it wins over a non-US marker in the same string so multi-location postings reach the semantic review. A location that only says `Remote`, or is empty, passes but carries the gap **Location unverified — confirm US eligibility**, a yellow `Location unverified` chip on the HTML card, and the same text in the XLSX Gaps column.
+- **Location.** A location naming a non-US country, region, or city (`Canada`, `Remote – UK`, `Bengaluru, India`, `Remote - Europe`, …; the list `NON_US_LOCATION_MARKERS` is meant to be extended) excludes the posting. Any US marker (`United States`, `USA`, `US`, a state name, a `, ST` code, or a well-known US city) passes, and it wins over a non-US marker in the same string so multi-location postings reach the semantic review. A location that only says `Remote`, or is empty, passes but carries the gap **Location unverified — confirm US eligibility**, a `Location unverified` badge on the HTML card, and the same text in the XLSX Gaps column.
 - **Graduation window.** `preferences.graduationDate` (`2027-05` in the example) drives a short list of rules, each documented in `GRADUATION_EXCLUSION_RULES`: `Class of 2026`, `graduating by/before/no later than <date before the graduation month>`, `graduation date between … and <earlier date>`, and `must be able to start/work full-time <before the month after graduation>` (skipped for internships). A rule only fires when every date it finds is too early; `Class of 2026 or 2027`, `by 2027`, `December 2026 or later`, and single-date phrases without a bound are left to the semantic review. When `graduationDate` is missing, the rule set is disabled and a warning says so.
 
 Excluded postings are counted, not listed one by one: a single `eligibility / hard filter` warning carries the totals and up to five examples, and both the HTML header and the XLSX Run Summary show **Excluded: location outside US** and **Excluded: graduation window**. Excluded postings are still marked as seen.
@@ -113,9 +113,9 @@ Resumes are configured as an ordered list of tracks:
 ```
 
 - `id` is the internal key: it names the extracted profile (`resumes/<id>.md`, override with `profile`), the per-track `scores.<id>` field in the semantic response, and the hash entry in `state/resume-sources.json`. Letters, digits, `_`, and `-` are allowed.
-- `label` is what the reports show: the `<label> Score` column in the XLSX, the chips on each HTML card, and the **Recommended Resume** value. It defaults to the capitalized id.
+- `label` is what the reports show: the `<label> Score` column in the XLSX, the score row on each HTML card (`Data 74 · LLM 87 · AI Agent 85`), the **Apply with <label> resume** tag, and the **Recommended Resume** value. It defaults to the capitalized id.
 - `enabled: false` removes a track from extraction, scoring, the subscription prompt, and both reports; nothing is read from its PDF or profile. Any number of enabled tracks from one upward works. No enabled track at all is a fatal configuration error, the same path as a missing resume.
-- Order matters: score columns and chips follow the list order, and a tie in the best score goes to the earlier track.
+- Order matters: score columns and the card score row follow the list order, and a tie in the best score goes to the earlier track.
 - Local (pre-review) scoring uses built-in keyword profiles for the ids `data`, `ai`, `llm`, and `agent`; any other id is triaged against the union of those profiles, and the subscription review supplies the real per-track judgment.
 
 The pre-track layout (`resumes: { data, ai }` plus `resumeSources`) is still read: it is migrated in memory to two tracks named Data and AI, and a one-line notice on stderr asks you to move to `resumes.tracks`.
@@ -124,7 +124,7 @@ The pre-track layout (`resumes: { data, ai }` plus `resumeSources`) is still rea
 
 `resumes.autoRefresh` makes resume updates non-fixed. Before every run, the project hashes the PDF of every enabled track and refreshes the gitignored `resumes/<id>.md` whenever that PDF changes. Replacing a PDF at the same path requires no configuration change; if its filename or folder changes, update only your private `config.json`.
 
-If a PDF lives on an iCloud-synced Desktop or Documents folder, macOS may evict the local copy and leave a cloud-only placeholder; the nightly run detects that (errno -11, `EAGAIN`, or an empty read of a non-empty file), asks iCloud to download the file with `brctl download`, and retries for up to a minute before giving up with a plain-language error. A successful recovery is disclosed as an info notice in the report warnings panel and in `meta.resumeSync.recovered`.
+If a PDF lives on an iCloud-synced Desktop or Documents folder, macOS may evict the local copy and leave a cloud-only placeholder; the nightly run detects that (errno -11, `EAGAIN`, or an empty read of a non-empty file), asks iCloud to download the file with `brctl download`, and retries for up to a minute before giving up with a plain-language error. A successful recovery is disclosed as an info line in `warnings.txt`, under **Run details** in the HTML, and in `meta.resumeSync.recovered`.
 
 Real PDFs, extracted resume text, `config.json`, state, email, logs, and generated reports are excluded from Git. The public repository contains examples and extraction code only.
 
@@ -153,15 +153,15 @@ A nightly run is designed to finish with a report on the Desktop even when parts
 | A posting is outside the US or the graduation window | Excluded deterministically, counted in the Run Summary | Warning `eligibility / hard filter` with totals |
 | A malformed or oversized `.eml` | Only that file is skipped; sibling files still yield jobs | Warning `collector / Email files` |
 | A resume PDF sits in an iCloud-synced folder and "Optimize Mac Storage" evicted the local copy (read fails with errno -11 / EAGAIN, or returns no bytes) | `brctl download <pdf>` is issued and the read is retried every 2 s for up to 60 s; the run then continues normally | Info notice `resume / <label> resume` saying the resume was recovered from iCloud. If the download does not finish in time the run fails fatally with a message that names the file and tells you to download it in Finder or move it out of iCloud. Off macOS, or without `brctl`, the original read error is reported unchanged |
-| Subscription CLI missing, wrong version, API-key auth, or a batch fails twice (10 s retry) | Affected jobs keep their local scores and are labeled `unreviewed` | Warning `llm / <engine>`; `[unreviewed]` prefix in the XLSX, orange `Match level: unreviewed` chip in the HTML |
+| Subscription CLI missing, wrong version, API-key auth, or a batch fails twice (10 s retry) | Affected jobs keep their local scores and are labeled `unreviewed` | Warning `llm / <engine>`; `[unreviewed]` prefix in the XLSX, `Unreviewed` badge on the HTML card |
 | The model omits job ids | One supplemental review; anything still missing becomes `unreviewed` | Warning `llm / <engine>` |
 | Reported model differs from `semanticMatching.model` | Scores kept for the run | `MODEL MISMATCH` warning |
 | XLSX generation fails | HTML report and seen-state are kept, `XLSX-FAILED.txt` is written beside the HTML, the day's payload stays incomplete in `state/report-payload-<date>.json`, `lastSuccessfulRun` is not updated, the process exits 1 | Warning `report / XLSX`, marker file |
 | A run starts while an earlier day's payload is incomplete | That day's HTML and XLSX are rebuilt from the payload first (no collection, no scoring), the marker is removed, `lastSuccessfulRun` is recorded | Warning `report / report payload` |
-| The same application date is run again | The run merges into the stored day payload and re-renders the whole report; zero new postings reproduce the earlier report as update #N | Footer `Daily update #N`, Run Summary `Update today` |
+| The same application date is run again | The run merges into the stored day payload and re-renders the whole report; zero new postings reproduce the earlier report as update #N | HTML **Run details** `Daily update #N`, Run Summary `Update today` |
 | Fatal error before any report | `ERROR-<run date>.html` is written directly under the output directory and a macOS notification is attempted | The error page itself |
 
-Warnings appear in the HTML "Pipeline warnings" panel and in the XLSX Run Summary. `unreviewed` jobs are included in the report only when they clear the local score threshold, so a model outage yields a locally ranked list rather than an empty page.
+Warnings are written to `warnings.txt` in the day's folder (one `[stage / source] message` line each, with a header naming the date and the count; the file is absent when there are none). The HTML **Run details** block and the XLSX Run Summary show only the count and point at the file. `unreviewed` jobs are included in the report only when they clear the local score threshold, so a model outage yields a locally ranked list rather than an empty page.
 
 `npm run chaos` (`scripts/chaos-check.sh`) exercises four of these paths with isolated temporary configs, state, and output directories—baseline, all collectors offline, subscription CLI unavailable, and a corrupted `.eml`—and asserts that each still produces the dated folder with an HTML report. It never writes to the Desktop or to the real `state/`, and it never calls the subscription CLI.
 
@@ -189,7 +189,7 @@ chmod +x scripts/run-launchd.sh scripts/install-launchd.sh
 ./scripts/install-launchd.sh 20 0
 ```
 
-`install-launchd.sh` renders `launchd/com.dailyjobmatchalert.daily.plist.template` into `~/Library/LaunchAgents`, reloads it, and enables it. Pass the hour and minute explicitly (the script's own fallback is 06:30); 20:00 America/Chicago is the recommended slot so the report is ready before the next application day. Reinstalling replaces any older agent definition.
+`install-launchd.sh` renders `launchd/com.dailyjobmatchalert.daily.plist.template` into `~/Library/LaunchAgents`, reloads it, and enables it. The hour and minute are optional and default to 20:00, the recommended slot in America/Chicago so the report is ready before the next application day. The script is zsh-only; running it with `bash` prints a message asking for zsh instead of failing on a variable expansion. Reinstalling replaces any older agent definition.
 
 How an unattended day works:
 
@@ -198,7 +198,7 @@ How an unattended day works:
 - **Lock.** `state/.lock` holds the owner PID. A second start while the owner is alive exits cleanly; a stale lock from a dead PID is removed automatically.
 - **Workday.** Career sites on `*.myworkdayjobs.com` render job pages in the browser, so the HTML fetch never contains the description. Those postings are read through the tenant's public JSON endpoint (`/wday/cxs/...`) instead and are labeled `workday_cxs`; if that call fails, the ordinary HTML path runs unchanged.
 - **State.** `state/state.json` remembers every canonical URL (original and redirect target) so the same posting is never reported twice; entries older than 90 days since their last attempt are pruned each run. `lastSuccessfulRun` is written only after both the HTML and the XLSX exist on disk, so a run whose workbook failed stays eligible for catch-up.
-- **Day payload.** `state/report-payload-<date>.json` accumulates everything reported for one application date. Each run merges its newly reviewed postings into it by resolved URL (a semantically reviewed copy beats a local one, a longer description beats a shorter one, otherwise the newer copy wins), writes the file before marking postings as seen, renders HTML and XLSX from the merged whole, and flips `complete` to true once both exist. A rerun with nothing new therefore reproduces the earlier report—footer `Daily update #N`, Run Summary `Update today` / `Last updated at`—instead of overwriting it with an empty page. Incomplete files from earlier dates are rebuilt at the start of the next run; files older than 90 days are pruned with the seen state.
+- **Day payload.** `state/report-payload-<date>.json` accumulates everything reported for one application date. Each run merges its newly reviewed postings into it by resolved URL (a semantically reviewed copy beats a local one, a longer description beats a shorter one, otherwise the newer copy wins), writes the file before marking postings as seen, renders HTML and XLSX from the merged whole, and flips `complete` to true once both exist. A rerun with nothing new therefore reproduces the earlier report—HTML **Run details** `Daily update #N`, Run Summary `Update today` / `Last updated at`—instead of overwriting it with an empty page. Incomplete files from earlier dates are rebuilt at the start of the next run; files older than 90 days are pruned with the seen state.
 - **Logs.** `state/logs/daily-YYYY-MM-DD.log`, newest 30 files kept. If the log directory cannot be prepared, output falls back to `/tmp/daily-job-match-alert-<date>.log`.
 - **Fatal errors.** `ERROR-YYYY-MM-DD.html` under the output directory plus a best-effort macOS notification; the catch-up path retries later.
 
@@ -208,10 +208,13 @@ Each successful evening run writes the **next application date** as a folder. Fo
 
 - `Daily Job Match Alert - 2026-08-28.html`
 - `Daily Job Match Alert - 2026-08-28.xlsx`
+- `warnings.txt`, only when the run had warnings
 
 No `latest.html`, CSV, JSON, inspection sidecar, or verification directory remains in the Desktop output.
 
-The XLSX `Matches` sheet has five fixed columns (Company, Title, Location, Role Type, Posted At), then one `<label> Score` column per enabled resume track in configured order, then Recommended Resume, Why It Matches, Gaps / Verify, and Posting Link. With the three example tracks that is 12 columns; with a single track, 10. The link cell shows the posting domain and opens the full URL; all score columns share one three-color scale, and Recommended Resume is a formula that picks the label of the highest score (ties go to the earlier track). Rows that kept a local score because semantic review was unavailable start their **Why It Matches** text with `[unreviewed]`. The `Run Summary` sheet lists counts, the enabled resume tracks, the scoring model, and every warning; the `Notes` sheet explains each field. The HTML report keeps everything the sheet omits: the full captured JD in a collapsible section, salary, employment type, source, discovery time, and freshness basis.
+The XLSX `Matches` sheet has five fixed columns (Company, Title, Location, Role Type, Posted At), then one `<label> Score` column per enabled resume track in configured order, then Recommended Resume, Why It Matches, Gaps / Verify, and Posting Link. With the three example tracks that is 12 columns; with a single track, 10. The link cell shows the posting domain and opens the full URL; all score columns share one three-color scale, and Recommended Resume is a formula that picks the label of the highest score (ties go to the earlier track). Rows that kept a local score because semantic review was unavailable start their **Why It Matches** text with `[unreviewed]`. The `Run Summary` sheet lists counts, the enabled resume tracks, the scoring model, and the warning count with a pointer to `warnings.txt`; the `Notes` sheet explains each field.
+
+The HTML report is built for a quick morning decision. The header is two lines: the title, then the readable date and match count. A toolbar (plain inline JavaScript, no external resources, works offline) sorts by best score, company, or posted time, filters by role type and recommended resume, and searches company or title. Each card shows a score ring for the best score, the title, `company · location · role type`, one compact line of per-track scores with an **Apply with <label> resume** tag, small badges for semantic markers (`Unreviewed`, `Location unverified`, `Fetch blocked`, `Posting removed`, `Login wall`, `Email only`), the first two match reasons and gaps with the rest behind a disclosure, the full captured JD folded, and the posting link. Run metadata (lookback window, scoring model, resume tracks, hard-filter counts and the excluded postings, update number and last update time, status notes) sits in a collapsed **Run details** block at the bottom. The page respects `prefers-color-scheme` for dark mode and collapses to a single column on phones; the tokens, stylesheet, and script live in `src/report-theme.mjs`, the components in `src/report-components.mjs`, and `src/report.mjs` only assembles data.
 
 - `postedAt` is populated only from employer or structured posting evidence.
 - `discoveredAt` records when Daily Job Match Alert first encountered the canonical URL.

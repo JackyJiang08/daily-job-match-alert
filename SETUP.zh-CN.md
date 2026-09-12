@@ -14,16 +14,19 @@
 ```text
 ~/Desktop/Daily Job Match Alert/2026-08-28/
 ├── Daily Job Match Alert - 2026-08-28.html
-└── Daily Job Match Alert - 2026-08-28.xlsx
+├── Daily Job Match Alert - 2026-08-28.xlsx
+└── warnings.txt            # 仅当本次运行有 warning 时生成
 ```
 
 桌面日报目录不保留 `latest.html`、CSV、JSON、检查文件或验证图片。JSON 只在系统临时目录中用于构建 XLSX，完成后自动删除。
 
-XLSX 的 `Matches` 表列数随启用的简历轨道数变化：前 5 列固定为 Company、Title、Location、Role Type、Posted At，接着每个启用轨道一列 `<label> Score`（按配置顺序），然后是 Recommended Resume、Why It Matches、Gaps / Verify、Posting Link。示例配置的三条轨道（Data、LLM、AI Agent）共 12 列，单轨道为 10 列。Posting Link 显示域名、点击打开完整 URL；所有分数列共用一个三色色阶；Recommended Resume 是公式，取分数最高轨道的 label，并列时取靠前的轨道。因语义评审不可用而保留本地分数的岗位，会在 Why It Matches 开头标注 `[unreviewed]`。完整 JD、薪资、雇佣类型、来源、发现时间和 freshness 依据只保留在 HTML 报告中。`Run Summary` 表列出计数、Resume tracks（启用轨道列表）、Scoring model 和全部 warning，`Notes` 表解释各字段。
+XLSX 的 `Matches` 表列数随启用的简历轨道数变化：前 5 列固定为 Company、Title、Location、Role Type、Posted At，接着每个启用轨道一列 `<label> Score`（按配置顺序），然后是 Recommended Resume、Why It Matches、Gaps / Verify、Posting Link。示例配置的三条轨道（Data、LLM、AI Agent）共 12 列，单轨道为 10 列。Posting Link 显示域名、点击打开完整 URL；所有分数列共用一个三色色阶；Recommended Resume 是公式，取分数最高轨道的 label，并列时取靠前的轨道。因语义评审不可用而保留本地分数的岗位，会在 Why It Matches 开头标注 `[unreviewed]`。完整 JD、薪资、雇佣类型、来源、发现时间和 freshness 依据只保留在 HTML 报告中。`Run Summary` 表列出计数、Resume tracks（启用轨道列表）、Scoring model 和 warning 条数（并注明 see warnings.txt），不再逐条列出；`Notes` 表解释各字段。
+
+HTML 报告面向"早上打开就能做决定"：页眉只有两行（标题；可读日期 + 匹配数，如 `September 11, 2026 · 9 matches`）。顶部工具栏为纯内联 JS、无外部依赖、离线可用，支持按 best score / 公司 / 发布时间排序，按 role type 与推荐轨道筛选，以及按公司或标题搜索。每张卡片：左侧色环显示 best score，标题一行，第二行 `公司 · 地点 · role type`，下方一行紧凑的逐轨分数（`Data 74 · LLM 87 · AI Agent 85`）加醒目的 `Apply with LLM resume` 标签；`Unreviewed`、`Location unverified`、`Fetch blocked`、`Posting removed`、`Login wall`、`Email only` 等语义标记以统一样式的小徽标显示；理由与 gaps 各默认显示前两条、其余点击展开；JD 折叠；投递按钮。回看窗口、评分模型、启用轨道、硬过滤排除计数与被排除岗位清单、本日运行次数与最近更新时间、状态提示等运行元数据全部收进页面底部默认折叠的 **Run details**。Pipeline warnings 不再出现在 HTML 中，而是写入同目录的 `warnings.txt`（每行一条 `[stage / source] message`，首行注明日期与条数，零 warning 时不生成）。页面支持 `prefers-color-scheme` 深色模式与移动端单列；样式令牌与脚本在 `src/report-theme.mjs`，组件在 `src/report-components.mjs`，`src/report.mjs` 只负责组装数据。
 
 Workday 招聘站（`*.myworkdayjobs.com`）的岗位页由浏览器端渲染，HTML 抓取拿不到 JD。这类岗位改走租户公开的 JSON 接口（`/wday/cxs/...`），enrichment 记为 `workday_cxs`；接口失败时回退到原有 HTML 路径。
 
-地点与毕业窗口是确定性资格，由 `src/eligibility.mjs` 在 `isEligible` 中对每个岗位强制执行，与评分引擎无关：地点含明确非美国家/地区/城市标识（列表 `NON_US_LOCATION_MARKERS` 可扩展）即排除，含美国标识即通过（同一字符串中美国标识优先），仅写 `Remote` 或为空则通过但在 Gaps 追加 "Location unverified — confirm US eligibility"，HTML 卡片显示黄色 chip。毕业窗口由 `preferences.graduationDate`（示例 `2027-05`）驱动，规则见 `GRADUATION_EXCLUSION_RULES`，仅在命中的所有日期都过早时才排除；表述有歧义交给语义层。缺少 `graduationDate` 时该规则关闭并给出 warning。
+地点与毕业窗口是确定性资格，由 `src/eligibility.mjs` 在 `isEligible` 中对每个岗位强制执行，与评分引擎无关：地点含明确非美国家/地区/城市标识（列表 `NON_US_LOCATION_MARKERS` 可扩展）即排除，含美国标识即通过（同一字符串中美国标识优先），仅写 `Remote` 或为空则通过但在 Gaps 追加 "Location unverified — confirm US eligibility"，HTML 卡片显示 `Location unverified` 徽标。毕业窗口由 `preferences.graduationDate`（示例 `2027-05`）驱动，规则见 `GRADUATION_EXCLUSION_RULES`，仅在命中的所有日期都过早时才排除；表述有歧义交给语义层。缺少 `graduationDate` 时该规则关闭并给出 warning。
 
 ## 降级语义：任何单点故障，桌面仍有产物
 
@@ -36,12 +39,12 @@ Workday 招聘站（`*.myworkdayjobs.com`）的岗位页由浏览器端渲染，
 | 岗位页面抓不到（429、5xx、超时、JSON 无法解析） | 保留到后续夜晚重试，最多 3 次后关闭 | warning `enrichment / <源>`，含 attempts 计数 |
 | 站点拒绝抓取（HTTP 403）或岗位已下线（404、410） | 首次即关闭，不再重试 | warning `enrichment / <源>`，注明岗位名及 `blocked` / `removed` |
 | `.eml` 文件畸形或超过 5 MB | 只跳过该文件，同目录其他文件照常解析 | warning `collector / Email files` |
-| Claude CLI 缺失 / 版本过低 / API-key 登录 / batch 重试后仍失败 | 相关岗位保留本地分数并标记 `unreviewed` | warning `llm / <engine>`；XLSX 前缀 `[unreviewed]`，HTML 橙色 `Match level: unreviewed` |
+| Claude CLI 缺失 / 版本过低 / API-key 登录 / batch 重试后仍失败 | 相关岗位保留本地分数并标记 `unreviewed` | warning `llm / <engine>`；XLSX 前缀 `[unreviewed]`，HTML 卡片 `Unreviewed` 徽标 |
 | 模型漏答岗位 id | 补审一次，仍缺的标为 `unreviewed` | warning `llm / <engine>` |
 | 实际模型与 `semanticMatching.model` 不一致 | 本次结果照用 | `MODEL MISMATCH` warning |
 | XLSX 生成失败 | 保留 HTML 与去重 state，同目录写入 `XLSX-FAILED.txt`，当日 payload 在 `state/report-payload-<日期>.json` 中保持未完成，不更新 `lastSuccessfulRun`，进程 exit 1 | warning `report / XLSX` + 标记文件 |
 | 启动时发现更早日期的 payload 未完成 | 先用它重建该日期的 HTML 与 XLSX（不采集、不评分），清除标记并记录 `lastSuccessfulRun` | warning `report / report payload` |
-| 同一投递日期再次运行 | 合并进当日 payload 并从全量重新渲染；零新岗位时输出与上次一致，页脚显示 `Daily update #N` | HTML 页脚、Run Summary `Update today` |
+| 同一投递日期再次运行 | 合并进当日 payload 并从全量重新渲染；零新岗位时输出与上次一致，Run details 显示 `Daily update #N` | HTML Run details、Run Summary `Update today` |
 | 报告生成前的致命错误 | 输出目录直接写 `ERROR-<运行日期>.html`，并尽力发 macOS 通知 | 错误页本身 |
 
 LLM batch 失败会在 10 秒后重试一次。`unreviewed` 岗位只有本地分数达到阈值才会进入报告，因此模型故障当晚得到的是一份本地排序的清单，而不是空页面。修复后再次成功运行，`XLSX-FAILED.txt` 会自动移除。
@@ -85,7 +88,7 @@ LLM batch 失败会在 10 秒后重试一次。`unreviewed` 岗位只有本地�
 
 每次任务运行前都会比较每个启用轨道 PDF 的 SHA-256；覆盖同一路径的 PDF 后，下一次运行会自动更新 gitignored 的文本简历。如果文件名或目录改变，只需修改私有配置。PDF、提取文本、配置、邮件、日志、状态和报告都不会被 Git 跟踪。
 
-简历 PDF 放在 iCloud 同步目录（桌面、文稿）时，macOS 的"优化储存空间"可能把本地副本回收为仅云端占位符，读取会报 `Unknown system error -11`/`EAGAIN` 或读到空内容。夜间运行遇到这种情况会自动执行 `brctl download <路径>`，然后每 2 秒重试读取，最长等待 60 秒；取回成功后照常继续，并在报告的 warning 面板里留下一条 info 级提示"<轨道> 简历曾被 iCloud 云端化，已自动取回"。60 秒内仍未取回则按现有 fatal 路径失败，错误信息会给出具体路径并提示在 Finder 中右键该文件选择"立即下载"，或把简历移出 iCloud 同步目录。非 macOS 环境或没有 `brctl` 时该机制静默跳过，行为与以前一致。
+简历 PDF 放在 iCloud 同步目录（桌面、文稿）时，macOS 的"优化储存空间"可能把本地副本回收为仅云端占位符，读取会报 `Unknown system error -11`/`EAGAIN` 或读到空内容。夜间运行遇到这种情况会自动执行 `brctl download <路径>`，然后每 2 秒重试读取，最长等待 60 秒；取回成功后照常继续，并在 `warnings.txt` 与 HTML 的 Run details 里留下一条 info 级提示"<轨道> 简历曾被 iCloud 云端化，已自动取回"。60 秒内仍未取回则按现有 fatal 路径失败，错误信息会给出具体路径并提示在 Finder 中右键该文件选择"立即下载"，或把简历移出 iCloud 同步目录。非 macOS 环境或没有 `brctl` 时该机制静默跳过，行为与以前一致。
 
 ## 费用保护
 
@@ -95,7 +98,7 @@ LLM batch 失败会在 10 秒后重试一次。`unreviewed` 岗位只有本地�
 
 ## 模型固定与审计
 
-`semanticMatching.model` 会传给 `claude --model`。可填 Claude Code 别名 `fable`、`opus`、`sonnet`（各自解析为该系列最新模型），或完整模型名如 `claude-fable-5`；示例配置固定为 `fable`。每个 batch 的 `claude --print --output-format json` 返回都会解析实际使用的模型（`modelUsage` 中输出 token 最多的条目），记录为每个岗位的 `scoringModel`，并显示在 HTML 页眉和 XLSX Run Summary 的 Scoring model 行。无法解析时记为 `unknown` 并给出 warning；若配置的模型与实际模型在别名展开后前缀不一致（例如配置 `fable` 但实际是 `claude-sonnet-5`），当批结果照常使用，但会在 warning 面板中显著提示 `MODEL MISMATCH`。没有任何语义评审的运行显示 `local_only` 或 `none`。
+`semanticMatching.model` 会传给 `claude --model`。可填 Claude Code 别名 `fable`、`opus`、`sonnet`（各自解析为该系列最新模型），或完整模型名如 `claude-fable-5`；示例配置固定为 `fable`。每个 batch 的 `claude --print --output-format json` 返回都会解析实际使用的模型（`modelUsage` 中输出 token 最多的条目），记录为每个岗位的 `scoringModel`，并显示在 HTML 底部 Run details 和 XLSX Run Summary 的 Scoring model 行。无法解析时记为 `unknown` 并给出 warning；若配置的模型与实际模型在别名展开后前缀不一致（例如配置 `fable` 但实际是 `claude-sonnet-5`），当批结果照常使用，但会在 `warnings.txt` 中记录 `MODEL MISMATCH`。没有任何语义评审的运行显示 `local_only` 或 `none`。
 
 ## 邮件通道（规划中）
 
@@ -121,7 +124,7 @@ chmod +x scripts/run-launchd.sh scripts/install-launchd.sh
 
 ## 无人值守的一天
 
-- **触发**：LaunchAgent 执行 `scripts/run-launchd.sh` → `src/launchd-dispatch.mjs`。到达计划时间且当天尚未成功时执行完整运行（`scheduled`）；其他启动（开机/登录时的 `RunAtLoad`、手动 load）走 `catchup`，只有 `state.lastSuccessfulRun` 距今超过 26 小时才补跑。`install-launchd.sh` 请显式传入小时和分钟（脚本自身兜底值是 06:30）。
+- **触发**：LaunchAgent 执行 `scripts/run-launchd.sh` → `src/launchd-dispatch.mjs`。到达计划时间且当天尚未成功时执行完整运行（`scheduled`）；其他启动（开机/登录时的 `RunAtLoad`、手动 load）走 `catchup`，只有 `state.lastSuccessfulRun` 距今超过 26 小时才补跑。`install-launchd.sh` 的小时和分钟可省略，默认 20:00；脚本只能用 zsh 运行，误用 bash 会直接提示"请用 zsh 运行"。
 - **投递日期**：00:00–14:00（含）运行使用当天日期，14:00 之后生成次日目录。因此正常的 20:00 运行产生明天的文件夹，漏跑后的早晨补跑仍能填上今天的。
 - **锁**：`state/.lock` 保存持有者 PID。持有者存活时第二个实例直接退出；PID 已死的陈旧锁自动清除。
 - **State**：`state/state.json` 记录每个规范化 URL（原始与跳转目标），同一岗位不会重复出现；每次运行修剪距最近一次尝试超过 90 天的条目。

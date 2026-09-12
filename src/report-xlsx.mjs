@@ -3,7 +3,6 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import ExcelJS from 'exceljs';
 import { reportTracks, scoreHeader, trackScore } from './resume-tracks.mjs';
-import { warningText } from './warnings.mjs';
 
 const [jsonPath, outputPath, verifyFlag] = process.argv.slice(2);
 if (!jsonPath || !outputPath) {
@@ -173,6 +172,7 @@ const matches = workbook.addWorksheet('Matches', { views: [{ state: 'frozen', yS
 const notes = workbook.addWorksheet('Notes', { views: [{ showGridLines: false }] });
 
 styleMergedTitle(summary, 'A1:F1', 'Daily Job Match Alert', COLORS.teal, 18, 34);
+const warningCount = (payload.meta.warnings || []).length;
 const summaryValues = [
   ['Application date', payload.meta.applicationDate || payload.meta.date],
   ['Generated at', asDate(payload.meta.generatedAt)],
@@ -186,6 +186,7 @@ const summaryValues = [
   ['Minimum score', payload.meta.minimumMatchScore],
   ['Resume tracks', tracks.map(track => track.label).join(', ')],
   ['Scoring model', payload.meta.scoringModel || 'unknown'],
+  ['Warnings', warningCount ? `${warningCount} (see warnings.txt beside this workbook)` : 'None'],
 ];
 const summaryStartRow = 3;
 summaryValues.forEach((values, index) => {
@@ -218,20 +219,6 @@ for (let row = 1; row <= roleTypeEndRow; row++) {
   for (let column = 1; column <= 6; column++) summary.getCell(row, column).alignment = { vertical: 'top', wrapText: true };
 }
 
-const warningsTitleRow = roleTypeEndRow + 2;
-styleMergedTitle(summary, `A${warningsTitleRow}:F${warningsTitleRow}`, 'Warnings', COLORS.orange, 13, 26);
-const warnings = payload.meta.warnings || [];
-const warningLines = warnings.length ? warnings.map(warningText) : ['None'];
-warningLines.forEach((warning, index) => {
-  const row = warningsTitleRow + 1 + index;
-  summary.mergeCells(row, 1, row, 6);
-  const cell = summary.getCell(row, 1);
-  cell.value = warning;
-  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.lightOrange } };
-  cell.font = { color: { argb: COLORS.orangeText } };
-  cell.alignment = { vertical: 'top', wrapText: true };
-  summary.getRow(row).height = Math.min(96, Math.max(36, 18 * Math.ceil(String(warning).length / 100)));
-});
 for (const column of ['C', 'D', 'E', 'F']) summary.getColumn(column).width = 12;
 
 const rows = jobs.map(job => [
@@ -318,7 +305,7 @@ styleMergedTitle(notes, 'A1:F1', 'How to read this report', COLORS.darkTeal, 16,
 const scoreColumnNames = tracks.map(track => scoreHeader(track)).join(' / ');
 const noteRows = [
   ['Field', 'Meaning'],
-  ['Warnings', 'Source, enrichment, subscription, or model-configuration issues that were downgraded so the nightly report could still be generated.'],
+  ['Warnings', 'Count of source, enrichment, subscription, or model-configuration issues that were downgraded so the nightly report could still be generated. The individual lines are in warnings.txt next to this workbook; the file is absent when there were none.'],
   ['Resume tracks', `The enabled resume tracks this report was scored against, in configured order: ${tracks.map(track => track.label).join(', ')}. Disabled tracks are not extracted, scored, or shown.`],
   ['Scoring model', 'Model reported by the subscription CLI for semantic review. "unknown" means the CLI output did not identify a model; "local_only" or "none" means no subscription review happened.'],
   [scoreColumnNames, 'Fit score against the corresponding resume track from subscription review, or the local triage score for unreviewed rows; not a probability of getting an interview.'],

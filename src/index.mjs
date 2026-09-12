@@ -13,7 +13,7 @@ import { enrichJob, enrichmentWarningMessage } from './enrich.mjs';
 import { evaluateJob, isEligible } from './match.mjs';
 import { annotateEligibility, summarizeExclusions } from './eligibility.mjs';
 import { applySubscriptionMatching, localFallbackJob, summarizeScoringModel } from './subscription-match.mjs';
-import { buildHtml, writeReports } from './report.mjs';
+import { buildHtml, writeReports, writeWarningsFile } from './report.mjs';
 import { isJobSeen, markJobSeen, normalizeState, pruneSeen } from './state.mjs';
 import { acquireRunLock, releaseRunLock } from './lock.mjs';
 import { canonicalUrl, dateWithOffset, htmlEscape, mapLimit, resolveFrom, sha256 } from './utils.mjs';
@@ -425,6 +425,7 @@ async function runPipeline(config, clock) {
     warnings: finalWarnings,
     runsToday, firstGeneratedAt: previous?.meta?.firstGeneratedAt || now.toISOString(), lastUpdatedAt: now.toISOString(),
     eligibilityExclusions: exclusions.counts,
+    excludedPostings: exclusions.examples,
     scoringModel: summarizeScoringModel(reviewed, config.semanticMatching?.engine || 'claude_subscription'),
   };
   const payload = { meta, matches, reviewed, complete: false };
@@ -464,8 +465,9 @@ async function runPipeline(config, clock) {
     }
     try {
       await fs.writeFile(paths.htmlPath, buildHtml(matches, meta));
+      await writeWarningsFile(rendered.runDirectory, meta);
     } catch (htmlUpdateError) {
-      console.warn(`Could not add the XLSX warning to HTML: ${errorSummary(htmlUpdateError)}`);
+      console.warn(`Could not add the XLSX warning to the report files: ${errorSummary(htmlUpdateError)}`);
     }
     console.warn(`${paths.xlsxWarning} ${error.message}`);
   } else {

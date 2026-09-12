@@ -1,9 +1,15 @@
 #!/bin/zsh
+# Installs the nightly LaunchAgent. Run with zsh (the shebang does that when executed directly):
+#   ./scripts/install-launchd.sh [hour] [minute]     default 20:00 local time
+if [ -z "${ZSH_VERSION:-}" ]; then
+  echo "install-launchd.sh must be run with zsh, not bash or sh. 请用 zsh 运行：zsh scripts/install-launchd.sh [hour] [minute]，或直接 ./scripts/install-launchd.sh" >&2
+  exit 2
+fi
 set -euo pipefail
 
 project_dir="${0:A:h:h}"
-hour="${1:-6}"
-minute="${2:-30}"
+hour="${1:-20}"
+minute="${2:-0}"
 node_bin="${DAILY_JOB_MATCH_ALERT_NODE:-${JOB_RADAR_NODE:-$(command -v node)}}"
 agent_dir="$HOME/Library/LaunchAgents"
 agent_path="$agent_dir/com.dailyjobmatchalert.daily.plist"
@@ -18,7 +24,7 @@ if [[ ! "$minute" =~ '^[0-9]{1,2}$' ]] || (( minute < 0 || minute > 59 )); then
   exit 2
 fi
 if [[ ! -f "$project_dir/config.json" ]]; then
-  print -u2 "Create config.json and both resume files before installing the schedule."
+  print -u2 "Create config.json and the resume profile for every enabled track before installing the schedule."
   exit 2
 fi
 

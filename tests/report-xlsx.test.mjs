@@ -111,10 +111,10 @@ test('writes and re-reads the ExcelJS workbook with one score column per enabled
     assert.equal(summaryRows['High matches'], 2);
     assert.equal(summaryRows.Internship.formula, "COUNTIF('Matches'!$D$2:$D$3,\"internship\")");
     assert.equal(summaryRows.Internship.result, 1);
-    assert.ok(Object.keys(summaryRows).includes('Warnings'));
+    assert.equal(summaryRows.Warnings, '1 (see warnings.txt beside this workbook)');
     const warningCell = [];
     workbook.getWorksheet('Run Summary').eachRow(row => { if (/batch fallback/.test(String(row.getCell(1).value))) warningCell.push(row.getCell(1).value); });
-    assert.equal(warningCell.length, 1);
+    assert.equal(warningCell.length, 0, 'individual warning lines belong to warnings.txt, not the workbook');
 
     const notes = workbook.getWorksheet('Notes');
     const noteFields = [];
@@ -197,6 +197,7 @@ test('an empty match list still writes the dynamic header and passes --verify', 
     const summaryRows = summaryRowsOf(workbook);
     assert.equal(summaryRows['Scoring model'], 'unknown');
     assert.equal(summaryRows['Resume tracks'], 'Data, LLM, AI Agent');
+    assert.equal(summaryRows.Warnings, 'None');
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }

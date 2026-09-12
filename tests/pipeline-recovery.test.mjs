@@ -101,7 +101,7 @@ test('an XLSX failure keeps the day payload incomplete; the next run rebuilds bo
     assert.equal(second.meta.newThisRun, 0);
     assert.equal(second.xlsxPath, xlsxPath);
     const html = await fs.readFile(htmlPath, 'utf8');
-    assert.equal((html.match(/<article class="job">/g) || []).length, pending.meta.matchCount, 'final HTML must list the carried matches, not an empty rerun');
+    assert.equal((html.match(/<article class="job"/g) || []).length, pending.meta.matchCount, 'final HTML must list the carried matches, not an empty rerun');
     assert.match(html, /Daily update #2/);
     assert.doesNotMatch(html, /XLSX generation failed/);
   } finally {

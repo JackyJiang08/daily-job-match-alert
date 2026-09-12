@@ -27,8 +27,18 @@ Record the date and commit next to each item when it passes.
   sheet has exactly these 12 headers: Company, Title, Location, Role Type, Posted At,
   Data Score, LLM Score, AI Agent Score, Recommended Resume, Why It Matches, Gaps / Verify,
   Posting Link; the Posting Link cell is a clickable hyperlink; Run Summary shows
-  `Resume tracks: Data, LLM, AI Agent` and `Scoring model: local_only`; the HTML header
-  lists the same tracks and each card carries one score chip per track.
+  `Resume tracks: Data, LLM, AI Agent`, `Scoring model: local_only`, and `Warnings: None`.
+  No `warnings.txt` is written for the demo (it has no warnings).
+
+- [ ] **The demo HTML opens correctly in a browser**
+  Open `tests/fixtures/demo-output/2026-08-27/Daily Job Match Alert - 2026-08-27.html`.
+  Expected: a two-line header (`Daily Job Match Alert`, then `August 27, 2026 · N match(es)`),
+  no banner; the toolbar sorts, filters by role type and recommended resume, and searches
+  company or title (it is rendered in its quiet style because the demo has fewer than five
+  matches); each card shows the score ring, `company · location · role type`, one line of
+  per-track scores with an `Apply with <label> resume` tag, and the folded JD; **Run details**
+  at the bottom is collapsed and lists the tracks, scoring model, and status; switching the
+  OS to dark mode restyles the page without a reload.
 
 - [ ] **Track configurations are covered by tests**
   `tests/resume-tracks.test.mjs` runs the pipeline end to end with three tracks, one track,
@@ -55,7 +65,7 @@ Record the date and commit next to each item when it passes.
   npm run run
   ```
   Expected: `~/Desktop/Daily Job Match Alert/<application date>/` contains the HTML and xlsx;
-  the xlsx Run Summary `Scoring model` row and the HTML header show a `claude-fable-*` model;
+  the xlsx Run Summary `Scoring model` row and the HTML **Run details** show a `claude-fable-*` model;
   no `MODEL MISMATCH` warning; no `XLSX-FAILED.txt`.
 
 - [ ] **launchd reinstalled and the next scheduled run succeeded** (owner)
