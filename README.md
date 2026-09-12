@@ -222,12 +222,33 @@ The HTML report is built for a quick morning decision. The header is two lines: 
 - Hard-blocked and low-match roles are excluded from both user-facing files.
 - If XLSX generation fails, the HTML report and seen state are preserved, `XLSX-FAILED.txt` is written beside the HTML with the underlying error, and the run exits 1. A later successful rerun removes the marker and writes the xlsx again.
 
+## Local hub
+
+`npm run hub` starts a small web hub on `http://127.0.0.1:4747/` (port from `hub.port` in `config.json`). It is an addition, not a replacement: the nightly run, the Desktop folders, the xlsx, and `warnings.txt` are untouched. The hub reads the pipeline's artifacts and writes only `config.json` and its own gitignored `private/` directory. It binds loopback only, never makes an outbound request, never shows API keys, and never renders resume text, only file metadata.
+
+Four pages, with a left navigation:
+
+- **Reports** lists every `state/report-payload-*.json` date, newest first, and renders the selected day with the same components, toolbar, and dark mode as the Desktop HTML. The line above the report names the Desktop copy, which remains the authoritative file; the hub never modifies it.
+- **Resumes** shows one card per track: label, enabled state, PDF name and path, last upload, the hub's trial text extraction (character count or the pdftotext error), and the nightly profile status. Uploading a replacement, or adding a track with id, label, and PDF, stores the file as `private/resumes/<id>/<ISO time>-<original name>.pdf`, points that track's `pdf` at it in `config.json`, and keeps the newest five versions (an older one can be selected again). Tracks that still point at an external file, such as a PDF on the Desktop, are marked **External file** and keep working unchanged; **Managed by hub** marks uploaded ones. Uploads accept `.pdf` up to 5 MB.
+- **Status** shows the last run (time, trigger, result, matches), the next scheduled time read from the installed LaunchAgent, the lock state, the warning count for the last seven report dates with each day's `warnings.txt` expandable, and any `ERROR-*.html`. **Run Now** asks for confirmation, then runs `node src/index.mjs --config config.json` as a child process with `DAILY_JOB_MATCH_ALERT_TRIGGER=manual`. It honors the pipeline lock (the button is disabled with the reason while a run holds it), polls progress, and shows the last 50 log lines; logs go to `private/hub/logs/`.
+- **Settings** exposes `minimumMatchScore`, `semanticMatching.acceptedMatchLevels`, `semanticMatching.model`, `reports.xlsx.required`, and `hub.port`. Values are validated and written back surgically: every other key in `config.json`, and their order, stay as they were. Writes take the same run lock as the pipeline, so they never race the 20:00 run.
+
+All state-changing requests are POSTs whose `Host` and `Origin` must be `127.0.0.1` or `localhost`; anything else gets 403. Path parameters (dates, track ids, error-report names) are pattern-checked, so no request can reach outside the expected folders.
+
+To keep the hub running across logins, install its own LaunchAgent (separate from the nightly job):
+
+```bash
+./scripts/install-hub-launchd.sh            # KeepAlive + RunAtLoad, logs in state/logs/hub.*.log
+./scripts/install-hub-launchd.sh --remove   # stop and remove it
+```
+
 ## Verifying a deployment
 
 ```bash
 npm test        # unit and integration tests
 npm run demo    # local-only run on fixtures -> tests/fixtures/demo-output/
-npm run chaos   # four failure scenarios in temporary directories
+npm run chaos   # five failure scenarios in temporary directories
+npm run hub     # local hub on http://127.0.0.1:4747/
 ```
 
 [VERIFICATION.md](VERIFICATION.md) is the sign-off checklist, including the owner-only steps (a real `npm run run` and a launchd reinstall) that automation must not perform.

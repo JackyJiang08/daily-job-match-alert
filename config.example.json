@@ -22,6 +22,9 @@
     }
   },
   "outputDirectory": "~/Desktop/Daily Job Match Alert",
+  "hub": {
+    "port": 4747
+  },
   "resumes": {
     "autoRefresh": true,
     "pdftotextCommand": "pdftotext",

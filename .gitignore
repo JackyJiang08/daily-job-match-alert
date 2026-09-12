@@ -4,6 +4,7 @@ resumes/*.md
 resumes/*.pdf
 intake/eml/*.eml
 state/
+private/
 daily-reports/
 node_modules
 *.log

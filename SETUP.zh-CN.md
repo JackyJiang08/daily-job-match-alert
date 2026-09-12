@@ -104,6 +104,24 @@ LLM batch 失败会在 10 秒后重试一次。`unreviewed` 岗位只有本地�
 
 目前不需要做任何邮箱配置。将来启用时：在邮箱里建立 `job-alerts` label/folder，把各平台的提醒规则自动移入该目录，运行 `himalaya account configure`，再把 `config.json` 的 `sources.himalaya.enabled` 改为 `true`。Himalaya collector 只执行 envelope list 和 `message read --preview`，不会标已读、移动、删除或发送邮件。不要把邮箱密码写进 `config.json`；使用 OAuth、App Password 搭配 macOS Keychain，或安全的 password command。
 
+## 本机中枢（hub）
+
+`npm run hub` 在 `http://127.0.0.1:4747/` 启动一个只运行在本机的 Web 中枢（端口来自 `config.json` 的 `hub.port`）。它是加法：夜间管道、桌面输出、xlsx、`warnings.txt` 全部不变；中枢只读管道产物，只写 `config.json` 与仓库内 gitignored 的 `private/` 目录。只绑定 127.0.0.1，不发起任何外部网络请求，不显示 API key，不渲染简历正文（只显示文件元数据）。左侧导航四个页面：
+
+- **Reports**：按日期倒序列出 `state/report-payload-*.json`，选中后用与桌面 HTML 相同的组件、工具栏与深色模式渲染；顶部一行 "Desktop copy: <路径>" 指向桌面文件夹，桌面副本始终是权威副本，中枢不会修改它。
+- **Resumes**：每条轨道一张卡：label、启用状态、PDF 文件名与路径、最近上传时间、中枢试抽取结果（字符数或 pdftotext 报错）、夜间 profile 状态。上传替换 PDF 或新增轨道（id/label/PDF）时，文件存到 `private/resumes/<id>/<ISO时间>-<原文件名>.pdf`，并把 `config.json` 里该轨道的 `pdf` 改为新文件，保留最近 5 个版本可回退。仍指向桌面等外部路径的轨道标为 "External file"，原样工作、不强制迁移；上传过的标为 "Managed by hub"。只接受 .pdf，上限 5 MB。
+- **Status**：上次运行（时间、trigger、结果、匹配数）、从已安装 LaunchAgent 读取的下次计划时间、锁状态、最近 7 个报告日期的 warnings 计数并可展开当日 `warnings.txt`、`ERROR-*.html` 列表。**Run Now** 弹出确认后以子进程执行 `node src/index.mjs --config config.json`，环境变量 `DAILY_JOB_MATCH_ALERT_TRIGGER=manual`，严格遵守现有锁文件（锁被占用时按钮禁用并显示原因），页面轮询显示进度与日志尾部 50 行；日志在 `private/hub/logs/`。
+- **Settings**：只暴露 `minimumMatchScore`、`semanticMatching.acceptedMatchLevels`、`semanticMatching.model`、`reports.xlsx.required`、`hub.port`，校验后写回 `config.json`，其他键与顺序原样保留；写入时使用与管道相同的锁，避免与 20:00 运行并发。
+
+所有写操作都是 POST，且 `Host`/`Origin` 必须是 127.0.0.1 或 localhost，否则 403；日期、轨道 id、错误报告文件名等路径参数都做严格白名单校验。
+
+常驻安装（与夜间任务是两个独立的 LaunchAgent）：
+
+```bash
+./scripts/install-hub-launchd.sh            # KeepAlive + RunAtLoad，日志在 state/logs/hub.*.log
+./scripts/install-hub-launchd.sh --remove   # 停止并移除
+```
+
 ## 第一次启用
 
 ```bash

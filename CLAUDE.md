@@ -27,3 +27,17 @@ disabled; do not expand them unless a task says so.
   migration; do not rename user-facing files or folders.
 - Report UI lives in src/report-components.mjs + src/report-theme.mjs and
   is meant to be reused by a future local hub.
+## Local hub (src/hub/)
+- `npm run hub` serves http://127.0.0.1:<config.hub.port|4747> (Node http, no
+  framework, zero external requests). Pages: Reports (renders
+  state/report-payload-*.json with the report components; the Desktop folder
+  stays authoritative), Resumes (upload PDFs into private/resumes/<id>/ and
+  repoint config.json; external paths keep working), Status (last/next run,
+  lock, warnings.txt per day, ERROR-*.html, Run Now = child
+  `node src/index.mjs` with DAILY_JOB_MATCH_ALERT_TRIGGER=manual under the
+  run lock), Settings (five keys, surgical config.json edit under the lock).
+- The hub only reads pipeline artifacts; it writes config.json and private/
+  (gitignored). POSTs require a loopback Host/Origin; uploads are .pdf ≤ 5 MB;
+  path params are pattern-checked. Never render resume text in the hub.
+- Its LaunchAgent (launchd/com.dailyjobmatchalert.hub.plist.template,
+  scripts/install-hub-launchd.sh) is separate from the nightly one.

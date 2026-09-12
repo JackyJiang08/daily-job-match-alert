@@ -167,11 +167,12 @@ export function runDetailsView(jobs, meta, tracks) {
   return { rows };
 }
 
-export function buildHtml(jobs, meta) {
+// The view object consumed by report-components; the hub renders the same view inside its shell.
+export function buildReportView(jobs, meta) {
   const tracks = reportTracks(meta, jobs);
   const cards = jobs.map(job => cardView(job, tracks));
   const roleTypes = [...new Set(jobs.map(job => job.roleType || 'unknown'))].map(value => ({ value, label: roleLabel(value) }));
-  return renderReportPage({
+  return {
     title: REPORT_TITLE,
     dateLabel: readableDate(meta.date),
     matchLabel: matchLabel(jobs.length),
@@ -180,7 +181,11 @@ export function buildHtml(jobs, meta) {
     emptyMessage: 'No new postings cleared the configured threshold for this date.',
     runDetails: runDetailsView(jobs, meta, tracks),
     footer: 'Generated locally. Scores are triage aids, not facts. Verify eligibility, posting date, and JD before applying. No applications were submitted.',
-  });
+  };
+}
+
+export function buildHtml(jobs, meta) {
+  return renderReportPage(buildReportView(jobs, meta));
 }
 
 export function warningsFileText(meta) {

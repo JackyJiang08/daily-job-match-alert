@@ -92,19 +92,24 @@ export function renderEmptyState(message) {
   return `<div class="empty">${htmlEscape(message)}</div>`;
 }
 
-export function renderReportPage(view) {
+// Everything between <main> and </main>: the hub embeds this inside its own shell.
+export function renderReportBody(view) {
   const list = view.cards.length
     ? `<section class="jobs" id="jobs">${view.cards.map(renderJobCard).join('\n')}</section><div class="empty" id="no-results" hidden>No matches for the current filters.</div>`
     : renderEmptyState(view.emptyMessage);
+  return `${renderMasthead(view)}
+${renderToolbar(view.toolbar)}
+${list}
+${renderRunDetails(view.runDetails)}
+<footer class="foot">${htmlEscape(view.footer)}</footer>`;
+}
+
+export function renderReportPage(view) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${htmlEscape(view.title)} — ${htmlEscape(view.dateLabel)}</title>
 <style>${REPORT_STYLES}</style></head>
 <body><main class="page">
-${renderMasthead(view)}
-${renderToolbar(view.toolbar)}
-${list}
-${renderRunDetails(view.runDetails)}
-<footer class="foot">${htmlEscape(view.footer)}</footer>
+${renderReportBody(view)}
 </main>
 <script>${REPORT_SCRIPT}</script>
 </body></html>`;
