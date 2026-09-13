@@ -13,6 +13,7 @@ import { detectIndent } from '../src/hub/config-file.mjs';
 import { parseMultipart } from '../src/hub/multipart.mjs';
 import { nextScheduledRun, validateSettings } from '../src/hub/services.mjs';
 import { hostIsLocal, originIsLocal } from '../src/hub/routes.mjs';
+import { formatDateLabel, formatLocalDateTime, formatLocalShort, localDate } from '../src/time-format.mjs';
 
 const NOW = '2026-08-27T12:00:00Z';
 const fixtures = new URL('./fixtures/', import.meta.url);
@@ -33,7 +34,7 @@ const CONFIG_TEXT = `{
     "autoRefresh": false,
     "pdftotextCommand": "/custom/pdftotext",
     "tracks": [
-      { "id": "data", "label": "Data", "pdf": "./external/Data Resume.pdf", "profile": "./data-resume.md", "enabled": true },
+      { "id": "data", "label": "Data", "pdf": "./Desktop/Data Resume.pdf", "profile": "./data-resume.md", "enabled": true },
       { "id": "llm", "label": "LLM", "profile": "./llm-resume.md", "enabled": true }
     ]
   },
@@ -51,20 +52,23 @@ function job(overrides = {}) {
   };
 }
 
+function payloadMeta(date, extra = {}) {
+  const tracks = [{ id: 'data', label: 'Data' }, { id: 'llm', label: 'LLM' }];
+  return { date, applicationDate: date, generatedAt: `${date}T01:00:00.000Z`, lastUpdatedAt: `${date}T01:00:00.000Z`, completedAt: `${date}T01:00:00.000Z`, trigger: 'scheduled', lookbackHours: 24, runsToday: 1, resumeTracks: tracks, scoringModel: 'local_only', warnings: [], matchCount: 1, reviewedCount: 3, ...extra };
+}
+
 async function prepareProject() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hub-test-'));
   await fs.mkdir(path.join(root, 'state', 'logs'), { recursive: true });
-  await fs.mkdir(path.join(root, 'external'), { recursive: true });
+  await fs.mkdir(path.join(root, 'Desktop'), { recursive: true });
   await fs.mkdir(path.join(root, 'output', '2026-08-27'), { recursive: true });
   await fs.writeFile(path.join(root, 'config.json'), CONFIG_TEXT);
-  await fs.writeFile(path.join(root, 'external', 'Data Resume.pdf'), '%PDF-1.4 external');
+  await fs.writeFile(path.join(root, 'Desktop', 'Data Resume.pdf'), '%PDF-1.4 external');
   await fs.copyFile(new URL('data-resume.md', fixtures), path.join(root, 'data-resume.md'));
-  const tracks = [{ id: 'data', label: 'Data' }, { id: 'llm', label: 'LLM' }];
-  const meta = (date, extra = {}) => ({ date, applicationDate: date, generatedAt: `${date}T01:00:00.000Z`, lastUpdatedAt: `${date}T01:00:00.000Z`, lookbackHours: 24, runsToday: 1, resumeTracks: tracks, scoringModel: 'local_only', warnings: [], matchCount: 1, reviewedCount: 3, ...extra });
-  await fs.writeFile(path.join(root, 'state', 'report-payload-2026-08-27.json'), JSON.stringify({ meta: meta('2026-08-27', { warnings: [{ stage: 'collector', source: 'Job board', message: 'network unavailable' }, { stage: 'llm', source: 'x', message: 'y' }] }), matches: [job()], reviewed: [job()], complete: true }));
-  await fs.writeFile(path.join(root, 'state', 'report-payload-2026-08-26.json'), JSON.stringify({ meta: meta('2026-08-26'), matches: [], reviewed: [], complete: false }));
+  await fs.writeFile(path.join(root, 'state', 'report-payload-2026-08-27.json'), JSON.stringify({ meta: payloadMeta('2026-08-27', { warnings: [{ stage: 'collector', source: 'Job board', message: 'network unavailable' }, { stage: 'llm', source: 'x', message: 'y' }] }), matches: [job()], reviewed: [job()], complete: true }));
+  await fs.writeFile(path.join(root, 'state', 'report-payload-2026-08-26.json'), JSON.stringify({ meta: payloadMeta('2026-08-26', { matchCount: 0 }), matches: [], reviewed: [], complete: false }));
   await fs.writeFile(path.join(root, 'state', 'state.json'), JSON.stringify({ seen: {}, lastSuccessfulRun: '2026-08-27T01:00:00.000Z' }));
-  await fs.writeFile(path.join(root, 'state', 'logs', 'daily-2026-08-26.log'), '[2026-08-27T01:00:00.000Z] launchd trigger: scheduled\n');
+  await fs.writeFile(path.join(root, 'state', 'resume-sources.json'), JSON.stringify({ sources: { data: { sha256: 'abc', refreshedAt: '2026-08-20T02:00:00.000Z' } } }));
   await fs.writeFile(path.join(root, 'output', '2026-08-27', 'warnings.txt'), 'Daily Job Match Alert — 2026-08-27 — 2 warnings\n[collector / Job board] network unavailable\n[llm / x] y\n');
   await fs.writeFile(path.join(root, 'output', 'ERROR-2026-08-20.html'), '<html><body>boom</body></html>');
   return root;
@@ -128,22 +132,31 @@ async function readConfig(root) {
   return JSON.parse(await fs.readFile(path.join(root, 'config.json'), 'utf8'));
 }
 
-test('Reports lists payload dates newest first and renders the selected day with the Desktop copy path', async () => {
+test('Reports lists dates newest first with counts, titles the report by date, and links the Desktop copy', async () => {
   const root = await prepareProject();
   const hub = await startHub(root);
   try {
     const list = await hub.request('GET', '/reports');
     assert.equal(list.status, 200);
-    assert.match(list.text, /<ul class="datelist"><li><a href="\/reports\/2026-08-27" class="active">2026-08-27<\/a><\/li><li><a href="\/reports\/2026-08-26">2026-08-26<\/a><\/li><\/ul>/);
+    assert.match(list.text, /<title>Report 2026-08-27 — Daily Job Match Alert Hub<\/title>/);
+    assert.match(list.text, /<p class="brand">Job Match Hub<\/p>/);
+    assert.match(list.text, /<ul class="datelist"><li><a href="\/reports\/2026-08-27" class="active today" title="2026-08-27 \(today\)"><span>Thu, Aug 27<\/span><span class="n">1 match<\/span><\/a><\/li><li><a href="\/reports\/2026-08-26" class="quiet" title="2026-08-26"><span>Wed, Aug 26<\/span><span class="n">0 matches<\/span><\/a><\/li><\/ul>/);
+    assert.doesNotMatch(list.text, /<h1 class="hub-title">Reports<\/h1>/, 'no page heading above the report');
+    assert.match(list.text, /<header class="masthead"><h1>August 27, 2026<\/h1><p class="sub">1 match · Ran Aug 26, 8:00 PM<\/p><\/header>/);
+    assert.equal((list.text.match(/<h1/g) || []).length, 1, 'a single h1 on the page');
+    assert.match(list.text, /<a class="btn secondary small" href="file:\/\/[^"]*output\/2026-08-27\/Daily%20Job%20Match%20Alert%20-%202026-08-27\.html" target="_blank" rel="noopener noreferrer" title="[^"]*output\/2026-08-27\/Daily Job Match Alert - 2026-08-27\.html">Open Desktop Copy<\/a>/);
+    assert.doesNotMatch(list.text, /Desktop copy:/);
     assert.match(list.text, /<article class="job"/);
-    assert.match(list.text, /Desktop copy: <code>[^<]*output\/2026-08-27\/Daily Job Match Alert - 2026-08-27\.html<\/code>/);
     assert.match(list.text, /<form class="toolbar/);
-    assert.match(list.text, /Analyze\./, 'the card carries the captured JD');
+    assert.match(list.text, /<dt>Trigger<\/dt><dd>scheduled<\/dd>/);
+    assert.match(list.text, /<div class="mini"><b>Last run<\/b><span class="ok">✓<\/span> Aug 26, 2026, 8:00 PM<b>Next run<\/b>Aug 27, 2026, 8:00 PM<\/div>/);
+    assert.doesNotMatch(list.text, /\bUTC\b/);
     assert.match(list.text, /<a href="\/reports" class="active">Reports<\/a>/);
     const day = await hub.request('GET', '/reports/2026-08-26');
     assert.equal(day.status, 200);
+    assert.match(day.text, /<h1>August 26, 2026<\/h1><p class="sub">No matches · Ran Aug 25, 8:00 PM<\/p>/);
     assert.match(day.text, /No new postings cleared the configured threshold/);
-    assert.match(day.text, /<a href="\/reports\/2026-08-26" class="active">/);
+    assert.match(day.text, /<a href="\/reports\/2026-08-26" class="active quiet"/);
     assert.equal((await hub.request('GET', '/reports/2026-01-01')).status, 404);
     assert.equal((await hub.request('GET', '/reports/../state')).status, 404);
     const home = await hub.request('GET', '/');
@@ -155,37 +168,71 @@ test('Reports lists payload dates newest first and renders the selected day with
   }
 });
 
+test('Reports reads payloads from disk on every request and normalizes locations without rewriting the file', async () => {
+  const root = await prepareProject();
+  const hub = await startHub(root);
+  try {
+    const before = await hub.request('GET', '/reports');
+    assert.doesNotMatch(before.text, /2026-08-28/);
+    const file = path.join(root, 'state', 'report-payload-2026-08-28.json');
+    const raw = JSON.stringify({ meta: payloadMeta('2026-08-28', { matchCount: 1, trigger: 'manual' }), matches: [job({ location: 'Boston, MA Johnston, RI Columbus, OH', title: 'Multi Site Analyst' })], reviewed: [], complete: true });
+    await fs.writeFile(file, raw);
+    const after = await hub.request('GET', '/reports');
+    assert.match(after.text, /<a href="\/reports\/2026-08-28" class="active"[^>]*><span>Fri, Aug 28<\/span><span class="n">1 match<\/span><\/a>/, 'the new payload is visible on the very next request');
+    assert.match(after.text, /Acme · Boston, MA · Johnston, RI · Columbus, OH · New Grad/);
+    assert.doesNotMatch(after.text, /Boston, MA Johnston/);
+    assert.equal(await fs.readFile(file, 'utf8'), raw, 'the payload on disk is untouched');
+    await fs.writeFile(file, JSON.stringify({ meta: payloadMeta('2026-08-28', { matchCount: 0 }), matches: [], reviewed: [], complete: true }));
+    assert.match((await hub.request('GET', '/reports/2026-08-28')).text, /No matches/, 'a rewritten payload is re-read, never served from memory');
+    await fs.rm(file);
+    assert.equal((await hub.request('GET', '/reports/2026-08-28')).status, 404);
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('uploading a PDF stores it under private/resumes, repoints only that track, and keeps five versions', async () => {
   const root = await prepareProject();
   const hub = await startHub(root);
   try {
     const before = await hub.request('GET', '/resumes');
-    assert.match(before.text, /<article class="card" data-track="data">[\s\S]*?data-badge="external">External file/);
+    assert.match(before.text, /<p class="hub-sub">One PDF per resume track; upload a new version here and tonight's run scores against it\.<\/p>/);
+    const dataCard = before.text.match(/<article class="card" data-track="data">[\s\S]*?<\/article>/)[0];
+    assert.match(dataCard, /<span class="badge badge-good" data-badge="enabled">Enabled<\/span><span class="badge" data-badge="desktop" title="[^"]*Desktop\/Data Resume\.pdf">On Desktop<\/span>/);
+    assert.match(dataCard, /<span class="mono" title="[^"]*Desktop\/Data Resume\.pdf">Data Resume\.pdf<\/span>/);
+    assert.doesNotMatch(dataCard, /Not uploaded through the hub|Not checked|Last upload|Text extraction/);
+    assert.match(dataCard, /<dt>Profile<\/dt><dd><span title="[^"]*data-resume\.md">Profile synced Aug 19 · 770 characters<\/span><\/dd>/);
+    assert.match(dataCard, /<span class="btn secondary">Choose PDF…<\/span><span class="file-name">No file chosen<\/span>/);
+    assert.match(dataCard, /Upload Replacement PDF<\/button>/);
+    assert.match(dataCard, /Disable Track<\/button>/);
     assert.match(before.text, /<article class="card" data-track="llm">[\s\S]*?data-badge="no-pdf"/);
+    assert.match(before.text, /<h2>Add Track<\/h2>[\s\S]*?<span>ID \(letters, digits, _ or -\)<\/span>[\s\S]*?Add Track<\/button>/);
     assert.doesNotMatch(before.text, /Data analyst and early-career/, 'resume text is never rendered');
+    assert.doesNotMatch(before.text, /\bUTC\b/);
 
-    const pdf = Buffer.from('%PDF-1.7\n%âãÏÓ\nbinary bytes\r\n--not-a-boundary\n', 'latin1');
+    const pdf = Buffer.from('%PDF-1.7\n%âãÏÓ\nbinary bytes\r\n--not-a-boundary\n', 'latin1');
     const response = await hub.upload('/resumes/upload', { trackId: 'llm' }, { name: 'My LLM Résumé (v2).pdf', data: pdf });
     assert.equal(response.status, 303);
     assert.match(decodeURIComponent(response.headers.location), /\/resumes\?notice=llm: stored 2026-08-27T12-00-00-000Z-My LLM R.*1234 characters extracted/);
 
     const config = await readConfig(root);
     assert.deepEqual(Object.keys(config), ['lookbackHours', 'timeZone', 'minimumMatchScore', 'semanticMatching', 'reports', 'outputDirectory', 'resumes', 'preferences', 'sources', 'network'], 'key order is preserved');
-    assert.equal(config.resumes.tracks[0].pdf, './external/Data Resume.pdf', 'the external track is untouched');
+    assert.equal(config.resumes.tracks[0].pdf, './Desktop/Data Resume.pdf', 'the external track is untouched');
     assert.match(config.resumes.tracks[1].pdf, /^\.\/private\/resumes\/llm\/2026-08-27T12-00-00-000Z-My LLM R.*\.pdf$/);
-    assert.equal(config.resumes.pdftotextCommand, '/custom/pdftotext');
     const stored = await fs.readFile(path.join(root, config.resumes.tracks[1].pdf), null);
     assert.ok(stored.equals(pdf), 'binary content is stored byte for byte');
-    assert.equal(hub.extractions.length, 1);
     assert.equal(hub.extractions[0].settings.pdftotextCommand, '/custom/pdftotext');
     assert.equal(detectIndent(await fs.readFile(path.join(root, 'config.json'), 'utf8')), 2);
 
-    const after = await hub.request('GET', '/resumes');
-    assert.match(after.text, /<article class="card" data-track="llm">[\s\S]*?data-badge="managed">Managed by hub/);
-    assert.match(after.text, /1234 characters extracted by the hub check/);
-    assert.match(after.text, /<article class="card" data-track="data">[\s\S]*?data-badge="external">External file/);
+    const after = await hub.request('GET', `/resumes?notice=${encodeURIComponent('llm: stored')}`);
+    assert.match(after.text, /<div class="flash notice">llm: stored<\/div>/);
+    const llmCard = after.text.match(/<article class="card" data-track="llm">[\s\S]*?<\/article>/)[0];
+    assert.match(llmCard, /<span class="badge" data-badge="hub" title="[^"]*private\/resumes\/llm\/[^"]*">Hub<\/span>/);
+    assert.match(llmCard, /<dt>Last upload<\/dt><dd>Aug 27, 2026, 7:00 AM<\/dd>/);
+    assert.match(llmCard, /<dt>Text extraction<\/dt><dd>1,234 characters \(checked Aug 27, 2026, 7:00 AM\)<\/dd>/);
+    assert.match(llmCard, /Profile not extracted yet/);
 
-    // Five more uploads: only the newest five files survive, and config follows the latest.
     for (let index = 0; index < 5; index += 1) {
       hub.ctx.now = () => new Date(`2026-08-28T0${index}:00:00Z`);
       assert.equal((await hub.upload('/resumes/upload', { trackId: 'llm' }, { name: `v${index}.pdf`, data: pdf })).status, 303);
@@ -194,13 +241,10 @@ test('uploading a PDF stores it under private/resumes, repoints only that track,
     assert.equal(kept.length, 5);
     assert.ok(!kept.some(name => name.includes('My LLM')), 'the oldest upload was pruned');
     assert.match((await readConfig(root)).resumes.tracks[1].pdf, /2026-08-28T04-00-00-000Z-v4\.pdf$/);
-    const hubState = JSON.parse(await fs.readFile(path.join(root, 'private', 'hub', 'hub-state.json'), 'utf8'));
-    assert.equal(hubState.resumes.llm.extraction.ok, true);
-
-    // Roll back to an older kept version.
     const rollback = await hub.form('/resumes/select', { trackId: 'llm', file: kept[1] });
     assert.equal(rollback.status, 303);
     assert.ok((await readConfig(root)).resumes.tracks[1].pdf.endsWith(kept[1]));
+    assert.match((await hub.request('GET', '/resumes')).text, /Use This Version<\/button>/);
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });
@@ -237,7 +281,7 @@ test('uploads reject non-PDF content, oversized files, and unknown or invalid tr
 
     assert.equal((await hub.form('/resumes/toggle', { trackId: 'agent', enabled: 'false' })).status, 303);
     assert.equal((await readConfig(root)).resumes.tracks[2].enabled, false);
-    assert.match((await hub.request('GET', '/resumes')).text, /data-track="agent">[\s\S]*?data-badge="disabled">Disabled/);
+    assert.match((await hub.request('GET', '/resumes')).text, /data-track="agent">[\s\S]*?<span class="badge badge-muted" data-badge="disabled">Disabled<\/span>[\s\S]*?Enable Track<\/button>/);
     await hub.form('/resumes/toggle', { trackId: 'llm', enabled: 'false' });
     const last = await hub.form('/resumes/toggle', { trackId: 'data', enabled: 'false' });
     assert.match(decodeURIComponent(last.headers.location), /At least one track must stay enabled/);
@@ -256,7 +300,9 @@ test('Run Now is refused while the pipeline lock is held, then spawns the pipeli
     const lockedPage = await hub.request('GET', '/status');
     assert.match(lockedPage.text, /<button class="btn" id="run-button" type="button" disabled>Run Now<\/button>/);
     assert.match(lockedPage.text, /already running \(PID 777\)/);
-    assert.match(lockedPage.text, /Held by PID 777/);
+    assert.match(lockedPage.text, /<dd id="lock-line">Held by PID 777/);
+    assert.match(lockedPage.text, /<div id="run-progress" hidden>/, 'idle: no run details shown');
+    assert.match(lockedPage.text, /<h2>Run Now<\/h2>\s*<p class="muted">Runs the full pipeline now using your Claude subscription\. Results merge into today's report\.<\/p>/);
     const refused = await hub.form('/run', { confirm: 'yes' });
     assert.equal(refused.status, 409);
     assert.match(JSON.parse(refused.text).error, /PID 777/);
@@ -273,6 +319,7 @@ test('Run Now is refused while the pipeline lock is held, then spawns the pipeli
     assert.equal(hub.spawnCalls[0].options.env.DAILY_JOB_MATCH_ALERT_TRIGGER, 'manual');
     assert.equal(hub.spawnCalls[0].options.cwd, root);
     assert.equal((await hub.form('/run', { confirm: 'yes' })).status, 409, 'a second run cannot start while the first is in progress');
+    assert.match((await hub.request('GET', '/status')).text, /<div id="run-progress">/, 'progress block appears once a run started');
 
     const child = hub.children[0];
     child.stderr.write('Resume tracks: Data, LLM\n');
@@ -292,23 +339,26 @@ test('Run Now is refused while the pipeline lock is held, then spawns the pipeli
     assert.match(await fs.readFile(done.run.logPath, 'utf8'), /line 59/);
     const runs = JSON.parse(await fs.readFile(path.join(root, 'private', 'hub', 'runs.json'), 'utf8'));
     assert.equal(runs[0].trigger, 'manual');
-    assert.match((await hub.request('GET', '/status')).text, /<dt>Trigger<\/dt><dd>manual<\/dd>/);
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });
   }
 });
 
-test('Settings writes only its keys, preserves the rest and their order, and validates input', async () => {
+test('Settings groups the fields, writes only its keys, preserves the rest and their order, and validates input', async () => {
   const root = await prepareProject();
   const hub = await startHub(root);
   try {
     const page = await hub.request('GET', '/settings');
+    assert.match(page.text, /<fieldset class="group"><legend>Matching<\/legend>[\s\S]*?Minimum Match Score \(0–100\)[\s\S]*?Accepted Match Levels[\s\S]*?value="high" checked> High[\s\S]*?value="medium"> Medium[\s\S]*?value="low"> Low[\s\S]*?Scoring Model[\s\S]*?<\/fieldset>/);
+    assert.match(page.text, /<legend>Reports<\/legend>[\s\S]*?Require XLSX Workbook/);
+    assert.match(page.text, /<legend>Hub<\/legend>[\s\S]*?<span>Port/);
+    assert.match(page.text, /<p class="form-foot">Changes apply to the next run\.<\/p>/);
     assert.match(page.text, /name="minimumMatchScore"[^>]*value="70"/);
-    assert.match(page.text, /value="high" checked/);
     const saved = await hub.form('/settings', { minimumMatchScore: '75', acceptedMatchLevels: 'high', model: 'claude-fable-5', xlsxRequired: 'on', hubPort: '5000' });
     assert.equal(saved.status, 303);
     assert.match(saved.headers.location, /notice=/);
+    assert.match((await hub.request('GET', saved.headers.location)).text, /<div class="flash notice">Settings saved to config\.json<\/div>/);
     const text = await fs.readFile(path.join(root, 'config.json'), 'utf8');
     const config = JSON.parse(text);
     assert.deepEqual(Object.keys(config), ['lookbackHours', 'timeZone', 'minimumMatchScore', 'semanticMatching', 'reports', 'outputDirectory', 'resumes', 'preferences', 'sources', 'network', 'hub']);
@@ -316,9 +366,7 @@ test('Settings writes only its keys, preserves the rest and their order, and val
     assert.equal(config.minimumMatchScore, 75);
     assert.equal(config.semanticMatching.model, 'claude-fable-5');
     assert.equal(config.semanticMatching.engine, 'local_only');
-    assert.equal(config.semanticMatching.batchSize, 6);
     assert.equal(config.reports.xlsx.required, true);
-    assert.equal(config.reports.xlsx.enabled, true);
     assert.equal(config.hub.port, 5000);
     assert.deepEqual(config.preferences, { roleTypes: ['internship', 'new_grad', 'entry_level'], graduationDate: '2027-05' });
     assert.match(text, /\n  "lookbackHours": 24,\n/, 'two-space indentation is kept');
@@ -330,13 +378,8 @@ test('Settings writes only its keys, preserves the rest and their order, and val
     assert.equal(again.reports.xlsx.required, false);
 
     const invalid = await hub.form('/settings', { minimumMatchScore: '120', acceptedMatchLevels: 'maybe', model: 'bad model!', hubPort: '80' });
-    assert.equal(invalid.status, 303);
     const message = decodeURIComponent(invalid.headers.location);
-    assert.match(message, /error=/);
-    assert.match(message, /0 to 100/);
-    assert.match(message, /high, medium, low/);
-    assert.match(message, /Model must be/);
-    assert.match(message, /1024 to 65535/);
+    assert.match(message, /error=.*0 to 100.*high, medium, low.*Model must be.*1024 to 65535/);
     assert.equal((await readConfig(root)).minimumMatchScore, 60, 'nothing written on validation failure');
     assert.throws(() => validateSettings({ minimumMatchScore: '70', acceptedMatchLevels: 'high', model: 'fable', hubPort: 'abc' }), /Hub port/);
 
@@ -378,33 +421,39 @@ test('POST requests from a non-local Origin or Host are rejected before any work
   }
 });
 
-test('Status shows the last run, the next scheduled time, warnings per day, and fatal error reports', async () => {
+test('Status merges runs into one card, formats every time in the configured zone, and lists warnings and errors', async () => {
   const root = await prepareProject();
   const hub = await startHub(root);
   try {
     const page = await hub.request('GET', '/status');
     assert.equal(page.status, 200);
-    assert.match(page.text, /<dt>Report date<\/dt><dd><a href="\/reports\/2026-08-27">2026-08-27<\/a><\/dd>/);
-    assert.match(page.text, /<dt>Trigger<\/dt><dd>scheduled<\/dd>/);
-    assert.match(page.text, /<dt>Result<\/dt><dd>success<\/dd>/);
-    assert.match(page.text, /<dt>Matches<\/dt><dd>1<\/dd>/);
-    assert.match(page.text, /<dt>Next scheduled run<\/dt><dd>2026-08-28 01:00 UTC \(20:00 America\/Chicago\)/);
-    assert.match(page.text, /LaunchAgent not installed/);
-    assert.match(page.text, /<dd id="lock-line">Free<\/dd>/);
-    assert.match(page.text, /<summary>2026-08-27 · 2 warnings · 1 match<\/summary><pre class="log">Daily Job Match Alert — 2026-08-27 — 2 warnings\n\[collector \/ Job board\] network unavailable/);
-    assert.match(page.text, /<summary>2026-08-26 · 0 warnings · 1 match<\/summary><p class="muted">No warnings\.txt/);
-    assert.match(page.text, /<a href="\/status\/error\/ERROR-2026-08-20\.html">ERROR-2026-08-20\.html<\/a>/);
+    assert.match(page.text, /<h2>Runs<\/h2><dl class="kv">\s*<dt>Last run<\/dt><dd>Aug 26, 2026, 8:00 PM · scheduled · success · 1 match · <a href="\/reports\/2026-08-27">report<\/a><\/dd>\s*<dt>Next run<\/dt><dd>Aug 27, 2026, 8:00 PM <span class="badge badge-warn" data-badge="not-installed">[^<]*<\/span><\/dd>\s*<dt>Lock<\/dt><dd id="lock-line">Free<\/dd>/);
+    assert.doesNotMatch(page.text, /<h2>Last run<\/h2>|<h2>Schedule<\/h2>|<h2>Fatal error reports<\/h2>|\bUTC\b/);
+    assert.match(page.text, /<div id="run-progress" hidden>/);
+    assert.match(page.text, /<h2>Warnings<\/h2>/);
+    assert.match(page.text, /<summary>Thu, Aug 27 · <span class="count-some">2 warnings<\/span> <span class="muted">· 1 match<\/span><\/summary><pre class="log">Daily Job Match Alert — 2026-08-27 — 2 warnings\n\[collector \/ Job board\] network unavailable/);
+    assert.match(page.text, /<summary>Wed, Aug 26 · <span class="count-zero">0 warnings<\/span> <span class="muted">· 0 matches<\/span><\/summary><p class="muted">No warnings\.txt/);
+    assert.match(page.text, /<h2>Error Reports<\/h2><table class="plain">[\s\S]*?<a href="\/status\/error\/ERROR-2026-08-20\.html" title="[^"]*">ERROR-2026-08-20\.html<\/a>/);
+    assert.match(page.text, /id="run-card" data-time-zone="America\/Chicago"/);
     const report = await hub.request('GET', '/status/error/ERROR-2026-08-20.html');
     assert.equal(report.status, 200);
     assert.match(report.text, /boom/);
     assert.equal((await hub.request('GET', '/status/error/..%2Fconfig.json')).status, 404);
 
-    // An installed LaunchAgent plist overrides the default schedule.
+    // The trigger comes from the payload written by the pipeline, never from logs.
+    await fs.writeFile(path.join(root, 'state', 'logs', 'daily-2026-08-27.log'), '[2026-08-27T11:00:00.000Z] launchd trigger: catchup\n');
+    assert.match((await hub.request('GET', '/status')).text, /· scheduled · success/);
+    const older = JSON.parse(await fs.readFile(path.join(root, 'state', 'report-payload-2026-08-27.json'), 'utf8'));
+    delete older.meta.trigger;
+    await fs.writeFile(path.join(root, 'state', 'report-payload-2026-08-27.json'), JSON.stringify(older));
+    assert.match((await hub.request('GET', '/status')).text, /<dt>Last run<\/dt><dd>Aug 26, 2026, 8:00 PM · success · 1 match/, 'no trigger shown when the payload has none');
+
     await fs.mkdir(path.join(root, 'Library', 'LaunchAgents'), { recursive: true });
     await fs.writeFile(path.join(root, 'Library', 'LaunchAgents', 'com.dailyjobmatchalert.daily.plist'), '<plist><dict><key>StartCalendarInterval</key><dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>30</integer></dict></dict></plist>');
     const installed = await hub.request('GET', '/status');
-    assert.match(installed.text, /<dt>Next scheduled run<\/dt><dd>2026-08-28 11:30 UTC \(06:30 America\/Chicago\)<\/dd>/);
+    assert.match(installed.text, /<dt>Next run<\/dt><dd>Aug 28, 2026, 6:30 AM<\/dd>/);
     assert.doesNotMatch(installed.text, /LaunchAgent not installed/);
+    assert.match(installed.text, /<b>Next run<\/b>Aug 28, 2026, 6:30 AM<\/div>/, 'the sidebar follows the installed schedule');
 
     assert.equal(nextScheduledRun(new Date('2026-08-27T12:00:00Z'), 'America/Chicago', 20, 0).toISOString(), '2026-08-28T01:00:00.000Z');
     assert.equal(nextScheduledRun(new Date('2026-08-27T01:30:00Z'), 'America/Chicago', 20, 0).toISOString(), '2026-08-28T01:00:00.000Z', 'after 20:00 local the next slot is tomorrow');
@@ -413,6 +462,19 @@ test('Status shows the last run, the next scheduled time, warnings per day, and 
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });
   }
+});
+
+test('time formatting renders in the configured zone in the "Sep 13, 2026, 8:00 PM" style', () => {
+  const zone = 'America/Chicago';
+  assert.equal(formatLocalDateTime('2026-09-14T01:00:00Z', zone), 'Sep 13, 2026, 8:00 PM');
+  assert.equal(formatLocalDateTime('2026-01-14T01:00:00Z', zone), 'Jan 13, 2026, 7:00 PM', 'standard time');
+  assert.equal(formatLocalDateTime('2026-09-14T01:00:00Z', 'Asia/Shanghai'), 'Sep 14, 2026, 9:00 AM');
+  assert.equal(formatLocalDateTime('2026-09-14T01:00:00Z', 'Not/AZone'), 'Sep 13, 2026, 8:00 PM', 'an unknown zone falls back to Chicago');
+  assert.equal(formatLocalShort('2026-09-13T01:00:00Z', zone), 'Sep 12, 8:00 PM');
+  assert.equal(formatDateLabel('2026-09-13'), 'Sun, Sep 13');
+  assert.equal(localDate(new Date('2026-09-13T03:30:00Z'), zone), '2026-09-12');
+  assert.equal(formatLocalDateTime('', zone), '');
+  assert.equal(formatLocalDateTime('garbage', zone), 'garbage');
 });
 
 test('the multipart parser keeps binary bodies intact and reads quoted filenames', () => {

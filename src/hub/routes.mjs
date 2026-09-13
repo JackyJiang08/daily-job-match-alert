@@ -6,9 +6,10 @@ import { renderReportBody } from '../report-components.mjs';
 import { HubLockedError } from './config-file.mjs';
 import { parseMultipart } from './multipart.mjs';
 import {
-  HubInputError, assertDate, buildStatusView, desktopCopyPath, listReportDates, loadTracksView, readErrorReport,
-  readReportPayload, readSettings, saveSettings, selectResumeVersion, setTrackEnabled, uploadResumePdf,
+  HubInputError, assertDate, buildStatusView, desktopCopyPath, listReportSummaries, loadTracksView, readErrorReport,
+  readReportPayload, readSettings, saveSettings, selectResumeVersion, setTrackEnabled, sidebarSummary, uploadResumePdf,
 } from './services.mjs';
+import { localDate } from '../time-format.mjs';
 import { STATUS_SCRIPT, renderHubPage, reportsPage, resumesPage, settingsPage, statusPage } from './views.mjs';
 
 const MAXIMUM_BODY_BYTES = 6 * 1024 * 1024;
@@ -78,39 +79,50 @@ export function createHubHandler(ctx) {
     response.writeHead(303, { location: target, 'cache-control': 'no-store' });
     response.end();
   };
-  const page = (response, status, options) => send(response, status, renderHubPage({ port: ctx.port, ...options }));
+  // Every page carries the sidebar summary; config is re-read per request so nothing is cached in-process.
+  const page = async (response, status, options) => {
+    const config = await ctx.loadConfig().catch(() => ({}));
+    const timeZone = config.timeZone || 'America/Chicago';
+    const sidebar = await sidebarSummary(ctx, config).catch(() => null);
+    send(response, status, renderHubPage({ port: ctx.port, timeZone, sidebar, ...options }));
+  };
 
   async function getReports(url, response) {
-    const dates = await listReportDates(ctx);
+    const config = await ctx.loadConfig();
+    const timeZone = config.timeZone || 'America/Chicago';
+    const dates = await listReportSummaries(ctx);
+    const today = localDate(ctx.now(), timeZone);
     const match = /^\/reports\/(\d{4}-\d{2}-\d{2})$/.exec(url.pathname);
-    const selected = match ? assertDate(match[1]) : dates[0] || null;
+    const selected = match ? assertDate(match[1]) : dates[0]?.date || null;
     let reportBody = null;
     let desktopPath = null;
     if (selected) {
       const payload = await readReportPayload(ctx, selected);
       if (!payload) {
-        page(response, 404, { active: 'reports', title: 'Reports', content: reportsPage({ dates, selected: null, reportBody: null, desktopPath: null }), error: `No report payload for ${selected}` });
+        await page(response, 404, { active: 'reports', title: 'Reports', content: reportsPage({ dates, selected: null, reportBody: null, desktopPath: null, today }), error: `No report payload for ${selected}` });
         return;
       }
-      reportBody = renderReportBody(buildReportView(payload.matches, payload.meta));
-      desktopPath = desktopCopyPath(await ctx.loadConfig(), selected);
+      reportBody = renderReportBody(buildReportView(payload.matches, { timeZone, ...payload.meta }, { embedded: true }));
+      desktopPath = desktopCopyPath(config, selected);
     }
-    page(response, 200, { active: 'reports', title: selected ? `Report ${selected}` : 'Reports', content: reportsPage({ dates, selected, reportBody, desktopPath }), notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
+    await page(response, 200, { active: 'reports', title: selected ? `Report ${selected}` : 'Reports', content: reportsPage({ dates, selected, reportBody, desktopPath, today }), notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
   }
 
   async function getResumes(url, response) {
     const tracksView = await loadTracksView(ctx);
-    page(response, 200, { active: 'resumes', title: 'Resumes', content: resumesPage({ tracksView }), notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
+    const timeZone = (await ctx.loadConfig()).timeZone || 'America/Chicago';
+    await page(response, 200, { active: 'resumes', title: 'Resumes', content: resumesPage({ tracksView, timeZone }), notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
   }
 
   async function getStatus(url, response) {
-    const status = await buildStatusView(ctx, await ctx.loadConfig());
-    page(response, 200, { active: 'status', title: 'Status', content: statusPage({ status }), script: STATUS_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
+    const config = await ctx.loadConfig();
+    const status = await buildStatusView(ctx, config);
+    await page(response, 200, { active: 'status', title: 'Status', content: statusPage({ status, timeZone: status.timeZone }).replace('id="run-card"', `id="run-card" data-time-zone="${status.timeZone}"`), script: STATUS_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
   }
 
   async function getSettings(url, response) {
     const settings = await readSettings(ctx);
-    page(response, 200, { active: 'settings', title: 'Settings', content: settingsPage({ settings }), notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
+    await page(response, 200, { active: 'settings', title: 'Settings', content: settingsPage({ settings }), notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
   }
 
   async function handlePost(url, request, response) {
@@ -181,7 +193,7 @@ export function createHubHandler(ctx) {
         if (errorMatch) return send(response, 200, await readErrorReport(ctx, await ctx.loadConfig(), errorMatch[1]));
         if (url.pathname === '/settings') return await getSettings(url, response);
         if (url.pathname === '/healthz') return json(response, 200, { ok: true });
-        return page(response, 404, { active: '', title: 'Not found', content: '<h1 class="hub-title">Not found</h1>' });
+        return await page(response, 404, { active: '', title: 'Not found', content: '<h1 class="hub-title">Not found</h1>' });
       }
       if (request.method === 'POST') return await handlePost(url, request, response);
       return send(response, 405, 'Method not allowed', 'text/plain; charset=utf-8');
@@ -193,7 +205,7 @@ export function createHubHandler(ctx) {
       if (wantsJson) return json(response, status, { error: message });
       const back = url.pathname.startsWith('/resumes') ? '/resumes' : url.pathname.startsWith('/settings') ? '/settings' : url.pathname.startsWith('/status') ? '/status' : '/reports';
       if (request.method === 'POST' && status !== 403) return redirect(response, back, message, 'error');
-      return page(response, status, { active: '', title: 'Error', content: '<h1 class="hub-title">Error</h1>', error: message });
+      return await page(response, status, { active: '', title: 'Error', content: '<h1 class="hub-title">Error</h1>', error: message });
     }
   };
 }

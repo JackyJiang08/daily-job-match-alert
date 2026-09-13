@@ -41,3 +41,7 @@ disabled; do not expand them unless a task says so.
   path params are pattern-checked. Never render resume text in the hub.
 - Its LaunchAgent (launchd/com.dailyjobmatchalert.hub.plist.template,
   scripts/install-hub-launchd.sh) is separate from the nightly one.
+- All hub and report timestamps render in config.timeZone via src/time-format.mjs
+  ("Sep 13, 2026, 8:00 PM"); never show UTC. The pipeline writes meta.trigger and
+  meta.completedAt into each day payload; Status reads those, not the logs.
+  After pulling new code run `npm run hub:restart` (launchctl kickstart).

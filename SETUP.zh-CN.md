@@ -120,7 +120,10 @@ LLM batch 失败会在 10 秒后重试一次。`unreviewed` 岗位只有本地�
 ```bash
 ./scripts/install-hub-launchd.sh            # KeepAlive + RunAtLoad，日志在 state/logs/hub.*.log
 ./scripts/install-hub-launchd.sh --remove   # 停止并移除
+npm run hub:restart                         # 更新代码或修改 hub.port 后重启常驻中枢
 ```
+
+`git pull` 更新代码后运行 `npm run hub:restart`（未安装 LaunchAgent 时会给出提示，直接重新 `npm run hub` 即可）。中枢内所有时间都按 `config.timeZone` 显示，侧栏底部常驻显示上次运行时间与结果、下次运行时间；夜间运行会把 trigger（scheduled / catchup / manual）与完成时间写进当日 payload，Status 页与报告页眉（`Ran Sep 12, 8:00 PM`）直接读取。
 
 ## 第一次启用
 

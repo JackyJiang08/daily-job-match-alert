@@ -7,6 +7,8 @@ import path from 'node:path';
 import { jobScores, reportTracks, trackScore } from './resume-tracks.mjs';
 import { renderReportPage } from './report-components.mjs';
 import { warningText } from './warnings.mjs';
+import { formatLocalDateTime, formatLocalShort } from './time-format.mjs';
+import { normalizeLocation } from './utils.mjs';
 
 export const REPORT_TITLE = 'Daily Job Match Alert';
 export const WARNINGS_FILE_NAME = 'warnings.txt';
@@ -31,14 +33,7 @@ export function readableDate(date) {
 }
 
 function readableTimestamp(value, timeZone) {
-  if (!value) return '';
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return String(value);
-  try {
-    return parsed.toLocaleString('en-US', { timeZone: timeZone || 'UTC', dateStyle: 'medium', timeStyle: 'short', hour12: false });
-  } catch {
-    return parsed.toISOString();
-  }
+  return formatLocalDateTime(value, timeZone);
 }
 
 function matchLabel(count) {
@@ -95,7 +90,7 @@ export function cardView(job, tracks) {
     title: job.title || 'Untitled posting',
     url: job.url,
     company,
-    location: job.location || 'Location not stated',
+    location: normalizeLocation(job.location) || 'Location not stated',
     roleType: job.roleType || 'unknown',
     roleLabel: roleLabel(job.roleType),
     bestScore: Number(job.bestScore) || 0,
@@ -143,6 +138,7 @@ export function runDetailsView(jobs, meta, tracks) {
       items: Array.isArray(meta.excludedPostings) ? meta.excludedPostings.map(String) : [],
     });
   }
+  if (meta.trigger) rows.push({ term: 'Trigger', detail: String(meta.trigger) });
   if (meta.runsToday) {
     rows.push({ term: 'Updates today', detail: `Daily update #${Number(meta.runsToday)}${meta.lastUpdatedAt ? ` · last updated ${readableTimestamp(meta.lastUpdatedAt, meta.timeZone)}` : ''}` });
   } else if (meta.generatedAt) {
@@ -168,14 +164,30 @@ export function runDetailsView(jobs, meta, tracks) {
 }
 
 // The view object consumed by report-components; the hub renders the same view inside its shell.
-export function buildReportView(jobs, meta) {
+// "1 match · Ran Sep 12, 8:00 PM"; the run time comes from the pipeline's own meta.completedAt.
+export function mastheadSubtitle(jobs, meta, { withDate = true } = {}) {
+  const parts = [];
+  if (withDate) parts.push(readableDate(meta.date));
+  parts.push(matchLabel(jobs.length));
+  const ranAt = meta.completedAt || meta.lastUpdatedAt || null;
+  if (ranAt) parts.push(`Ran ${formatLocalShort(ranAt, meta.timeZone)}`);
+  return parts.join(' · ');
+}
+
+// The view object consumed by report-components; the hub renders the same view inside its shell with
+// `embedded: true`, which titles the masthead with the date instead of repeating the product name.
+export function buildReportView(jobs, meta, options = {}) {
   const tracks = reportTracks(meta, jobs);
   const cards = jobs.map(job => cardView(job, tracks));
   const roleTypes = [...new Set(jobs.map(job => job.roleType || 'unknown'))].map(value => ({ value, label: roleLabel(value) }));
+  const embedded = options.embedded === true;
   return {
     title: REPORT_TITLE,
     dateLabel: readableDate(meta.date),
     matchLabel: matchLabel(jobs.length),
+    masthead: embedded
+      ? { title: readableDate(meta.date), subtitle: mastheadSubtitle(jobs, meta, { withDate: false }) }
+      : { title: REPORT_TITLE, subtitle: mastheadSubtitle(jobs, meta) },
     toolbar: { roleTypes, tracks, quiet: jobs.length < 5, total: jobs.length },
     cards,
     emptyMessage: 'No new postings cleared the configured threshold for this date.',

@@ -8,8 +8,10 @@ const VISIBLE_FACTS = 2;
 // Every link out of the report opens a new tab so the shortlist itself is never navigated away.
 export const EXTERNAL_LINK = 'target="_blank" rel="noopener noreferrer"';
 
-export function renderMasthead({ title, dateLabel, matchLabel }) {
-  return `<header class="masthead"><h1>${htmlEscape(title)}</h1><p class="sub">${htmlEscape(dateLabel)} · ${htmlEscape(matchLabel)}</p></header>`;
+export function renderMasthead(view) {
+  const title = view.masthead?.title ?? view.title;
+  const subtitle = view.masthead?.subtitle ?? `${view.dateLabel} · ${view.matchLabel}`;
+  return `<header class="masthead"><h1>${htmlEscape(title)}</h1><p class="sub">${htmlEscape(subtitle)}</p></header>`;
 }
 
 function option(value, label, selected = false) {

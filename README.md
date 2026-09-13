@@ -240,7 +240,10 @@ To keep the hub running across logins, install its own LaunchAgent (separate fro
 ```bash
 ./scripts/install-hub-launchd.sh            # KeepAlive + RunAtLoad, logs in state/logs/hub.*.log
 ./scripts/install-hub-launchd.sh --remove   # stop and remove it
+npm run hub:restart                         # after updating the code or changing hub.port
 ```
+
+After a `git pull`, run `npm run hub:restart` so the installed hub picks up the new code; without the LaunchAgent the script says so and you simply restart `npm run hub`. Every time in the hub is shown in `config.timeZone`, and the sidebar on every page carries the last and next run times. The nightly run now records its trigger (`scheduled`, `catchup`, or `manual`) and its completion time in the day payload, which Status and the report masthead (`Ran Sep 12, 8:00 PM`) display.
 
 ## Verifying a deployment
 

@@ -7,6 +7,7 @@ import { enabledResumeTracks, normalizeResumeConfig } from '../config.mjs';
 import { TRACK_ID_PATTERN, defaultTrackLabel } from '../resume-tracks.mjs';
 import { REPORT_TITLE } from '../report.mjs';
 import { resolveFrom } from '../utils.mjs';
+import { localDate } from '../time-format.mjs';
 import { readConfigFile, updateConfigFile } from './config-file.mjs';
 import { readLockStatus } from './run.mjs';
 
@@ -41,6 +42,16 @@ export async function listReportDates(ctx) {
   let names = [];
   try { names = await ctx.io.readdir(path.join(ctx.root, 'state')); } catch (error) { if (error?.code !== 'ENOENT') throw error; }
   return names.map(name => PAYLOAD_PATTERN.exec(name)?.[1]).filter(Boolean).sort().reverse();
+}
+
+// Dates with their match counts for the Reports sidebar; each payload is read from disk on every call.
+export async function listReportSummaries(ctx) {
+  const summaries = [];
+  for (const date of await listReportDates(ctx)) {
+    const payload = await readReportPayload(ctx, date);
+    summaries.push({ date, matchCount: payload ? (payload.meta?.matchCount ?? payload.matches.length) : null, complete: payload?.complete === true });
+  }
+  return summaries;
 }
 
 export function assertDate(value) {
@@ -138,6 +149,7 @@ export async function loadTracksView(ctx) {
       pdfName: track.pdf ? path.basename(track.pdf) : null,
       pdfExists,
       managed: isManagedPath(ctx, track.id, track.pdf),
+      onDesktop: Boolean(track.pdf) && track.pdf.startsWith(`${path.join(ctx.homedir, 'Desktop')}${path.sep}`),
       versions,
       uploadedAt: record?.uploadedAt || (isManagedPath(ctx, track.id, track.pdf) ? versions.find(version => version.path === track.pdf)?.modifiedAt || null : null),
       extraction: record?.extraction || null,
@@ -277,20 +289,17 @@ async function installedSchedule(ctx) {
   return { hour: 20, minute: 0, installed: false, path: plist };
 }
 
-async function latestLogTrigger(ctx) {
-  const directory = path.join(ctx.root, 'state', 'logs');
-  let names = [];
-  try { names = await ctx.io.readdir(directory); } catch { return null; }
-  const logs = names.filter(name => /^daily-\d{4}-\d{2}-\d{2}\.log$/.test(name)).sort().reverse().slice(0, 3);
-  for (const name of logs) {
-    const text = await ctx.io.readFile(path.join(directory, name), 'utf8').catch(() => '');
-    const matches = [...text.matchAll(/^\[([^\]]+)\] launchd trigger: (scheduled|catchup)/gm)];
-    if (matches.length) {
-      const last = matches[matches.length - 1];
-      return { at: last[1], trigger: last[2] };
-    }
-  }
-  return null;
+// Small summary for the sidebar of every page: last run time and result, next run time.
+export async function sidebarSummary(ctx, config) {
+  const dates = await listReportDates(ctx);
+  const latest = dates[0] ? await readReportPayload(ctx, dates[0]) : null;
+  const schedule = await installedSchedule(ctx);
+  const next = nextScheduledRun(ctx.now(), config.timeZone || 'America/Chicago', schedule.hour, schedule.minute);
+  return {
+    lastRunAt: latest?.meta?.completedAt || latest?.meta?.lastUpdatedAt || latest?.meta?.generatedAt || null,
+    lastResult: latest ? (latest.complete === true ? 'success' : 'incomplete') : null,
+    nextRunAt: next ? next.toISOString() : null,
+  };
 }
 
 export async function buildStatusView(ctx, config) {
@@ -299,17 +308,13 @@ export async function buildStatusView(ctx, config) {
   const dates = await listReportDates(ctx);
   const latestDate = dates[0] || null;
   const latest = latestDate ? await readReportPayload(ctx, latestDate) : null;
-  const runs = await ctx.runManager.history();
-  const manual = runs[0] || null;
-  const logTrigger = await latestLogTrigger(ctx);
-  const lastUpdatedAt = latest?.meta?.lastUpdatedAt || latest?.meta?.generatedAt || null;
-  let trigger = logTrigger?.trigger || null;
-  if (manual?.startedAt && (!logTrigger || manual.startedAt > logTrigger.at)) trigger = 'manual';
+  const lastUpdatedAt = latest?.meta?.completedAt || latest?.meta?.lastUpdatedAt || latest?.meta?.generatedAt || null;
 
   const lastRun = {
     at: lastUpdatedAt,
     date: latestDate,
-    trigger,
+    // Written by the pipeline itself (scheduled / catchup / manual); older payloads carry none.
+    trigger: latest?.meta?.trigger || null,
     matchCount: latest?.meta?.matchCount ?? latest?.matches?.length ?? null,
     runsToday: latest?.meta?.runsToday ?? null,
     complete: latest?.complete === true,
@@ -342,6 +347,7 @@ export async function buildStatusView(ctx, config) {
 
   return {
     now: now.toISOString(),
+    today: localDate(now, config.timeZone || 'America/Chicago'),
     timeZone: config.timeZone || 'America/Chicago',
     lastRun,
     nextRun: { at: next ? next.toISOString() : null, hour: schedule.hour, minute: schedule.minute, installed: schedule.installed, plist: schedule.path },

@@ -18,6 +18,7 @@ import { isJobSeen, markJobSeen, normalizeState, pruneSeen } from './state.mjs';
 import { acquireRunLock, releaseRunLock } from './lock.mjs';
 import { canonicalUrl, dateWithOffset, htmlEscape, mapLimit, resolveFrom, sha256 } from './utils.mjs';
 import { createWarning, errorSummary } from './warnings.mjs';
+import { formatLocalDateTime } from './time-format.mjs';
 
 const execFileAsync = promisify(execFile);
 const REPORT_PAYLOAD_PREFIX = 'report-payload-';
@@ -418,12 +419,15 @@ async function runPipeline(config, clock) {
   if (exclusionWarning) finalWarnings.push(exclusionWarning);
   const timeZone = config.timeZone || 'America/Chicago';
   const runsToday = Number(previous?.meta?.runsToday || 0) + 1;
+  // How this run was started (the launchd dispatcher and the hub set the variable; a bare `npm run run` is manual).
+  const trigger = ['scheduled', 'catchup', 'manual'].includes(process.env.DAILY_JOB_MATCH_ALERT_TRIGGER) ? process.env.DAILY_JOB_MATCH_ALERT_TRIGGER : 'manual';
   const meta = {
     generatedAt: now.toISOString(), date, applicationDate: date, runDate, timeZone, lookbackHours: config.lookbackHours,
     minimumMatchScore: config.minimumMatchScore, resumeSync, resumeTracks, collectedCount: collected.length,
     newCount: reviewed.length, newThisRun: enriched.length, reviewedCount: reviewed.length, matchCount: matches.length,
     warnings: finalWarnings,
     runsToday, firstGeneratedAt: previous?.meta?.firstGeneratedAt || now.toISOString(), lastUpdatedAt: now.toISOString(),
+    trigger, completedAt: now.toISOString(), completedAtLocal: formatLocalDateTime(now, timeZone),
     eligibilityExclusions: exclusions.counts,
     excludedPostings: exclusions.examples,
     scoringModel: summarizeScoringModel(reviewed, config.semanticMatching?.engine || 'claude_subscription'),

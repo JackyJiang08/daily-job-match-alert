@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { WARNINGS_FILE_NAME, buildHtml, jobBadges, readableDate, warningsFileText, writeReports, writeWarningsFile } from '../src/report.mjs';
+import { WARNINGS_FILE_NAME, buildHtml, buildReportView, cardView, jobBadges, mastheadSubtitle, readableDate, warningsFileText, writeReports, writeWarningsFile } from '../src/report.mjs';
 import { dateWithOffset } from '../src/utils.mjs';
 
 const job = {
@@ -72,13 +72,37 @@ test('run metadata lives only in the collapsed Run details block, including the 
   assert.match(details, /<dt>Minimum score<\/dt><dd>70<\/dd>/);
   assert.match(details, /<dt>Postings<\/dt><dd>12 collected · 7 reviewed · 2 matched<\/dd>/);
   assert.match(details, /<dt>Hard filter<\/dt><dd>3 excluded: 2 outside the United States, 1 outside the graduation window<ul><li>Globex — Data Analyst \(Toronto\): location outside the United States<\/li><li>Initech — BI Intern: Class of 2026 only<\/li><\/ul><\/dd>/);
-  assert.match(details, /<dt>Updates today<\/dt><dd>Daily update #2 · last updated Aug 27, 2026, 08:30<\/dd>/);
+  assert.match(details, /<dt>Updates today<\/dt><dd>Daily update #2 · last updated Aug 27, 2026, 8:30 AM<\/dd>/);
+  assert.doesNotMatch(html, /\bUTC\b/);
   assert.match(details, /<dt>Status<\/dt><dd>1 of 2 matches kept local scores because semantic review was unavailable \(unreviewed\)<ul><li>Resume PDF\(s\) recovered from iCloud before this run: data<\/li><li>2 pipeline warning\(s\), see warnings\.txt beside this file<\/li><\/ul><\/dd>/);
   // The warning lines themselves never reach the page.
   assert.doesNotMatch(html, /network unavailable|batch fallback|Pipeline warnings/);
   // Outside the block, none of the run metadata appears.
   const outside = html.replace(details, '');
   assert.doesNotMatch(outside, /claude-fable-5|Lookback|Daily update|excluded|Toronto/);
+});
+
+test('the masthead names the run time in the configured zone, and the embedded view is titled by date', () => {
+  const ran = { ...meta, timeZone: 'America/Chicago', completedAt: '2026-09-13T01:00:00Z', trigger: 'scheduled', runsToday: 1, lastUpdatedAt: '2026-09-13T01:00:00Z' };
+  const html = buildHtml([job], { ...ran, date: '2026-09-13' });
+  assert.equal(header(html), '<h1>Daily Job Match Alert</h1><p class="sub">September 13, 2026 · 1 match · Ran Sep 12, 8:00 PM</p>');
+  assert.equal(mastheadSubtitle([job], { ...ran, date: '2026-09-13' }), 'September 13, 2026 · 1 match · Ran Sep 12, 8:00 PM');
+  assert.match(html, /<dt>Trigger<\/dt><dd>scheduled<\/dd>/);
+  assert.doesNotMatch(html, /\bUTC\b/);
+  const embedded = buildReportView([job], { ...ran, date: '2026-09-13' }, { embedded: true });
+  assert.deepEqual(embedded.masthead, { title: 'September 13, 2026', subtitle: '1 match · Ran Sep 12, 8:00 PM' });
+  assert.equal(buildReportView([job], meta).masthead.subtitle, 'August 27, 2026 · 1 match', 'no run time when the payload has none');
+  // Older payloads without completedAt fall back to lastUpdatedAt.
+  assert.equal(mastheadSubtitle([], { date: '2026-08-27', timeZone: 'America/Chicago', lastUpdatedAt: '2026-08-27T13:30:00Z' }), 'August 27, 2026 · No matches · Ran Aug 27, 8:30 AM');
+});
+
+test('card locations are normalized at render time so historical payloads read correctly', () => {
+  const tracks = [{ id: 'data', label: 'Data' }];
+  assert.equal(cardView({ ...job, location: 'Boston, MA Johnston, RI Columbus, OH' }, tracks).location, 'Boston, MA · Johnston, RI · Columbus, OH');
+  assert.equal(cardView({ ...job, location: '3 locations Boston, MA Remote' }, tracks).location, 'Boston, MA · Remote');
+  assert.equal(cardView({ ...job, location: '' }, tracks).location, 'Location not stated');
+  const html = buildHtml([{ ...job, location: 'Boston, MA Johnston, RI' }], meta);
+  assert.match(html, /Acme, Inc\. · Boston, MA · Johnston, RI · New Grad/);
 });
 
 test('the empty state uses the same layout and hides the run status behind the same block', () => {
