@@ -42,6 +42,7 @@ export const REPORT_TOKENS = `
   --space-5: 24px;
   --space-6: 40px;
   --shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5l3.5 3.5 3.5-3.5' fill='none' stroke='%236b7280' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 `;
 
 export const REPORT_TOKENS_DARK = `
@@ -63,6 +64,7 @@ export const REPORT_TOKENS_DARK = `
   --bad-bg: #3d1a1a;
   --bad-ink: #f3a9a9;
   --shadow: none;
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5l3.5 3.5 3.5-3.5' fill='none' stroke='%238a94a3' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 `;
 
 export const REPORT_STYLES = `
@@ -79,7 +81,10 @@ a{color:inherit}
 .masthead .sub{margin:var(--space-1) 0 0;font-size:var(--fs-body);color:var(--ink-2)}
 
 .toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2);margin:0 0 var(--space-4)}
-.toolbar input,.toolbar select{font:inherit;font-size:var(--fs-body);color:var(--ink);background:var(--surface);border:1px solid var(--line-2);border-radius:var(--radius-sm);padding:6px 9px;min-height:32px}
+/* One control style for every text input and select, in the report toolbar and in the hub forms. */
+.control-input,.toolbar input,.toolbar select{font:inherit;font-size:var(--fs-body);line-height:1.3;color:var(--ink);background:var(--surface);border:1px solid var(--line-2);border-radius:var(--radius-sm);padding:6px 9px;min-height:32px;box-sizing:border-box}
+select.control-input,.toolbar select{appearance:none;-webkit-appearance:none;background-image:var(--chevron);background-repeat:no-repeat;background-position:right 9px center;padding-right:28px;cursor:pointer}
+select.control-input:focus,.control-input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
 .toolbar input[type=search]{flex:1 1 200px;min-width:160px}
 .toolbar select{flex:0 0 auto}
 .toolbar .control{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-meta);color:var(--ink-3)}

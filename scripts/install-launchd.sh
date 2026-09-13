@@ -31,7 +31,7 @@ fi
 mkdir -p "$agent_dir" "$project_dir/state/logs"
 temp_file="$(mktemp)"
 trap 'rm -f "$temp_file"' EXIT
-sed -e "s|__PROJECT_DIR__|$project_dir|g" -e "s|__NODE_BIN__|$node_bin|g" -e "s|__HOUR__|$hour|g" -e "s|__MINUTE__|$minute|g" "$template" >"$temp_file"
+sed -e "s|__PROJECT_DIR__|$project_dir|g" -e "s|__NODE_BIN__|$node_bin|g" -e "s|__HOME__|$HOME|g" -e "s|__HOUR__|$hour|g" -e "s|__MINUTE__|$minute|g" "$template" >"$temp_file"
 plutil -lint "$temp_file"
 cp "$temp_file" "$agent_path"
 launchctl bootout "gui/$(id -u)" "$agent_path" 2>/dev/null || true

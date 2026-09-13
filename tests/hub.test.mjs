@@ -146,7 +146,9 @@ test('Reports lists dates newest first with counts, titles the report by date, a
     assert.equal(list.status, 200);
     assert.match(list.text, /<title>Report 2026-08-27 — Daily Job Match Alert Hub<\/title>/);
     assert.match(list.text, /<p class="brand">Job Match Hub<\/p>/);
-    assert.match(list.text, /<ul class="datelist"><li><a href="\/reports\/2026-08-27" class="active today" title="2026-08-27 \(today\)"><span>Thu, Aug 27<\/span><span class="n">1 match<\/span><\/a><\/li><li><a href="\/reports\/2026-08-26" class="quiet" title="2026-08-26"><span>Wed, Aug 26<\/span><span class="n">0 matches<\/span><\/a><\/li><\/ul>/);
+    assert.match(list.text, /<div class="datetools"><a class="today-link" href="\/reports\/2026-08-27" id="today-link" title="Newest report \(2026-08-27\)">Today<\/a><label><input type="checkbox" id="only-matches"> Only days with matches<\/label><\/div>/);
+    assert.match(list.text, /<ul class="datelist" id="datelist"><li class="month" data-month="2026-08">August 2026<\/li><li data-month="2026-08"><a href="\/reports\/2026-08-27" class="active today" title="2026-08-27 \(today\)"><span>Thu, Aug 27<\/span><span class="n">1 match<\/span><\/a><\/li><li data-month="2026-08" data-empty="1"><a href="\/reports\/2026-08-26" class="quiet" title="2026-08-26"><span>Wed, Aug 26<\/span><span class="n">0 matches<\/span><\/a><\/li><\/ul>/);
+    assert.match(list.text, /localStorage\.getItem\(key\)/, 'the toggle remembers itself');
     assert.doesNotMatch(list.text, /<h1 class="hub-title">Reports<\/h1>/, 'no page heading above the report');
     assert.match(list.text, /<header class="masthead"><h1>August 27, 2026<\/h1><p class="sub">1 match · Ran Aug 26, 8:00 PM<\/p><\/header>/);
     assert.equal((list.text.match(/<h1/g) || []).length, 1, 'a single h1 on the page');
@@ -186,6 +188,12 @@ test('Reports reads payloads from disk on every request and normalizes locations
     await fs.writeFile(file, raw);
     const after = await hub.request('GET', '/reports');
     assert.match(after.text, /<a href="\/reports\/2026-08-28" class="active"[^>]*><span>Fri, Aug 28<\/span><span class="n">1 match<\/span><\/a>/, 'the new payload is visible on the very next request');
+    const sept = path.join(root, 'state', 'report-payload-2026-09-02.json');
+    await fs.writeFile(sept, JSON.stringify({ meta: payloadMeta('2026-09-02', { matchCount: 2 }), matches: [job(), job({ url: 'https://example.com/jobs/9' })], reviewed: [], complete: true }));
+    const grouped = await hub.request('GET', '/reports/2026-08-27');
+    assert.match(grouped.text, /<li class="month" data-month="2026-09">September 2026<\/li><li data-month="2026-09"><a href="\/reports\/2026-09-02"[^>]*><span>Wed, Sep 2<\/span><span class="n">2 matches<\/span><\/a><\/li><li class="month" data-month="2026-08">August 2026<\/li>/, 'months are grouped newest first');
+    assert.match(grouped.text, /<a class="today-link" href="\/reports\/2026-09-02"/, 'Today jumps to the newest report');
+    await fs.rm(sept);
     assert.match(after.text, /Acme · Boston, MA · Johnston, RI · Columbus, OH · New Grad/);
     assert.doesNotMatch(after.text, /Boston, MA Johnston/);
     assert.equal(await fs.readFile(file, 'utf8'), raw, 'the payload on disk is untouched');
@@ -507,9 +515,10 @@ test('Settings offers an engine choice with a model dropdown per engine, a custo
     assert.doesNotMatch(page.text, /Only these values are written/);
     assert.match(page.text, /<h2>Connections<\/h2><dl class="conn"><dt>Claude<\/dt><dd><span class="badge badge-good" data-conn="connected">Connected<\/span> Claude · Max · claude\.ai<\/dd><dt>Codex<\/dt><dd><span class="badge badge-warn" data-conn="disconnected">Not connected<\/span> <span class="muted">Sign in from a terminal: <code>codex login<\/code><\/span>/);
     assert.match(page.text, /Checked Aug 27, 2026, 7:00 AM; refreshed every minute\. The hub never signs in for you\./);
-    assert.match(page.text, /<span>Engine<\/span><div class="radio-row"><label><input type="radio" name="engine" value="claude" checked> Claude subscription<\/label><label><input type="radio" name="engine" value="codex"> ChatGPT subscription via Codex<\/label><\/div>/);
-    assert.match(page.text, /<div class="model-group" data-engine="claude">\s*<label class="field"><span>Scoring Model<\/span><select name="model_claude" class="model-select"><option value="fable" selected>Fable \(recommended\)<\/option><option value="opus">Opus<\/option><option value="sonnet">Sonnet<\/option><option value="haiku">Haiku<\/option><option value="__custom__">Custom…<\/option><\/select><\/label>\s*<label class="field model-custom" hidden>/);
-    assert.match(page.text, /<div class="model-group" data-engine="codex" hidden>\s*<label class="field"><span>Scoring Model<\/span><select name="model_codex" class="model-select"><option value="gpt-5\.6-sol" selected>gpt-5\.6-sol \(Codex default\)<\/option><option value="__custom__">Custom…<\/option><\/select>/);
+    assert.match(page.text, /<span>Engine<\/span><div class="radio-row"><label><input type="radio" name="engine" value="claude" checked data-connected="yes"> Claude subscription <span class="badge badge-good" data-engine-state="connected">Connected<\/span><\/label><label><input type="radio" name="engine" value="codex" data-connected="no"> ChatGPT subscription via Codex <span class="badge badge-warn" data-engine-state="disconnected">Not connected<\/span><\/label><\/div><p class="engine-warning" id="engine-warning" hidden>/);
+    assert.match(page.text, /<select name="model_claude" class="model-select control-input">/);
+    assert.match(page.text, /<div class="model-group" data-engine="claude">\s*<label class="field"><span>Scoring Model<\/span><select name="model_claude" class="model-select control-input"><option value="fable" selected>Fable \(recommended\)<\/option><option value="opus">Opus<\/option><option value="sonnet">Sonnet<\/option><option value="haiku">Haiku<\/option><option value="__custom__">Custom…<\/option><\/select><\/label>\s*<label class="field model-custom" hidden>/);
+    assert.match(page.text, /<div class="model-group" data-engine="codex" hidden>\s*<label class="field"><span>Scoring Model<\/span><select name="model_codex" class="model-select control-input"><option value="gpt-5\.6-sol" selected>gpt-5\.6-sol \(Codex default\)<\/option><option value="__custom__">Custom…<\/option><\/select>/);
     assert.match(page.text, /form\.querySelectorAll\('\.model-group'\)\.forEach/, 'the switch script is inlined');
     await hub.request('GET', '/settings');
     assert.equal(hub.connectionCalls.length, 1, 'connection probes are cached for a minute');
@@ -526,10 +535,10 @@ test('Settings offers an engine choice with a model dropdown per engine, a custo
     assert.deepEqual(config.semanticMatching.models, { codex: 'gpt-5.5-mini' });
     assert.deepEqual(Object.keys(config.semanticMatching), ['engine', 'model', 'acceptedMatchLevels', 'batchSize', 'models']);
     const after = await hub.request('GET', '/settings');
-    assert.match(after.text, /<input type="radio" name="engine" value="codex" checked>/);
+    assert.match(after.text, /<input type="radio" name="engine" value="codex" checked data-connected="no">/);
     assert.match(after.text, /<div class="model-group" data-engine="claude" hidden>/);
-    assert.match(after.text, /<div class="model-group" data-engine="codex">\s*<label class="field"><span>Scoring Model<\/span><select name="model_codex" class="model-select"><option value="gpt-5\.6-sol">gpt-5\.6-sol \(Codex default\)<\/option><option value="__custom__" selected>Custom…<\/option><\/select><\/label>\s*<label class="field model-custom"><span>Custom model name<\/span><input type="text" name="modelCustom_codex" value="gpt-5\.5-mini"/);
-    assert.match(after.text, /<select name="model_claude" class="model-select"><option value="fable" selected>/, 'the Claude choice was not written, so it keeps its default');
+    assert.match(after.text, /<div class="model-group" data-engine="codex">\s*<label class="field"><span>Scoring Model<\/span><select name="model_codex" class="model-select control-input"><option value="gpt-5\.6-sol">gpt-5\.6-sol \(Codex default\)<\/option><option value="__custom__" selected>Custom…<\/option><\/select><\/label>\s*<label class="field model-custom"><span>Custom model name<\/span><input type="text" name="modelCustom_codex" value="gpt-5\.5-mini"/);
+    assert.match(after.text, /<select name="model_claude" class="model-select control-input"><option value="fable" selected>/, 'the Claude choice was not written, so it keeps its default');
 
     const back = await hub.form('/settings', { minimumMatchScore: '70', acceptedMatchLevels: 'high', engine: 'claude', model_claude: 'sonnet', model_codex: 'gpt-5.6-sol', hubPort: '4747' });
     assert.equal(back.status, 303);
@@ -551,6 +560,41 @@ test('Settings offers an engine choice with a model dropdown per engine, a custo
     payload.meta.scoringModel = 'gpt-5.6-sol';
     await fs.writeFile(path.join(root, 'state', 'report-payload-2026-08-27.json'), JSON.stringify(payload));
     assert.match((await hub.request('GET', '/status')).text, /<dt>Engine<\/dt><dd>codex · gpt-5\.6-sol<\/dd>/);
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('Connections shows the resolved CLI path, a not-found message with the install command, and saves a path to config', async () => {
+  const root = await prepareProject();
+  const hub = await startHub(root, {
+    connections: {
+      claude: { installed: true, connected: true, detail: 'Claude · Max · claude.ai', hint: null, reason: null, path: '/Users/me/.local/bin/claude', source: 'extra', configured: null, searched: ['/usr/bin/claude', '/Users/me/.local/bin/claude'] },
+      codex: { installed: false, connected: false, detail: null, hint: 'npm i -g @openai/codex', reason: 'Codex CLI was not found on this Mac', path: null, source: 'missing', configured: '/nowhere/codex', searched: ['/nowhere/codex', '/usr/bin/codex'] },
+    },
+  });
+  try {
+    const page = await hub.request('GET', '/settings');
+    assert.match(page.text, /<dt>Claude<\/dt><dd><span class="badge badge-good" data-conn="connected">Connected<\/span> Claude · Max · claude\.ai<br><span class="muted mono" title="\/usr\/bin\/claude\n\/Users\/me\/\.local\/bin\/claude">\/Users\/me\/\.local\/bin\/claude<\/span> <form class="inline" method="post" action="\/settings\/cli-path"><input type="hidden" name="engine" value="claude"><input type="hidden" name="path" value="\/Users\/me\/\.local\/bin\/claude"><button class="btn secondary small" type="submit">Save this path to config<\/button><\/form><\/dd>/);
+    assert.match(page.text, /<dt>Codex<\/dt><dd><span class="badge badge-muted" data-conn="missing">Not found on this Mac<\/span> <span class="muted">Install with <code>npm i -g @openai\/codex<\/code>; config points at <code>\/nowhere\/codex<\/code><\/span><br><span class="muted" title="[^"]*">Searched PATH, ~\/\.local\/bin, \/opt\/homebrew\/bin, \/usr\/local\/bin, ~\/\.npm-global\/bin, and nvm\.<\/span><\/dd>/);
+    assert.doesNotMatch(page.text, /Not installed/);
+    assert.match(page.text, /value="codex" data-connected="no"> ChatGPT subscription via Codex <span class="badge badge-muted" data-engine-state="missing">Not found<\/span>/);
+
+    const binary = path.join(root, 'claude-bin');
+    await fs.writeFile(binary, '#!/bin/sh\n');
+    const saved = await hub.form('/settings/cli-path', { engine: 'claude', path: binary });
+    assert.equal(saved.status, 303);
+    assert.match(decodeURIComponent(saved.headers.location), /Saved .*claude-bin as semanticMatching\.claudeCommand/);
+    const config = await readConfig(root);
+    assert.equal(config.semanticMatching.claudeCommand, binary);
+    assert.deepEqual(Object.keys(config.semanticMatching), ['engine', 'model', 'acceptedMatchLevels', 'batchSize', 'claudeCommand']);
+    await hub.request('GET', '/settings');
+    assert.equal(hub.connectionCalls.length, 2, 'saving a path resets the connection cache');
+    assert.match(decodeURIComponent((await hub.form('/settings/cli-path', { engine: 'claude', path: 'relative/claude' })).headers.location), /must be absolute/);
+    assert.match(decodeURIComponent((await hub.form('/settings/cli-path', { engine: 'claude', path: path.join(root, 'missing') })).headers.location), /No executable found/);
+    assert.match(decodeURIComponent((await hub.form('/settings/cli-path', { engine: 'gpt', path: binary })).headers.location), /Engine must be claude or codex/);
+    assert.equal((await readConfig(root)).semanticMatching.claudeCommand, binary);
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });

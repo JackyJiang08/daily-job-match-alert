@@ -11,6 +11,8 @@ import { describeClaudeConnection } from '../src/engines/claude.mjs';
 import { isCredentialEnvironmentKey, subscriptionEnvironment } from '../src/engines/shared.mjs';
 import { applySubscriptionMatching } from '../src/subscription-match.mjs';
 import { createConnectionsProbe } from '../src/hub/connections.mjs';
+import { launchdPath, resolveCliCommand, withCliPath } from '../src/engines/cli-path.mjs';
+import { createClaudeEngine } from '../src/engines/claude.mjs';
 import { sha256 } from '../src/utils.mjs';
 
 const REQUIRED_METHODS = ['verifyAuth', 'reviewBatch', 'describeModel', 'modelMatches', 'describeConnection'];
@@ -93,7 +95,7 @@ test('the Codex engine runs codex exec read-only with a schema file and parses t
     return { stdout: '{"type":"thread.started","thread_id":"t1"}\n{"type":"session_meta","payload":{"model":"gpt-5.6-sol","cwd":"/tmp"}}\n{"type":"turn.completed","usage":{"input_tokens":10}}\n', stderr: '' };
   };
   try {
-    const engine = createCodexEngine({ model: 'gpt-5.6-sol', runner, codexCommand: '/opt/codex' });
+    const engine = createCodexEngine({ model: 'gpt-5.6-sol', runner, codexCommand: '/opt/codex', env: { PATH: '' }, extraDirectories: [] });
     const schema = { type: 'object', properties: { results: { type: 'array' } } };
     const response = await engine.reviewBatch('PROMPT', schema, { tempDirectory: directory });
     assert.deepEqual(response.results, results);
@@ -168,23 +170,29 @@ test('the orchestrator scores with Codex and degrades to local fallback when the
 });
 
 test('connection probes report installed, connected, and signed-out states without signing in', async () => {
+  // A resolver fake keeps these assertions independent of what is installed on the test machine.
+  const found = async name => ({ found: true, command: `/fake/bin/${name}`, source: 'path', configured: null, configuredMissing: false, searched: [`/fake/bin/${name}`] });
+  const location = name => ({ path: `/fake/bin/${name}`, source: 'path', configured: null, configuredMissing: false, searched: [`/fake/bin/${name}`] });
   const claudeRunner = status => async () => ({ stdout: JSON.stringify(status), stderr: '' });
-  assert.deepEqual(await describeClaudeConnection({ runner: claudeRunner({ loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty', subscriptionType: 'max' }) }), { installed: true, connected: true, detail: 'Claude · Max · claude.ai', hint: null, reason: null });
-  const consoleLogin = await describeClaudeConnection({ runner: claudeRunner({ loggedIn: true, authMethod: 'console' }) });
+  assert.deepEqual(await describeClaudeConnection({ resolveCommand: found, runner: claudeRunner({ loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty', subscriptionType: 'max' }) }), { installed: true, connected: true, detail: 'Claude · Max · claude.ai', hint: null, reason: null, ...location('claude') });
+  const consoleLogin = await describeClaudeConnection({ resolveCommand: found, runner: claudeRunner({ loggedIn: true, authMethod: 'console' }) });
   assert.equal(consoleLogin.connected, false);
   assert.equal(consoleLogin.hint, 'claude auth login --claudeai');
-  const missingClaude = await describeClaudeConnection({ runner: async () => { throw Object.assign(new Error('spawn claude ENOENT'), { code: 'ENOENT' }); } });
-  assert.deepEqual([missingClaude.installed, missingClaude.connected], [false, false]);
+  const missingClaude = await describeClaudeConnection({ resolveCommand: found, runner: async () => { throw Object.assign(new Error('spawn claude ENOENT'), { code: 'ENOENT' }); } });
+  assert.deepEqual([missingClaude.installed, missingClaude.connected, missingClaude.path], [false, false, null]);
 
-  assert.deepEqual(await describeCodexConnection({ runner: async () => ({ stdout: 'Logged in using ChatGPT', stderr: '' }) }), { installed: true, connected: true, detail: 'Codex · ChatGPT', hint: null, reason: null });
-  const apiKey = await describeCodexConnection({ runner: async () => ({ stdout: 'Logged in using API key', stderr: '' }) });
+  assert.deepEqual(await describeCodexConnection({ resolveCommand: found, runner: async () => ({ stdout: 'Logged in using ChatGPT', stderr: '' }) }), { installed: true, connected: true, detail: 'Codex · ChatGPT', hint: null, reason: null, ...location('codex') });
+  const apiKey = await describeCodexConnection({ resolveCommand: found, runner: async () => ({ stdout: 'Logged in using API key', stderr: '' }) });
   assert.equal(apiKey.connected, false);
   assert.equal(apiKey.hint, 'codex login');
-  const missingCodex = await describeCodexConnection({ runner: async () => { throw Object.assign(new Error('spawn codex ENOENT'), { code: 'ENOENT' }); } });
+  const missingCodex = await describeCodexConnection({ resolveCommand: found, runner: async () => { throw Object.assign(new Error('spawn codex ENOENT'), { code: 'ENOENT' }); } });
   assert.equal(missingCodex.installed, false);
   assert.equal(missingCodex.hint, 'npm i -g @openai/codex');
+  const notFound = await describeCodexConnection({ resolveCommand: async () => ({ found: false, command: 'codex', source: 'missing', configured: '/nowhere/codex', configuredMissing: true, searched: ['/nowhere/codex'] }) });
+  assert.deepEqual([notFound.installed, notFound.source, notFound.configured, notFound.configuredMissing], [false, 'missing', '/nowhere/codex', true]);
+  assert.match(notFound.reason, /not found on this Mac/);
 
-  const both = await describeConnections({ runner: async (command) => (command === 'claude' ? { stdout: JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', subscriptionType: 'pro' }), stderr: '' } : { stdout: 'Not logged in', stderr: '' }) });
+  const both = await describeConnections({ resolveCommand: found, runner: async (command) => (command === '/fake/bin/claude' ? { stdout: JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', subscriptionType: 'pro' }), stderr: '' } : { stdout: 'Not logged in', stderr: '' }) });
   assert.equal(both.claude.detail, 'Claude · Pro · claude.ai');
   assert.equal(both.codex.connected, false);
 
@@ -200,4 +208,77 @@ test('connection probes report installed, connected, and signed-out states witho
   assert.equal(calls, 2, 'refreshed after the window');
   await probe.status({ force: true });
   assert.equal(calls, 3);
+});
+
+test('resolveCliCommand prefers the configured path, then PATH, then the well-known user directories', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cli-path-'));
+  const home = path.join(root, 'home');
+  // The system directories are swapped for temp ones so the test cannot see CLIs installed on this machine.
+  const extraDirectories = ['~/.local/bin', path.join(root, 'opt', 'homebrew', 'bin'), '~/.npm-global/bin', '~/.nvm/versions/node/*/bin'];
+  const lookup = (name, configured, options) => resolveCliCommand(name, configured, { extraDirectories, ...options });
+  const make = async (file) => { await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(file, '#!/bin/sh\n'); await fs.chmod(file, 0o755); };
+  try {
+    // 1. PATH empty, config names an absolute path: resolved from config.
+    await make(path.join(root, 'bin', 'claude'));
+    const fromConfig = await lookup('claude', path.join(root, 'bin', 'claude'), { env: { PATH: '' }, homedir: home });
+    assert.deepEqual([fromConfig.found, fromConfig.source, fromConfig.command], [true, 'config', path.join(root, 'bin', 'claude')]);
+    const tilde = await lookup('claude', '~/tools/claude', { env: { PATH: '' }, homedir: home });
+    assert.deepEqual([tilde.found, tilde.configuredMissing], [false, true], 'a configured path that does not exist is reported, and nothing else is found');
+    await make(path.join(home, 'tools', 'claude'));
+    assert.equal((await lookup('claude', '~/tools/claude', { env: { PATH: '' }, homedir: home })).source, 'config');
+
+    // 2. No config, launchd-style PATH: found in the extra user directories, newest nvm version first.
+    await make(path.join(home, '.local', 'bin', 'codex'));
+    const extra = await lookup('codex', null, { env: { PATH: '/usr/bin:/bin' }, homedir: home });
+    assert.deepEqual([extra.found, extra.source, extra.command], [true, 'extra', path.join(home, '.local', 'bin', 'codex')]);
+    await make(path.join(home, '.nvm', 'versions', 'node', 'v20.1.0', 'bin', 'nvmtool'));
+    await make(path.join(home, '.nvm', 'versions', 'node', 'v22.3.0', 'bin', 'nvmtool'));
+    const nvm = await lookup('nvmtool', null, { env: { PATH: '' }, homedir: home });
+    assert.equal(nvm.command, path.join(home, '.nvm', 'versions', 'node', 'v22.3.0', 'bin', 'nvmtool'));
+    await make(path.join(root, 'onpath', 'codex'));
+    const onPath = await lookup('codex', null, { env: { PATH: path.join(root, 'onpath') }, homedir: home });
+    assert.deepEqual([onPath.source, onPath.command], ['path', path.join(root, 'onpath', 'codex')]);
+    const bareName = await lookup('codex', 'codex', { env: { PATH: path.join(root, 'onpath') }, homedir: home });
+    assert.equal(bareName.source, 'path', 'a bare configured name is looked up like the default name');
+
+    // 3. Nowhere: explicit missing status, the name is kept, and the search list is reported.
+    const missing = await lookup('claude', null, { env: { PATH: '/nonexistent' }, homedir: home });
+    assert.deepEqual([missing.found, missing.source, missing.command, missing.hint], [false, 'missing', 'claude', 'npm i -g @anthropic-ai/claude-code@latest']);
+    assert.ok(missing.searched.includes(path.join(home, '.local', 'bin', 'claude')));
+    assert.ok(missing.searched.includes(path.join(root, 'opt', 'homebrew', 'bin', 'claude')));
+    const stale = await lookup('codex', '/nowhere/codex', { env: { PATH: '' }, homedir: home });
+    assert.deepEqual([stale.found, stale.source, stale.command, stale.configuredMissing], [true, 'extra', path.join(home, '.local', 'bin', 'codex'), true], 'a stale configured path falls back to the lookup and says so');
+    assert.equal(launchdPath('/Users/me'), '/Users/me/.local/bin:/Users/me/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin');
+    assert.equal(withCliPath({ PATH: '/usr/bin:/bin', HOME: '/Users/me' }, '/Users/me').PATH, '/usr/bin:/bin:/Users/me/.local/bin:/Users/me/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin', 'child processes see the user CLI directories even under launchd');
+    assert.equal(withCliPath({ PATH: '', OPENAI_API_KEY: 'x' }, '/Users/me').OPENAI_API_KEY, 'x', 'withCliPath only touches PATH; scrubbing is subscriptionEnvironment\'s job');
+
+    // Engines and probes use the resolved binary.
+    const calls = [];
+    const runner = async (command, args) => { calls.push(command); return args[0] === '--version' ? { stdout: '2.1.250 (Claude Code)', stderr: '' } : { stdout: JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', subscriptionType: 'max' }), stderr: '' }; };
+    await make(path.join(home, '.local', 'bin', 'claude'));
+    const engine = createClaudeEngine({ runner, env: { PATH: '/usr/bin:/bin' }, homedir: home, extraDirectories });
+    await engine.verifyAuth();
+    assert.equal(calls[0], path.join(home, '.local', 'bin', 'claude'));
+    const connection = await engine.describeConnection();
+    assert.equal(connection.connected, true);
+    assert.equal(connection.path, path.join(home, '.local', 'bin', 'claude'));
+    assert.equal(connection.source, 'extra');
+    await fs.rm(path.join(home, '.local', 'bin', 'codex'));
+    const pinned = await describeConnections({ runner, env: { PATH: '' }, homedir: home, extraDirectories, claudeCommand: path.join(root, 'bin', 'claude'), codexCommand: '/nowhere/codex' });
+    assert.deepEqual([pinned.claude.source, pinned.claude.path], ['config', path.join(root, 'bin', 'claude')]);
+    assert.deepEqual([pinned.codex.installed, pinned.codex.source, pinned.codex.configured, pinned.codex.configuredMissing], [false, 'missing', '/nowhere/codex', true]);
+    assert.match(pinned.codex.reason, /not found on this Mac/);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('both LaunchAgent templates export a PATH that covers the user CLI directories', async () => {
+  for (const name of ['com.dailyjobmatchalert.daily.plist.template', 'com.dailyjobmatchalert.hub.plist.template']) {
+    const text = await fs.readFile(new URL(`../launchd/${name}`, import.meta.url), 'utf8');
+    assert.match(text, /<key>PATH<\/key><string>__HOME__\/\.local\/bin:__HOME__\/\.npm-global\/bin:\/opt\/homebrew\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin<\/string>/, name);
+  }
+  for (const name of ['install-launchd.sh', 'install-hub-launchd.sh']) {
+    assert.match(await fs.readFile(new URL(`../scripts/${name}`, import.meta.url), 'utf8'), /s\|__HOME__\|\$HOME\|g/, name);
+  }
 });

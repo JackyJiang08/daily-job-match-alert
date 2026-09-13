@@ -16,12 +16,12 @@ const NAV = [
 
 export const HUB_STYLES = `
 .hub{display:grid;grid-template-columns:200px minmax(0,1fr);min-height:100vh}
-.hub-nav{position:sticky;top:0;height:100vh;overflow:auto;display:flex;flex-direction:column;border-right:1px solid var(--line);padding:var(--space-5) var(--space-3);background:var(--surface)}
-.hub-nav .brand{font-size:var(--fs-body);font-weight:650;margin:0 var(--space-2) var(--space-4);line-height:1.3;white-space:nowrap}
-.hub-nav a{display:block;padding:7px var(--space-2);border-radius:var(--radius-sm);text-decoration:none;color:var(--ink-2);font-size:var(--fs-body)}
-.hub-nav a.active{background:var(--accent-soft);color:var(--accent);font-weight:650}
+.hub-nav{position:sticky;top:0;height:100vh;overflow:auto;display:flex;flex-direction:column;border-right:1px solid var(--line);padding:var(--space-5) var(--space-3) var(--space-4);background:var(--surface)}
+.hub-nav .brand{font-size:var(--fs-body);font-weight:650;margin:0 0 var(--space-4) var(--space-3);line-height:1.5;white-space:nowrap}
+.hub-nav a{display:block;padding:6px var(--space-2) 6px 9px;margin:0 0 2px;border-left:3px solid transparent;border-radius:0 var(--radius-sm) var(--radius-sm) 0;text-decoration:none;color:var(--ink-2);font-size:var(--fs-body);line-height:1.5}
+.hub-nav a.active{background:var(--accent-soft);color:var(--accent);font-weight:650;border-left-color:var(--accent)}
 .hub-nav a:hover{color:var(--ink)}
-.hub-nav .mini{margin:auto var(--space-2) 0;padding-top:var(--space-4);border-top:1px solid var(--line);font-size:11px;line-height:1.5;color:var(--ink-3)}
+.hub-nav .mini{margin:auto 0 0 var(--space-3);padding-top:var(--space-4);border-top:1px solid var(--line);font-size:11px;line-height:1.5;color:var(--ink-3)}
 .hub-nav .mini b{display:block;font-weight:600;color:var(--ink-2)}
 .hub-nav .mini .ok{color:var(--accent)}.hub-nav .mini .bad{color:var(--bad-ink)}.hub-nav .mini .warn{color:var(--warn-ink)}
 .hub-main{padding:var(--space-5) var(--space-5) var(--space-6);min-width:0}
@@ -33,8 +33,13 @@ export const HUB_STYLES = `
 .flash.notice{background:var(--accent-soft);color:var(--accent)}
 .flash.error{background:var(--bad-bg);color:var(--bad-ink)}
 .split{display:grid;grid-template-columns:200px minmax(0,1fr);gap:var(--space-4);align-items:start}
-.split aside{position:sticky;top:var(--space-4);max-height:calc(100vh - 2 * var(--space-4));overflow:auto}
+.split aside{position:sticky;top:var(--space-4);max-height:calc(100vh - 2 * var(--space-4));overflow:auto;display:flex;flex-direction:column}
+.datetools{display:flex;flex-direction:column;gap:var(--space-2);padding:0 var(--space-2) var(--space-2);font-size:var(--fs-meta);color:var(--ink-3)}
+.datetools .today-link{align-self:flex-start;text-decoration:none;color:var(--accent);font-weight:650}
+.datetools label{display:inline-flex;align-items:center;gap:6px;cursor:pointer}
 .datelist{margin:0;padding:0;list-style:none;font-size:var(--fs-body)}
+.datelist .month{position:sticky;top:0;z-index:1;margin:0;padding:var(--space-2) var(--space-2) var(--space-1);background:var(--bg);font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.datelist li[hidden]{display:none}
 .datelist a{display:flex;justify-content:space-between;align-items:baseline;gap:var(--space-2);padding:6px var(--space-2);border-radius:var(--radius-sm);text-decoration:none;color:var(--ink-2)}
 .datelist a .n{color:var(--ink-3);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:var(--fs-meta);text-align:right}
 .datelist a.active{background:var(--accent-soft);color:var(--accent);font-weight:650}
@@ -69,7 +74,11 @@ fieldset.group{border:1px solid var(--line);border-radius:var(--radius);padding:
 fieldset.group legend{font-size:var(--fs-meta);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);padding:0 6px}
 .field{display:block;margin:0 0 var(--space-3);font-size:var(--fs-body)}
 .field>span{display:block;font-size:var(--fs-meta);color:var(--ink-3);margin-bottom:4px}
-.field input[type=text],.field input[type=number]{font:inherit;font-size:var(--fs-body);color:var(--ink);background:var(--surface);border:1px solid var(--line-2);border-radius:var(--radius-sm);padding:6px 9px;min-width:240px;max-width:100%}
+.field input[type=text],.field input[type=number],.field select{font:inherit;font-size:var(--fs-body);line-height:1.3;color:var(--ink);background:var(--surface);border:1px solid var(--line-2);border-radius:var(--radius-sm);padding:6px 9px;min-height:32px;min-width:240px;max-width:100%;box-sizing:border-box}
+.field select{appearance:none;-webkit-appearance:none;background-image:var(--chevron);background-repeat:no-repeat;background-position:right 9px center;padding-right:28px;cursor:pointer}
+.field input:focus,.field select:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+.radio-row .badge{margin-left:4px}
+.engine-warning{margin:var(--space-1) 0 0;font-size:var(--fs-meta);color:var(--warn-ink)}
 .field label.check{display:inline-flex;align-items:center;gap:6px;margin-right:var(--space-3)}
 .inline{display:inline}
 .form-foot{font-size:var(--fs-meta);color:var(--ink-3);margin:var(--space-2) 0 0}
@@ -129,19 +138,67 @@ export function renderHubPage({ active, title, content, notice = '', error = '',
 
 // ---------------------------------------------------------------------------------------------- reports
 
+function monthLabel(date) {
+  const match = /^(\d{4})-(\d{2})/.exec(String(date || ''));
+  if (!match) return String(date || '');
+  return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, 1)).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+}
+
+// Dates newest first, grouped by month with sticky month headings; empty days carry data-empty so the
+// "Only days with matches" toggle can hide them (and any month left without visible days).
+export function renderDateList({ dates, selected, today }) {
+  if (!dates.length) return '<p class="muted">No report payloads under state/ yet.</p>';
+  const items = [];
+  let month = null;
+  for (const item of dates) {
+    const label = monthLabel(item.date);
+    if (label !== month) {
+      month = label;
+      items.push(`<li class="month" data-month="${htmlEscape(item.date.slice(0, 7))}">${htmlEscape(label)}</li>`);
+    }
+    const classes = [item.date === selected ? 'active' : '', item.date === today ? 'today' : '', item.matchCount === 0 ? 'quiet' : ''].filter(Boolean).join(' ');
+    const count = item.matchCount == null ? '' : `<span class="n">${item.matchCount} match${item.matchCount === 1 ? '' : 'es'}</span>`;
+    items.push(`<li data-month="${htmlEscape(item.date.slice(0, 7))}"${item.matchCount === 0 ? ' data-empty="1"' : ''}><a href="/reports/${item.date}"${classes ? ` class="${classes}"` : ''} title="${item.date}${item.date === today ? ' (today)' : ''}"><span>${htmlEscape(formatDateLabel(item.date))}</span>${count}</a></li>`);
+  }
+  const newest = dates[0].date;
+  return `<div class="datetools"><a class="today-link" href="/reports/${newest}" id="today-link" title="Newest report (${newest})">Today</a><label><input type="checkbox" id="only-matches"> Only days with matches</label></div><ul class="datelist" id="datelist">${items.join('')}</ul>`;
+}
+
 export function reportsPage({ dates, selected, reportBody, desktopPath, today }) {
-  const list = dates.length
-    ? `<ul class="datelist">${dates.map(item => {
-      const classes = [item.date === selected ? 'active' : '', item.date === today ? 'today' : '', item.matchCount === 0 ? 'quiet' : ''].filter(Boolean).join(' ');
-      const count = item.matchCount == null ? '' : `<span class="n">${item.matchCount} match${item.matchCount === 1 ? '' : 'es'}</span>`;
-      return `<li><a href="/reports/${item.date}"${classes ? ` class="${classes}"` : ''} title="${item.date}${item.date === today ? ' (today)' : ''}"><span>${htmlEscape(formatDateLabel(item.date))}</span>${count}</a></li>`;
-    }).join('')}</ul>`
-    : '<p class="muted">No report payloads under state/ yet.</p>';
+  const list = renderDateList({ dates, selected, today });
   const body = reportBody
     ? `<div class="report-head"><a class="btn secondary small" href="/desktop/${selected}" target="_blank" rel="noopener noreferrer" title="${htmlEscape(desktopPath)}">Open Desktop Copy</a><a class="btn secondary small" href="/desktop/${selected}/xlsx" title="Download the Desktop workbook">Download XLSX</a></div><div class="page">${reportBody}</div>`
     : `<p class="muted">${dates.length ? 'Pick a date on the left.' : 'Run the pipeline once and its report will appear here.'}</p>`;
-  return `<div class="split"><aside>${list}</aside><section>${body}</section></div>`;
+  return `<div class="split"><aside id="date-column">${list}</aside><section>${body}</section></div>`;
 }
+
+export const REPORTS_SCRIPT = `
+(function () {
+  var list = document.getElementById('datelist');
+  var toggle = document.getElementById('only-matches');
+  var today = document.getElementById('today-link');
+  var column = document.getElementById('date-column');
+  if (!list || !toggle) return;
+  var key = 'hub.reports.onlyMatches';
+  function apply() {
+    var only = toggle.checked;
+    try { localStorage.setItem(key, only ? '1' : '0'); } catch (e) {}
+    var visibleMonths = {};
+    list.querySelectorAll('li:not(.month)').forEach(function (item) {
+      var hide = only && item.dataset.empty === '1';
+      item.hidden = hide;
+      if (!hide) visibleMonths[item.dataset.month] = true;
+    });
+    list.querySelectorAll('li.month').forEach(function (heading) { heading.hidden = !visibleMonths[heading.dataset.month]; });
+  }
+  try { toggle.checked = localStorage.getItem(key) === '1'; } catch (e) {}
+  toggle.addEventListener('change', apply);
+  apply();
+  if (today && column) today.addEventListener('click', function () { column.scrollTop = 0; });
+  var active = list.querySelector('a.active');
+  if (active && column && active.offsetTop > column.clientHeight - 40) column.scrollTop = active.offsetTop - 80;
+})();
+`;
 
 // ---------------------------------------------------------------------------------------------- resumes
 
@@ -304,11 +361,25 @@ export const STATUS_SCRIPT = `
 
 // ---------------------------------------------------------------------------------------------- settings
 
-function connectionRow(name, item) {
+function connectionRow(name, engine, item) {
   if (!item) return `<dt>${htmlEscape(name)}</dt><dd><span class="muted">Not checked</span></dd>`;
-  if (!item.installed) return `<dt>${htmlEscape(name)}</dt><dd><span class="badge badge-muted" data-conn="missing">Not installed</span> <span class="muted">Install with <code>${htmlEscape(item.hint)}</code></span></dd>`;
-  if (item.connected) return `<dt>${htmlEscape(name)}</dt><dd><span class="badge badge-good" data-conn="connected">Connected</span> ${htmlEscape(item.detail)}</dd>`;
-  return `<dt>${htmlEscape(name)}</dt><dd><span class="badge badge-warn" data-conn="disconnected">Not connected</span> <span class="muted">Sign in from a terminal: <code>${htmlEscape(item.hint)}</code></span>${item.reason ? `<br><span class="muted">${htmlEscape(item.reason)}</span>` : ''}</dd>`;
+  const stale = item.configuredMissing && item.configured ? ` <span class="badge badge-warn" data-conn="stale-config" title="config points at ${htmlEscape(item.configured)}, which does not exist">config path missing</span>` : '';
+  const where = item.path ? `<br><span class="muted mono" title="${htmlEscape((item.searched || []).join('\n'))}">${htmlEscape(item.path)}${item.source === 'config' ? ' (from config)' : ''}</span>${stale}` : '';
+  const savePath = item.path && item.source !== 'config'
+    ? `<form class="inline" method="post" action="/settings/cli-path"><input type="hidden" name="engine" value="${engine}"><input type="hidden" name="path" value="${htmlEscape(item.path)}"><button class="btn secondary small" type="submit">Save this path to config</button></form>`
+    : '';
+  if (!item.installed) {
+    return `<dt>${htmlEscape(name)}</dt><dd><span class="badge badge-muted" data-conn="missing">Not found on this Mac</span> <span class="muted">Install with <code>${htmlEscape(item.hint)}</code>${item.configured ? `; config points at <code>${htmlEscape(item.configured)}</code>` : ''}</span><br><span class="muted" title="${htmlEscape((item.searched || []).join('\n'))}">Searched PATH, ~/.local/bin, /opt/homebrew/bin, /usr/local/bin, ~/.npm-global/bin, and nvm.</span></dd>`;
+  }
+  if (item.connected) return `<dt>${htmlEscape(name)}</dt><dd><span class="badge badge-good" data-conn="connected">Connected</span> ${htmlEscape(item.detail)}${where}${savePath ? ` ${savePath}` : ''}</dd>`;
+  return `<dt>${htmlEscape(name)}</dt><dd><span class="badge badge-warn" data-conn="disconnected">Not connected</span> <span class="muted">Sign in from a terminal: <code>${htmlEscape(item.hint)}</code></span>${item.reason ? `<br><span class="muted">${htmlEscape(item.reason)}</span>` : ''}${where}${savePath ? ` ${savePath}` : ''}</dd>`;
+}
+
+function engineBadge(item) {
+  if (!item) return '';
+  if (item.connected) return '<span class="badge badge-good" data-engine-state="connected">Connected</span>';
+  if (!item.installed) return '<span class="badge badge-muted" data-engine-state="missing">Not found</span>';
+  return '<span class="badge badge-warn" data-engine-state="disconnected">Not connected</span>';
 }
 
 function modelSelect(engine, settings) {
@@ -317,22 +388,22 @@ function modelSelect(engine, settings) {
   const listed = choices.some(choice => choice.value === current);
   const options = choices.map(choice => `<option value="${htmlEscape(choice.value)}"${choice.value === current ? ' selected' : ''}>${htmlEscape(choice.label)}</option>`).join('');
   return `<div class="model-group" data-engine="${engine}"${engine === settings.engine ? '' : ' hidden'}>
-      <label class="field"><span>Scoring Model</span><select name="model_${engine}" class="model-select">${options}<option value="__custom__"${listed ? '' : ' selected'}>Custom…</option></select></label>
+      <label class="field"><span>Scoring Model</span><select name="model_${engine}" class="model-select control-input">${options}<option value="__custom__"${listed ? '' : ' selected'}>Custom…</option></select></label>
       <label class="field model-custom"${listed ? ' hidden' : ''}><span>Custom model name</span><input type="text" name="modelCustom_${engine}" value="${listed ? '' : htmlEscape(current)}" placeholder="${engine === 'codex' ? 'gpt-5.6-sol' : 'claude-fable-5'}"></label>
     </div>`;
 }
 
 export function settingsPage({ settings, connections = null, timeZone }) {
   const levels = ['high', 'medium', 'low'].map(level => `<label class="check"><input type="checkbox" name="acceptedMatchLevels" value="${level}"${settings.acceptedMatchLevels.includes(level) ? ' checked' : ''}> ${level.charAt(0).toUpperCase()}${level.slice(1)}</label>`).join('');
-  const engines = settings.engines.map(engine => `<label><input type="radio" name="engine" value="${engine.id}"${engine.id === settings.engine ? ' checked' : ''}> ${htmlEscape(engine.label)}</label>`).join('');
+  const engines = settings.engines.map(engine => `<label><input type="radio" name="engine" value="${engine.id}"${engine.id === settings.engine ? ' checked' : ''} data-connected="${connections?.[engine.id]?.connected ? 'yes' : 'no'}"> ${htmlEscape(engine.label)} ${engineBadge(connections?.[engine.id])}</label>`).join('');
   const checked = connections?.checkedAt ? `<p class="form-foot">Checked ${htmlEscape(formatLocalDateTime(connections.checkedAt, timeZone))}; refreshed every minute. The hub never signs in for you.</p>` : '<p class="form-foot">The hub never signs in for you.</p>';
   return `<h1 class="hub-title">Settings</h1>
-  <article class="card"><h2>Connections</h2><dl class="conn">${connectionRow('Claude', connections?.claude)}${connectionRow('Codex', connections?.codex)}</dl>${checked}</article>
+  <article class="card"><h2>Connections</h2><dl class="conn">${connectionRow('Claude', 'claude', connections?.claude)}${connectionRow('Codex', 'codex', connections?.codex)}</dl>${checked}</article>
   <article class="card"><form method="post" action="/settings" id="settings-form">
     <fieldset class="group"><legend>Matching</legend>
       <label class="field"><span>Minimum Match Score (0–100)</span><input type="number" name="minimumMatchScore" min="0" max="100" step="1" value="${Number(settings.minimumMatchScore)}" required></label>
       <div class="field"><span>Accepted Match Levels</span>${levels}</div>
-      <div class="field"><span>Engine</span><div class="radio-row">${engines}</div></div>
+      <div class="field"><span>Engine</span><div class="radio-row">${engines}</div><p class="engine-warning" id="engine-warning" hidden>This engine is not connected on this Mac; the nightly run will keep local scores (unreviewed) until it is signed in. You can still save.</p></div>
       ${settings.engines.map(engine => modelSelect(engine.id, settings)).join('')}
     </fieldset>
     <fieldset class="group"><legend>Reports</legend>
@@ -350,9 +421,12 @@ export const SETTINGS_SCRIPT = `
 (function () {
   var form = document.getElementById('settings-form');
   if (!form) return;
+  var warning = document.getElementById('engine-warning');
   function sync() {
-    var engine = (form.querySelector('input[name=engine]:checked') || {}).value;
+    var checked = form.querySelector('input[name=engine]:checked') || {};
+    var engine = checked.value;
     form.querySelectorAll('.model-group').forEach(function (group) { group.hidden = group.dataset.engine !== engine; });
+    if (warning) warning.hidden = !(checked.dataset && checked.dataset.connected === 'no');
   }
   form.querySelectorAll('input[name=engine]').forEach(function (radio) { radio.addEventListener('change', sync); });
   form.querySelectorAll('.model-select').forEach(function (select) {

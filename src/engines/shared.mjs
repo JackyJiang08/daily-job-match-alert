@@ -2,6 +2,7 @@
 // and version/model helpers. Every engine subprocess goes through subscriptionEnvironment() so the
 // launching shell can never steer a CLI toward an API key, a gateway, or a proxy.
 import { spawn } from 'node:child_process';
+import { withCliPath } from './cli-path.mjs';
 
 // Prefixes catch every current and future ANTHROPIC_* (API key, base URL, auth token, custom headers,
 // model overrides), AWS_* (Bedrock credentials, profiles, regions), and OPENAI_* (API key, base URL,
@@ -27,7 +28,7 @@ export function subscriptionEnvironment(environment = process.env) {
 
 export function run(command, args, { input = '', cwd = process.cwd(), timeoutMs = 600_000, env = subscriptionEnvironment() } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(command, args, { cwd, env: withCliPath(env), stdio: ['pipe', 'pipe', 'pipe'] });
     const stdout = [];
     const stderr = [];
     const timer = setTimeout(() => {

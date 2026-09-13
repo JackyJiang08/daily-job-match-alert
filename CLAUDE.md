@@ -57,3 +57,7 @@ disabled; do not expand them unless a task says so.
 - config.semanticMatching.engine is "claude" (default) or "codex";
   models: { claude, codex } holds each engine's model (legacy `model` still
   applies to Claude). meta.engine + meta.scoringModel record what a run used.
+- CLI binaries are found by src/engines/cli-path.mjs (config path → PATH →
+  ~/.local/bin, /opt/homebrew/bin, /usr/local/bin, ~/.npm-global/bin, nvm);
+  launchd jobs get PATH=/usr/bin:/bin, so never assume `claude`/`codex` are
+  on PATH. Both LaunchAgent templates set PATH explicitly.

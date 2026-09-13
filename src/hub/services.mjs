@@ -439,6 +439,31 @@ export function validateSettings(form) {
   return { minimumMatchScore, acceptedMatchLevels: MATCH_LEVELS.filter(level => levels.includes(level)), engine, model, xlsxRequired, hubPort };
 }
 
+// "Save this path to config": pins the resolved binary as semanticMatching.<engine>Command.
+export async function saveCliPath(ctx, engineId, binaryPath) {
+  const engine = String(engineId || '').toLowerCase();
+  if (!ENGINE_IDS.includes(engine)) throw new HubInputError('Engine must be claude or codex');
+  const candidate = String(binaryPath || '').trim();
+  if (!path.isAbsolute(candidate)) throw new HubInputError('The CLI path must be absolute');
+  try {
+    const info = await ctx.io.stat(candidate);
+    if (!info.isFile()) throw new Error('not a file');
+  } catch {
+    throw new HubInputError(`No executable found at ${candidate}`);
+  }
+  await updateConfigFile(ctx.configPath, config => {
+    config.semanticMatching = config.semanticMatching && typeof config.semanticMatching === 'object' ? config.semanticMatching : {};
+    config.semanticMatching[`${engine}Command`] = candidate;
+    return true;
+  }, { fs: ctx.io, pidAlive: ctx.pidAlive });
+  return { engine, path: candidate };
+}
+
+export function configuredCliCommands(config) {
+  const semantic = config?.semanticMatching || {};
+  return { claudeCommand: semantic.claudeCommand || null, codexCommand: semantic.codexCommand || null };
+}
+
 export async function saveSettings(ctx, form) {
   const settings = validateSettings(form);
   await updateConfigFile(ctx.configPath, config => {

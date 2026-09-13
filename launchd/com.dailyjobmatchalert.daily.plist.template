@@ -11,6 +11,7 @@
   <key>WorkingDirectory</key><string>__PROJECT_DIR__</string>
   <key>EnvironmentVariables</key>
   <dict>
+    <key>PATH</key><string>__HOME__/.local/bin:__HOME__/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     <key>DAILY_JOB_MATCH_ALERT_NODE</key><string>__NODE_BIN__</string>
     <key>DAILY_JOB_MATCH_ALERT_TRIGGER</key><string>auto</string>
     <key>DAILY_JOB_MATCH_ALERT_SCHEDULE_HOUR</key><string>__HOUR__</string>

@@ -6,11 +6,11 @@ import { renderReportBody } from '../report-components.mjs';
 import { HubLockedError } from './config-file.mjs';
 import { parseMultipart } from './multipart.mjs';
 import {
-  HubInputError, assertDate, buildStatusView, desktopCopyPath, desktopWorkbookPath, listReportSummaries, loadTracksView, readErrorReport,
-  readReportPayload, readSettings, saveSettings, selectResumeVersion, setTrackEnabled, sidebarSummary, uploadResumePdf,
+  HubInputError, assertDate, buildStatusView, configuredCliCommands, desktopCopyPath, desktopWorkbookPath, listReportSummaries, loadTracksView, readErrorReport,
+  readReportPayload, readSettings, saveCliPath, saveSettings, selectResumeVersion, setTrackEnabled, sidebarSummary, uploadResumePdf,
 } from './services.mjs';
 import { localDate } from '../time-format.mjs';
-import { SETTINGS_SCRIPT, STATUS_SCRIPT, renderHubPage, reportsPage, resumesPage, settingsPage, statusPage } from './views.mjs';
+import { REPORTS_SCRIPT, SETTINGS_SCRIPT, STATUS_SCRIPT, renderHubPage, reportsPage, resumesPage, settingsPage, statusPage } from './views.mjs';
 
 const MAXIMUM_BODY_BYTES = 6 * 1024 * 1024;
 const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
@@ -105,7 +105,7 @@ export function createHubHandler(ctx) {
       reportBody = renderReportBody(buildReportView(payload.matches, { timeZone, ...payload.meta }, { embedded: true }));
       desktopPath = desktopCopyPath(config, selected);
     }
-    await page(response, 200, { active: 'reports', title: selected ? `Report ${selected}` : 'Reports', content: reportsPage({ dates, selected, reportBody, desktopPath, today }), notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
+    await page(response, 200, { active: 'reports', title: selected ? `Report ${selected}` : 'Reports', content: reportsPage({ dates, selected, reportBody, desktopPath, today }), script: REPORTS_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
   }
 
   async function getResumes(url, response) {
@@ -122,8 +122,9 @@ export function createHubHandler(ctx) {
 
   async function getSettings(url, response) {
     const settings = await readSettings(ctx);
-    const connections = ctx.connections ? await ctx.connections.status().catch(() => null) : null;
-    const timeZone = (await ctx.loadConfig().catch(() => ({}))).timeZone || 'America/Chicago';
+    const config = await ctx.loadConfig().catch(() => ({}));
+    const connections = ctx.connections ? await ctx.connections.status({ commands: configuredCliCommands(config) }).catch(() => null) : null;
+    const timeZone = config.timeZone || 'America/Chicago';
     await page(response, 200, { active: 'settings', title: 'Settings', content: settingsPage({ settings, connections, timeZone }), script: SETTINGS_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
   }
 
@@ -181,6 +182,12 @@ export function createHubHandler(ctx) {
       case '/settings': {
         await saveSettings(ctx, fields);
         redirect(response, '/settings', 'Settings saved to config.json');
+        return;
+      }
+      case '/settings/cli-path': {
+        const result = await saveCliPath(ctx, fields.engine, fields.path);
+        if (ctx.connections?.reset) ctx.connections.reset();
+        redirect(response, '/settings', `Saved ${result.path} as semanticMatching.${result.engine}Command`);
         return;
       }
       case '/run': {

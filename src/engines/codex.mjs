@@ -12,6 +12,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { extractResults, isMissingCommand, modelMatchesConfiguration, run, subscriptionEnvironment } from './shared.mjs';
 import { errorSummary } from '../warnings.mjs';
+import { INSTALL_HINTS, resolveCliCommand } from './cli-path.mjs';
 
 export const CODEX_DEFAULT_MODEL = 'gpt-5.6-sol';
 
@@ -39,9 +40,14 @@ async function loginStatus(runner, command) {
   }
 }
 
+async function resolvedCommand(options) {
+  const resolver = options.resolveCommand || resolveCliCommand;
+  return (await resolver('codex', options.codexCommand || null, options)).command;
+}
+
 export async function verifyCodexSubscription(options = {}) {
   const runner = options.runner || run;
-  const command = options.codexCommand || 'codex';
+  const command = await resolvedCommand(options);
   try {
     await runner(command, ['--version'], { timeoutMs: 30_000, env: subscriptionEnvironment() });
   } catch (error) {
@@ -55,15 +61,18 @@ export async function verifyCodexSubscription(options = {}) {
 
 export async function describeCodexConnection(options = {}) {
   const runner = options.runner || run;
-  const command = options.codexCommand || 'codex';
+  const resolver = options.resolveCommand || resolveCliCommand;
+  const resolution = await resolver('codex', options.codexCommand || null, options);
+  const location = { path: resolution.found ? resolution.command : null, source: resolution.source, configured: resolution.configured || null, configuredMissing: resolution.configuredMissing === true, searched: resolution.searched };
+  if (!resolution.found) return { installed: false, connected: false, detail: null, hint: INSTALL_HINTS.codex, reason: 'Codex CLI was not found on this Mac', ...location };
   try {
-    const status = await loginStatus(runner, command);
+    const status = await loginStatus(runner, resolution.command);
     const verdict = assessCodexLoginStatus(status.text, status.exitCode);
-    if (!verdict.accepted) return { installed: true, connected: false, detail: null, hint: 'codex login', reason: verdict.reason };
-    return { installed: true, connected: true, detail: 'Codex · ChatGPT', hint: null, reason: null };
+    if (!verdict.accepted) return { installed: true, connected: false, detail: null, hint: 'codex login', reason: verdict.reason, ...location };
+    return { installed: true, connected: true, detail: 'Codex · ChatGPT', hint: null, reason: null, ...location };
   } catch (error) {
-    if (isMissingCommand(error)) return { installed: false, connected: false, detail: null, hint: 'npm i -g @openai/codex', reason: 'Codex CLI is not installed' };
-    return { installed: true, connected: false, detail: null, hint: 'codex login', reason: errorSummary(error) };
+    if (isMissingCommand(error)) return { installed: false, connected: false, detail: null, hint: INSTALL_HINTS.codex, reason: 'Codex CLI was not found on this Mac', ...location, path: null, source: 'missing' };
+    return { installed: true, connected: false, detail: null, hint: 'codex login', reason: errorSummary(error), ...location };
   }
 }
 
@@ -118,14 +127,15 @@ export function parseCodexOutput(lastMessage, jsonl, configuredModel) {
 export function createCodexEngine(options = {}) {
   const model = options.model || CODEX_DEFAULT_MODEL;
   const runner = options.runner || run;
-  const command = options.codexCommand || 'codex';
   const io = options.io || fs;
+  let command = null;
+  const commandOf = async () => { command = command || await resolvedCommand(options); return command; };
   return {
     id: 'codex',
     label: 'ChatGPT subscription via Codex',
     model,
     async verifyAuth() {
-      return verifyCodexSubscription({ runner, codexCommand: command });
+      return verifyCodexSubscription({ ...options, runner });
     },
     async reviewBatch(prompt, schema, context = {}) {
       const directory = context.tempDirectory || process.cwd();
@@ -138,7 +148,7 @@ export function createCodexEngine(options = {}) {
         '--json', '--output-schema', schemaPath, '--output-last-message', lastMessagePath, '--model', model,
       ];
       try {
-        const result = await runner(command, args, {
+        const result = await runner(await commandOf(), args, {
           input: prompt, cwd: directory, timeoutMs: Number(options.timeoutMs || 600_000), env: subscriptionEnvironment(),
         });
         const lastMessage = await io.readFile(lastMessagePath, 'utf8').catch(() => '');
@@ -155,7 +165,7 @@ export function createCodexEngine(options = {}) {
       return modelMatchesConfiguration(model, actual);
     },
     describeConnection() {
-      return describeCodexConnection({ runner, codexCommand: command });
+      return describeCodexConnection({ ...options, runner });
     },
   };
 }

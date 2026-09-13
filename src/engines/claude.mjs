@@ -1,6 +1,7 @@
 // Claude Code subscription engine: `claude --print` with a JSON schema, allow-listed claude.ai login.
 import { compareVersions, extractResults, isMissingCommand, modelMatchesConfiguration, normalizeModelName, parseSemanticVersion, run, subscriptionEnvironment } from './shared.mjs';
 import { errorSummary } from '../warnings.mjs';
+import { INSTALL_HINTS, resolveCliCommand } from './cli-path.mjs';
 
 // Subscription flags used below were validated against this installed Claude Code release.
 export const MINIMUM_CLAUDE_CODE_VERSION = '2.1.250';
@@ -76,7 +77,7 @@ export function parseStructuredOutput(raw) {
 
 export async function verifyClaudeSubscription(options = {}) {
   const runner = options.runner || run;
-  const command = options.claudeCommand || 'claude';
+  const command = await resolvedCommand(options);
   let versionResult;
   try {
     versionResult = await runner(command, ['--version'], { timeoutMs: 30_000, env: subscriptionEnvironment() });
@@ -99,33 +100,45 @@ export async function verifyClaudeSubscription(options = {}) {
   return status;
 }
 
-// Read-only connection probe for the hub: installed? logged in with a subscription? which plan?
+// The binary: the configured path when it exists, else a PATH / well-known-directory lookup, else the
+// configured name so the spawn error stays what it always was.
+async function resolvedCommand(options) {
+  const resolver = options.resolveCommand || resolveCliCommand;
+  const resolution = await resolver('claude', options.claudeCommand || null, options);
+  return resolution.command;
+}
+
+// Read-only connection probe for the hub: found where? signed in with a subscription? which plan?
 export async function describeClaudeConnection(options = {}) {
   const runner = options.runner || run;
-  const command = options.claudeCommand || 'claude';
+  const resolver = options.resolveCommand || resolveCliCommand;
+  const resolution = await resolver('claude', options.claudeCommand || null, options);
+  const location = { path: resolution.found ? resolution.command : null, source: resolution.source, configured: resolution.configured || null, configuredMissing: resolution.configuredMissing === true, searched: resolution.searched };
+  if (!resolution.found) return { installed: false, connected: false, detail: null, hint: INSTALL_HINTS.claude, reason: 'Claude Code CLI was not found on this Mac', ...location };
   try {
-    const result = await runner(command, ['auth', 'status', '--json'], { timeoutMs: 30_000, env: subscriptionEnvironment() });
+    const result = await runner(resolution.command, ['auth', 'status', '--json'], { timeoutMs: 30_000, env: subscriptionEnvironment() });
     const status = JSON.parse(result.stdout);
     const verdict = assessClaudeAuthStatus(status);
-    if (!verdict.accepted) return { installed: true, connected: false, detail: null, hint: 'claude auth login --claudeai', reason: verdict.reason };
+    if (!verdict.accepted) return { installed: true, connected: false, detail: null, hint: 'claude auth login --claudeai', reason: verdict.reason, ...location };
     const plan = status.subscriptionType ? String(status.subscriptionType).charAt(0).toUpperCase() + String(status.subscriptionType).slice(1) : 'Subscription';
-    return { installed: true, connected: true, detail: `Claude · ${plan} · ${status.authMethod}`, hint: null, reason: null };
+    return { installed: true, connected: true, detail: `Claude · ${plan} · ${status.authMethod}`, hint: null, reason: null, ...location };
   } catch (error) {
-    if (isMissingCommand(error)) return { installed: false, connected: false, detail: null, hint: 'npm i -g @anthropic-ai/claude-code@latest', reason: 'Claude Code CLI is not installed' };
-    return { installed: true, connected: false, detail: null, hint: 'claude auth login --claudeai', reason: errorSummary(error) };
+    if (isMissingCommand(error)) return { installed: false, connected: false, detail: null, hint: INSTALL_HINTS.claude, reason: 'Claude Code CLI was not found on this Mac', ...location, path: null, source: 'missing' };
+    return { installed: true, connected: false, detail: null, hint: 'claude auth login --claudeai', reason: errorSummary(error), ...location };
   }
 }
 
 export function createClaudeEngine(options = {}) {
   const model = options.model || CLAUDE_DEFAULT_MODEL;
   const runner = options.runner || run;
-  const command = options.claudeCommand || 'claude';
+  let command = null;
+  const commandOf = async () => { command = command || await resolvedCommand(options); return command; };
   return {
     id: 'claude',
     label: 'Claude subscription',
     model,
     async verifyAuth() {
-      return verifyClaudeSubscription({ runner, claudeCommand: command });
+      return verifyClaudeSubscription({ ...options, runner });
     },
     // Scores one batch; the caller supplies the prompt, the per-run JSON schema, and a scratch directory.
     async reviewBatch(prompt, schema, context = {}) {
@@ -134,7 +147,7 @@ export function createClaudeEngine(options = {}) {
         '--tools', '', '--output-format', 'json', '--json-schema', JSON.stringify(schema),
       ];
       if (model) args.push('--model', model);
-      const result = await runner(command, args, {
+      const result = await runner(await commandOf(), args, {
         input: prompt, cwd: context.tempDirectory || process.cwd(), timeoutMs: Number(options.timeoutMs || 600_000), env: subscriptionEnvironment(),
       });
       return parseStructuredOutput(result.stdout);
@@ -146,7 +159,7 @@ export function createClaudeEngine(options = {}) {
       return claudeModelMatches(model, actual);
     },
     describeConnection() {
-      return describeClaudeConnection({ runner, claudeCommand: command });
+      return describeClaudeConnection({ ...options, runner });
     },
   };
 }

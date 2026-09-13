@@ -39,6 +39,8 @@ export function createEngine(engineId, options = {}) {
   throw new Error(`Unsupported semanticMatching.engine: ${engineId}. Only claude, codex, and local_only exist; API-backed engines are intentionally unavailable.`);
 }
 
+// options.claudeCommand / options.codexCommand come from config.semanticMatching; options.env and
+// options.homedir feed the path lookup.
 export async function describeConnections(options = {}) {
   const [claude, codex] = await Promise.all([
     describeClaudeConnection(options),
@@ -46,3 +48,5 @@ export async function describeConnections(options = {}) {
   ]);
   return { claude, codex };
 }
+
+export { resolveCliCommand, launchdPath } from './cli-path.mjs';

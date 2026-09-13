@@ -100,6 +100,8 @@ LLM batch 失败会在 10 秒后重试一次。`unreviewed` 岗位只有本地�
 
 `semanticMatching.engine` 选择评分用的订阅 CLI：`claude`（默认，Claude Code 以 claude.ai 订阅登录）或 `codex`（OpenAI Codex CLI 以 ChatGPT 账号登录）。两者都以本机子进程运行，启动前统一删除 `ANTHROPIC_*`、`AWS_*`、`OPENAI_*` 环境变量，因此都不可能走 API key 或网关。各引擎的模型写在 `semanticMatching.models`（`{ "claude": "fable", "codex": "gpt-5.6-sol" }`），旧的单个 `model` 键仍对 Claude 生效。引擎抽象在 `src/engines/`（统一接口 `verifyAuth` / `reviewBatch` / `describeModel`），`src/subscription-match.mjs` 只负责分批、重试、补审与本地降级。
 
+两个 CLI 都由 `resolveCliCommand`（`src/engines/cli-path.mjs`）定位：config 里的 `semanticMatching.claudeCommand` / `codexCommand`（存在时）优先，其次是 `PATH`，再是 `~/.local/bin`、`/opt/homebrew/bin`、`/usr/local/bin`、`~/.npm-global/bin` 与 `~/.nvm/versions/node/*/bin`。launchd 任务默认 `PATH=/usr/bin:/bin`，因此两个 LaunchAgent 模板也把这些目录写进了 `PATH`。中枢 Connections 卡显示实际解析到的路径；在扩展目录找到但 config 未配置时提供 "Save this path to config" 一键写入。
+
 使用 Codex 前在终端执行一次 `codex login` 并选择 ChatGPT 账号；`codex login status` 必须显示 "Logged in using ChatGPT"。API key 登录（`codex login --with-api-key`）或未登录会被拒绝并给出人话提示，运行按现有方式降级为本地评分。批次通过 `codex exec --ephemeral --sandbox read-only --output-schema <schema> --output-last-message <file> -m <model>` 执行，JSON schema 由 CLI 原生约束，最终消息严格解析。中枢 Settings 页显示两个连接状态，并可切换引擎与模型。
 
 ## 模型固定与审计
