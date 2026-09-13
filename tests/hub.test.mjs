@@ -14,6 +14,7 @@ import { parseMultipart } from '../src/hub/multipart.mjs';
 import { nextScheduledRun, validateSettings } from '../src/hub/services.mjs';
 import { hostIsLocal, originIsLocal } from '../src/hub/routes.mjs';
 import { formatDateLabel, formatLocalDateTime, formatLocalShort, localDate } from '../src/time-format.mjs';
+import { createConnectionsProbe } from '../src/hub/connections.mjs';
 
 const NOW = '2026-08-27T12:00:00Z';
 const fixtures = new URL('./fixtures/', import.meta.url);
@@ -71,6 +72,8 @@ async function prepareProject() {
   await fs.writeFile(path.join(root, 'state', 'resume-sources.json'), JSON.stringify({ sources: { data: { sha256: 'abc', refreshedAt: '2026-08-20T02:00:00.000Z' } } }));
   await fs.writeFile(path.join(root, 'output', '2026-08-27', 'warnings.txt'), 'Daily Job Match Alert — 2026-08-27 — 2 warnings\n[collector / Job board] network unavailable\n[llm / x] y\n');
   await fs.writeFile(path.join(root, 'output', 'ERROR-2026-08-20.html'), '<html><body>boom</body></html>');
+  await fs.writeFile(path.join(root, 'output', '2026-08-27', 'Daily Job Match Alert - 2026-08-27.html'), '<!doctype html><html><body><h1>Desktop copy</h1></body></html>');
+  await fs.writeFile(path.join(root, 'output', '2026-08-27', 'Daily Job Match Alert - 2026-08-27.xlsx'), Buffer.from('PK\u0003\u0004fake-xlsx'));
   return root;
 }
 
@@ -87,10 +90,13 @@ async function startHub(root, overrides = {}) {
   const children = [];
   const alivePids = new Set(overrides.alivePids || []);
   const extractions = [];
+  const clock = { value: overrides.now || NOW };
+  const connectionCalls = [];
   const ctx = createHubContext({
     configPath: path.join(root, 'config.json'),
     port: 0,
-    now: () => new Date(overrides.now || NOW),
+    now: () => new Date(clock.value),
+    describeConnections: async () => { connectionCalls.push(clock.value); return overrides.connections || { claude: { installed: true, connected: true, detail: 'Claude · Max · claude.ai', hint: null, reason: null }, codex: { installed: true, connected: false, detail: null, hint: 'codex login', reason: 'Codex is not signed in with a ChatGPT subscription (not logged in).' } }; },
     homedir: root,
     pidAlive: pid => alivePids.has(pid),
     spawn: (command, args, options) => { spawnCalls.push({ command, args, options }); const child = fakeChild(); children.push(child); return child; },
@@ -125,7 +131,7 @@ async function startHub(root, overrides = {}) {
     parts.push(Buffer.from(`--${boundary}--\r\n`));
     return request('POST', pathname, { headers: { 'content-type': `multipart/form-data; boundary=${boundary}`, ...headers }, body: Buffer.concat(parts) });
   };
-  return { ctx, base, request, form, upload, spawnCalls, children, extractions, alivePids, close: () => new Promise(resolve => server.close(resolve)) };
+  return { ctx, base, request, form, upload, spawnCalls, children, extractions, alivePids, clock, connectionCalls, close: () => new Promise(resolve => server.close(resolve)) };
 }
 
 async function readConfig(root) {
@@ -144,7 +150,8 @@ test('Reports lists dates newest first with counts, titles the report by date, a
     assert.doesNotMatch(list.text, /<h1 class="hub-title">Reports<\/h1>/, 'no page heading above the report');
     assert.match(list.text, /<header class="masthead"><h1>August 27, 2026<\/h1><p class="sub">1 match · Ran Aug 26, 8:00 PM<\/p><\/header>/);
     assert.equal((list.text.match(/<h1/g) || []).length, 1, 'a single h1 on the page');
-    assert.match(list.text, /<a class="btn secondary small" href="file:\/\/[^"]*output\/2026-08-27\/Daily%20Job%20Match%20Alert%20-%202026-08-27\.html" target="_blank" rel="noopener noreferrer" title="[^"]*output\/2026-08-27\/Daily Job Match Alert - 2026-08-27\.html">Open Desktop Copy<\/a>/);
+    assert.match(list.text, /<a class="btn secondary small" href="\/desktop\/2026-08-27" target="_blank" rel="noopener noreferrer" title="[^"]*output\/2026-08-27\/Daily Job Match Alert - 2026-08-27\.html">Open Desktop Copy<\/a><a class="btn secondary small" href="\/desktop\/2026-08-27\/xlsx"[^>]*>Download XLSX<\/a>/);
+    assert.doesNotMatch(list.text, /file:\/\//);
     assert.doesNotMatch(list.text, /Desktop copy:/);
     assert.match(list.text, /<article class="job"/);
     assert.match(list.text, /<form class="toolbar/);
@@ -362,7 +369,7 @@ test('Settings groups the fields, writes only its keys, preserves the rest and t
     const text = await fs.readFile(path.join(root, 'config.json'), 'utf8');
     const config = JSON.parse(text);
     assert.deepEqual(Object.keys(config), ['lookbackHours', 'timeZone', 'minimumMatchScore', 'semanticMatching', 'reports', 'outputDirectory', 'resumes', 'preferences', 'sources', 'network', 'hub']);
-    assert.deepEqual(Object.keys(config.semanticMatching), ['engine', 'model', 'acceptedMatchLevels', 'batchSize']);
+    assert.deepEqual(Object.keys(config.semanticMatching), ['engine', 'model', 'acceptedMatchLevels', 'batchSize'], 'no engine field in the form: engine and models are left alone');
     assert.equal(config.minimumMatchScore, 75);
     assert.equal(config.semanticMatching.model, 'claude-fable-5');
     assert.equal(config.semanticMatching.engine, 'local_only');
@@ -427,7 +434,7 @@ test('Status merges runs into one card, formats every time in the configured zon
   try {
     const page = await hub.request('GET', '/status');
     assert.equal(page.status, 200);
-    assert.match(page.text, /<h2>Runs<\/h2><dl class="kv">\s*<dt>Last run<\/dt><dd>Aug 26, 2026, 8:00 PM · scheduled · success · 1 match · <a href="\/reports\/2026-08-27">report<\/a><\/dd>\s*<dt>Next run<\/dt><dd>Aug 27, 2026, 8:00 PM <span class="badge badge-warn" data-badge="not-installed">[^<]*<\/span><\/dd>\s*<dt>Lock<\/dt><dd id="lock-line">Free<\/dd>/);
+    assert.match(page.text, /<h2>Runs<\/h2><dl class="kv">\s*<dt>Last run<\/dt><dd>Aug 26, 2026, 8:00 PM · scheduled · success · 1 match · <a href="\/reports\/2026-08-27">report<\/a><\/dd>\s*<dt>Engine<\/dt><dd>local_only<\/dd>\s*<dt>Next run<\/dt><dd>Aug 27, 2026, 8:00 PM <span class="badge badge-warn" data-badge="not-installed">[^<]*<\/span><\/dd>\s*<dt>Lock<\/dt><dd id="lock-line">Free<\/dd>/);
     assert.doesNotMatch(page.text, /<h2>Last run<\/h2>|<h2>Schedule<\/h2>|<h2>Fatal error reports<\/h2>|\bUTC\b/);
     assert.match(page.text, /<div id="run-progress" hidden>/);
     assert.match(page.text, /<h2>Warnings<\/h2>/);
@@ -458,6 +465,92 @@ test('Status merges runs into one card, formats every time in the configured zon
     assert.equal(nextScheduledRun(new Date('2026-08-27T12:00:00Z'), 'America/Chicago', 20, 0).toISOString(), '2026-08-28T01:00:00.000Z');
     assert.equal(nextScheduledRun(new Date('2026-08-27T01:30:00Z'), 'America/Chicago', 20, 0).toISOString(), '2026-08-28T01:00:00.000Z', 'after 20:00 local the next slot is tomorrow');
     assert.equal(nextScheduledRun(new Date('2026-12-01T12:00:00Z'), 'America/Chicago', 20, 0).toISOString(), '2026-12-02T02:00:00.000Z', 'standard time offset');
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('/desktop serves the Desktop HTML and workbook read-only, and refuses anything but a valid date', async () => {
+  const root = await prepareProject();
+  const hub = await startHub(root);
+  try {
+    const html = await hub.request('GET', '/desktop/2026-08-27');
+    assert.equal(html.status, 200);
+    assert.match(html.headers['content-type'], /^text\/html/);
+    assert.equal(html.headers['cache-control'], 'no-store');
+    assert.equal(html.text, '<!doctype html><html><body><h1>Desktop copy</h1></body></html>');
+    const xlsx = await hub.request('GET', '/desktop/2026-08-27/xlsx');
+    assert.equal(xlsx.status, 200);
+    assert.match(xlsx.headers['content-type'], /spreadsheetml/);
+    assert.equal(xlsx.headers['content-disposition'], 'attachment; filename="Daily Job Match Alert - 2026-08-27.xlsx"');
+    assert.equal(xlsx.text, 'PK\u0003\u0004fake-xlsx');
+    const missing = await hub.request('GET', '/desktop/2026-08-26');
+    assert.equal(missing.status, 404);
+    assert.match(missing.text, /No Desktop report for 2026-08-26/);
+    assert.equal((await hub.request('GET', '/desktop/2026-08-26/xlsx')).status, 404);
+    for (const bad of ['/desktop/2026-8-27', '/desktop/20260827', '/desktop/../config.json', '/desktop/2026-08-27/../../config.json', '/desktop/2026-08-27/html']) {
+      assert.equal((await hub.request('GET', bad)).status, 404, bad);
+    }
+    assert.equal((await hub.form('/desktop/2026-08-27', {})).status, 404, 'the route is read-only');
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('Settings offers an engine choice with a model dropdown per engine, a custom entry, and cached connections', async () => {
+  const root = await prepareProject();
+  const hub = await startHub(root);
+  try {
+    const page = await hub.request('GET', '/settings');
+    assert.doesNotMatch(page.text, /Only these values are written/);
+    assert.match(page.text, /<h2>Connections<\/h2><dl class="conn"><dt>Claude<\/dt><dd><span class="badge badge-good" data-conn="connected">Connected<\/span> Claude · Max · claude\.ai<\/dd><dt>Codex<\/dt><dd><span class="badge badge-warn" data-conn="disconnected">Not connected<\/span> <span class="muted">Sign in from a terminal: <code>codex login<\/code><\/span>/);
+    assert.match(page.text, /Checked Aug 27, 2026, 7:00 AM; refreshed every minute\. The hub never signs in for you\./);
+    assert.match(page.text, /<span>Engine<\/span><div class="radio-row"><label><input type="radio" name="engine" value="claude" checked> Claude subscription<\/label><label><input type="radio" name="engine" value="codex"> ChatGPT subscription via Codex<\/label><\/div>/);
+    assert.match(page.text, /<div class="model-group" data-engine="claude">\s*<label class="field"><span>Scoring Model<\/span><select name="model_claude" class="model-select"><option value="fable" selected>Fable \(recommended\)<\/option><option value="opus">Opus<\/option><option value="sonnet">Sonnet<\/option><option value="haiku">Haiku<\/option><option value="__custom__">Custom…<\/option><\/select><\/label>\s*<label class="field model-custom" hidden>/);
+    assert.match(page.text, /<div class="model-group" data-engine="codex" hidden>\s*<label class="field"><span>Scoring Model<\/span><select name="model_codex" class="model-select"><option value="gpt-5\.6-sol" selected>gpt-5\.6-sol \(Codex default\)<\/option><option value="__custom__">Custom…<\/option><\/select>/);
+    assert.match(page.text, /form\.querySelectorAll\('\.model-group'\)\.forEach/, 'the switch script is inlined');
+    await hub.request('GET', '/settings');
+    assert.equal(hub.connectionCalls.length, 1, 'connection probes are cached for a minute');
+    hub.clock.value = '2026-08-27T12:01:05Z';
+    await hub.request('GET', '/settings');
+    assert.equal(hub.connectionCalls.length, 2);
+
+    const saved = await hub.form('/settings', { minimumMatchScore: '70', acceptedMatchLevels: 'high', engine: 'codex', model_claude: 'opus', model_codex: '__custom__', modelCustom_codex: 'gpt-5.5-mini', hubPort: '4747' });
+    assert.equal(saved.status, 303);
+    assert.match(saved.headers.location, /notice=/);
+    const config = await readConfig(root);
+    assert.equal(config.semanticMatching.engine, 'codex');
+    assert.equal(config.semanticMatching.model, 'gpt-5.5-mini');
+    assert.deepEqual(config.semanticMatching.models, { codex: 'gpt-5.5-mini' });
+    assert.deepEqual(Object.keys(config.semanticMatching), ['engine', 'model', 'acceptedMatchLevels', 'batchSize', 'models']);
+    const after = await hub.request('GET', '/settings');
+    assert.match(after.text, /<input type="radio" name="engine" value="codex" checked>/);
+    assert.match(after.text, /<div class="model-group" data-engine="claude" hidden>/);
+    assert.match(after.text, /<div class="model-group" data-engine="codex">\s*<label class="field"><span>Scoring Model<\/span><select name="model_codex" class="model-select"><option value="gpt-5\.6-sol">gpt-5\.6-sol \(Codex default\)<\/option><option value="__custom__" selected>Custom…<\/option><\/select><\/label>\s*<label class="field model-custom"><span>Custom model name<\/span><input type="text" name="modelCustom_codex" value="gpt-5\.5-mini"/);
+    assert.match(after.text, /<select name="model_claude" class="model-select"><option value="fable" selected>/, 'the Claude choice was not written, so it keeps its default');
+
+    const back = await hub.form('/settings', { minimumMatchScore: '70', acceptedMatchLevels: 'high', engine: 'claude', model_claude: 'sonnet', model_codex: 'gpt-5.6-sol', hubPort: '4747' });
+    assert.equal(back.status, 303);
+    const again = await readConfig(root);
+    assert.equal(again.semanticMatching.engine, 'claude');
+    assert.equal(again.semanticMatching.model, 'sonnet');
+    assert.deepEqual(again.semanticMatching.models, { codex: 'gpt-5.5-mini', claude: 'sonnet' });
+
+    const bad = await hub.form('/settings', { minimumMatchScore: '70', acceptedMatchLevels: 'high', engine: 'openai_api', model_claude: 'fable', hubPort: '4747' });
+    assert.match(decodeURIComponent(bad.headers.location), /Engine must be claude or codex/);
+    const badModel = await hub.form('/settings', { minimumMatchScore: '70', acceptedMatchLevels: 'high', engine: 'codex', model_codex: '__custom__', modelCustom_codex: 'not a model!', hubPort: '4747' });
+    assert.match(decodeURIComponent(badModel.headers.location), /Model must be a Codex model name/);
+    assert.equal((await readConfig(root)).semanticMatching.engine, 'claude');
+
+    const status = await hub.request('GET', '/status');
+    assert.match(status.text, /<dt>Engine<\/dt><dd>local_only<\/dd>/, 'the fixture payload predates meta.engine, so only the scoring model shows');
+    const payload = JSON.parse(await fs.readFile(path.join(root, 'state', 'report-payload-2026-08-27.json'), 'utf8'));
+    payload.meta.engine = 'codex';
+    payload.meta.scoringModel = 'gpt-5.6-sol';
+    await fs.writeFile(path.join(root, 'state', 'report-payload-2026-08-27.json'), JSON.stringify(payload));
+    assert.match((await hub.request('GET', '/status')).text, /<dt>Engine<\/dt><dd>codex · gpt-5\.6-sol<\/dd>/);
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });

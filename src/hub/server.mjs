@@ -9,6 +9,7 @@ import { isPidAlive } from '../lock.mjs';
 import { extractPdfText } from '../resume-sync.mjs';
 import { createHubHandler } from './routes.mjs';
 import { createRunManager } from './run.mjs';
+import { createConnectionsProbe } from './connections.mjs';
 
 export const DEFAULT_HUB_PORT = 4747;
 export const HUB_HOST = '127.0.0.1';
@@ -35,6 +36,7 @@ export function createHubContext(options) {
     extractText: options.extractText || ((file, settings) => extractPdfText(file, settings)),
     loadConfig: options.loadConfig || (() => loadConfig(configPath, { notify: () => {} })),
   };
+  ctx.connections = options.connections || createConnectionsProbe({ now, runner: options.cliRunner, describe: options.describeConnections });
   ctx.runManager = options.runManager || createRunManager({
     root, configPath, hubDirectory, io, now, pidAlive,
     spawn: options.spawn, nodeBinary: options.nodeBinary, entrypoint: options.entrypoint,

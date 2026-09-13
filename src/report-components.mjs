@@ -65,7 +65,7 @@ export function renderJobCard(card) {
   ].join(' ');
   const badges = card.badges.length ? `<div class="badges">${card.badges.map(renderBadge).join('')}</div>` : '';
   const description = card.description
-    ? `<details class="jd"><summary>Full Captured JD</summary><p>${htmlEscape(card.description)}</p></details>`
+    ? `<details class="jd"><summary>Job Description</summary><p>${htmlEscape(card.description)}</p></details>`
     : '';
   return `<article class="job" ${attributes}>
     ${renderScoreRing(card.bestScore)}

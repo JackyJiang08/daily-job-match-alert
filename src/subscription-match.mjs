@@ -1,61 +1,13 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
 import { pickBestTrack, reportTracks, resumeTrackList, trackSummaries } from './resume-tracks.mjs';
 import { sha256, unique } from './utils.mjs';
 import { createWarning, errorSummary } from './warnings.mjs';
 
-// The subscription CLI must never be steered to an API key, a Bedrock/Vertex gateway, or a proxy by the
-// launching shell. Prefixes catch every current and future ANTHROPIC_* (API key, base URL, auth token,
-// custom headers, model overrides) and AWS_* (Bedrock credentials, profiles, regions) variable; the explicit
-// list covers the routing switches that live outside those prefixes.
-const CREDENTIAL_ENV_PREFIXES = ['ANTHROPIC_', 'AWS_'];
-const CREDENTIAL_ENV_KEYS = [
-  'OPENAI_API_KEY', 'CLAUDE_API_KEY',
-  'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX',
-  'GOOGLE_API_KEY', 'GOOGLE_APPLICATION_CREDENTIALS', 'CLOUD_ML_REGION',
-];
-// Subscription flags used below were validated against this installed Claude Code release.
-const MINIMUM_CLAUDE_CODE_VERSION = '2.1.250';
-
-export function isCredentialEnvironmentKey(key) {
-  return CREDENTIAL_ENV_KEYS.includes(key) || CREDENTIAL_ENV_PREFIXES.some(prefix => key.startsWith(prefix));
-}
-
-export function subscriptionEnvironment(environment = process.env) {
-  const safe = {};
-  for (const [key, value] of Object.entries(environment)) {
-    if (!isCredentialEnvironmentKey(key)) safe[key] = value;
-  }
-  return safe;
-}
-
-function run(command, args, { input = '', cwd = process.cwd(), timeoutMs = 600_000, env = subscriptionEnvironment() } = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
-    const stdout = [];
-    const stderr = [];
-    const timer = setTimeout(() => {
-      child.kill('SIGTERM');
-      reject(new Error(`${command} timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-    child.stdout.on('data', chunk => stdout.push(chunk));
-    child.stderr.on('data', chunk => stderr.push(chunk));
-    child.on('error', error => { clearTimeout(timer); reject(error); });
-    child.on('close', (code, signal) => {
-      clearTimeout(timer);
-      const result = { code, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') };
-      if (code === 0) resolve(result);
-      else reject(new Error(`${command} exited ${code ?? signal}: ${result.stderr.slice(-2000) || result.stdout.slice(-2000)}`));
-    });
-    // A CLI that exits before reading its prompt (crash, bad flag, missing binary) closes the pipe while
-    // the prompt is still being written. That EPIPE must not become an unhandled 'error' event that kills
-    // the whole nightly run; the 'close' handler above already reports the failed exit.
-    child.stdin.on('error', () => {});
-    child.stdin.end(input);
-  });
-}
+import { createEngine, normalizeEngineId, resolveModel } from './engines/index.mjs';
+import { MINIMUM_CLAUDE_CODE_VERSION, assessClaudeAuthStatus, claudeModelMatches, expandModelAlias, extractScoringModel, parseClaudeCodeVersion, parseStructuredOutput, verifyClaudeSubscription } from './engines/claude.mjs';
+import { compareVersions, isCredentialEnvironmentKey, normalizeModelName, run, subscriptionEnvironment } from './engines/shared.mjs';
 
 // The response schema is generated per run: one required integer score per enabled track id, so the
 // model has to score every resume, and the recommended track must be one of those ids.
@@ -134,135 +86,9 @@ JOBS:
 ${JSON.stringify(jobs, null, 2)}`;
 }
 
-// Aliases accepted by `claude --model`; each expands to the prefix of the canonical model family.
-const MODEL_ALIASES = { fable: 'claude-fable', opus: 'claude-opus', sonnet: 'claude-sonnet', haiku: 'claude-haiku' };
-
-export function normalizeModelName(value) {
-  return String(value || '').trim().toLowerCase().replace(/\[\s*1m\s*\]$/, '');
-}
-
-export function expandModelAlias(value) {
-  const normalized = normalizeModelName(value);
-  return MODEL_ALIASES[normalized] || normalized;
-}
-
+// Kept for callers and tests that compare a configured alias with the model a CLI reported.
 export function modelMatchesConfiguration(configured, actual) {
-  const expected = expandModelAlias(configured);
-  const reported = normalizeModelName(actual);
-  if (!expected || !reported || reported === 'unknown') return true;
-  return reported.startsWith(expected);
-}
-
-// `claude --print --output-format json` reports usage per model id under modelUsage; the scoring model is the
-// entry that produced the most output tokens (helper calls such as Haiku title generation are much smaller).
-export function extractScoringModel(parsed) {
-  const usage = parsed?.modelUsage;
-  if (usage && typeof usage === 'object') {
-    let best = null;
-    for (const [id, stats] of Object.entries(usage)) {
-      const outputTokens = Number(stats?.outputTokens || 0);
-      const inputTokens = Number(stats?.inputTokens || 0) + Number(stats?.cacheReadInputTokens || 0) + Number(stats?.cacheCreationInputTokens || 0);
-      const candidate = { name: String(stats?.canonicalModel || id), outputTokens, inputTokens };
-      if (!best || candidate.outputTokens > best.outputTokens || (candidate.outputTokens === best.outputTokens && candidate.inputTokens > best.inputTokens)) {
-        best = candidate;
-      }
-    }
-    if (best?.name) return best.name;
-  }
-  if (typeof parsed?.model === 'string' && parsed.model.trim()) return parsed.model.trim();
-  return null;
-}
-
-function extractResults(parsed) {
-  if (parsed?.results) return parsed;
-  if (parsed?.structured_output?.results) return parsed.structured_output;
-  if (typeof parsed?.result === 'string') return JSON.parse(parsed.result);
-  if (parsed?.result?.results) return parsed.result;
-  throw new Error('subscription CLI returned JSON without results[]');
-}
-
-export function parseStructuredOutput(raw) {
-  const parsed = JSON.parse(raw.trim());
-  return { results: extractResults(parsed).results, scoringModel: extractScoringModel(parsed) };
-}
-
-export function parseClaudeCodeVersion(value) {
-  const match = String(value || '').match(/\b(\d+)\.(\d+)\.(\d+)\b/);
-  return match ? match.slice(1, 4).map(Number) : null;
-}
-
-export function compareVersions(left, right) {
-  const leftParts = Array.isArray(left) ? left : parseClaudeCodeVersion(left);
-  const rightParts = Array.isArray(right) ? right : parseClaudeCodeVersion(right);
-  if (!leftParts || !rightParts) throw new Error('Could not parse semantic version');
-  for (let index = 0; index < 3; index += 1) {
-    if (leftParts[index] !== rightParts[index]) return leftParts[index] - rightParts[index];
-  }
-  return 0;
-}
-
-async function verifyClaudeSubscription(options = {}) {
-  const runner = options.runner || run;
-  const command = options.claudeCommand || 'claude';
-  let versionResult;
-  try {
-    versionResult = await runner(command, ['--version'], { timeoutMs: 30_000, env: subscriptionEnvironment() });
-  } catch (error) {
-    throw new Error(`Could not verify the Claude Code version. Upgrade with \`npm i -g @anthropic-ai/claude-code@latest\`, then retry. ${errorSummary(error)}`);
-  }
-  const versionText = `${versionResult.stdout || ''}\n${versionResult.stderr || ''}`;
-  const installedVersion = parseClaudeCodeVersion(versionText);
-  if (!installedVersion) {
-    throw new Error(`Claude Code returned an unrecognized version string. Version ${MINIMUM_CLAUDE_CODE_VERSION} or newer is required; upgrade with \`npm i -g @anthropic-ai/claude-code@latest\`.`);
-  }
-  if (compareVersions(installedVersion, MINIMUM_CLAUDE_CODE_VERSION) < 0) {
-    throw new Error(`Claude Code ${installedVersion.join('.')} is older than the verified minimum ${MINIMUM_CLAUDE_CODE_VERSION}. Upgrade with \`npm i -g @anthropic-ai/claude-code@latest\`.`);
-  }
-
-  const result = await runner(command, ['auth', 'status', '--json'], { timeoutMs: 30_000, env: subscriptionEnvironment() });
-  const status = JSON.parse(result.stdout);
-  const verdict = assessClaudeAuthStatus(status);
-  if (!verdict.accepted) throw new Error(verdict.reason);
-}
-
-// Allow-list, not deny-list: only a claude.ai subscription login is accepted. `console` (Anthropic Console
-// billing), `apiKey`, Bedrock, Vertex, and anything unrecognized fall back to local scoring.
-const SUBSCRIPTION_AUTH_METHODS = new Set(['claude.ai', 'claudeai', 'subscription']);
-const SUBSCRIPTION_TYPES = new Set(['pro', 'max', 'team', 'enterprise']);
-
-function normalizeAuthValue(value) {
-  return String(value ?? '').trim().toLowerCase().replace(/[\s_-]+/g, '');
-}
-
-export function assessClaudeAuthStatus(status) {
-  const reject = detail => ({
-    accepted: false,
-    reason: `Claude Code is not authenticated with a Claude subscription (${detail}). Run \`claude auth login --claudeai\`; Console, API-key, Bedrock, and Vertex billing paths are intentionally rejected.`,
-  });
-  if (!status || typeof status !== 'object') return reject('auth status was not a JSON object');
-  const authMethod = status.authMethod == null ? '' : String(status.authMethod);
-  if (status.loggedIn !== true) return reject(`loggedIn=${JSON.stringify(status.loggedIn ?? null)}, authMethod="${authMethod}"`);
-  if (!SUBSCRIPTION_AUTH_METHODS.has(normalizeAuthValue(authMethod))) return reject(`authMethod="${authMethod}"`);
-  // The remaining fields are optional in the CLI output; when present they must agree with the login.
-  if (Object.hasOwn(status, 'apiProvider') && normalizeAuthValue(status.apiProvider) !== 'firstparty') {
-    return reject(`authMethod="${authMethod}", apiProvider="${status.apiProvider}"`);
-  }
-  if (Object.hasOwn(status, 'subscriptionType') && !SUBSCRIPTION_TYPES.has(normalizeAuthValue(status.subscriptionType))) {
-    return reject(`authMethod="${authMethod}", subscriptionType="${status.subscriptionType}"`);
-  }
-  return { accepted: true, reason: null };
-}
-
-async function claudeBatch(prompt, tempDirectory, schema, options = {}) {
-  const args = [
-    '--print', '--safe-mode', '--no-session-persistence', '--permission-mode', 'dontAsk',
-    '--tools', '', '--output-format', 'json', '--json-schema', JSON.stringify(schema),
-  ];
-  if (options.model) args.push('--model', options.model);
-  const result = await (options.runner || run)(options.claudeCommand || 'claude', args, {
-    input: prompt, cwd: tempDirectory, timeoutMs: Number(options.timeoutMs || 600_000), env: subscriptionEnvironment(),
-  });
-  return parseStructuredOutput(result.stdout);
+  return claudeModelMatches(configured, actual);
 }
 
 function chunks(items, size) {
@@ -272,7 +98,7 @@ function chunks(items, size) {
 }
 
 function addWarning(options, message) {
-  if (Array.isArray(options.warnings)) options.warnings.push(createWarning('llm', options.engine || 'subscription', message));
+  if (Array.isArray(options.warnings)) options.warnings.push(createWarning('llm', normalizeEngineId(options.engine || 'claude') || String(options.engine), message));
 }
 
 function wait(milliseconds) {
@@ -350,18 +176,20 @@ export function mergeSemanticResults(jobs, results, engine, resumes = null) {
   });
 }
 
-export function summarizeScoringModel(jobs, engine = 'claude_subscription') {
+export function summarizeScoringModel(jobs, engine = 'claude') {
   const models = unique(jobs.filter(job => job.semanticReviewed).map(job => job.scoringModel).filter(Boolean));
   if (models.length) return models.join(', ');
   return engine === 'local_only' ? 'local_only' : 'none';
 }
 
 export async function applySubscriptionMatching(jobs, resumes, preferences, options = {}) {
-  const engine = options.engine || 'claude_subscription';
-  if (engine === 'local_only') return jobs.map(job => ({ ...job, scoringEngine: 'local_only' }));
-  if (engine !== 'claude_subscription') {
-    throw new Error(`Unsupported semanticMatching.engine: ${engine}. Only claude_subscription and local_only exist; API-backed engines are intentionally unavailable.`);
+  const engineId = normalizeEngineId(options.engine || 'claude');
+  if (engineId === 'local_only') return jobs.map(job => ({ ...job, scoringEngine: 'local_only' }));
+  if (!engineId) {
+    throw new Error(`Unsupported semanticMatching.engine: ${options.engine}. Only claude, codex, and local_only exist; API-backed engines are intentionally unavailable.`);
   }
+  const engine = options.engineInstance || createEngine(engineId, { ...options, model: resolveModel(options, engineId) });
+  const engineName = engineId;
 
   const tracks = resumeTrackList(resumes);
   if (!tracks.length) throw new Error('applySubscriptionMatching needs at least one enabled resume track');
@@ -373,7 +201,7 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
   const schema = buildResultSchema(tracks);
 
   try {
-    await verifyClaudeSubscription(options);
+    await engine.verifyAuth();
   } catch (error) {
     addWarning(options, `Subscription authentication check failed; ${candidates.length} jobs used local fallback: ${errorSummary(error)}`);
     const fallbackByUrl = new Map(candidates.map(job => [job.url, localFallbackJob(job)]));
@@ -385,11 +213,10 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
   const fallbackIds = new Set();
   try {
     tempDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'daily-job-match-alert-semantic-'));
-    const invokeBatch = batch => claudeBatch(
+    const invokeBatch = batch => engine.reviewBatch(
       buildSemanticPrompt(batch, tracks, preferences, Number(options.maximumDescriptionCharacters || 7000)),
-      tempDirectory,
       schema,
-      options,
+      { tempDirectory },
     );
     const observedModels = new Set();
     let unknownModelBatches = 0;
@@ -401,8 +228,8 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
       }
       if (!observedModels.has(model)) {
         observedModels.add(model);
-        if (options.model && !modelMatchesConfiguration(options.model, model)) {
-          addWarning(options, `MODEL MISMATCH: semanticMatching.model is "${options.model}" but the subscription CLI reported "${model}". Scores from this run were kept; fix the model configuration before the next run.`);
+        if (engine.model && !engine.modelMatches(model)) {
+          addWarning(options, `MODEL MISMATCH: semanticMatching.model is "${engine.model}" but the ${engine.label} CLI reported "${model}". Scores from this run were kept; fix the model configuration before the next run.`);
         }
       }
       return model;
@@ -470,7 +297,7 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
   }
 
   const resultIds = new Set(allResults.map(result => result.id));
-  const candidateResults = mergeSemanticResults(candidates, allResults, engine, tracks);
+  const candidateResults = mergeSemanticResults(candidates, allResults, engineName, tracks);
   const mergedByUrl = new Map(candidateResults.map(job => [
     job.url,
     fallbackIds.has(job.semanticId) || !resultIds.has(job.semanticId) ? localFallbackJob(job) : job,
@@ -478,4 +305,7 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
   return jobs.map(job => mergedByUrl.get(job.url) || job);
 }
 
-export { MINIMUM_CLAUDE_CODE_VERSION, run as runSubscriptionCommand, verifyClaudeSubscription };
+export {
+  MINIMUM_CLAUDE_CODE_VERSION, assessClaudeAuthStatus, compareVersions, expandModelAlias, extractScoringModel, isCredentialEnvironmentKey,
+  normalizeModelName, parseClaudeCodeVersion, parseStructuredOutput, run as runSubscriptionCommand, subscriptionEnvironment, verifyClaudeSubscription,
+};

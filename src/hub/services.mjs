@@ -8,6 +8,7 @@ import { TRACK_ID_PATTERN, defaultTrackLabel } from '../resume-tracks.mjs';
 import { REPORT_TITLE } from '../report.mjs';
 import { resolveFrom } from '../utils.mjs';
 import { localDate } from '../time-format.mjs';
+import { ENGINE_DEFAULT_MODELS, ENGINE_IDS, ENGINE_LABELS, normalizeEngineId, resolveModel } from '../engines/index.mjs';
 import { readConfigFile, updateConfigFile } from './config-file.mjs';
 import { readLockStatus } from './run.mjs';
 
@@ -16,7 +17,18 @@ export const ERROR_FILE_PATTERN = /^ERROR-\d{4}-\d{2}-\d{2}\.html$/;
 export const MAXIMUM_PDF_BYTES = 5 * 1024 * 1024;
 export const KEEP_PDF_VERSIONS = 5;
 const PAYLOAD_PATTERN = /^report-payload-(\d{4}-\d{2}-\d{2})\.json$/;
-const MODEL_PATTERN = /^[a-z0-9][a-z0-9.\-]{0,63}(\[1m\])?$/i;
+const MODEL_PATTERN = /^[a-z0-9][a-z0-9._\-]{0,63}(\[1m\])?$/i;
+export const DEFAULT_MODEL_CHOICES = {
+  claude: [
+    { value: 'fable', label: 'Fable (recommended)' },
+    { value: 'opus', label: 'Opus' },
+    { value: 'sonnet', label: 'Sonnet' },
+    { value: 'haiku', label: 'Haiku' },
+  ],
+  codex: [
+    { value: 'gpt-5.6-sol', label: 'gpt-5.6-sol (Codex default)' },
+  ],
+};
 const MATCH_LEVELS = ['high', 'medium', 'low'];
 
 export class HubInputError extends Error {
@@ -64,6 +76,10 @@ export async function readReportPayload(ctx, date) {
   const payload = await readJson(ctx.io, path.join(ctx.root, 'state', `report-payload-${date}.json`));
   if (!payload?.meta?.date || !Array.isArray(payload.matches)) return null;
   return payload;
+}
+
+export function desktopWorkbookPath(config, date) {
+  return path.join(config.outputDirectory, date, `${REPORT_TITLE} - ${date}.xlsx`);
 }
 
 export function desktopCopyPath(config, date) {
@@ -315,6 +331,8 @@ export async function buildStatusView(ctx, config) {
     date: latestDate,
     // Written by the pipeline itself (scheduled / catchup / manual); older payloads carry none.
     trigger: latest?.meta?.trigger || null,
+    engine: latest?.meta?.engine || null,
+    scoringModel: latest?.meta?.scoringModel || null,
     matchCount: latest?.meta?.matchCount ?? latest?.matches?.length ?? null,
     runsToday: latest?.meta?.runsToday ?? null,
     complete: latest?.complete === true,
@@ -367,12 +385,32 @@ export async function readErrorReport(ctx, config, name) {
 
 // ---------------------------------------------------------------------------------------------- settings
 
+function normalizeChoices(raw) {
+  const choices = {};
+  for (const engine of ENGINE_IDS) {
+    const list = Array.isArray(raw?.[engine]) ? raw[engine] : DEFAULT_MODEL_CHOICES[engine];
+    choices[engine] = list
+      .map(item => (typeof item === 'string' ? { value: item, label: item } : { value: String(item?.value || ''), label: String(item?.label || item?.value || '') }))
+      .filter(item => item.value);
+    if (!choices[engine].length) choices[engine] = DEFAULT_MODEL_CHOICES[engine];
+  }
+  return choices;
+}
+
 export async function readSettings(ctx) {
   const { config } = await readConfigFile(ctx.configPath, ctx.io);
+  const semantic = config.semanticMatching && typeof config.semanticMatching === 'object' ? config.semanticMatching : {};
+  const engine = normalizeEngineId(semantic.engine) === 'codex' ? 'codex' : 'claude';
+  const models = {};
+  for (const id of ENGINE_IDS) models[id] = resolveModel(semantic, id) || ENGINE_DEFAULT_MODELS[id];
   return {
     minimumMatchScore: config.minimumMatchScore ?? 60,
-    acceptedMatchLevels: Array.isArray(config.semanticMatching?.acceptedMatchLevels) ? config.semanticMatching.acceptedMatchLevels : ['high'],
-    model: config.semanticMatching?.model || '',
+    acceptedMatchLevels: Array.isArray(semantic.acceptedMatchLevels) ? semantic.acceptedMatchLevels : ['high'],
+    engine,
+    engines: ENGINE_IDS.map(id => ({ id, label: ENGINE_LABELS[id] })),
+    model: models[engine],
+    models,
+    modelChoices: normalizeChoices(config.hub?.modelChoices),
     xlsxRequired: config.reports?.xlsx?.required === true,
     hubPort: Number(config.hub?.port || 4747),
   };
@@ -384,13 +422,21 @@ export function validateSettings(form) {
   if (!Number.isInteger(minimumMatchScore) || minimumMatchScore < 0 || minimumMatchScore > 100) errors.push('Minimum match score must be a whole number from 0 to 100');
   const levels = (Array.isArray(form.acceptedMatchLevels) ? form.acceptedMatchLevels : [form.acceptedMatchLevels]).filter(Boolean).map(String);
   if (!levels.length || levels.some(level => !MATCH_LEVELS.includes(level))) errors.push('Accepted match levels must include at least one of high, medium, low');
-  const model = String(form.model || '').trim();
-  if (!MODEL_PATTERN.test(model)) errors.push('Model must be a Claude Code alias (fable, opus, sonnet) or a full model name such as claude-fable-5');
+  // The engine field is optional: a form without it leaves semanticMatching.engine untouched.
+  const engineGiven = form.engine != null && String(form.engine).trim() !== '';
+  const engine = engineGiven ? String(form.engine).trim().toLowerCase() : null;
+  if (engineGiven && !ENGINE_IDS.includes(engine)) errors.push('Engine must be claude or codex');
+  const modelKey = engine || 'claude';
+  // The form carries one <select> per engine plus an optional custom box; "__custom__" selects the box.
+  const selected = String(form[`model_${modelKey}`] ?? form.model ?? '').trim();
+  const custom = String(form[`modelCustom_${modelKey}`] ?? form.modelCustom ?? '').trim();
+  const model = selected === '__custom__' ? custom : selected;
+  if (!MODEL_PATTERN.test(model)) errors.push(engine === 'codex' ? 'Model must be a Codex model name such as gpt-5.6-sol' : 'Model must be a Claude Code alias (fable, opus, sonnet, haiku) or a full model name such as claude-fable-5');
   const hubPort = Number(form.hubPort);
   if (!Number.isInteger(hubPort) || hubPort < 1024 || hubPort > 65535) errors.push('Hub port must be a whole number from 1024 to 65535');
   const xlsxRequired = form.xlsxRequired === 'on' || form.xlsxRequired === 'true' || form.xlsxRequired === true;
   if (errors.length) throw new HubInputError(errors.join('; '));
-  return { minimumMatchScore, acceptedMatchLevels: MATCH_LEVELS.filter(level => levels.includes(level)), model, xlsxRequired, hubPort };
+  return { minimumMatchScore, acceptedMatchLevels: MATCH_LEVELS.filter(level => levels.includes(level)), engine, model, xlsxRequired, hubPort };
 }
 
 export async function saveSettings(ctx, form) {
@@ -399,7 +445,13 @@ export async function saveSettings(ctx, form) {
     config.minimumMatchScore = settings.minimumMatchScore;
     config.semanticMatching = config.semanticMatching && typeof config.semanticMatching === 'object' ? config.semanticMatching : {};
     config.semanticMatching.acceptedMatchLevels = settings.acceptedMatchLevels;
+    if (settings.engine) config.semanticMatching.engine = settings.engine;
     config.semanticMatching.model = settings.model;
+    const activeEngine = settings.engine || normalizeEngineId(config.semanticMatching.engine);
+    if (ENGINE_IDS.includes(activeEngine)) {
+      config.semanticMatching.models = config.semanticMatching.models && typeof config.semanticMatching.models === 'object' ? config.semanticMatching.models : {};
+      config.semanticMatching.models[activeEngine] = settings.model;
+    }
     config.reports = config.reports && typeof config.reports === 'object' ? config.reports : {};
     config.reports.xlsx = config.reports.xlsx && typeof config.reports.xlsx === 'object' ? config.reports.xlsx : {};
     config.reports.xlsx.required = settings.xlsxRequired;

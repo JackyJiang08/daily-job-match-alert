@@ -6,9 +6,11 @@
   "requireFullDescription": true,
   "minimumDescriptionCharacters": 200,
   "semanticMatching": {
-    "engine": "claude_subscription",
+    "engine": "claude",
     "claudeCommand": "claude",
+    "codexCommand": "codex",
     "model": "fable",
+    "models": { "claude": "fable", "codex": "gpt-5.6-sol" },
     "required": true,
     "batchSize": 6,
     "maximumDescriptionCharacters": 7000,
@@ -23,7 +25,19 @@
   },
   "outputDirectory": "~/Desktop/Daily Job Match Alert",
   "hub": {
-    "port": 4747
+    "port": 4747,
+    "modelChoicesNote": "Options for the Settings page model dropdown; append your own entries (value = name passed to the CLI).",
+    "modelChoices": {
+      "claude": [
+        { "value": "fable", "label": "Fable (recommended)" },
+        { "value": "opus", "label": "Opus" },
+        { "value": "sonnet", "label": "Sonnet" },
+        { "value": "haiku", "label": "Haiku" }
+      ],
+      "codex": [
+        { "value": "gpt-5.6-sol", "label": "gpt-5.6-sol (Codex default)" }
+      ]
+    }
   },
   "resumes": {
     "autoRefresh": true,

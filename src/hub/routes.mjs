@@ -6,11 +6,11 @@ import { renderReportBody } from '../report-components.mjs';
 import { HubLockedError } from './config-file.mjs';
 import { parseMultipart } from './multipart.mjs';
 import {
-  HubInputError, assertDate, buildStatusView, desktopCopyPath, listReportSummaries, loadTracksView, readErrorReport,
+  HubInputError, assertDate, buildStatusView, desktopCopyPath, desktopWorkbookPath, listReportSummaries, loadTracksView, readErrorReport,
   readReportPayload, readSettings, saveSettings, selectResumeVersion, setTrackEnabled, sidebarSummary, uploadResumePdf,
 } from './services.mjs';
 import { localDate } from '../time-format.mjs';
-import { STATUS_SCRIPT, renderHubPage, reportsPage, resumesPage, settingsPage, statusPage } from './views.mjs';
+import { SETTINGS_SCRIPT, STATUS_SCRIPT, renderHubPage, reportsPage, resumesPage, settingsPage, statusPage } from './views.mjs';
 
 const MAXIMUM_BODY_BYTES = 6 * 1024 * 1024;
 const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
@@ -122,7 +122,32 @@ export function createHubHandler(ctx) {
 
   async function getSettings(url, response) {
     const settings = await readSettings(ctx);
-    await page(response, 200, { active: 'settings', title: 'Settings', content: settingsPage({ settings }), notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
+    const connections = ctx.connections ? await ctx.connections.status().catch(() => null) : null;
+    const timeZone = (await ctx.loadConfig().catch(() => ({}))).timeZone || 'America/Chicago';
+    await page(response, 200, { active: 'settings', title: 'Settings', content: settingsPage({ settings, connections, timeZone }), script: SETTINGS_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
+  }
+
+  // Read-only pass-through of the Desktop folder's own files: the HTML report and the workbook.
+  async function getDesktop(date, kind, response) {
+    const config = await ctx.loadConfig();
+    const file = kind === 'xlsx' ? desktopWorkbookPath(config, date) : desktopCopyPath(config, date);
+    let content;
+    try {
+      content = await ctx.io.readFile(file);
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+      return send(response, 404, `No Desktop ${kind === 'xlsx' ? 'workbook' : 'report'} for ${date} at ${file}`, 'text/plain; charset=utf-8');
+    }
+    if (kind === 'xlsx') {
+      response.writeHead(200, {
+        'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'content-disposition': `attachment; filename="Daily Job Match Alert - ${date}.xlsx"`,
+        'cache-control': 'no-store',
+        'x-content-type-options': 'nosniff',
+      });
+      return response.end(content);
+    }
+    return send(response, 200, content);
   }
 
   async function handlePost(url, request, response) {
@@ -191,6 +216,8 @@ export function createHubHandler(ctx) {
         if (url.pathname === '/status/run.json') return json(response, 200, await buildStatusView(ctx, await ctx.loadConfig()));
         const errorMatch = /^\/status\/error\/(ERROR-\d{4}-\d{2}-\d{2}\.html)$/.exec(url.pathname);
         if (errorMatch) return send(response, 200, await readErrorReport(ctx, await ctx.loadConfig(), errorMatch[1]));
+        const desktopMatch = /^\/desktop\/(\d{4}-\d{2}-\d{2})(\/xlsx)?$/.exec(url.pathname);
+        if (desktopMatch) return await getDesktop(assertDate(desktopMatch[1]), desktopMatch[2] ? 'xlsx' : 'html', response);
         if (url.pathname === '/settings') return await getSettings(url, response);
         if (url.pathname === '/healthz') return json(response, 200, { ok: true });
         return await page(response, 404, { active: '', title: 'Not found', content: '<h1 class="hub-title">Not found</h1>' });

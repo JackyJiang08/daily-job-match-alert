@@ -9,8 +9,10 @@ workbook, and warnings.txt only when warnings exist. Same-day reruns merge
 into that date's report (never shrink). Email-alert collectors exist but are
 disabled; do not expand them unless a task says so.
 ## Hard constraints
-- Subscription-only LLM use via the local `claude` CLI (allow-listed auth).
-  Never add API clients; never read API-key/gateway env vars.
+- Subscription-only LLM use via local subscription CLIs (`claude` with a
+  claude.ai login, `codex` with a ChatGPT login), both allow-listed. Never add
+  API clients; never use an API key or gateway; ANTHROPIC_/AWS_/OPENAI_ env
+  vars are scrubbed before every CLI subprocess (src/engines/shared.mjs).
 - No auto-apply, no screening answers, no authenticated scraping.
 - config.json, resumes/, intake/, state/, reports are gitignored: never
   commit personal data (incl. phone/email/resume text) or weaken .gitignore.
@@ -45,3 +47,13 @@ disabled; do not expand them unless a task says so.
   ("Sep 13, 2026, 8:00 PM"); never show UTC. The pipeline writes meta.trigger and
   meta.completedAt into each day payload; Status reads those, not the logs.
   After pulling new code run `npm run hub:restart` (launchctl kickstart).
+## Scoring engines (src/engines/)
+- One interface per engine: verifyAuth(), reviewBatch(prompt, schema,
+  { tempDirectory }), describeModel(), modelMatches(actual),
+  describeConnection(). claude.mjs and codex.mjs implement it; index.mjs is
+  the registry (normalizeEngineId, resolveModel, createEngine,
+  describeConnections). src/subscription-match.mjs only orchestrates batches,
+  retries, supplemental review, and local_fallback on top of an engine.
+- config.semanticMatching.engine is "claude" (default) or "codex";
+  models: { claude, codex } holds each engine's model (legacy `model` still
+  applies to Claude). meta.engine + meta.scoringModel record what a run used.

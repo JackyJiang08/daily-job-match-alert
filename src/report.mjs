@@ -7,7 +7,7 @@ import path from 'node:path';
 import { jobScores, reportTracks, trackScore } from './resume-tracks.mjs';
 import { renderReportPage } from './report-components.mjs';
 import { warningText } from './warnings.mjs';
-import { formatLocalDateTime, formatLocalShort } from './time-format.mjs';
+import { formatLocalDateTime, formatLocalDay, formatLocalShort } from './time-format.mjs';
 import { normalizeLocation } from './utils.mjs';
 
 export const REPORT_TITLE = 'Daily Job Match Alert';
@@ -69,15 +69,15 @@ function postedEpoch(job) {
   return Number.isNaN(stamp.getTime()) ? '' : String(stamp.getTime());
 }
 
-function footnote(job) {
+function footnote(job, timeZone) {
   const parts = [];
-  if (job.postedAt) parts.push(`Posted ${String(job.postedAt).slice(0, 10)}`);
-  else if (job.discoveredAt) parts.push(`Discovered ${String(job.discoveredAt).slice(0, 10)}`);
+  if (job.postedAt) parts.push(`Posted ${formatLocalDay(job.postedAt, timeZone)}`);
+  else if (job.discoveredAt) parts.push(`Found ${formatLocalDay(job.discoveredAt, timeZone)}`);
   if (job.source) parts.push(String(job.source));
   return parts.join(' · ');
 }
 
-export function cardView(job, tracks) {
+export function cardView(job, tracks, timeZone = null) {
   const scores = tracks.map(track => ({ id: track.id, label: track.label, value: trackScore(job, track.id), best: track.id === job.recommendedTrack }));
   if (!scores.some(score => score.best) && scores.length) {
     const top = scores.reduce((best, score) => (score.value > best.value ? score : best), scores[0]);
@@ -101,7 +101,7 @@ export function cardView(job, tracks) {
     reasons: (job.reasons || []).map(String),
     gaps: (job.gaps || []).map(String),
     description: String(job.description || '').trim(),
-    footnote: footnote(job),
+    footnote: footnote(job, timeZone),
     sort: {
       score: Number(job.bestScore) || 0,
       company: company.toLowerCase(),
@@ -139,6 +139,7 @@ export function runDetailsView(jobs, meta, tracks) {
     });
   }
   if (meta.trigger) rows.push({ term: 'Trigger', detail: String(meta.trigger) });
+  if (meta.engine) rows.push({ term: 'Engine', detail: String(meta.engine) });
   if (meta.runsToday) {
     rows.push({ term: 'Updates today', detail: `Daily update #${Number(meta.runsToday)}${meta.lastUpdatedAt ? ` · last updated ${readableTimestamp(meta.lastUpdatedAt, meta.timeZone)}` : ''}` });
   } else if (meta.generatedAt) {
@@ -178,7 +179,7 @@ export function mastheadSubtitle(jobs, meta, { withDate = true } = {}) {
 // `embedded: true`, which titles the masthead with the date instead of repeating the product name.
 export function buildReportView(jobs, meta, options = {}) {
   const tracks = reportTracks(meta, jobs);
-  const cards = jobs.map(job => cardView(job, tracks));
+  const cards = jobs.map(job => cardView(job, tracks, meta.timeZone));
   const roleTypes = [...new Set(jobs.map(job => job.roleType || 'unknown'))].map(value => ({ value, label: roleLabel(value) }));
   const embedded = options.embedded === true;
   return {

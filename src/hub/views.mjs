@@ -25,23 +25,23 @@ export const HUB_STYLES = `
 .hub-nav .mini b{display:block;font-weight:600;color:var(--ink-2)}
 .hub-nav .mini .ok{color:var(--accent)}.hub-nav .mini .bad{color:var(--bad-ink)}.hub-nav .mini .warn{color:var(--warn-ink)}
 .hub-main{padding:var(--space-5) var(--space-5) var(--space-6);min-width:0}
-.hub-content{max-width:1100px;margin:0 auto}
+.hub-content{max-width:1280px;margin:0}
 .hub-main .page{padding:0;margin:0;max-width:none}
 .hub-title{margin:0 0 var(--space-4);font-size:var(--fs-page);font-weight:650;letter-spacing:-0.01em}
 .hub-sub{margin:calc(-1 * var(--space-3)) 0 var(--space-4);font-size:var(--fs-body);color:var(--ink-2)}
 .flash{margin:0 0 var(--space-4);padding:var(--space-3) var(--space-4);border-radius:var(--radius);font-size:var(--fs-body)}
 .flash.notice{background:var(--accent-soft);color:var(--accent)}
 .flash.error{background:var(--bad-bg);color:var(--bad-ink)}
-.split{display:grid;grid-template-columns:220px minmax(0,1fr);gap:var(--space-5);align-items:start}
+.split{display:grid;grid-template-columns:200px minmax(0,1fr);gap:var(--space-4);align-items:start}
 .split aside{position:sticky;top:var(--space-4);max-height:calc(100vh - 2 * var(--space-4));overflow:auto}
 .datelist{margin:0;padding:0;list-style:none;font-size:var(--fs-body)}
-.datelist a{display:flex;justify-content:space-between;gap:var(--space-2);padding:6px var(--space-2);border-radius:var(--radius-sm);text-decoration:none;color:var(--ink-2)}
-.datelist a .n{color:var(--ink-3);font-variant-numeric:tabular-nums;white-space:nowrap}
+.datelist a{display:flex;justify-content:space-between;align-items:baseline;gap:var(--space-2);padding:6px var(--space-2);border-radius:var(--radius-sm);text-decoration:none;color:var(--ink-2)}
+.datelist a .n{color:var(--ink-3);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:var(--fs-meta);text-align:right}
 .datelist a.active{background:var(--accent-soft);color:var(--accent);font-weight:650}
 .datelist a.active .n{color:var(--accent)}
 .datelist a.today:not(.active){color:var(--ink);font-weight:650}
 .datelist a.quiet{color:var(--ink-3)}
-.report-head{display:flex;justify-content:flex-end;margin:0 0 var(--space-2)}
+.report-head{display:flex;justify-content:flex-end;gap:var(--space-2);margin:0 0 var(--space-2)}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:var(--space-4);margin:0 0 var(--space-3);box-shadow:var(--shadow)}
 .card h2{margin:0 0 var(--space-1);font-size:var(--fs-title);font-weight:650}
 .card h3{margin:var(--space-3) 0 var(--space-1);font-size:var(--fs-meta);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
@@ -60,6 +60,11 @@ export const HUB_STYLES = `
 .file{display:inline-flex;align-items:center;gap:var(--space-2)}
 .file input[type=file]{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden}
 .file .file-name{font-size:var(--fs-meta);color:var(--ink-3);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.radio-row{display:flex;flex-wrap:wrap;gap:var(--space-3)}
+.radio-row label{display:inline-flex;align-items:center;gap:6px}
+.conn{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:var(--space-2) var(--space-4);font-size:var(--fs-body)}
+.conn dt{color:var(--ink-3)}.conn dd{margin:0}
+.conn .badge{vertical-align:middle}
 fieldset.group{border:1px solid var(--line);border-radius:var(--radius);padding:var(--space-3) var(--space-4) var(--space-2);margin:0 0 var(--space-3)}
 fieldset.group legend{font-size:var(--fs-meta);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);padding:0 6px}
 .field{display:block;margin:0 0 var(--space-3);font-size:var(--fs-body)}
@@ -124,10 +129,6 @@ export function renderHubPage({ active, title, content, notice = '', error = '',
 
 // ---------------------------------------------------------------------------------------------- reports
 
-function fileUrl(filePath) {
-  return `file://${encodeURI(String(filePath)).replace(/#/g, '%23').replace(/\?/g, '%3F')}`;
-}
-
 export function reportsPage({ dates, selected, reportBody, desktopPath, today }) {
   const list = dates.length
     ? `<ul class="datelist">${dates.map(item => {
@@ -137,7 +138,7 @@ export function reportsPage({ dates, selected, reportBody, desktopPath, today })
     }).join('')}</ul>`
     : '<p class="muted">No report payloads under state/ yet.</p>';
   const body = reportBody
-    ? `<div class="report-head"><a class="btn secondary small" href="${htmlEscape(fileUrl(desktopPath))}" target="_blank" rel="noopener noreferrer" title="${htmlEscape(desktopPath)}">Open Desktop Copy</a></div><div class="page">${reportBody}</div>`
+    ? `<div class="report-head"><a class="btn secondary small" href="/desktop/${selected}" target="_blank" rel="noopener noreferrer" title="${htmlEscape(desktopPath)}">Open Desktop Copy</a><a class="btn secondary small" href="/desktop/${selected}/xlsx" title="Download the Desktop workbook">Download XLSX</a></div><div class="page">${reportBody}</div>`
     : `<p class="muted">${dates.length ? 'Pick a date on the left.' : 'Run the pipeline once and its report will appear here.'}</p>`;
   return `<div class="split"><aside>${list}</aside><section>${body}</section></div>`;
 }
@@ -233,6 +234,7 @@ export function statusPage({ status, timeZone }) {
   return `<h1 class="hub-title">Status</h1>
   <article class="card"><h2>Runs</h2><dl class="kv">
     <dt>Last run</dt><dd>${lastRunLine}</dd>
+    <dt>Engine</dt><dd>${lastRun.engine ? `${htmlEscape(lastRun.engine)}${lastRun.scoringModel ? ` · ${htmlEscape(lastRun.scoringModel)}` : ''}` : (lastRun.scoringModel ? htmlEscape(lastRun.scoringModel) : '—')}</dd>
     <dt>Next run</dt><dd>${nextRunLine}</dd>
     <dt>Lock</dt><dd id="lock-line">${lockLine}</dd>
   </dl></article>
@@ -302,15 +304,36 @@ export const STATUS_SCRIPT = `
 
 // ---------------------------------------------------------------------------------------------- settings
 
-export function settingsPage({ settings }) {
+function connectionRow(name, item) {
+  if (!item) return `<dt>${htmlEscape(name)}</dt><dd><span class="muted">Not checked</span></dd>`;
+  if (!item.installed) return `<dt>${htmlEscape(name)}</dt><dd><span class="badge badge-muted" data-conn="missing">Not installed</span> <span class="muted">Install with <code>${htmlEscape(item.hint)}</code></span></dd>`;
+  if (item.connected) return `<dt>${htmlEscape(name)}</dt><dd><span class="badge badge-good" data-conn="connected">Connected</span> ${htmlEscape(item.detail)}</dd>`;
+  return `<dt>${htmlEscape(name)}</dt><dd><span class="badge badge-warn" data-conn="disconnected">Not connected</span> <span class="muted">Sign in from a terminal: <code>${htmlEscape(item.hint)}</code></span>${item.reason ? `<br><span class="muted">${htmlEscape(item.reason)}</span>` : ''}</dd>`;
+}
+
+function modelSelect(engine, settings) {
+  const choices = settings.modelChoices[engine] || [];
+  const current = settings.models[engine] || '';
+  const listed = choices.some(choice => choice.value === current);
+  const options = choices.map(choice => `<option value="${htmlEscape(choice.value)}"${choice.value === current ? ' selected' : ''}>${htmlEscape(choice.label)}</option>`).join('');
+  return `<div class="model-group" data-engine="${engine}"${engine === settings.engine ? '' : ' hidden'}>
+      <label class="field"><span>Scoring Model</span><select name="model_${engine}" class="model-select">${options}<option value="__custom__"${listed ? '' : ' selected'}>Custom…</option></select></label>
+      <label class="field model-custom"${listed ? ' hidden' : ''}><span>Custom model name</span><input type="text" name="modelCustom_${engine}" value="${listed ? '' : htmlEscape(current)}" placeholder="${engine === 'codex' ? 'gpt-5.6-sol' : 'claude-fable-5'}"></label>
+    </div>`;
+}
+
+export function settingsPage({ settings, connections = null, timeZone }) {
   const levels = ['high', 'medium', 'low'].map(level => `<label class="check"><input type="checkbox" name="acceptedMatchLevels" value="${level}"${settings.acceptedMatchLevels.includes(level) ? ' checked' : ''}> ${level.charAt(0).toUpperCase()}${level.slice(1)}</label>`).join('');
+  const engines = settings.engines.map(engine => `<label><input type="radio" name="engine" value="${engine.id}"${engine.id === settings.engine ? ' checked' : ''}> ${htmlEscape(engine.label)}</label>`).join('');
+  const checked = connections?.checkedAt ? `<p class="form-foot">Checked ${htmlEscape(formatLocalDateTime(connections.checkedAt, timeZone))}; refreshed every minute. The hub never signs in for you.</p>` : '<p class="form-foot">The hub never signs in for you.</p>';
   return `<h1 class="hub-title">Settings</h1>
-  <p class="hub-sub">Only these values are written to config.json; everything else in the file stays as it is.</p>
-  <article class="card"><form method="post" action="/settings">
+  <article class="card"><h2>Connections</h2><dl class="conn">${connectionRow('Claude', connections?.claude)}${connectionRow('Codex', connections?.codex)}</dl>${checked}</article>
+  <article class="card"><form method="post" action="/settings" id="settings-form">
     <fieldset class="group"><legend>Matching</legend>
       <label class="field"><span>Minimum Match Score (0–100)</span><input type="number" name="minimumMatchScore" min="0" max="100" step="1" value="${Number(settings.minimumMatchScore)}" required></label>
       <div class="field"><span>Accepted Match Levels</span>${levels}</div>
-      <label class="field"><span>Scoring Model</span><input type="text" name="model" value="${htmlEscape(settings.model)}" placeholder="fable" required></label>
+      <div class="field"><span>Engine</span><div class="radio-row">${engines}</div></div>
+      ${settings.engines.map(engine => modelSelect(engine.id, settings)).join('')}
     </fieldset>
     <fieldset class="group"><legend>Reports</legend>
       <div class="field"><label class="check"><input type="checkbox" name="xlsxRequired"${settings.xlsxRequired ? ' checked' : ''}> Require XLSX Workbook (fail the run when it cannot be written)</label></div>
@@ -322,3 +345,22 @@ export function settingsPage({ settings }) {
     <p class="form-foot">Changes apply to the next run.</p>
   </form></article>`;
 }
+
+export const SETTINGS_SCRIPT = `
+(function () {
+  var form = document.getElementById('settings-form');
+  if (!form) return;
+  function sync() {
+    var engine = (form.querySelector('input[name=engine]:checked') || {}).value;
+    form.querySelectorAll('.model-group').forEach(function (group) { group.hidden = group.dataset.engine !== engine; });
+  }
+  form.querySelectorAll('input[name=engine]').forEach(function (radio) { radio.addEventListener('change', sync); });
+  form.querySelectorAll('.model-select').forEach(function (select) {
+    var custom = select.closest('.model-group').querySelector('.model-custom');
+    var update = function () { custom.hidden = select.value !== '__custom__'; };
+    select.addEventListener('change', update);
+    update();
+  });
+  sync();
+})();
+`;

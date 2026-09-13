@@ -96,6 +96,12 @@ LLM batch 失败会在 10 秒后重试一次。`unreviewed` 岗位只有本地�
 
 订阅校验采用白名单：`claude auth status --json` 必须 `loggedIn: true`，`authMethod` 属于 `claude.ai`/`claudeai`/`subscription`，若返回 `apiProvider` 必须是 `firstParty`，若返回 `subscriptionType` 必须属于 pro/max/team/enterprise；`console`（Console 计费）、`apiKey`、Bedrock、Vertex 一律拒绝并降级为本地评分，warning 中写明实际 `authMethod`。`local_only` 之外只有 `claude_subscription` 一个引擎。订阅 CLI 的运行会消耗对应计划额度，但不会产生 Anthropic API 按量账单。
 
+## 评分引擎：Claude 或 Codex
+
+`semanticMatching.engine` 选择评分用的订阅 CLI：`claude`（默认，Claude Code 以 claude.ai 订阅登录）或 `codex`（OpenAI Codex CLI 以 ChatGPT 账号登录）。两者都以本机子进程运行，启动前统一删除 `ANTHROPIC_*`、`AWS_*`、`OPENAI_*` 环境变量，因此都不可能走 API key 或网关。各引擎的模型写在 `semanticMatching.models`（`{ "claude": "fable", "codex": "gpt-5.6-sol" }`），旧的单个 `model` 键仍对 Claude 生效。引擎抽象在 `src/engines/`（统一接口 `verifyAuth` / `reviewBatch` / `describeModel`），`src/subscription-match.mjs` 只负责分批、重试、补审与本地降级。
+
+使用 Codex 前在终端执行一次 `codex login` 并选择 ChatGPT 账号；`codex login status` 必须显示 "Logged in using ChatGPT"。API key 登录（`codex login --with-api-key`）或未登录会被拒绝并给出人话提示，运行按现有方式降级为本地评分。批次通过 `codex exec --ephemeral --sandbox read-only --output-schema <schema> --output-last-message <file> -m <model>` 执行，JSON schema 由 CLI 原生约束，最终消息严格解析。中枢 Settings 页显示两个连接状态，并可切换引擎与模型。
+
 ## 模型固定与审计
 
 `semanticMatching.model` 会传给 `claude --model`。可填 Claude Code 别名 `fable`、`opus`、`sonnet`（各自解析为该系列最新模型），或完整模型名如 `claude-fable-5`；示例配置固定为 `fable`。每个 batch 的 `claude --print --output-format json` 返回都会解析实际使用的模型（`modelUsage` 中输出 token 最多的条目），记录为每个岗位的 `scoringModel`，并显示在 HTML 底部 Run Details 和 XLSX Run Summary 的 Scoring model 行。无法解析时记为 `unknown` 并给出 warning；若配置的模型与实际模型在别名展开后前缀不一致（例如配置 `fable` 但实际是 `claude-sonnet-5`），当批结果照常使用，但会在 `warnings.txt` 中记录 `MODEL MISMATCH`。没有任何语义评审的运行显示 `local_only` 或 `none`。
@@ -108,10 +114,10 @@ LLM batch 失败会在 10 秒后重试一次。`unreviewed` 岗位只有本地�
 
 `npm run hub` 在 `http://127.0.0.1:4747/` 启动一个只运行在本机的 Web 中枢（端口来自 `config.json` 的 `hub.port`）。它是加法：夜间管道、桌面输出、xlsx、`warnings.txt` 全部不变；中枢只读管道产物，只写 `config.json` 与仓库内 gitignored 的 `private/` 目录。只绑定 127.0.0.1，不发起任何外部网络请求，不显示 API key，不渲染简历正文（只显示文件元数据）。左侧导航四个页面：
 
-- **Reports**：按日期倒序列出 `state/report-payload-*.json`，选中后用与桌面 HTML 相同的组件、工具栏与深色模式渲染；顶部一行 "Desktop copy: <路径>" 指向桌面文件夹，桌面副本始终是权威副本，中枢不会修改它。
+- **Reports**：按日期倒序列出 `state/report-payload-*.json`，选中后用与桌面 HTML 相同的组件、工具栏与深色模式渲染；右上角 "Open Desktop Copy" 通过只读路由 `/desktop/<日期>` 在新标签打开桌面文件夹里的 HTML（`/desktop/<日期>/xlsx` 下载工作簿）；桌面副本始终是权威副本，中枢不会修改它。
 - **Resumes**：每条轨道一张卡：label、启用状态、PDF 文件名与路径、最近上传时间、中枢试抽取结果（字符数或 pdftotext 报错）、夜间 profile 状态。上传替换 PDF 或新增轨道（id/label/PDF）时，文件存到 `private/resumes/<id>/<ISO时间>-<原文件名>.pdf`，并把 `config.json` 里该轨道的 `pdf` 改为新文件，保留最近 5 个版本可回退。仍指向桌面等外部路径的轨道标为 "External file"，原样工作、不强制迁移；上传过的标为 "Managed by hub"。只接受 .pdf，上限 5 MB。
 - **Status**：上次运行（时间、trigger、结果、匹配数）、从已安装 LaunchAgent 读取的下次计划时间、锁状态、最近 7 个报告日期的 warnings 计数并可展开当日 `warnings.txt`、`ERROR-*.html` 列表。**Run Now** 弹出确认后以子进程执行 `node src/index.mjs --config config.json`，环境变量 `DAILY_JOB_MATCH_ALERT_TRIGGER=manual`，严格遵守现有锁文件（锁被占用时按钮禁用并显示原因），页面轮询显示进度与日志尾部 50 行；日志在 `private/hub/logs/`。
-- **Settings**：只暴露 `minimumMatchScore`、`semanticMatching.acceptedMatchLevels`、`semanticMatching.model`、`reports.xlsx.required`、`hub.port`，校验后写回 `config.json`，其他键与顺序原样保留；写入时使用与管道相同的锁，避免与 20:00 运行并发。
+- **Settings**：顶部 Connections 卡显示 Claude 与 Codex 的连接状态（每分钟检查一次、只读，登录请在终端完成）；表单暴露 `minimumMatchScore`、`semanticMatching.acceptedMatchLevels`、引擎单选（Claude / Codex）与随引擎切换的模型下拉（选项来自 `hub.modelChoices`，末尾 Custom… 可手填）、`reports.xlsx.required`、`hub.port`，校验后写回 `config.json`，其他键与顺序原样保留；写入时使用与管道相同的锁，避免与 20:00 运行并发。
 
 所有写操作都是 POST，且 `Host`/`Origin` 必须是 127.0.0.1 或 localhost，否则 403；日期、轨道 id、错误报告文件名等路径参数都做严格白名单校验。
 

@@ -13,6 +13,7 @@ import { enrichJob, enrichmentWarningMessage } from './enrich.mjs';
 import { evaluateJob, isEligible } from './match.mjs';
 import { annotateEligibility, summarizeExclusions } from './eligibility.mjs';
 import { applySubscriptionMatching, localFallbackJob, summarizeScoringModel } from './subscription-match.mjs';
+import { normalizeEngineId } from './engines/index.mjs';
 import { buildHtml, writeReports, writeWarningsFile } from './report.mjs';
 import { isJobSeen, markJobSeen, normalizeState, pruneSeen } from './state.mjs';
 import { acquireRunLock, releaseRunLock } from './lock.mjs';
@@ -430,7 +431,8 @@ async function runPipeline(config, clock) {
     trigger, completedAt: now.toISOString(), completedAtLocal: formatLocalDateTime(now, timeZone),
     eligibilityExclusions: exclusions.counts,
     excludedPostings: exclusions.examples,
-    scoringModel: summarizeScoringModel(reviewed, config.semanticMatching?.engine || 'claude_subscription'),
+    engine: normalizeEngineId(config.semanticMatching?.engine || 'claude') || String(config.semanticMatching?.engine),
+    scoringModel: summarizeScoringModel(reviewed, normalizeEngineId(config.semanticMatching?.engine || 'claude') || 'claude'),
   };
   const payload = { meta, matches, reviewed, complete: false };
 

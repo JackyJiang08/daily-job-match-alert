@@ -28,7 +28,8 @@ test('HTML output escapes remote content, links the posting, and keeps the JD fo
   assert.match(html, /<a class="apply" target="_blank" rel="noopener noreferrer" href="https:\/\/example\.com\/jobs\/1">Open Posting<\/a>/);
   assert.match(html, /<h2 class="job-title"><a target="_blank" rel="noopener noreferrer" href="https:\/\/example\.com\/jobs\/1">/);
   assert.equal((html.match(/<a /g) || []).length, (html.match(/<a (?:class="apply" )?target="_blank" rel="noopener noreferrer" href=/g) || []).length, 'every link opens in a new tab');
-  assert.match(html, /<details class="jd"><summary>Full Captured JD<\/summary>/);
+  assert.match(html, /<details class="jd"><summary>Job Description<\/summary>/);
+  assert.doesNotMatch(html, /Full Captured JD/);
   assert.doesNotMatch(html, /Pipeline warnings/);
   assert.doesNotMatch(html, /<link |src="http|https:\/\/cdn/);
 });
@@ -88,6 +89,7 @@ test('the masthead names the run time in the configured zone, and the embedded v
   assert.equal(header(html), '<h1>Daily Job Match Alert</h1><p class="sub">September 13, 2026 · 1 match · Ran Sep 12, 8:00 PM</p>');
   assert.equal(mastheadSubtitle([job], { ...ran, date: '2026-09-13' }), 'September 13, 2026 · 1 match · Ran Sep 12, 8:00 PM');
   assert.match(html, /<dt>Trigger<\/dt><dd>scheduled<\/dd>/);
+  assert.match(buildHtml([job], { ...ran, engine: 'codex', scoringModel: 'gpt-5.6-sol' }), /<dt>Engine<\/dt><dd>codex<\/dd>/);
   assert.doesNotMatch(html, /\bUTC\b/);
   const embedded = buildReportView([job], { ...ran, date: '2026-09-13' }, { embedded: true });
   assert.deepEqual(embedded.masthead, { title: 'September 13, 2026', subtitle: '1 match · Ran Sep 12, 8:00 PM' });
@@ -125,7 +127,10 @@ test('cards carry the ring score, compact track scores, the recommendation, and 
   assert.match(html, /<div class="scores"><span class="track" data-track="data">Data <b>74<\/b><\/span><span class="sep">·<\/span><span class="track best" data-track="llm">LLM <b>87<\/b><\/span><span class="sep">·<\/span><span class="track" data-track="agent">AI Agent <b>85<\/b><\/span><span class="recommend">Apply with LLM Resume<\/span><\/div>/);
   assert.match(html, /<div class="facts-label">Why It Matches<\/div><ul class="facts reasons"><li>one<\/li><li>two<\/li><\/ul><details class="more"><summary>2 more<\/summary><ul class="facts reasons"><li>three<\/li><li>four<\/li><\/ul><\/details>/);
   assert.match(html, /<div class="facts-label">Gaps \/ Verify<\/div><ul class="facts gaps"><li>a<\/li><li>b<\/li><\/ul><details class="more"><summary>1 more<\/summary>/);
-  assert.match(html, /<span class="meta">Posted 2026-08-27 · fixture<\/span>/);
+  assert.match(html, /<span class="meta">Posted Aug 27 · fixture<\/span>/);
+  const found = buildHtml([{ ...job, postedAt: null, discoveredAt: '2026-09-13T01:30:00Z' }], { ...meta, timeZone: 'America/Chicago' });
+  assert.match(found, /<span class="meta">Found Sep 12 · fixture<\/span>/);
+  assert.doesNotMatch(found, /Discovered/);
   assert.doesNotMatch(html, /Match level:|Use LLM|Apply with LLM resume/);
 
   const multi = buildHtml([{ ...job, location: 'Boston, MA · Johnston, RI · Columbus, OH' }], meta);
