@@ -4,12 +4,14 @@
 import { REPORT_SCRIPT, REPORT_STYLES } from '../report-theme.mjs';
 import { formatCount, formatDateLabel, formatLocalDateTime, formatLocalDay } from '../time-format.mjs';
 import { htmlEscape } from '../utils.mjs';
+import { LETTER_STYLES, coverLetterSettingsSection } from './letter-views.mjs';
 
 export const HUB_TITLE = 'Daily Job Match Alert Hub';
 export const HUB_BRAND = 'Job Match Hub';
 const NAV = [
   { id: 'reports', href: '/reports', label: 'Reports' },
   { id: 'resumes', href: '/resumes', label: 'Resumes' },
+  { id: 'letters', href: '/letters', label: 'Letters' },
   { id: 'status', href: '/status', label: 'Status' },
   { id: 'settings', href: '/settings', label: 'Settings' },
 ];
@@ -129,7 +131,7 @@ export function renderHubPage({ active, title, content, notice = '', error = '',
   ].join('');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${htmlEscape(title)} — ${htmlEscape(HUB_TITLE)}</title>
-<style>${REPORT_STYLES}${HUB_STYLES}</style></head>
+<style>${REPORT_STYLES}${HUB_STYLES}${LETTER_STYLES}</style></head>
 <body><div class="hub"><nav class="hub-nav"><p class="brand">${htmlEscape(HUB_BRAND)}</p>${nav}${renderMiniStatus(sidebar, timeZone)}</nav>
 <main class="hub-main"><div class="hub-content">${flash}${content}</div></main></div>
 <script>${REPORT_SCRIPT}${HUB_SCRIPT}${script}</script>
@@ -393,7 +395,7 @@ function modelSelect(engine, settings) {
     </div>`;
 }
 
-export function settingsPage({ settings, connections = null, timeZone }) {
+export function settingsPage({ settings, connections = null, timeZone, coverLetter = null }) {
   const levels = ['high', 'medium', 'low'].map(level => `<label class="check"><input type="checkbox" name="acceptedMatchLevels" value="${level}"${settings.acceptedMatchLevels.includes(level) ? ' checked' : ''}> ${level.charAt(0).toUpperCase()}${level.slice(1)}</label>`).join('');
   const engines = settings.engines.map(engine => `<label><input type="radio" name="engine" value="${engine.id}"${engine.id === settings.engine ? ' checked' : ''} data-connected="${connections?.[engine.id]?.connected ? 'yes' : 'no'}"> ${htmlEscape(engine.label)} ${engineBadge(connections?.[engine.id])}</label>`).join('');
   const checked = connections?.checkedAt ? `<p class="form-foot">Checked ${htmlEscape(formatLocalDateTime(connections.checkedAt, timeZone))}; refreshed every minute. The hub never signs in for you.</p>` : '<p class="form-foot">The hub never signs in for you.</p>';
@@ -414,7 +416,8 @@ export function settingsPage({ settings, connections = null, timeZone }) {
     </fieldset>
     <button class="btn" type="submit">Save</button>
     <p class="form-foot">Changes apply to the next run.</p>
-  </form></article>`;
+  </form></article>
+  ${coverLetter ? coverLetterSettingsSection({ ...coverLetter, timeZone }) : ''}`;
 }
 
 export const SETTINGS_SCRIPT = `

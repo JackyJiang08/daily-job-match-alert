@@ -24,7 +24,7 @@ jobs:
       - run: npm test
       - name: Syntax check
         run: |
-          for file in src/*.mjs src/collectors/*.mjs src/hub/*.mjs src/engines/*.mjs; do
+          for file in src/*.mjs src/collectors/*.mjs src/hub/*.mjs src/engines/*.mjs src/cover-letter/*.mjs; do
             node --check "$file"
           done
       - name: Build and verify XLSX smoke report

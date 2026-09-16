@@ -121,6 +121,16 @@ LLM batch 失败会在 10 秒后重试一次。`unreviewed` 岗位只有本地�
 - **Status**：上次运行（时间、trigger、结果、匹配数）、从已安装 LaunchAgent 读取的下次计划时间、锁状态、最近 7 个报告日期的 warnings 计数并可展开当日 `warnings.txt`、`ERROR-*.html` 列表。**Run Now** 弹出确认后以子进程执行 `node src/index.mjs --config config.json`，环境变量 `DAILY_JOB_MATCH_ALERT_TRIGGER=manual`，严格遵守现有锁文件（锁被占用时按钮禁用并显示原因），页面轮询显示进度与日志尾部 50 行；日志在 `private/hub/logs/`。
 - **Settings**：顶部 Connections 卡显示 Claude 与 Codex 的连接状态（每分钟检查一次、只读，登录请在终端完成）；表单暴露 `minimumMatchScore`、`semanticMatching.acceptedMatchLevels`、引擎单选（Claude / Codex）与随引擎切换的模型下拉（选项来自 `hub.modelChoices`，末尾 Custom… 可手填）、`reports.xlsx.required`、`hub.port`，校验后写回 `config.json`，其他键与顺序原样保留；写入时使用与管道相同的锁，避免与 20:00 运行并发。
 
+- **Letters**：已生成 cover letter 的历史列表（日期、公司、岗位、轨道、引擎），可重新打开编辑或再次下载。
+
+### Cover letter
+
+中枢里每张岗位卡都有 "Generate Cover Letter"。面板顶部显示岗位摘要与推荐轨道（可切换）和公司名（用于称呼与文件名），点 Generate 后单次调用配置的引擎（Claude 或 Codex，与评分相同的订阅 CLI、认证白名单与环境清理；`local_only` 用明确标注的占位引擎，不写真实内容）。模型收到：playbook 全文、最多 3 封样稿（标注"仅作风格参考，不得复用其中的公司特定内容"）、所选轨道的简历 profile、岗位的 title / company / location / role type / 完整 JD / 匹配理由与 gaps，并受固定规则约束：5–6 段、无 bullet、不用破折号作标点、专业人声、只使用简历与 playbook 证据库中真实存在的事实与数字、缺失技能按 playbook 的 fast-ramp 框架处理、按岗位类型选用 playbook 中的毕业时间线表述。模型只输出正文段落；抬头（姓名 16pt 加粗居中 + 联系方式行）、日期（config.timeZone，"September 15, 2026"）、"Dear {Company} Recruiting Team,"、"Sincerely," + 签名全部由代码生成。
+
+生成后自动校验（段落数、去 bullet、破折号改逗号、320–450 词，超长带"精简 15%"重试一次），正文以可编辑的分段 textarea 显示，并标注校验提示与所用引擎/模型。"Save & Render PDF" 把 `letter.md`、`letter.json` 与 PDF 写到 `private/cover-letters/<日期>/<Company>/`，文件名由 `coverLetter.fileNameTemplate` 决定（默认 `{FirstLast}_Cover_Letter_{Company}.pdf`）。PDF 首选本机 Chrome/Chromium headless 打印（可用 `hub.chromeCommand` 指定；Letter、Times New Roman 11pt、1 英寸页边距），不可用时回退 pdfkit；超过一页时先按 B5 重试，仍超则缩小页边距到 0.8 英寸并在面板提示。
+
+素材在 **Settings → Cover Letters** 维护：姓名、电话、邮箱、签名名，playbook（.md/.txt，写作规则与证据库），最多 3 封样稿（.pdf 经 pdftotext 抽文本，或 .txt）。全部存于已 gitignore 的 `private/cover-letter/`；仓库、文档与测试里只出现 Jane Doe 之类的占位数据。缺少 playbook 或联系方式时，Generate 按钮禁用并提示先去 Settings。
+
 所有写操作都是 POST，且 `Host`/`Origin` 必须是 127.0.0.1 或 localhost，否则 403；日期、轨道 id、错误报告文件名等路径参数都做严格白名单校验。
 
 常驻安装（与夜间任务是两个独立的 LaunchAgent）：

@@ -4,6 +4,7 @@
 // Only subscription CLIs exist here; API-backed engines are intentionally unavailable.
 import { CLAUDE_DEFAULT_MODEL, createClaudeEngine, describeClaudeConnection } from './claude.mjs';
 import { CODEX_DEFAULT_MODEL, createCodexEngine, describeCodexConnection } from './codex.mjs';
+import { createFakeEngine } from './fake.mjs';
 
 export const ENGINE_IDS = ['claude', 'codex'];
 export const ENGINE_LABELS = { claude: 'Claude subscription', codex: 'ChatGPT subscription via Codex' };
@@ -36,6 +37,8 @@ export function createEngine(engineId, options = {}) {
   const id = normalizeEngineId(engineId);
   if (id === 'claude') return createClaudeEngine(options);
   if (id === 'codex') return createCodexEngine(options);
+  // local_only has no model; text generation gets a clearly labelled placeholder engine.
+  if (id === 'local_only' && options.allowPlaceholder) return createFakeEngine(options);
   throw new Error(`Unsupported semanticMatching.engine: ${engineId}. Only claude, codex, and local_only exist; API-backed engines are intentionally unavailable.`);
 }
 
@@ -50,3 +53,4 @@ export async function describeConnections(options = {}) {
 }
 
 export { resolveCliCommand, launchdPath } from './cli-path.mjs';
+export { createFakeEngine, FAKE_ENGINE_LABEL } from './fake.mjs';

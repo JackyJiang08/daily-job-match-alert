@@ -77,7 +77,7 @@ export function renderJobCard(card) {
       ${renderFacts('Why It Matches', card.reasons, 'reasons')}
       ${renderFacts('Gaps / Verify', card.gaps, 'gaps')}
       ${description}
-      <div class="actions"><a class="apply" ${EXTERNAL_LINK} href="${htmlEscape(card.url)}">Open Posting</a><span class="meta">${htmlEscape(card.footnote)}</span></div>
+      <div class="actions"><a class="apply" ${EXTERNAL_LINK} href="${htmlEscape(card.url)}">Open Posting</a>${(card.actions || []).map(action => `<a class="${htmlEscape(action.className || 'btn secondary small')}" href="${htmlEscape(action.href)}"${action.newTab ? ` ${EXTERNAL_LINK}` : ''}>${htmlEscape(action.label)}</a>`).join('')}<span class="meta">${htmlEscape(card.footnote)}</span></div>
     </div>
   </article>`;
 }

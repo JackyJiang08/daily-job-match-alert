@@ -158,6 +158,35 @@ export function createCodexEngine(options = {}) {
         await io.rm(lastMessagePath, { force: true }).catch(() => {});
       }
     },
+    async generateText(prompt, context = {}) {
+      const directory = context.tempDirectory || process.cwd();
+      const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const schemaPath = path.join(directory, `schema-${stamp}.json`);
+      const lastMessagePath = path.join(directory, `last-${stamp}.txt`);
+      const args = ['exec', '--ephemeral', '--skip-git-repo-check', '--sandbox', 'read-only', '--cd', directory, '--color', 'never', '--json', '--output-last-message', lastMessagePath, '--model', model];
+      if (context.schema) {
+        await io.writeFile(schemaPath, JSON.stringify(context.schema));
+        args.push('--output-schema', schemaPath);
+      }
+      try {
+        const result = await runner(await commandOf(), args, {
+          input: prompt, cwd: directory, timeoutMs: Number(context.timeoutMs || options.timeoutMs || 600_000), env: subscriptionEnvironment(),
+        });
+        const lastMessage = (await io.readFile(lastMessagePath, 'utf8').catch(() => '')).trim() || lastAgentMessage(result.stdout) || '';
+        if (!lastMessage) throw new Error('Codex returned no final message');
+        let output = lastMessage;
+        if (context.schema) {
+          const start = lastMessage.indexOf('{');
+          const end = lastMessage.lastIndexOf('}');
+          if (start < 0 || end < start) throw new Error('Codex final message is not a JSON object');
+          output = JSON.parse(lastMessage.slice(start, end + 1));
+        }
+        return { output, scoringModel: extractCodexModel(result.stdout, model) };
+      } finally {
+        await io.rm(schemaPath, { force: true }).catch(() => {});
+        await io.rm(lastMessagePath, { force: true }).catch(() => {});
+      }
+    },
     describeModel() {
       return { engine: 'codex', model, label: `Codex · ${model}` };
     },

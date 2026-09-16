@@ -8,7 +8,7 @@ import { jobScores, reportTracks, trackScore } from './resume-tracks.mjs';
 import { renderReportPage } from './report-components.mjs';
 import { warningText } from './warnings.mjs';
 import { formatLocalDateTime, formatLocalDay, formatLocalShort } from './time-format.mjs';
-import { normalizeLocation } from './utils.mjs';
+import { normalizeLocation, sha256 } from './utils.mjs';
 
 export const REPORT_TITLE = 'Daily Job Match Alert';
 export const WARNINGS_FILE_NAME = 'warnings.txt';
@@ -77,7 +77,7 @@ function footnote(job, timeZone) {
   return parts.join(' · ');
 }
 
-export function cardView(job, tracks, timeZone = null) {
+export function cardView(job, tracks, timeZone = null, decorate = null) {
   const scores = tracks.map(track => ({ id: track.id, label: track.label, value: trackScore(job, track.id), best: track.id === job.recommendedTrack }));
   if (!scores.some(score => score.best) && scores.length) {
     const top = scores.reduce((best, score) => (score.value > best.value ? score : best), scores[0]);
@@ -86,7 +86,10 @@ export function cardView(job, tracks, timeZone = null) {
   const recommendedTrack = job.recommendedTrack || scores.find(score => score.best)?.id || '';
   const recommendedLabel = job.recommendedResume || scores.find(score => score.best)?.label || '';
   const company = job.company || 'Company not resolved';
+  const extra = typeof decorate === 'function' ? decorate(job) || {} : {};
   return {
+    id: job.semanticId || sha256(job.url || '').slice(0, 16),
+    actions: Array.isArray(extra.actions) ? extra.actions : [],
     title: job.title || 'Untitled posting',
     url: job.url,
     company,
@@ -97,7 +100,7 @@ export function cardView(job, tracks, timeZone = null) {
     scores,
     recommendedTrack,
     recommendation: recommendedLabel ? `Apply with ${recommendedLabel} Resume` : 'No Resume Recommended',
-    badges: jobBadges(job),
+    badges: [...jobBadges(job), ...(Array.isArray(extra.badges) ? extra.badges : [])],
     reasons: (job.reasons || []).map(String),
     gaps: (job.gaps || []).map(String),
     description: String(job.description || '').trim(),
@@ -179,7 +182,7 @@ export function mastheadSubtitle(jobs, meta, { withDate = true } = {}) {
 // `embedded: true`, which titles the masthead with the date instead of repeating the product name.
 export function buildReportView(jobs, meta, options = {}) {
   const tracks = reportTracks(meta, jobs);
-  const cards = jobs.map(job => cardView(job, tracks, meta.timeZone));
+  const cards = jobs.map(job => cardView(job, tracks, meta.timeZone, options.decorate));
   const roleTypes = [...new Set(jobs.map(job => job.roleType || 'unknown'))].map(value => ({ value, label: roleLabel(value) }));
   const embedded = options.embedded === true;
   return {

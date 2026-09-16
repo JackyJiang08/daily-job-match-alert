@@ -61,3 +61,17 @@ disabled; do not expand them unless a task says so.
   ~/.local/bin, /opt/homebrew/bin, /usr/local/bin, ~/.npm-global/bin, nvm);
   launchd jobs get PATH=/usr/bin:/bin, so never assume `claude`/`codex` are
   on PATH. Both LaunchAgent templates set PATH explicitly.
+## Cover letters (src/cover-letter/ + hub Letters pages)
+- Engines expose generateText(prompt, { schema, tempDirectory }); local_only
+  gets a labelled placeholder engine (src/engines/fake.mjs) so demos and tests
+  never call a model. compose.mjs holds the rules, prompt, validation
+  (5–6 paragraphs, no bullets, no em/en dash punctuation, 320–450 words) and
+  the deterministic framing (header, date in config.timeZone, "Dear {Company}
+  Recruiting Team,", "Sincerely,"); generate.mjs retries once with a
+  condensing instruction; pdf.mjs prints with local Chrome (Letter, Times New
+  Roman 11pt, 1in) and falls back to pdfkit, retrying B5 then 0.8in margins.
+- Personal details (name, phone, email, signature, playbook, sample letters)
+  live ONLY under private/cover-letter/; generated letters under
+  private/cover-letters/<date>/<Company>/. Never put a real person's data in
+  code, config.example.json, docs, or fixtures: use "Jane Doe" placeholders.
+  Downloads go through /letters/<date>/<Company>/<file> with a file whitelist.

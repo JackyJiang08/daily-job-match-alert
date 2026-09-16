@@ -24,8 +24,12 @@
     }
   },
   "outputDirectory": "~/Desktop/Daily Job Match Alert",
+  "coverLetter": {
+    "fileNameTemplate": "{FirstLast}_Cover_Letter_{Company}.pdf"
+  },
   "hub": {
     "port": 4747,
+    "chromeCommand": "",
     "modelChoicesNote": "Options for the Settings page model dropdown; append your own entries (value = name passed to the CLI).",
     "modelChoices": {
       "claude": [

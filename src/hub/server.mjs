@@ -11,6 +11,7 @@ import { createHubHandler } from './routes.mjs';
 import { createRunManager } from './run.mjs';
 import { createConnectionsProbe } from './connections.mjs';
 import { describeConnections } from '../engines/index.mjs';
+import { createLetterStore } from '../cover-letter/store.mjs';
 
 export const DEFAULT_HUB_PORT = 4747;
 export const HUB_HOST = '127.0.0.1';
@@ -37,6 +38,13 @@ export function createHubContext(options) {
     extractText: options.extractText || ((file, settings) => extractPdfText(file, settings)),
     loadConfig: options.loadConfig || (() => loadConfig(configPath, { notify: () => {} })),
   };
+  ctx.letterStore = options.letterStore || createLetterStore({
+    root, io, now,
+    extractText: async file => ctx.extractText(file, { pdftotextCommand: (await ctx.loadConfig().catch(() => ({}))).resumes?.pdftotextCommand || 'pdftotext' }),
+  });
+  ctx.letterEngine = options.letterEngine || null;
+  ctx.renderPdf = options.renderPdf || null;
+  ctx.chromeCommand = options.chromeCommand;
   ctx.connections = options.connections || createConnectionsProbe({ now, runner: options.cliRunner, describe: options.describeConnections || (commands => describeConnections({ runner: options.cliRunner, homedir: ctx.homedir, env: process.env, ...commands })) });
   ctx.runManager = options.runManager || createRunManager({
     root, configPath, hubDirectory, io, now, pidAlive,

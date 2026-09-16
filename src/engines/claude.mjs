@@ -152,6 +152,20 @@ export function createClaudeEngine(options = {}) {
       });
       return parseStructuredOutput(result.stdout);
     },
+    // One structured call for free-form generation (cover letters); same flags, auth, and env scrubbing.
+    async generateText(prompt, context = {}) {
+      const args = ['--print', '--safe-mode', '--no-session-persistence', '--permission-mode', 'dontAsk', '--tools', '', '--output-format', 'json'];
+      if (context.schema) args.push('--json-schema', JSON.stringify(context.schema));
+      if (model) args.push('--model', model);
+      const result = await runner(await commandOf(), args, {
+        input: prompt, cwd: context.tempDirectory || process.cwd(), timeoutMs: Number(context.timeoutMs || options.timeoutMs || 600_000), env: subscriptionEnvironment(),
+      });
+      const parsed = JSON.parse(String(result.stdout).trim());
+      const output = context.schema
+        ? (parsed?.structured_output ?? (typeof parsed?.result === 'string' ? JSON.parse(parsed.result) : parsed?.result ?? parsed))
+        : (typeof parsed?.result === 'string' ? parsed.result : String(parsed?.result ?? ''));
+      return { output, scoringModel: extractScoringModel(parsed) || model };
+    },
     describeModel() {
       return { engine: 'claude', model, label: `Claude · ${model}` };
     },
