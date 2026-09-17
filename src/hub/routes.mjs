@@ -12,6 +12,7 @@ import {
 } from './services.mjs';
 import { localDate } from '../time-format.mjs';
 import { LETTER_SCRIPT, letterPanel, lettersPage } from './letter-views.mjs';
+import { todayTarget } from './views.mjs';
 import { findLetterJob, generateLetter, jobIdOf, letterEngineFor, saveLetter } from './letters.mjs';
 import { LetterInputError } from '../cover-letter/store.mjs';
 import { REPORTS_SCRIPT, SETTINGS_SCRIPT, STATUS_SCRIPT, renderHubPage, reportsPage, resumesPage, settingsPage, statusPage } from './views.mjs';
@@ -97,7 +98,8 @@ export function createHubHandler(ctx) {
     const dates = await listReportSummaries(ctx);
     const today = localDate(ctx.now(), timeZone);
     const match = /^\/reports\/(\d{4}-\d{2}-\d{2})$/.exec(url.pathname);
-    const selected = match ? assertDate(match[1]) : dates[0]?.date || null;
+    // No date in the URL: open the calendar-today report when it exists, otherwise the newest one.
+    const selected = match ? assertDate(match[1]) : todayTarget(dates, today).date;
     let reportBody = null;
     let desktopPath = null;
     if (selected) {

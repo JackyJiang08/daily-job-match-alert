@@ -146,8 +146,8 @@ test('Reports lists dates newest first with counts, titles the report by date, a
     assert.equal(list.status, 200);
     assert.match(list.text, /<title>Report 2026-08-27 — Daily Job Match Alert Hub<\/title>/);
     assert.match(list.text, /<p class="brand">Job Match Hub<\/p>/);
-    assert.match(list.text, /<div class="datetools"><a class="today-link" href="\/reports\/2026-08-27" id="today-link" title="Newest report \(2026-08-27\)">Today<\/a><label><input type="checkbox" id="only-matches"> Only days with matches<\/label><\/div>/);
-    assert.match(list.text, /<ul class="datelist" id="datelist"><li class="month" data-month="2026-08">August 2026<\/li><li data-month="2026-08"><a href="\/reports\/2026-08-27" class="active today" title="2026-08-27 \(today\)"><span>Thu, Aug 27<\/span><span class="n">1 match<\/span><\/a><\/li><li data-month="2026-08" data-empty="1"><a href="\/reports\/2026-08-26" class="quiet" title="2026-08-26"><span>Wed, Aug 26<\/span><span class="n">0 matches<\/span><\/a><\/li><\/ul>/);
+    assert.match(list.text, /<div class="datetools"><a class="today-link" href="\/reports\/2026-08-27" id="today-link" title="Today's report \(2026-08-27\)">Today<\/a><label><input type="checkbox" id="only-matches"> Only days with matches<\/label><\/div>/);
+    assert.match(list.text, /<ul class="datelist" id="datelist"><li class="month" data-month="2026-08">August 2026<\/li><li data-month="2026-08"><a href="\/reports\/2026-08-27" class="active today" title="2026-08-27 \(today\)"><span>Thu, Aug 27<\/span><span class="n">1 match<\/span><span class="tag" data-tag="today">Today<\/span><\/a><\/li><li data-month="2026-08" data-empty="1"><a href="\/reports\/2026-08-26" class="quiet" title="2026-08-26"><span>Wed, Aug 26<\/span><span class="n">0 matches<\/span><\/a><\/li><\/ul>/);
     assert.match(list.text, /localStorage\.getItem\(key\)/, 'the toggle remembers itself');
     assert.doesNotMatch(list.text, /<h1 class="hub-title">Reports<\/h1>/, 'no page heading above the report');
     assert.match(list.text, /<header class="masthead"><h1>August 27, 2026<\/h1><p class="sub">1 match · Ran Aug 26, 8:00 PM<\/p><\/header>/);
@@ -186,13 +186,18 @@ test('Reports reads payloads from disk on every request and normalizes locations
     const file = path.join(root, 'state', 'report-payload-2026-08-28.json');
     const raw = JSON.stringify({ meta: payloadMeta('2026-08-28', { matchCount: 1, trigger: 'manual' }), matches: [job({ location: 'Boston, MA Johnston, RI Columbus, OH', title: 'Multi Site Analyst' })], reviewed: [], complete: true });
     await fs.writeFile(file, raw);
-    const after = await hub.request('GET', '/reports');
-    assert.match(after.text, /<a href="\/reports\/2026-08-28" class="active"[^>]*><span>Fri, Aug 28<\/span><span class="n">1 match<\/span><\/a>/, 'the new payload is visible on the very next request');
+    const listed = await hub.request('GET', '/reports');
+    assert.match(listed.text, /<a href="\/reports\/2026-08-28"[^>]*><span>Fri, Aug 28<\/span><span class="n">1 match<\/span><span class="tag" data-tag="tomorrow">Tomorrow<\/span><\/a>/, 'the new payload is visible on the very next request');
+    assert.match(listed.text, /<a href="\/reports\/2026-08-27" class="active today"/, 'calendar today stays selected by default');
+    const after = await hub.request('GET', '/reports/2026-08-28');
+    assert.match(after.text, /<a href="\/reports\/2026-08-28" class="active"[^>]*><span>Fri, Aug 28<\/span>/);
     const sept = path.join(root, 'state', 'report-payload-2026-09-02.json');
     await fs.writeFile(sept, JSON.stringify({ meta: payloadMeta('2026-09-02', { matchCount: 2 }), matches: [job(), job({ url: 'https://example.com/jobs/9' })], reviewed: [], complete: true }));
     const grouped = await hub.request('GET', '/reports/2026-08-27');
-    assert.match(grouped.text, /<li class="month" data-month="2026-09">September 2026<\/li><li data-month="2026-09"><a href="\/reports\/2026-09-02"[^>]*><span>Wed, Sep 2<\/span><span class="n">2 matches<\/span><\/a><\/li><li class="month" data-month="2026-08">August 2026<\/li>/, 'months are grouped newest first');
-    assert.match(grouped.text, /<a class="today-link" href="\/reports\/2026-09-02"/, 'Today jumps to the newest report');
+    assert.match(grouped.text, /<li class="month" data-month="2026-09">September 2026<\/li><li data-month="2026-09"><a href="\/reports\/2026-09-02"[^>]*><span>Wed, Sep 2<\/span><span class="n">2 matches<\/span><span class="tag" data-tag="tomorrow">Tomorrow<\/span><\/a><\/li><li class="month" data-month="2026-08">August 2026<\/li>/, 'months are grouped newest first');
+    assert.match(grouped.text, /<a class="today-link" href="\/reports\/2026-08-27" id="today-link" title="Today's report \(2026-08-27\)">Today<\/a>/, 'Today keeps pointing at the calendar day even when newer reports exist');
+    assert.match(grouped.text, /<a href="\/reports\/2026-09-02"[^>]*title="2026-09-02 \(after today\)"><span>Wed, Sep 2<\/span><span class="n">2 matches<\/span><span class="tag" data-tag="tomorrow">Tomorrow<\/span><\/a>/, 'dates after today are tagged Tomorrow');
+    assert.match((await hub.request('GET', '/reports')).text, /<a href="\/reports\/2026-08-27" class="active today"/, 'the default selection is calendar today, not the newest report');
     await fs.rm(sept);
     assert.match(after.text, /Acme · Boston, MA · Johnston, RI · Columbus, OH · New Grad/);
     assert.doesNotMatch(after.text, /Boston, MA Johnston/);
@@ -201,6 +206,21 @@ test('Reports reads payloads from disk on every request and normalizes locations
     assert.match((await hub.request('GET', '/reports/2026-08-28')).text, /No matches/, 'a rewritten payload is re-read, never served from memory');
     await fs.rm(file);
     assert.equal((await hub.request('GET', '/reports/2026-08-28')).status, 404);
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('without a report for today the list opens the newest one and the shortcut reads Latest', async () => {
+  const root = await prepareProject();
+  const hub = await startHub(root, { now: '2026-08-30T12:00:00Z' });
+  try {
+    const page = await hub.request('GET', '/reports');
+    assert.match(page.text, /<a href="\/reports\/2026-08-27" class="active"[^>]*title="2026-08-27"><span>Thu, Aug 27<\/span><span class="n">1 match<\/span><\/a>/, 'newest report selected, no Today tag');
+    assert.match(page.text, /<a class="today-link" href="\/reports\/2026-08-27" id="today-link" title="No report for today; newest report \(2026-08-27\)">Latest<\/a>/);
+    assert.doesNotMatch(page.text, /data-tag="today"|data-tag="tomorrow"/);
+    assert.match(page.text, /<h1>August 27, 2026<\/h1>/);
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });

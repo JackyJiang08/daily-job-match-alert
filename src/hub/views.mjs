@@ -42,12 +42,15 @@ export const HUB_STYLES = `
 .datelist{margin:0;padding:0;list-style:none;font-size:var(--fs-body)}
 .datelist .month{position:sticky;top:0;z-index:1;margin:0;padding:var(--space-2) var(--space-2) var(--space-1);background:var(--bg);font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
 .datelist li[hidden]{display:none}
-.datelist a{display:flex;justify-content:space-between;align-items:baseline;gap:var(--space-2);padding:6px var(--space-2);border-radius:var(--radius-sm);text-decoration:none;color:var(--ink-2)}
+.datelist a{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:baseline;gap:2px 6px;padding:6px var(--space-2);border-radius:var(--radius-sm);text-decoration:none;color:var(--ink-2)}
+.datelist a>span:first-child{margin-right:auto;white-space:nowrap}
 .datelist a .n{color:var(--ink-3);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:var(--fs-meta);text-align:right}
 .datelist a.active{background:var(--accent-soft);color:var(--accent);font-weight:650}
 .datelist a.active .n{color:var(--accent)}
 .datelist a.today:not(.active){color:var(--ink);font-weight:650}
 .datelist a.quiet{color:var(--ink-3)}
+.datelist .tag{font-size:10px;font-weight:600;line-height:1.4;border-radius:var(--radius-sm);padding:0 5px;background:var(--line);color:var(--ink-3);white-space:nowrap}
+.datelist a.active .tag{background:var(--accent-soft);color:var(--accent)}
 .report-head{display:flex;justify-content:flex-end;gap:var(--space-2);margin:0 0 var(--space-2)}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:var(--space-4);margin:0 0 var(--space-3);box-shadow:var(--shadow)}
 .card h2{margin:0 0 var(--space-1);font-size:var(--fs-title);font-weight:650}
@@ -158,12 +161,25 @@ export function renderDateList({ dates, selected, today }) {
       month = label;
       items.push(`<li class="month" data-month="${htmlEscape(item.date.slice(0, 7))}">${htmlEscape(label)}</li>`);
     }
-    const classes = [item.date === selected ? 'active' : '', item.date === today ? 'today' : '', item.matchCount === 0 ? 'quiet' : ''].filter(Boolean).join(' ');
+    const isToday = item.date === today;
+    const isFuture = Boolean(today) && item.date > today;
+    const classes = [item.date === selected ? 'active' : '', isToday ? 'today' : '', item.matchCount === 0 ? 'quiet' : ''].filter(Boolean).join(' ');
     const count = item.matchCount == null ? '' : `<span class="n">${item.matchCount} match${item.matchCount === 1 ? '' : 'es'}</span>`;
-    items.push(`<li data-month="${htmlEscape(item.date.slice(0, 7))}"${item.matchCount === 0 ? ' data-empty="1"' : ''}><a href="/reports/${item.date}"${classes ? ` class="${classes}"` : ''} title="${item.date}${item.date === today ? ' (today)' : ''}"><span>${htmlEscape(formatDateLabel(item.date))}</span>${count}</a></li>`);
+    // Calendar tags: "Today" for the current date in config.timeZone, "Tomorrow" for anything later (the
+    // evening run writes the next application date, so that is usually the newest report).
+    const tag = isToday ? '<span class="tag" data-tag="today">Today</span>' : isFuture ? '<span class="tag" data-tag="tomorrow">Tomorrow</span>' : '';
+    items.push(`<li data-month="${htmlEscape(item.date.slice(0, 7))}"${item.matchCount === 0 ? ' data-empty="1"' : ''}><a href="/reports/${item.date}"${classes ? ` class="${classes}"` : ''} title="${item.date}${isToday ? ' (today)' : isFuture ? ' (after today)' : ''}"><span>${htmlEscape(formatDateLabel(item.date))}</span>${count}${tag}</a></li>`);
   }
-  const newest = dates[0].date;
-  return `<div class="datetools"><a class="today-link" href="/reports/${newest}" id="today-link" title="Newest report (${newest})">Today</a><label><input type="checkbox" id="only-matches"> Only days with matches</label></div><ul class="datelist" id="datelist">${items.join('')}</ul>`;
+  const jump = todayTarget(dates, today);
+  return `<div class="datetools"><a class="today-link" href="/reports/${jump.date}" id="today-link" title="${jump.isToday ? `Today's report (${jump.date})` : `No report for today; newest report (${jump.date})`}">${jump.isToday ? 'Today' : 'Latest'}</a><label><input type="checkbox" id="only-matches"> Only days with matches</label></div><ul class="datelist" id="datelist">${items.join('')}</ul>`;
+}
+
+// The date the "Today" shortcut and the default selection point at: today's report when it exists,
+// otherwise the newest one.
+export function todayTarget(dates, today) {
+  const list = dates.map(item => (typeof item === 'string' ? item : item.date));
+  if (today && list.includes(today)) return { date: today, isToday: true };
+  return { date: list[0] || null, isToday: false };
 }
 
 export function reportsPage({ dates, selected, reportBody, desktopPath, today }) {
