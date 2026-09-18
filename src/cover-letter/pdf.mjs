@@ -29,14 +29,14 @@ export function letterHtml(letter, layout = LAYOUTS[0]) {
 <style>
 @page { size: ${layout.size}; margin: ${layout.margin}in; }
 html, body { margin: 0; padding: 0; }
-body { font-family: "Times New Roman", Times, serif; font-size: 11pt; line-height: 1.35; color: #000; }
-header { text-align: center; margin-bottom: 14pt; }
+body { font-family: "Times New Roman", Times, serif; font-size: 11pt; line-height: 1.15; color: #000; }
+header { text-align: center; margin-bottom: 8pt; }
 header .name { font-size: 16pt; font-weight: bold; margin: 0 0 3pt; }
 header .contact { font-size: 11pt; margin: 0; }
-p { margin: 0 0 10pt; text-align: left; }
+p { margin: 0 0 7pt; text-align: left; }
 header p { text-align: center; }
-p.date, p.salutation { margin-bottom: 10pt; }
-p.closing { margin-top: 10pt; margin-bottom: 18pt; }
+p.date, p.salutation { margin-bottom: 7pt; }
+p.closing { margin-top: 4pt; margin-bottom: 14pt; }
 p.signature { margin: 0; }
 </style></head><body>
 <header><p class="name">${htmlEscape(letter.name)}</p>${letter.contact ? `<p class="contact">${htmlEscape(letter.contact)}</p>` : ''}</header>
@@ -106,17 +106,17 @@ async function renderWithPdfkit(letter, layout, outputPath, io) {
   const done = new Promise(resolve => document.on('end', resolve));
   document.font('Times-Bold').fontSize(16).text(letter.name, { align: 'center' });
   if (letter.contact) document.font('Times-Roman').fontSize(11).text(letter.contact, { align: 'center' });
-  document.moveDown(1.2);
+  document.moveDown(0.8);
   document.font('Times-Roman').fontSize(11).text(letter.date);
-  document.moveDown(0.9);
+  document.moveDown(0.6);
   document.text(letter.salutation);
-  document.moveDown(0.9);
+  document.moveDown(0.6);
   for (const paragraph of letter.paragraphs) {
-    document.text(paragraph, { lineGap: 2 });
-    document.moveDown(0.9);
+    document.text(paragraph);
+    document.moveDown(0.5);
   }
   document.text(letter.closing);
-  document.moveDown(1.6);
+  document.moveDown(1.4);
   document.text(letter.signature);
   const pages = document.bufferedPageRange().count;
   document.end();
@@ -126,37 +126,52 @@ async function renderWithPdfkit(letter, layout, outputPath, io) {
   return { buffer, pages };
 }
 
-// Returns { path, pages, layout, renderer, note }. `chromeCommand: false` forces the pdfkit path.
+async function renderOnce(letter, layout, outputPath, { chrome, io, spawnImpl, tempRoot, strictChrome }) {
+  if (chrome) {
+    try {
+      const buffer = await renderWithChrome(chrome, letter, layout, outputPath, { io, spawnImpl, tempRoot });
+      return { pages: countPdfPages(buffer), renderer: 'chrome' };
+    } catch (error) {
+      if (strictChrome) throw error;
+    }
+  }
+  const fallback = await renderWithPdfkit(letter, layout, outputPath, io);
+  return { pages: fallback.pages, renderer: 'pdfkit' };
+}
+
+// Returns { path, pages, layout, renderer, note, paragraphs, condensed }. `chromeCommand: false` forces the
+// pdfkit path. Page fit is decided by the rendered page count: a first render that spills past one page
+// triggers `options.condense(paragraphs, pages)` once (the engine's 15 percent trim) before the smaller
+// layouts are tried.
 export async function renderLetterPdf(letter, outputPath, options = {}) {
   const io = options.io || fs;
   const spawnImpl = options.spawn || spawn;
   const tempRoot = options.tempRoot || os.tmpdir();
+  const strictChrome = options.strictChrome === true;
   const chrome = options.chromeCommand === false ? null : await findChrome(options.chromeCommand || null, io);
   await io.mkdir(path.dirname(outputPath), { recursive: true });
+  let current = letter;
+  let condensed = false;
+  const notes = [];
   let last = null;
-  for (const layout of LAYOUTS) {
-    let pages;
-    let renderer;
-    if (chrome) {
-      try {
-        const buffer = await renderWithChrome(chrome, letter, layout, outputPath, { io, spawnImpl, tempRoot });
-        pages = countPdfPages(buffer);
-        renderer = 'chrome';
-      } catch (error) {
-        if (options.strictChrome) throw error;
-        const fallback = await renderWithPdfkit(letter, layout, outputPath, io);
-        pages = fallback.pages;
-        renderer = 'pdfkit';
+  for (let index = 0; index < LAYOUTS.length; index += 1) {
+    const layout = LAYOUTS[index];
+    let { pages, renderer } = await renderOnce(current, layout, outputPath, { chrome, io, spawnImpl, tempRoot, strictChrome });
+    if (index === 0 && pages > 1 && typeof options.condense === 'function' && !condensed) {
+      const shorter = await options.condense(current.paragraphs, pages).catch(() => null);
+      if (Array.isArray(shorter) && shorter.length) {
+        current = { ...current, paragraphs: shorter };
+        condensed = true;
+        notes.push(`Condensed by the engine after the first render ran to ${pages} pages`);
+        ({ pages, renderer } = await renderOnce(current, layout, outputPath, { chrome, io, spawnImpl, tempRoot, strictChrome }));
       }
-    } else {
-      const fallback = await renderWithPdfkit(letter, layout, outputPath, io);
-      pages = fallback.pages;
-      renderer = 'pdfkit';
     }
-    last = { path: outputPath, pages, layout: layout.id, renderer, note: layout.note };
+    if (layout.note && pages <= 1) notes.push(layout.note);
+    last = { path: outputPath, pages, layout: layout.id, renderer, paragraphs: current.paragraphs, condensed, note: notes.length ? notes.join('; ') : null };
     if (pages <= 1) return last;
   }
-  return { ...last, note: `${last.note ? `${last.note}; ` : ''}the letter still runs to ${last.pages} pages, trim the body` };
+  notes.push(LAYOUTS[LAYOUTS.length - 1].note, `the letter still runs to ${last.pages} pages, trim the body`);
+  return { ...last, note: notes.join('; ') };
 }
 
 export { LAYOUTS as PDF_LAYOUTS };

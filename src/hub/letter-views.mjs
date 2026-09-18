@@ -15,6 +15,8 @@ export const LETTER_STYLES = `
 .letter-meta{font-size:var(--fs-meta);color:var(--ink-3);margin:var(--space-2) 0 0}
 .letter-status{font-size:var(--fs-body);color:var(--ink-2);margin:var(--space-2) 0 0}
 .letter-status.error{color:var(--bad-ink)}
+details.notes{margin:var(--space-2) 0 0;font-size:var(--fs-meta)}
+details.notes>summary{cursor:pointer;color:var(--ink-2);font-weight:600}
 .samples{margin:0;padding:0;list-style:none;font-size:var(--fs-body)}
 .samples li{display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center;padding:4px 0}
 `;
@@ -30,8 +32,8 @@ export function coverLetterSettingsSection({ profile, readiness, timeZone }) {
     ? `<span class="mono">${htmlEscape(profile.playbook.originalName || profile.playbook.file)}</span> · ${Number(profile.playbook.characters || 0).toLocaleString('en-US')} characters · uploaded ${readable(profile.playbook.uploadedAt, timeZone)}`
     : '<span class="muted">No playbook yet</span>';
   const samples = (profile.samples || []).length
-    ? `<ul class="samples">${profile.samples.map(sample => `<li><span class="mono">${htmlEscape(sample.originalName || sample.file)}</span><span class="muted">${Number(sample.characters || 0).toLocaleString('en-US')} characters · ${readable(sample.uploadedAt, timeZone)}</span><form class="inline" method="post" action="/settings/cover-letter/remove-sample"><input type="hidden" name="file" value="${htmlEscape(sample.file)}"><button class="btn secondary small" type="submit">Remove</button></form></li>`).join('')}</ul>`
-    : '<p class="muted">No sample letters yet (optional, up to three).</p>';
+    ? `<ul class="samples">${profile.samples.map(sample => `<li><span class="mono">${htmlEscape(sample.originalName || sample.file)}</span>${sample.track ? `<span class="badge" data-sample-track="${htmlEscape(sample.track)}">${htmlEscape(sample.track)}</span>` : '<span class="badge badge-muted" data-sample-track="">untagged</span>'}<span class="muted">${Number(sample.characters || 0).toLocaleString('en-US')} characters · ${readable(sample.uploadedAt, timeZone)}</span><form class="inline" method="post" action="/settings/cover-letter/remove-sample"><input type="hidden" name="file" value="${htmlEscape(sample.file)}"><button class="btn secondary small" type="submit">Remove</button></form></li>`).join('')}</ul>`
+    : '<p class="muted">No sample letters yet (optional, up to ten; the three closest to the chosen track go into each prompt).</p>';
   const state = readiness.ready
     ? '<span class="badge badge-good" data-letter-ready="yes">Ready to generate</span>'
     : `<span class="badge badge-warn" data-letter-ready="no">Missing: ${htmlEscape(readiness.missing.join(', '))}</span>`;
@@ -51,6 +53,7 @@ export function coverLetterSettingsSection({ profile, readiness, timeZone }) {
     <fieldset class="group"><legend>Sample letters (.pdf or .txt, style reference only)</legend>
       ${samples}
       <div class="field"><label class="file"><input type="file" name="sample" accept=".pdf,.txt,application/pdf,text/plain"><span class="btn secondary">Choose Sample…</span><span class="file-name">No file chosen</span></label></div>
+      <label class="field"><span>Resume track this sample was written for</span><select name="sampleTrack" class="control-input"><option value="">Not tagged</option><option value="data">Data</option><option value="llm">LLM</option><option value="agent">AI Agent</option></select></label>
     </fieldset>
     <button class="btn" type="submit">Save Cover Letter Material</button>
   </form></article>`;
@@ -83,6 +86,9 @@ export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, 
     ? paragraphs.map((paragraph, index) => `<textarea class="para" name="paragraph" data-index="${index}">${htmlEscape(paragraph)}</textarea>`).join('')
     : '';
   const issues = (existing?.record?.issues || []).map(issue => `<li data-kind="${htmlEscape(issue.kind)}">${htmlEscape(issue.message)}</li>`).join('');
+  const notes = (existing?.record?.editorNotes || []).map(note => `<li>${htmlEscape(note)}</li>`).join('');
+  const samplesUsed = (existing?.record?.samplesUsed || []).map(sample => `${sample.name}${sample.track ? ` (${sample.track})` : ''}`).join(', ');
+  const counts = existing?.record ? `${Number(existing.record.wordCount || 0)} words${existing.record.pdf ? ` · ${existing.record.pdf.pages} page${existing.record.pdf.pages === 1 ? '' : 's'}` : ''}` : '';
   const meta = existing?.record
     ? `Generated with ${htmlEscape(existing.record.engine)} · ${htmlEscape(existing.record.model)}${existing.record.pdf ? ` · PDF: ${existing.record.pdf.pages} page${existing.record.pdf.pages === 1 ? '' : 's'} (${htmlEscape(existing.record.pdf.renderer)}, ${htmlEscape(existing.record.pdf.layout)})` : ''}`
     : `Engine: ${htmlEscape(engineLabel)}`;
@@ -114,6 +120,9 @@ export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, 
     <p class="muted">Header, date, salutation, and sign-off are added automatically; edit the paragraphs here before rendering.</p>
     <div id="paragraphs">${editor}</div>
     <ul class="issues" id="letter-issues">${issues}</ul>
+    <p class="letter-meta" id="letter-counts">${htmlEscape(counts)}</p>
+    <p class="letter-meta" id="letter-samples">${samplesUsed ? `Samples used: ${htmlEscape(samplesUsed)}` : ''}</p>
+    <details class="notes" id="editor-notes"${notes ? '' : ' hidden'}><summary>Editor notes</summary><ul class="issues" id="editor-notes-list">${notes}</ul></details>
     <p class="letter-meta" id="letter-meta">${meta}</p>
   </article>`;
 }
@@ -130,7 +139,11 @@ export const LETTER_SCRIPT = `
   var box = document.getElementById('paragraphs');
   var issues = document.getElementById('letter-issues');
   var meta = document.getElementById('letter-meta');
-  var state = { engine: null, model: null, issues: [] };
+  var state = { engine: null, model: null, issues: [], editorNotes: [], samplesUsed: [] };
+  var counts = document.getElementById('letter-counts');
+  var samplesLine = document.getElementById('letter-samples');
+  var notesBox = document.getElementById('editor-notes');
+  var notesList = document.getElementById('editor-notes-list');
   function say(text, error) { status.textContent = text || ''; status.className = 'letter-status' + (error ? ' error' : ''); }
   function form(fields) { var params = new URLSearchParams(); Object.keys(fields).forEach(function (key) { [].concat(fields[key]).forEach(function (value) { params.append(key, value); }); }); return params.toString(); }
   function post(url, fields) {
@@ -142,9 +155,12 @@ export const LETTER_SCRIPT = `
     result.paragraphs.forEach(function (text, index) { var area = document.createElement('textarea'); area.className = 'para'; area.name = 'paragraph'; area.dataset.index = String(index); area.value = text; box.appendChild(area); });
     issues.innerHTML = '';
     (result.issues || []).forEach(function (issue) { var item = document.createElement('li'); item.dataset.kind = issue.kind; item.textContent = issue.message; issues.appendChild(item); });
-    if (result.wordCount != null) { var count = document.createElement('li'); count.className = 'info'; count.textContent = result.wordCount + ' words · ' + result.paragraphs.length + ' paragraphs'; issues.appendChild(count); }
-    state.engine = result.engine; state.model = result.model; state.issues = result.issues || [];
-    meta.textContent = 'Generated with ' + (result.engineLabel || result.engine) + ' · ' + result.model + (result.attempts && result.attempts.length > 1 ? ' · condensed on retry' : '');
+    if (counts) counts.textContent = (result.wordCount != null ? result.wordCount + ' words · ' : '') + result.paragraphs.length + ' paragraphs' + (result.pages != null ? ' · ' + result.pages + ' page' + (result.pages === 1 ? '' : 's') : '');
+    if (samplesLine) samplesLine.textContent = (result.samplesUsed && result.samplesUsed.length) ? 'Samples used: ' + result.samplesUsed.map(function (s) { return s.name + (s.track ? ' (' + s.track + ')' : ''); }).join(', ') : 'Samples used: none';
+    if (notesList) { notesList.innerHTML = ''; (result.editorNotes || []).forEach(function (note) { var item = document.createElement('li'); item.textContent = note; notesList.appendChild(item); }); }
+    if (notesBox) notesBox.hidden = !(result.editorNotes && result.editorNotes.length);
+    state.engine = result.engine; state.model = result.model; state.issues = result.issues || []; state.editorNotes = result.editorNotes || []; state.samplesUsed = result.samplesUsed || [];
+    meta.textContent = 'Generated with ' + (result.engineLabel || result.engine) + ' · ' + result.model + (result.reviewed ? (result.revisionAdopted ? ' · editor revision applied' : ' · editor pass: no changes') : '');
     editor.hidden = false; save.hidden = false; download.hidden = true; generate.textContent = 'Regenerate';
   }
   generate.addEventListener('click', function () {
@@ -156,9 +172,11 @@ export const LETTER_SCRIPT = `
   });
   save.addEventListener('click', function () {
     save.disabled = true; say('Rendering PDF…');
-    post('/letters/save', { date: panel.dataset.date, job: panel.dataset.job, track: document.getElementById('letter-track').value, company: document.getElementById('letter-company').value, paragraph: paragraphs(), engine: state.engine || (meta.dataset.engine || ''), model: state.model || '', issues: JSON.stringify(state.issues) })
+    post('/letters/save', { date: panel.dataset.date, job: panel.dataset.job, track: document.getElementById('letter-track').value, company: document.getElementById('letter-company').value, paragraph: paragraphs(), engine: state.engine || (meta.dataset.engine || ''), model: state.model || '', issues: JSON.stringify(state.issues), editorNotes: JSON.stringify(state.editorNotes), samplesUsed: JSON.stringify(state.samplesUsed) })
       .then(function (result) {
         download.href = result.downloadUrl; download.hidden = false;
+        if (result.pdf.condensed && result.paragraphs) { box.innerHTML = ''; result.paragraphs.forEach(function (text, index) { var area = document.createElement('textarea'); area.className = 'para'; area.name = 'paragraph'; area.dataset.index = String(index); area.value = text; box.appendChild(area); }); }
+        if (counts) counts.textContent = result.wordCount + ' words · ' + (result.paragraphs || paragraphs()).length + ' paragraphs · ' + result.pdf.pages + ' page' + (result.pdf.pages === 1 ? '' : 's');
         var note = result.pdf.note ? ' ' + result.pdf.note + '.' : '';
         say('Saved. PDF: ' + result.pdf.pages + ' page' + (result.pdf.pages === 1 ? '' : 's') + ' (' + result.pdf.renderer + ', ' + result.pdf.layout + ').' + note, result.pdf.pages > 1);
       })

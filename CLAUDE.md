@@ -64,12 +64,19 @@ disabled; do not expand them unless a task says so.
 ## Cover letters (src/cover-letter/ + hub Letters pages)
 - Engines expose generateText(prompt, { schema, tempDirectory }); local_only
   gets a labelled placeholder engine (src/engines/fake.mjs) so demos and tests
-  never call a model. compose.mjs holds the rules, prompt, validation
-  (5–6 paragraphs, no bullets, no em/en dash punctuation, 320–450 words) and
-  the deterministic framing (header, date in config.timeZone, "Dear {Company}
-  Recruiting Team,", "Sincerely,"); generate.mjs retries once with a
-  condensing instruction; pdf.mjs prints with local Chrome (Letter, Times New
-  Roman 11pt, 1in) and falls back to pdfkit, retrying B5 then 0.8in margins.
+  never call a model. compose.mjs holds the fixed letter architecture (P1:
+  role + location, degree/GPA, role-type timeline sentence, in-state line for
+  Illinois, hook; 3–4 responsibility paragraphs with numbered evidence and a
+  principle; a candid "I should be straightforward about" paragraph only when
+  the scorer's gaps name missing tools; a two-sentence close; verbatim-number
+  discipline), validation (5–7 paragraphs, no bullets, no em/en dash
+  punctuation, 460–600 words) and the deterministic framing. generate.mjs
+  makes the draft call plus an editor-review call (config.coverLetter.
+  editorReview, default on) that returns { issues, revised_paragraphs };
+  page fit is decided by the rendered PDF: pdf.mjs calls the engine's
+  condensing pass once when the first render spills, then tries B5 and
+  0.8in margins. Samples: up to 10, tagged data/llm/agent, three closest to
+  the chosen track go into the prompt.
 - Personal details (name, phone, email, signature, playbook, sample letters)
   live ONLY under private/cover-letter/; generated letters under
   private/cover-letters/<date>/<Company>/. Never put a real person's data in

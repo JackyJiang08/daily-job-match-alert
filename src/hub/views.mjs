@@ -427,6 +427,10 @@ export function settingsPage({ settings, connections = null, timeZone, coverLett
     <fieldset class="group"><legend>Reports</legend>
       <div class="field"><label class="check"><input type="checkbox" name="xlsxRequired"${settings.xlsxRequired ? ' checked' : ''}> Require XLSX Workbook (fail the run when it cannot be written)</label></div>
     </fieldset>
+    <fieldset class="group"><legend>Cover Letters</legend>
+      <input type="hidden" name="editorReviewPresent" value="1">
+      <div class="field"><label class="check"><input type="checkbox" name="editorReview"${settings.editorReview ? ' checked' : ''}> Editor review pass (a second call to the same engine checks structure, evidence numbers, and tone before you see the draft)</label></div>
+    </fieldset>
     <fieldset class="group"><legend>Hub</legend>
       <label class="field"><span>Port (takes effect after <code>npm run hub:restart</code>)</span><input type="number" name="hubPort" min="1024" max="65535" step="1" value="${Number(settings.hubPort)}" required></label>
     </fieldset>

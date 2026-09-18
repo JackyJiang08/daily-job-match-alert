@@ -412,6 +412,7 @@ export async function readSettings(ctx) {
     models,
     modelChoices: normalizeChoices(config.hub?.modelChoices),
     xlsxRequired: config.reports?.xlsx?.required === true,
+    editorReview: config.coverLetter?.editorReview !== false,
     hubPort: Number(config.hub?.port || 4747),
   };
 }
@@ -435,8 +436,10 @@ export function validateSettings(form) {
   const hubPort = Number(form.hubPort);
   if (!Number.isInteger(hubPort) || hubPort < 1024 || hubPort > 65535) errors.push('Hub port must be a whole number from 1024 to 65535');
   const xlsxRequired = form.xlsxRequired === 'on' || form.xlsxRequired === 'true' || form.xlsxRequired === true;
+  // Only the settings form carries the flag; a form without it (older callers) leaves the config value alone.
+  const editorReview = form.editorReviewPresent != null ? (form.editorReview === 'on' || form.editorReview === 'true' || form.editorReview === true) : null;
   if (errors.length) throw new HubInputError(errors.join('; '));
-  return { minimumMatchScore, acceptedMatchLevels: MATCH_LEVELS.filter(level => levels.includes(level)), engine, model, xlsxRequired, hubPort };
+  return { minimumMatchScore, acceptedMatchLevels: MATCH_LEVELS.filter(level => levels.includes(level)), engine, model, xlsxRequired, editorReview, hubPort };
 }
 
 // "Save this path to config": pins the resolved binary as semanticMatching.<engine>Command.
@@ -481,6 +484,10 @@ export async function saveSettings(ctx, form) {
     config.reports.xlsx = config.reports.xlsx && typeof config.reports.xlsx === 'object' ? config.reports.xlsx : {};
     config.reports.xlsx.required = settings.xlsxRequired;
     config.hub = config.hub && typeof config.hub === 'object' ? config.hub : {};
+    if (settings.editorReview != null) {
+      config.coverLetter = config.coverLetter && typeof config.coverLetter === 'object' ? config.coverLetter : {};
+      config.coverLetter.editorReview = settings.editorReview;
+    }
     config.hub.port = settings.hubPort;
     return true;
   }, { fs: ctx.io, pidAlive: ctx.pidAlive });

@@ -242,7 +242,11 @@ export function createHubHandler(ctx) {
       case '/letters/save': {
         let issues = [];
         try { issues = JSON.parse(fields.issues || '[]'); } catch { issues = []; }
-        json(response, 200, await saveLetter(ctx, { date: assertDate(fields.date), jobId: fields.job, trackId: fields.track || null, company: fields.company, paragraphs: [].concat(fields.paragraph || []), engine: fields.engine, model: fields.model, issues: Array.isArray(issues) ? issues : [] }));
+        let editorNotes = [];
+        try { editorNotes = JSON.parse(fields.editorNotes || '[]'); } catch { editorNotes = []; }
+        let samplesUsed = [];
+        try { samplesUsed = JSON.parse(fields.samplesUsed || '[]'); } catch { samplesUsed = []; }
+        json(response, 200, await saveLetter(ctx, { date: assertDate(fields.date), jobId: fields.job, trackId: fields.track || null, company: fields.company, paragraphs: [].concat(fields.paragraph || []), engine: fields.engine, model: fields.model, issues: Array.isArray(issues) ? issues : [], editorNotes: Array.isArray(editorNotes) ? editorNotes.map(String) : [], samplesUsed: Array.isArray(samplesUsed) ? samplesUsed : [] }));
         return;
       }
       case '/settings/cover-letter': {
@@ -251,7 +255,7 @@ export function createHubHandler(ctx) {
         const playbook = files.find(file => file.field === 'playbook' && file.data?.length);
         if (playbook) { const saved = await ctx.letterStore.savePlaybook(playbook); notes.push(`playbook ${saved.originalName} (${saved.characters} characters)`); }
         const sample = files.find(file => file.field === 'sample' && file.data?.length);
-        if (sample) { const saved = await ctx.letterStore.saveSample(sample); notes.push(`sample ${saved.originalName} (${saved.characters} characters)`); }
+        if (sample) { const saved = await ctx.letterStore.saveSample(sample, { track: fields.sampleTrack || null }); notes.push(`sample ${saved.originalName} (${saved.characters} characters${saved.track ? `, ${saved.track} track` : ''})`); }
         redirect(response, '/settings#cover-letters', notes.join('; '));
         return;
       }

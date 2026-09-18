@@ -9,8 +9,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
-import { MAX_WORDS, assembleLetter, buildCoverLetterPrompt, letterDate, letterFileName, letterRules, sanitizeCompany, validateParagraphs } from '../src/cover-letter/compose.mjs';
-import { generateCoverLetter } from '../src/cover-letter/generate.mjs';
+import { MAX_WORDS, MIN_WORDS, assembleLetter, buildCondensePrompt, buildCoverLetterPrompt, buildReviewPrompt, graduationTerms, letterDate, letterFileName, letterRules, missingRequirements, sanitizeCompany, selectSamples, validateParagraphs } from '../src/cover-letter/compose.mjs';
+import { condenseCoverLetter, generateCoverLetter, reviewCoverLetter } from '../src/cover-letter/generate.mjs';
 import { countPdfPages, letterHtml, renderLetterPdf } from '../src/cover-letter/pdf.mjs';
 import { createLetterStore } from '../src/cover-letter/store.mjs';
 import { createFakeEngine } from '../src/engines/fake.mjs';
@@ -27,7 +27,7 @@ function words(count) {
   return Array.from({ length: count }, (_, index) => WORDS[index % WORDS.length]).join(' ');
 }
 
-function fiveParagraphs(wordsEach = 75) {
+function fiveParagraphs(wordsEach = 105) {
   return Array.from({ length: 5 }, (_, index) => `Paragraph ${index + 1} ${words(wordsEach - 2)}.`);
 }
 
@@ -57,11 +57,15 @@ test('the prompt carries the playbook, the chosen track resume, the samples with
     job: { title: 'LLM Engineer', company: 'Globex', location: 'Boston, MA Johnston, RI', roleType: 'new_grad', description: 'Build RAG systems.', reasons: ['RAG match'], gaps: ['No Kubernetes'] },
   });
   assert.match(prompt, /^RULES:\n1\. You write cover letters\. Output ONLY the body paragraphs as JSON/);
-  assert.match(prompt, /5 to 6 paragraphs/);
+  assert.match(prompt, /Body length: 460 to 600 words/);
   assert.match(prompt, /Never use an em dash or an en dash/);
-  assert.match(prompt, /No bullet points/);
+  assert.match(prompt, /no bullet points/);
   assert.match(prompt, /fast-ramp framework/);
-  assert.match(prompt, /graduation timeline wording/);
+  assert.match(prompt, /Paragraph 1 must contain, in this order: the role title and location; your degree and GPA/);
+  assert.match(prompt, /one middle paragraph per responsibility \(3 to 4 paragraphs\)/);
+  assert.match(prompt, /The closing paragraph is exactly two sentences/);
+  assert.match(prompt, /every number must match the RESUME or the PLAYBOOK evidence library word for word/);
+  assert.match(prompt, /SAMPLE LETTER 1 \(style reference only/);
   assert.match(prompt, /PLAYBOOK \(writing rules and evidence library\):\n---\nPLAYBOOK TEXT with fast-ramp framework\n---/);
   assert.match(prompt, /SAMPLE LETTER 1 \(style reference only; do not reuse its company-specific content\):\n---\nSAMPLE ONE BODY\n---/);
   assert.match(prompt, /RESUME \(track "LLM", the resume that will accompany this letter\):\n---\nRESUME TEXT FOR LLM TRACK\n---/);
@@ -72,6 +76,7 @@ test('the prompt carries the playbook, the chosen track resume, the samples with
   assert.doesNotMatch(prompt, /Condense it/);
   assert.match(buildCoverLetterPrompt({ playbook: 'P', track: { id: 'data', label: 'Data' }, resumeText: 'R', job: {}, condense: true }), /Condense it by about 15 percent/);
   assert.equal(letterRules().split('\n').length, 9);
+  assert.equal(letterRules({ condense: true }).split('\n').length, 10);
 });
 
 test('header, date, salutation, and sign-off are assembled by code, never by the model', () => {
@@ -98,46 +103,130 @@ test('validation strips bullets, rewrites dashes, and reports paragraph and leng
   const result = validateParagraphs(['- First point — with an em dash', '• Second point – en dash', 'Third -- double hyphen', 'Fourth is fine, co-founder stays hyphenated.', 'Fifth.']);
   assert.deepEqual(result.paragraphs, ['First point, with an em dash', 'Second point, en dash', 'Third, double hyphen', 'Fourth is fine, co-founder stays hyphenated.', 'Fifth.']);
   assert.deepEqual(result.issues.map(issue => issue.kind), ['bullet', 'dash', 'bullet', 'dash', 'dash', 'too-short']);
+  assert.equal(validateParagraphs(Array.from({ length: 8 }, () => 'p')).ok, false, 'more than seven paragraphs is rejected');
+  assert.equal(validateParagraphs(Array.from({ length: 7 }, () => 'p')).ok, true, 'seven paragraphs (with a candid paragraph) is allowed');
   assert.equal(result.ok, true);
   const few = validateParagraphs(['Only one paragraph.']);
   assert.equal(few.ok, false);
   assert.ok(few.issues.some(issue => issue.kind === 'paragraphs'));
-  const long = validateParagraphs(fiveParagraphs(100));
+  const long = validateParagraphs(fiveParagraphs(130));
   assert.equal(long.tooLong, true);
   assert.ok(long.issues.some(issue => issue.kind === 'too-long'));
-  const good = validateParagraphs(fiveParagraphs(75));
+  const good = validateParagraphs(fiveParagraphs(105));
   assert.deepEqual(good.issues, []);
-  assert.equal(good.wordCount, 375);
+  assert.equal(good.wordCount, 525);
+  assert.deepEqual([MIN_WORDS, MAX_WORDS], [460, 600]);
   assert.equal(validateParagraphs(null).ok, false);
 });
 
-test('generation retries once with a condensing instruction when the draft is too long', async () => {
-  const { engine, calls } = fakeEngineReturning([{ paragraphs: fiveParagraphs(110) }, { paragraphs: fiveParagraphs(80) }]);
+test('generation makes one draft call, then an editor pass whose revision is adopted only when it raised issues', async () => {
   const inputs = { playbook: 'P', samples: [], track: { id: 'data', label: 'Data' }, resumeText: 'R', job: { title: 'T', company: 'C', description: 'D' } };
-  const result = await generateCoverLetter({ engine, inputs });
-  assert.equal(calls.length, 2);
-  assert.doesNotMatch(calls[0].prompt, /Condense it/);
-  assert.match(calls[1].prompt, /Condense it by about 15 percent/);
-  assert.deepEqual(calls[0].context.schema.required, ['paragraphs']);
-  assert.equal(result.wordCount, 400);
-  assert.equal(result.tooLong, false);
-  assert.deepEqual(result.attempts.map(item => item.wordCount), [550, 400]);
+  const clean = fakeEngineReturning([{ paragraphs: fiveParagraphs(105) }, { issues: [], revised_paragraphs: [] }]);
+  const result = await generateCoverLetter({ engine: clean.engine, inputs });
+  assert.equal(clean.calls.length, 2, 'draft plus editor pass');
+  assert.match(clean.calls[0].prompt, /^RULES:/);
+  assert.match(clean.calls[1].prompt, /^EDITOR REVIEW\./);
+  assert.deepEqual(clean.calls[1].context.schema.required, ['issues', 'revised_paragraphs']);
+  assert.equal(result.reviewed, true);
+  assert.equal(result.revisionAdopted, false);
+  assert.deepEqual(result.editorNotes, []);
+  assert.equal(result.wordCount, 525);
+  assert.deepEqual(result.samplesUsed, []);
   assert.equal(result.model, 'claude-fable-5');
-  assert.equal(result.engineLabel, 'Claude subscription');
 
-  const stubborn = fakeEngineReturning([{ paragraphs: fiveParagraphs(120) }]);
-  const still = await generateCoverLetter({ engine: stubborn.engine, inputs });
-  assert.equal(stubborn.calls.length, 2);
-  assert.equal(still.tooLong, true);
-  assert.ok(still.issues.some(issue => issue.kind === 'still-too-long'));
-  assert.ok(still.wordCount > MAX_WORDS);
+  const flagged = fakeEngineReturning([{ paragraphs: fiveParagraphs(105) }, { issues: ['Paragraph 1 lacks the GPA', 'Numbers in paragraph 3 do not appear in the resume'], revised_paragraphs: fiveParagraphs(100).map(p => `${p} Revised.`) }]);
+  const merged = await generateCoverLetter({ engine: flagged.engine, inputs });
+  assert.equal(merged.revisionAdopted, true);
+  assert.deepEqual(merged.editorNotes, ['Paragraph 1 lacks the GPA', 'Numbers in paragraph 3 do not appear in the resume']);
+  assert.match(merged.paragraphs[0], / Revised\.$/);
+  assert.equal(merged.paragraphs.length, 5);
 
-  const plain = fakeEngineReturning(['Not JSON at all.\n\nSecond paragraph.\n\nThird.\n\nFourth.\n\nFifth.']);
+  const useless = fakeEngineReturning([{ paragraphs: fiveParagraphs(105) }, { issues: ['Vague'], revised_paragraphs: ['only one paragraph'] }]);
+  const kept = await generateCoverLetter({ engine: useless.engine, inputs });
+  assert.equal(kept.revisionAdopted, false, 'an unusable revision is ignored but its notes are kept');
+  assert.deepEqual(kept.editorNotes, ['Vague']);
+  assert.equal(kept.paragraphs.length, 5);
+
+  const off = fakeEngineReturning([{ paragraphs: fiveParagraphs(105) }]);
+  const single = await generateCoverLetter({ engine: off.engine, inputs, review: false });
+  assert.equal(off.calls.length, 1, 'the editor pass can be switched off');
+  assert.equal(single.reviewed, false);
+
+  const long = fakeEngineReturning([{ paragraphs: fiveParagraphs(130) }, { issues: [], revised_paragraphs: [] }]);
+  const overLimit = await generateCoverLetter({ engine: long.engine, inputs });
+  assert.equal(long.calls.length, 2, 'word count alone never triggers a retry; the rendered page count does');
+  assert.ok(overLimit.issues.some(issue => issue.kind === 'too-long'));
+
+  const plain = fakeEngineReturning(['Not JSON at all.\n\nSecond paragraph.\n\nThird.\n\nFourth.\n\nFifth.', { issues: [], revised_paragraphs: [] }]);
   const parsed = await generateCoverLetter({ engine: plain.engine, inputs });
   assert.equal(parsed.paragraphs.length, 5, 'a plain-text reply is split on blank lines');
   const placeholder = await generateCoverLetter({ engine: createFakeEngine(), inputs });
   assert.equal(placeholder.engine, 'local_only');
   assert.equal(placeholder.paragraphs.length, 5);
+  assert.equal(placeholder.reviewed, true);
+
+  const review = await reviewCoverLetter({ engine: flagged.engine, paragraphs: ['a', 'b', 'c', 'd', 'e'], inputs, tempDirectory: os.tmpdir() });
+  assert.equal(typeof review.adopted, 'boolean');
+  const condensed = await condenseCoverLetter({ engine: createFakeEngine(), paragraphs: fiveParagraphs(120), pages: 2 });
+  assert.equal(condensed.length, 5);
+  assert.ok(validateParagraphs(condensed).wordCount < 600);
+  assert.match(buildCondensePrompt({ paragraphs: ['x'], pages: 2 }), /^CONDENSE\. .*ran to 2 pages/);
+});
+
+test('paragraph 1 rules follow the role type, the graduation date, and an Illinois location', () => {
+  const graduation = graduationTerms('2027-05');
+  assert.deepEqual(graduation, { month: 'May 2027', nextFall: 'Fall 2027', year: 2027 });
+  assert.deepEqual(graduationTerms('2026-12'), { month: 'December 2026', nextFall: 'Fall 2027', year: 2026 });
+  const base = { playbook: 'P', track: { id: 'data', label: 'Data' }, resumeText: 'R' };
+  const intern = buildCoverLetterPrompt({ ...base, job: { title: 'Data Intern', roleType: 'internship', location: 'Chicago, IL' }, graduation });
+  assert.match(intern, /completing your bachelor's degree in May 2027 with plans to begin a master's program in Fall 2027/);
+  assert.match(intern, /because the role is in Illinois, add that you are in state/);
+  const newGrad = buildCoverLetterPrompt({ ...base, job: { title: 'Analyst', roleType: 'new_grad', location: 'Austin, TX' }, graduation });
+  assert.match(newGrad, /Timeline sentence for a new-grad role: state that your May 2027 graduation falls inside the employer's start window/);
+  assert.doesNotMatch(newGrad, /in state/);
+  const entry = buildCoverLetterPrompt({ ...base, job: { title: 'Analyst', roleType: 'entry_level', location: 'Remote' }, graduation });
+  assert.match(entry, /Timeline sentence for a full-time entry-level role/);
+  assert.match(buildCoverLetterPrompt({ ...base, job: { title: 'X', roleType: 'new_grad', location: 'Springfield, Illinois' } }), /in state/);
+  assert.match(intern, /as its last sentence, one specific judgment about this company or this role/);
+});
+
+test('the candid paragraph is required only when the scorer found requirements missing from the resume', () => {
+  const base = { playbook: 'P', track: { id: 'llm', label: 'LLM' }, resumeText: 'R' };
+  const gaps = ['JD skill not found in resume: dbt', 'JD skill not found in resume: Kubernetes', 'Location unverified — confirm US eligibility'];
+  assert.deepEqual(missingRequirements({ gaps }), ['dbt', 'Kubernetes']);
+  assert.deepEqual(missingRequirements({ gaps: ['Verify sponsorship'] }), []);
+  const withGaps = buildCoverLetterPrompt({ ...base, job: { title: 'X', roleType: 'new_grad', gaps } });
+  assert.match(withGaps, /The posting explicitly requires dbt, Kubernetes, which the selected resume does not show\. Include ONE candid paragraph, placed before the closing, that opens with "I should be straightforward about"/);
+  assert.match(withGaps, /Do not claim the missing skill/);
+  const covered = buildCoverLetterPrompt({ ...base, job: { title: 'X', roleType: 'new_grad', gaps: ['Verify sponsorship'] } });
+  assert.match(covered, /Do NOT add a candid or disclaimer paragraph; do not invent a gap/);
+  assert.doesNotMatch(covered, /I should be straightforward/);
+  const review = buildReviewPrompt({ paragraphs: ['a'], job: { title: 'X', roleType: 'new_grad', gaps }, resumeText: 'R', playbook: 'P' });
+  assert.match(review, /A candid paragraph about dbt, Kubernetes that opens with "I should be straightforward about"/);
+  assert.match(buildReviewPrompt({ paragraphs: ['a'], job: { title: 'X', roleType: 'new_grad', gaps: [] }, resumeText: 'R', playbook: 'P' }), /No candid or disclaimer paragraph should be present/);
+  assert.match(review, /Every number in the DRAFT must appear verbatim in the RESUME or the PLAYBOOK/);
+  assert.match(review, /Output ONLY JSON: \{ "issues": string\[\], "revised_paragraphs": string\[\] \}/);
+});
+
+test('samples are chosen by track, untagged next, three at most, and named in the result', async () => {
+  const samples = [
+    { file: 'a.txt', originalName: 'agent-one.txt', track: 'agent', text: 'A' },
+    { file: 'b.txt', originalName: 'untagged-one.txt', track: null, text: 'B' },
+    { file: 'c.txt', originalName: 'llm-one.txt', track: 'llm', text: 'C' },
+    { file: 'd.txt', originalName: 'llm-two.txt', track: 'llm', text: 'D' },
+    { file: 'e.txt', originalName: 'untagged-two.txt', track: null, text: 'E' },
+    { file: 'f.txt', originalName: 'data-one.txt', track: 'data', text: 'F' },
+  ];
+  assert.deepEqual(selectSamples(samples, 'llm').map(sample => sample.originalName), ['llm-one.txt', 'llm-two.txt', 'untagged-one.txt']);
+  assert.deepEqual(selectSamples(samples, 'data').map(sample => sample.originalName), ['data-one.txt', 'untagged-one.txt', 'untagged-two.txt']);
+  assert.deepEqual(selectSamples(samples, 'nothing').map(sample => sample.originalName), ['untagged-one.txt', 'untagged-two.txt', 'agent-one.txt']);
+  assert.equal(selectSamples(samples, 'llm', 10).length, 6);
+  const { engine, calls } = fakeEngineReturning([{ paragraphs: fiveParagraphs(105) }, { issues: [], revised_paragraphs: [] }]);
+  const result = await generateCoverLetter({ engine, inputs: { playbook: 'P', samples, track: { id: 'llm', label: 'LLM' }, resumeText: 'R', job: { title: 'T' } } });
+  assert.deepEqual(result.samplesUsed, [{ name: 'llm-one.txt', track: 'llm' }, { name: 'llm-two.txt', track: 'llm' }, { name: 'untagged-one.txt', track: null }]);
+  assert.match(calls[0].prompt, /SAMPLE LETTER 1 \(llm track\)/);
+  assert.match(calls[0].prompt, /SAMPLE LETTER 3 \(style reference only/);
+  assert.doesNotMatch(calls[0].prompt, /SAMPLE LETTER 4/);
 });
 
 test('file names are built from the template with the name and company cleaned', () => {
@@ -152,7 +241,7 @@ test('file names are built from the template with the name and company cleaned',
 test('PDF rendering counts pages and shrinks the layout until the letter fits (pdfkit fallback)', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'letter-pdf-'));
   try {
-    const short = assembleLetter({ profile: PROFILE, company: 'Acme', paragraphs: fiveParagraphs(75), now: new Date(NOW), timeZone: 'America/Chicago' });
+    const short = assembleLetter({ profile: PROFILE, company: 'Acme', paragraphs: fiveParagraphs(105), now: new Date(NOW), timeZone: 'America/Chicago' });
     const one = await renderLetterPdf(short, path.join(directory, 'short.pdf'), { chromeCommand: false });
     assert.deepEqual([one.renderer, one.pages, one.layout, one.note], ['pdfkit', 1, 'letter-1in', null]);
     const buffer = await fs.readFile(one.path);
@@ -165,7 +254,23 @@ test('PDF rendering counts pages and shrinks the layout until the letter fits (p
     assert.equal(spilled.renderer, 'pdfkit');
     assert.ok(spilled.pages > 1, 'a 1,500-word body cannot fit one page');
     assert.equal(spilled.layout, 'b5-0.8in', 'every layout was tried');
+    assert.equal(spilled.condensed, false);
     assert.match(spilled.note, /still runs to \d+ pages/);
+
+    // Page count, not word count, drives the condensing pass: it runs once, before the smaller layouts.
+    const condenseCalls = [];
+    const slightlyLong = assembleLetter({ profile: PROFILE, company: 'Acme', paragraphs: Array.from({ length: 6 }, () => words(115)), now: new Date(NOW), timeZone: 'America/Chicago' });
+    const fitted = await renderLetterPdf(slightlyLong, path.join(directory, 'fitted.pdf'), { chromeCommand: false, condense: async (paragraphs, pages) => { condenseCalls.push({ count: paragraphs.length, pages }); return paragraphs.map(() => words(70)); } });
+    assert.deepEqual(condenseCalls, [{ count: 6, pages: 2 }]);
+    assert.deepEqual([fitted.pages, fitted.layout, fitted.condensed], [1, 'letter-1in', true]);
+    assert.match(fitted.note, /Condensed by the engine after the first render ran to 2 pages/);
+    assert.equal(fitted.paragraphs.length, 6);
+    assert.equal(fitted.paragraphs[0], words(70));
+    const stubborn = await renderLetterPdf(long, path.join(directory, 'stubborn.pdf'), { chromeCommand: false, condense: async paragraphs => paragraphs });
+    assert.equal(stubborn.condensed, true);
+    assert.equal(stubborn.layout, 'b5-0.8in', 'a condensing pass that does not help still falls through to the smaller layouts');
+    const fitsAlready = await renderLetterPdf(short, path.join(directory, 'fits.pdf'), { chromeCommand: false, condense: async () => { throw new Error('must not be called'); } });
+    assert.equal(fitsAlready.condensed, false);
 
     assert.equal(countPdfPages('%PDF-1.4 1 0 obj << /Type /Pages /Count 3 /Kids [] >> endobj'), 3);
     assert.equal(countPdfPages('%PDF-1.4 << /Type /Page >> << /Type /Page >>'), 2);
@@ -191,16 +296,19 @@ test('the private store keeps material and letters under private/ and only serve
     await store.saveSample({ filename: 'sample one.txt', data: Buffer.from('A sample letter body that is definitely long enough to be stored as a style reference.') });
     await store.saveSample({ filename: 'sample two.pdf', data: Buffer.from('%PDF-1.4 fake') });
     await assert.rejects(store.saveSample({ filename: 'bad.pdf', data: Buffer.from('not a pdf but long enough to pass the size check for sure') }), /does not look like a PDF/);
-    await store.saveSample({ filename: 'three.txt', data: Buffer.from('Third sample letter body, long enough to be stored as a style reference too.') });
-    await assert.rejects(store.saveSample({ filename: 'four.txt', data: Buffer.from('Fourth sample letter body, long enough to be stored as a style reference too.') }), /At most 3/);
+    await store.saveSample({ filename: 'three.txt', data: Buffer.from('Third sample letter body, long enough to be stored as a style reference too.') }, { track: 'LLM' });
+    for (let index = 4; index <= 10; index += 1) await store.saveSample({ filename: `s${index}.txt`, data: Buffer.from(`Sample number ${index} body, long enough to be stored as a style reference too, yes.`) }, { track: index % 2 ? 'data' : 'bogus' });
+    await assert.rejects(store.saveSample({ filename: 'eleven.txt', data: Buffer.from('Eleventh sample letter body, long enough to be stored as a style reference too.') }), /At most 10/);
     const material = await store.loadMaterial();
-    assert.equal(material.samples.length, 3);
+    assert.equal(material.samples.length, 10);
     assert.match(material.samples[1].text, /Extracted sample text/);
+    assert.deepEqual(material.samples.slice(0, 4).map(sample => sample.track), [null, null, 'llm', null], 'tracks are normalized; unknown tags are dropped');
+    assert.equal(material.samples[4].track, 'data');
     await store.removeSample(material.samples[0].file);
-    assert.equal((await store.loadMaterial()).samples.length, 2);
+    assert.equal((await store.loadMaterial()).samples.length, 9);
     const profileJson = JSON.parse(await fs.readFile(path.join(root, 'private', 'cover-letter', 'profile.json'), 'utf8'));
     assert.equal(profileJson.name, 'Jane Doe');
-    assert.equal(profileJson.samples.length, 2);
+    assert.equal(profileJson.samples.length, 9);
 
     const saved = await store.saveLetter({ date: '2026-09-15', company: 'Acme, Inc.', markdown: '# Jane Doe\n', meta: { jobId: 'abc123abc123abc1', company: 'Acme, Inc.', pdfFileName: 'JaneDoe_Cover_Letter_AcmeInc.pdf' } });
     assert.equal(saved.slug, 'AcmeInc');
@@ -285,10 +393,10 @@ async function startHub(root, overrides = {}) {
     for (const [key, value] of Object.entries(fields)) for (const item of [].concat(value)) params.append(key, item);
     return request('POST', pathname, { headers: { 'content-type': 'application/x-www-form-urlencoded', ...headers }, body: params.toString() });
   };
-  const upload = (pathname, fields, files) => {
+  const upload = (pathname, fields, files, extra = {}) => {
     const boundary = '----lettertest';
     const parts = [];
-    for (const [name, value] of Object.entries(fields)) parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`));
+    for (const [name, value] of Object.entries({ ...fields, ...extra })) parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`));
     for (const file of files) parts.push(Buffer.concat([Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${file.field}"; filename="${file.name}"\r\nContent-Type: application/octet-stream\r\n\r\n`), file.data, Buffer.from('\r\n')]));
     parts.push(Buffer.from(`--${boundary}--\r\n`));
     return request('POST', pathname, { headers: { 'content-type': `multipart/form-data; boundary=${boundary}` }, body: Buffer.concat(parts) });
@@ -322,14 +430,16 @@ test('the panel disables Generate until the material exists, and Settings collec
     const saved = await hub.upload('/settings/cover-letter', PROFILE, [
       { field: 'playbook', name: 'playbook.md', data: Buffer.from(`# Playbook\n${'Real evidence line. '.repeat(10)}`) },
       { field: 'sample', name: 'sample.txt', data: Buffer.from('A sample letter body that is long enough to be stored as a style reference for the writer.') },
-    ]);
+    ], { sampleTrack: 'llm' });
     assert.equal(saved.status, 303);
-    assert.match(decodeURIComponent(saved.headers.location), /Contact block saved; playbook playbook\.md \(\d+ characters\); sample sample\.txt/);
+    assert.match(decodeURIComponent(saved.headers.location), /Contact block saved; playbook playbook\.md \(\d+ characters\); sample sample\.txt \(\d+ characters, llm track\)/);
     const after = await hub.request('GET', '/settings');
     assert.match(after.text, /data-letter-ready="yes">Ready to generate/);
     assert.match(after.text, /value="Jane Doe"/);
     assert.match(after.text, /<span class="mono">playbook\.md<\/span>/);
-    assert.match(after.text, /<span class="mono">sample\.txt<\/span>/);
+    assert.match(after.text, /<span class="mono">sample\.txt<\/span><span class="badge" data-sample-track="llm">llm<\/span>/);
+    assert.match(after.text, /<select name="sampleTrack" class="control-input"><option value="">Not tagged<\/option><option value="data">Data<\/option><option value="llm">LLM<\/option><option value="agent">AI Agent<\/option><\/select>/);
+    assert.match(after.text, /<legend>Cover Letters<\/legend>[\s\S]*?name="editorReview" checked> Editor review pass/);
     assert.doesNotMatch(after.text, /Real evidence line/, 'material text is never rendered');
     const profile = JSON.parse(await fs.readFile(path.join(root, 'private', 'cover-letter', 'profile.json'), 'utf8'));
     assert.equal(profile.email, 'jane.doe@example.com');
@@ -345,16 +455,22 @@ test('the panel disables Generate until the material exists, and Settings collec
 
 test('generate → edit → save renders a PDF, records the letter, marks the card, and serves only whitelisted files', async () => {
   const root = await prepareProject();
-  const { engine, calls } = fakeEngineReturning([{ paragraphs: ['- Opening — strong', ...fiveParagraphs(70).slice(1)] }]);
+  const { engine, calls } = fakeEngineReturning([{ paragraphs: ['- Opening — strong', ...fiveParagraphs(100).slice(1)] }, { issues: ['Paragraph 1 lacks the GPA'], revised_paragraphs: ['Opening, strong, with GPA 3.9 added.', ...fiveParagraphs(100).slice(1)] }]);
   const hub = await startHub(root, { letterEngine: engine });
   const jobId = sha256('https://example.com/jobs/1').slice(0, 16);
   try {
-    await hub.upload('/settings/cover-letter', PROFILE, [{ field: 'playbook', name: 'playbook.md', data: Buffer.from(`# Playbook\n${'Real evidence line. '.repeat(10)}`) }]);
+    await hub.upload('/settings/cover-letter', PROFILE, [{ field: 'playbook', name: 'playbook.md', data: Buffer.from(`# Playbook\n${'Real evidence line. '.repeat(10)}`) }, { field: 'sample', name: 'sample.txt', data: Buffer.from('A sample letter body that is long enough to be stored as a style reference for the writer.') }]);
     const generated = await hub.form('/letters/generate', { date: '2026-09-15', job: jobId, track: 'llm', company: 'Acme, Inc.' });
     assert.equal(generated.status, 200);
     const draft = JSON.parse(generated.text);
-    assert.equal(draft.paragraphs[0], 'Opening, strong', 'bullet stripped and dash rewritten');
-    assert.deepEqual(draft.issues.map(issue => issue.kind).slice(0, 2), ['bullet', 'dash']);
+    assert.equal(draft.paragraphs[0], 'Opening, strong, with GPA 3.9 added.', 'the editor revision was adopted');
+    assert.deepEqual(draft.editorNotes, ['Paragraph 1 lacks the GPA']);
+    assert.equal(draft.reviewed, true);
+    assert.equal(draft.revisionAdopted, true);
+    assert.deepEqual(draft.samplesUsed, [{ name: 'sample.txt', track: null }]);
+    assert.equal(calls.length, 2);
+    assert.match(calls[1].prompt, /^EDITOR REVIEW/);
+    assert.match(calls[1].prompt, /"paragraphs": \[\s*"Opening, strong"/, 'the editor sees the bullet-stripped, dash-rewritten draft');
     assert.equal(draft.engine, 'claude');
     assert.equal(draft.model, 'claude-fable-5');
     assert.equal(draft.track.id, 'llm');
@@ -366,7 +482,7 @@ test('generate → edit → save renders a PDF, records the letter, marks the ca
 
     const edited = [...draft.paragraphs];
     edited[1] = 'I edited this paragraph by hand before rendering.';
-    const saved = await hub.form('/letters/save', { date: '2026-09-15', job: jobId, track: 'llm', company: 'Acme, Inc.', paragraph: edited, engine: draft.engine, model: draft.model, issues: JSON.stringify(draft.issues) });
+    const saved = await hub.form('/letters/save', { date: '2026-09-15', job: jobId, track: 'llm', company: 'Acme, Inc.', paragraph: edited, engine: draft.engine, model: draft.model, issues: JSON.stringify(draft.issues), editorNotes: JSON.stringify(draft.editorNotes), samplesUsed: JSON.stringify(draft.samplesUsed) });
     assert.equal(saved.status, 200);
     const result = JSON.parse(saved.text);
     assert.equal(result.slug, 'AcmeInc');
@@ -374,6 +490,10 @@ test('generate → edit → save renders a PDF, records the letter, marks the ca
     assert.deepEqual([result.pdf.renderer, result.pdf.pages, result.pdf.layout], ['pdfkit', 1, 'letter-1in']);
     const record = JSON.parse(await fs.readFile(path.join(root, 'private', 'cover-letters', '2026-09-15', 'AcmeInc', 'letter.json'), 'utf8'));
     assert.equal(record.paragraphs[1], 'I edited this paragraph by hand before rendering.');
+    assert.deepEqual(record.editorNotes, ['Paragraph 1 lacks the GPA']);
+    assert.deepEqual(record.samplesUsed, [{ name: 'sample.txt', track: null }]);
+    assert.equal(record.pdf.condensed, false);
+    assert.equal(typeof record.wordCount, 'number');
     assert.equal(record.track, 'llm');
     assert.equal(record.jobId, jobId);
     const markdown = await fs.readFile(path.join(root, 'private', 'cover-letters', '2026-09-15', 'AcmeInc', 'letter.md'), 'utf8');
@@ -391,7 +511,19 @@ test('generate → edit → save renders a PDF, records the letter, marks the ca
     assert.equal((await hub.request('GET', '/letters/2026-09-15/AcmeInc/..%2Fprofile.json')).status, 400, 'a traversal-looking file name is refused outright');
     assert.equal((await hub.request('GET', '/letters/2026-09-15/Nope/letter.md')).status, 404);
     assert.equal((await hub.request('GET', '/letters/2026-09-15/AcmeInc')).status, 200);
-    assert.match((await hub.request('GET', '/letters/2026-09-15/AcmeInc')).text, /I edited this paragraph by hand before rendering\./);
+    const reopened = (await hub.request('GET', '/letters/2026-09-15/AcmeInc')).text;
+    assert.match(reopened, /I edited this paragraph by hand before rendering\./);
+    assert.match(reopened, /<details class="notes" id="editor-notes"><summary>Editor notes<\/summary><ul class="issues" id="editor-notes-list"><li>Paragraph 1 lacks the GPA<\/li><\/ul><\/details>/);
+    assert.match(reopened, /Samples used: sample\.txt/);
+    assert.match(reopened, /<p class="letter-meta" id="letter-counts">\d+ words · 1 page<\/p>/);
+    const toggled = await hub.form('/settings', { minimumMatchScore: '70', acceptedMatchLevels: 'high', engine: 'claude', model_claude: 'fable', hubPort: '4747', editorReviewPresent: '1' });
+    assert.equal(toggled.status, 303);
+    assert.equal(JSON.parse(await fs.readFile(path.join(root, 'config.json'), 'utf8')).coverLetter.editorReview, false, 'an unchecked box switches the editor pass off');
+    const single = fakeEngineReturning([{ paragraphs: fiveParagraphs(105) }]);
+    hub.ctx.letterEngine = single.engine;
+    const again = JSON.parse((await hub.form('/letters/generate', { date: '2026-09-15', job: jobId, track: 'llm', company: 'Acme, Inc.' })).text);
+    assert.equal(single.calls.length, 1, 'no editor pass once it is switched off');
+    assert.equal(again.reviewed, false);
 
     const list = await hub.request('GET', '/letters');
     assert.match(list.text, /<td>2026-09-15<\/td>\s*<td>Acme, Inc\.<\/td>\s*<td>Data Analyst<\/td>\s*<td>LLM<\/td>\s*<td>claude · claude-fable-5<\/td>\s*<td>1 page<\/td>/);
@@ -404,7 +536,7 @@ test('generate → edit → save renders a PDF, records the letter, marks the ca
     const evil = await hub.form('/letters/generate', { date: '2026-09-15', job: jobId }, { origin: 'http://evil.example' });
     assert.equal(evil.status, 403);
     assert.equal((await hub.form('/letters/save', { date: '2026-09-15', job: jobId, paragraph: ['x'] }, { host: 'hub.example.com' })).status, 403);
-    assert.equal(calls.length, 1, 'no extra engine calls from rejected requests');
+    assert.equal(calls.length, 2, 'no extra engine calls from rejected requests (draft plus editor pass only)');
     assert.equal((await hub.form('/letters/generate', { date: '2026-09-15', job: 'zzzz' })).status, 400);
     assert.equal((await hub.form('/letters/generate', { date: '2026-09-15', job: jobId, track: 'agent' })).status, 400, 'a disabled track is refused');
   } finally {

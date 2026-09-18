@@ -26,6 +26,18 @@ export function createFakeEngine(options = {}) {
     modelMatches() { return true; },
     async describeConnection() { return { installed: true, connected: true, detail: FAKE_ENGINE_LABEL, hint: null, reason: null }; },
     async generateText(prompt) {
+      const text = String(prompt || '');
+      // Editor pass: nothing to flag for placeholder text.
+      if (text.startsWith('EDITOR REVIEW')) return { output: { issues: [], revised_paragraphs: [] }, scoringModel: model };
+      // Condensing pass: trim each paragraph of the draft by about 15 percent.
+      if (text.startsWith('CONDENSE')) {
+        const draftAt = text.indexOf('DRAFT:');
+        const start = text.indexOf('{', draftAt >= 0 ? draftAt : 0);
+        let draft = [];
+        try { draft = JSON.parse(text.slice(start)).paragraphs || []; } catch {}
+        const shorter = draft.map(paragraph => { const words = String(paragraph).split(/\s+/); return words.slice(0, Math.max(8, Math.ceil(words.length * 0.85))).join(' ').replace(/[,;:]$/, '') + '.'; });
+        return { output: { paragraphs: shorter }, scoringModel: model };
+      }
       return { output: { paragraphs: placeholderParagraphs(prompt) }, scoringModel: model };
     },
   };

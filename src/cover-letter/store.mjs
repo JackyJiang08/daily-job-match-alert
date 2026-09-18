@@ -6,9 +6,9 @@
 // Nothing in this module carries personal data; every value comes from the owner's uploads.
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { DEFAULT_FILE_NAME_TEMPLATE, letterFileName, sanitizeCompany } from './compose.mjs';
+import { DEFAULT_FILE_NAME_TEMPLATE, SAMPLE_TRACKS, letterFileName, sanitizeCompany } from './compose.mjs';
 
-export const MAX_SAMPLES = 3;
+export const MAX_SAMPLES = 10;
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const COMPANY_PATTERN = /^[A-Za-z0-9]{1,80}$/;
@@ -78,8 +78,10 @@ export function createLetterStore({ root, io = fs, now = () => new Date(), extra
     return profile.playbook;
   }
 
-  async function saveSample(file) {
+  // `track` tags the sample with the resume track it was written for (data / llm / agent) or null.
+  async function saveSample(file, { track = null } = {}) {
     const { name, extension } = textFromUpload(file, ['pdf', 'txt']);
+    const trackTag = SAMPLE_TRACKS.includes(String(track || '').toLowerCase()) ? String(track).toLowerCase() : null;
     const profile = await readProfile();
     if ((profile.samples || []).length >= MAX_SAMPLES) throw new LetterInputError(`At most ${MAX_SAMPLES} sample letters are kept; remove one first`);
     const samplesDirectory = path.join(materialDirectory, 'samples');
@@ -104,7 +106,7 @@ export function createLetterStore({ root, io = fs, now = () => new Date(), extra
     if (String(text).trim().length < 50) throw new LetterInputError('The sample is too short to be useful');
     const textPath = path.join(samplesDirectory, `${stem}.txt`);
     await io.writeFile(textPath, text, { mode: 0o600 });
-    const sample = { file: `${stem}.txt`, originalName: path.basename(name), uploadedAt: now().toISOString(), characters: String(text).length };
+    const sample = { file: `${stem}.txt`, originalName: path.basename(name), track: trackTag, uploadedAt: now().toISOString(), characters: String(text).length };
     profile.samples = [...(profile.samples || []), sample];
     await writeJson(profilePath, profile);
     return sample;

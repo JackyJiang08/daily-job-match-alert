@@ -25,7 +25,8 @@
   },
   "outputDirectory": "~/Desktop/Daily Job Match Alert",
   "coverLetter": {
-    "fileNameTemplate": "{FirstLast}_Cover_Letter_{Company}.pdf"
+    "fileNameTemplate": "{FirstLast}_Cover_Letter_{Company}.pdf",
+    "editorReview": true
   },
   "hub": {
     "port": 4747,
