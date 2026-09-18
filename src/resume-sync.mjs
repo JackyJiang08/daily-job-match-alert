@@ -37,7 +37,8 @@ async function extractPdfText(sourcePath, options = {}) {
     maxBuffer: 10 * 1024 * 1024,
   });
   const text = normalizeResumeText(result.stdout);
-  if (text.length < 250) throw new Error(`PDF text extraction produced too little content: ${sourcePath}`);
+  const minimum = Number(options.minimumCharacters ?? 250);
+  if (text.length < minimum) throw new Error(`PDF text extraction produced too little content: ${sourcePath}`);
   return text;
 }
 

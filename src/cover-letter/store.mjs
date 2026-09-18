@@ -1,7 +1,7 @@
 // Private cover-letter material and generated letters, all under private/ (gitignored):
 //   private/cover-letter/profile.json        name, phone, email, signature, playbook + sample metadata
 //   private/cover-letter/playbook.<ext>      the owner's writing rules and evidence library
-//   private/cover-letter/samples/<file>.txt  extracted text of up to three style samples (+ original PDF)
+//   private/cover-letter/samples/<file>.txt  extracted text of up to ten style samples (+ original PDF)
 //   private/cover-letters/<date>/<Company>/  letter.json, letter.md, <fileName>.pdf per generated letter
 // Nothing in this module carries personal data; every value comes from the owner's uploads.
 import fs from 'node:fs/promises';
@@ -78,16 +78,30 @@ export function createLetterStore({ root, io = fs, now = () => new Date(), extra
     return profile.playbook;
   }
 
-  // `track` tags the sample with the resume track it was written for (data / llm / agent) or null.
+  function normalizeTrack(track) {
+    return SAMPLE_TRACKS.includes(String(track || '').toLowerCase()) ? String(track).toLowerCase() : null;
+  }
+
+  async function removeSampleFiles(sample) {
+    await io.rm(path.join(materialDirectory, 'samples', sample.file), { force: true }).catch(() => {});
+    await io.rm(path.join(materialDirectory, 'samples', sample.file.replace(/\.txt$/, '.pdf')), { force: true }).catch(() => {});
+  }
+
+  // Uploading a file whose name is already on file replaces that sample in place (keeping its track);
+  // `track` may pre-tag a new sample (data / llm / agent), otherwise it starts untagged.
   async function saveSample(file, { track = null } = {}) {
     const { name, extension } = textFromUpload(file, ['pdf', 'txt']);
-    const trackTag = SAMPLE_TRACKS.includes(String(track || '').toLowerCase()) ? String(track).toLowerCase() : null;
+    const originalName = path.basename(name);
     const profile = await readProfile();
-    if ((profile.samples || []).length >= MAX_SAMPLES) throw new LetterInputError(`At most ${MAX_SAMPLES} sample letters are kept; remove one first`);
+    const existingIndex = (profile.samples || []).findIndex(item => item.originalName === originalName);
+    const trackTag = normalizeTrack(track) ?? (existingIndex >= 0 ? profile.samples[existingIndex].track || null : null);
+    if (existingIndex < 0 && (profile.samples || []).length >= MAX_SAMPLES) throw new LetterInputError(`At most ${MAX_SAMPLES} sample letters are kept; remove one first`);
     const samplesDirectory = path.join(materialDirectory, 'samples');
     await io.mkdir(samplesDirectory, { recursive: true });
     const stamp = now().toISOString().replace(/[:.]/g, '-');
-    const stem = `${stamp}-${path.basename(name).replace(/[^A-Za-z0-9._-]+/g, '_').replace(/\.(pdf|txt)$/i, '')}`;
+    let stem = `${stamp}-${path.basename(name).replace(/[^A-Za-z0-9._-]+/g, '_').replace(/\.(pdf|txt)$/i, '')}`;
+    // A replacement uploaded within the same second must not overwrite (and then delete) the old files.
+    if (existingIndex >= 0 && profile.samples[existingIndex].file === `${stem}.txt`) stem = `${stem}-r`;
     let text;
     if (extension === 'pdf') {
       if (file.data.slice(0, 5).toString('latin1') !== '%PDF-') throw new LetterInputError('The file does not look like a PDF');
@@ -106,8 +120,23 @@ export function createLetterStore({ root, io = fs, now = () => new Date(), extra
     if (String(text).trim().length < 50) throw new LetterInputError('The sample is too short to be useful');
     const textPath = path.join(samplesDirectory, `${stem}.txt`);
     await io.writeFile(textPath, text, { mode: 0o600 });
-    const sample = { file: `${stem}.txt`, originalName: path.basename(name), track: trackTag, uploadedAt: now().toISOString(), characters: String(text).length };
-    profile.samples = [...(profile.samples || []), sample];
+    const sample = { file: `${stem}.txt`, originalName, track: trackTag, uploadedAt: now().toISOString(), characters: String(text).length };
+    if (existingIndex >= 0) {
+      await removeSampleFiles(profile.samples[existingIndex]);
+      profile.samples[existingIndex] = sample;
+    } else {
+      profile.samples = [...(profile.samples || []), sample];
+    }
+    await writeJson(profilePath, profile);
+    return { ...sample, replaced: existingIndex >= 0 };
+  }
+
+  async function setSampleTrack(fileName, track) {
+    const profile = await readProfile();
+    const name = path.basename(String(fileName || ''));
+    const sample = (profile.samples || []).find(item => item.file === name);
+    if (!sample) throw new LetterInputError('Unknown sample');
+    sample.track = normalizeTrack(track);
     await writeJson(profilePath, profile);
     return sample;
   }
@@ -117,8 +146,7 @@ export function createLetterStore({ root, io = fs, now = () => new Date(), extra
     const name = path.basename(String(fileName || ''));
     const sample = (profile.samples || []).find(item => item.file === name);
     if (!sample) throw new LetterInputError('Unknown sample');
-    await io.rm(path.join(materialDirectory, 'samples', name), { force: true }).catch(() => {});
-    await io.rm(path.join(materialDirectory, 'samples', name.replace(/\.txt$/, '.pdf')), { force: true }).catch(() => {});
+    await removeSampleFiles(sample);
     profile.samples = profile.samples.filter(item => item.file !== name);
     await writeJson(profilePath, profile);
   }
@@ -196,7 +224,7 @@ export function createLetterStore({ root, io = fs, now = () => new Date(), extra
 
   return {
     materialDirectory, lettersDirectory, profilePath,
-    readProfile, readiness, saveProfileFields, savePlaybook, saveSample, removeSample, loadMaterial,
+    readProfile, readiness, saveProfileFields, savePlaybook, saveSample, setSampleTrack, removeSample, loadMaterial,
     saveLetter, loadLetter, listLetters, resolveDownload, lettersByJob,
     fileNameFor: (template, profile, company) => letterFileName(template || DEFAULT_FILE_NAME_TEMPLATE, { name: profile.name, company }),
   };

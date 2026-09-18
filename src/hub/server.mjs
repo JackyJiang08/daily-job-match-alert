@@ -40,7 +40,7 @@ export function createHubContext(options) {
   };
   ctx.letterStore = options.letterStore || createLetterStore({
     root, io, now,
-    extractText: async file => ctx.extractText(file, { pdftotextCommand: (await ctx.loadConfig().catch(() => ({}))).resumes?.pdftotextCommand || 'pdftotext' }),
+    extractText: async file => ctx.extractText(file, { pdftotextCommand: (await ctx.loadConfig().catch(() => ({}))).resumes?.pdftotextCommand || 'pdftotext', minimumCharacters: 50 }),
   });
   ctx.letterEngine = options.letterEngine || null;
   ctx.renderPdf = options.renderPdf || null;

@@ -232,7 +232,7 @@ test('uploading a PDF stores it under private/resumes, repoints only that track,
   const hub = await startHub(root);
   try {
     const before = await hub.request('GET', '/resumes');
-    assert.match(before.text, /<p class="hub-sub">One PDF per resume track; upload a new version here and tonight's run scores against it\.<\/p>/);
+    assert.match(before.text, /<p class="hub-sub">One PDF per resume track; upload a new version here and tonight's run scores against it\. Files stay on this Mac\.<\/p>/);
     const dataCard = before.text.match(/<article class="card" data-track="data">[\s\S]*?<\/article>/)[0];
     assert.match(dataCard, /<span class="badge badge-good" data-badge="enabled">Enabled<\/span><span class="badge" data-badge="desktop" title="[^"]*Desktop\/Data Resume\.pdf">On Desktop<\/span>/);
     assert.match(dataCard, /<span class="mono" title="[^"]*Desktop\/Data Resume\.pdf">Data Resume\.pdf<\/span>/);
@@ -335,7 +335,7 @@ test('Run Now is refused while the pipeline lock is held, then spawns the pipeli
     const lockedPage = await hub.request('GET', '/status');
     assert.match(lockedPage.text, /<button class="btn" id="run-button" type="button" disabled>Run Now<\/button>/);
     assert.match(lockedPage.text, /already running \(PID 777\)/);
-    assert.match(lockedPage.text, /<dd id="lock-line">Held by PID 777/);
+    assert.match(lockedPage.text, /<dd id="lock-line"><span title="[^"]*">Held by PID 777/);
     assert.match(lockedPage.text, /<div id="run-progress" hidden>/, 'idle: no run details shown');
     assert.match(lockedPage.text, /<h2>Run Now<\/h2>\s*<p class="muted">Runs the full pipeline now using your Claude subscription\. Results merge into today's report\.<\/p>/);
     const refused = await hub.form('/run', { confirm: 'yes' });

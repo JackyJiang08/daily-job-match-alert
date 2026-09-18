@@ -296,14 +296,30 @@ test('the private store keeps material and letters under private/ and only serve
     await store.saveSample({ filename: 'sample one.txt', data: Buffer.from('A sample letter body that is definitely long enough to be stored as a style reference.') });
     await store.saveSample({ filename: 'sample two.pdf', data: Buffer.from('%PDF-1.4 fake') });
     await assert.rejects(store.saveSample({ filename: 'bad.pdf', data: Buffer.from('not a pdf but long enough to pass the size check for sure') }), /does not look like a PDF/);
-    await store.saveSample({ filename: 'three.txt', data: Buffer.from('Third sample letter body, long enough to be stored as a style reference too.') }, { track: 'LLM' });
+    const third = await store.saveSample({ filename: 'three.txt', data: Buffer.from('Third sample letter body, long enough to be stored as a style reference too.') }, { track: 'LLM' });
+    assert.equal(third.replaced, false);
     for (let index = 4; index <= 10; index += 1) await store.saveSample({ filename: `s${index}.txt`, data: Buffer.from(`Sample number ${index} body, long enough to be stored as a style reference too, yes.`) }, { track: index % 2 ? 'data' : 'bogus' });
     await assert.rejects(store.saveSample({ filename: 'eleven.txt', data: Buffer.from('Eleventh sample letter body, long enough to be stored as a style reference too.') }), /At most 10/);
-    const material = await store.loadMaterial();
+    let material = await store.loadMaterial();
     assert.equal(material.samples.length, 10);
     assert.match(material.samples[1].text, /Extracted sample text/);
     assert.deepEqual(material.samples.slice(0, 4).map(sample => sample.track), [null, null, 'llm', null], 'tracks are normalized; unknown tags are dropped');
     assert.equal(material.samples[4].track, 'data');
+
+    // Same file name again: replaced in place at the limit, keeping its position and track.
+    const replaced = await store.saveSample({ filename: 'three.txt', data: Buffer.from('Third sample letter body, second version, long enough to be stored as a style reference too.') });
+    assert.equal(replaced.replaced, true);
+    material = await store.loadMaterial();
+    assert.equal(material.samples.length, 10);
+    assert.equal(material.samples[2].originalName, 'three.txt');
+    assert.equal(material.samples[2].track, 'llm', 'the track survives a replacement');
+    assert.match(material.samples[2].text, /second version/);
+    assert.equal((await fs.readdir(path.join(root, 'private', 'cover-letter', 'samples'))).filter(name => name.includes('three')).length, 1, 'the old text file is gone');
+    // Inline track edits persist.
+    assert.equal((await store.setSampleTrack(material.samples[0].file, 'agent')).track, 'agent');
+    assert.equal((await store.setSampleTrack(material.samples[0].file, '')).track, null);
+    await assert.rejects(store.setSampleTrack('nope.txt', 'data'), /Unknown sample/);
+    assert.equal((await store.setSampleTrack(material.samples[1].file, 'AI Agent')).track, null, 'labels are not ids; unknown values clear the tag');
     await store.removeSample(material.samples[0].file);
     assert.equal((await store.loadMaterial()).samples.length, 9);
     const profileJson = JSON.parse(await fs.readFile(path.join(root, 'private', 'cover-letter', 'profile.json'), 'utf8'));
@@ -418,7 +434,7 @@ test('the panel disables Generate until the material exists, and Settings collec
     assert.match(panel.text, /missing: playbook, name, contact/);
     assert.match(panel.text, /data-ready="no"/);
     assert.match(panel.text, /<option value="data" selected>Data \(recommended\)<\/option><option value="llm">LLM<\/option>/);
-    assert.doesNotMatch(panel.text, /agent/i, 'disabled tracks are not offered');
+    assert.doesNotMatch(panel.text.match(/<select id="letter-track"[^>]*>[\s\S]*?<\/select>/)[0], /agent/i, 'disabled tracks are not offered');
     const refused = await hub.form('/letters/generate', { date: '2026-09-15', job: jobId, track: 'data', company: 'Acme' });
     assert.equal(refused.status, 400);
     assert.match(JSON.parse(refused.text).error, /material is incomplete/);
@@ -430,23 +446,54 @@ test('the panel disables Generate until the material exists, and Settings collec
     const saved = await hub.upload('/settings/cover-letter', PROFILE, [
       { field: 'playbook', name: 'playbook.md', data: Buffer.from(`# Playbook\n${'Real evidence line. '.repeat(10)}`) },
       { field: 'sample', name: 'sample.txt', data: Buffer.from('A sample letter body that is long enough to be stored as a style reference for the writer.') },
-    ], { sampleTrack: 'llm' });
+    ]);
     assert.equal(saved.status, 303);
-    assert.match(decodeURIComponent(saved.headers.location), /Contact block saved; playbook playbook\.md \(\d+ characters\); sample sample\.txt \(\d+ characters, llm track\)/);
+    assert.match(decodeURIComponent(saved.headers.location), /^\/settings\?notice=Contact block saved; playbook playbook\.md \(\d+ characters\); added sample sample\.txt \(\d+ characters\)#cover-letters$/, 'the notice sits before the fragment so the browser shows it');
     const after = await hub.request('GET', '/settings');
     assert.match(after.text, /data-letter-ready="yes">Ready to generate/);
     assert.match(after.text, /value="Jane Doe"/);
     assert.match(after.text, /<span class="mono">playbook\.md<\/span>/);
-    assert.match(after.text, /<span class="mono">sample\.txt<\/span><span class="badge" data-sample-track="llm">llm<\/span>/);
-    assert.match(after.text, /<select name="sampleTrack" class="control-input"><option value="">Not tagged<\/option><option value="data">Data<\/option><option value="llm">LLM<\/option><option value="agent">AI Agent<\/option><\/select>/);
+    assert.match(after.text, /<tr data-sample="[^"]+">\s*<td><span class="mono">sample\.txt<\/span><\/td>\s*<td><select name="track" class="control-input sample-track" data-file="[^"]+" aria-label="Track for sample\.txt"><option value="" selected>Not tagged<\/option><option value="data">Data<\/option><option value="llm">LLM<\/option><option value="agent">AI Agent<\/option><\/select><\/td>/);
+    assert.match(after.text, /<input type="file" name="sample" accept="[^"]+" multiple>/);
+    assert.match(after.text, /Stored privately on this Mac and never shared\./);
+    assert.doesNotMatch(after.text, /private\/cover-letter|config\.json|\{FirstLast\}/);
+    assert.match(after.text, /<legend>Contact Block<\/legend>\s*<div class="two-col">/);
     assert.match(after.text, /<legend>Cover Letters<\/legend>[\s\S]*?name="editorReview" checked> Editor review pass/);
+
+    // A second single-file upload is kept alongside the first; a multi-file upload keeps every file.
+    const profileBefore = JSON.parse(await fs.readFile(path.join(root, 'private', 'cover-letter', 'profile.json'), 'utf8'));
+    const second = await hub.upload('/settings/cover-letter', PROFILE, [{ field: 'sample', name: 'second.txt', data: Buffer.from('Second sample letter body, long enough to be stored as a style reference for the writer too.') }]);
+    assert.match(decodeURIComponent(second.headers.location), /added sample second\.txt/);
+    const multi = await hub.upload('/settings/cover-letter', PROFILE, [
+      { field: 'sample', name: 'third.txt', data: Buffer.from('Third sample letter body, long enough to be stored as a style reference for the writer too.') },
+      { field: 'sample', name: 'fourth.txt', data: Buffer.from('Fourth sample letter body, long enough to be stored as a style reference for the writer too.') },
+      { field: 'sample', name: 'second.txt', data: Buffer.from('Second sample letter body, revised, long enough to be stored as a style reference for the writer.') },
+    ]);
+    assert.match(decodeURIComponent(multi.headers.location), /added sample third\.txt .*added sample fourth\.txt .*replaced sample second\.txt/);
+    const profileAfter = JSON.parse(await fs.readFile(path.join(root, 'private', 'cover-letter', 'profile.json'), 'utf8'));
+    assert.deepEqual(profileAfter.samples.map(sample => sample.originalName), ['sample.txt', 'second.txt', 'third.txt', 'fourth.txt']);
+    assert.equal(profileBefore.samples.length, 1);
+    const tracked = await hub.form('/settings/cover-letter/sample-track', { file: profileAfter.samples[1].file, track: 'agent' });
+    assert.equal(tracked.status, 200);
+    assert.deepEqual(JSON.parse(tracked.text), { file: profileAfter.samples[1].file, track: 'agent', trackLabel: 'AI Agent' });
+    assert.equal(JSON.parse(await fs.readFile(path.join(root, 'private', 'cover-letter', 'profile.json'), 'utf8')).samples[1].track, 'agent');
+    assert.match((await hub.request('GET', '/settings')).text, /aria-label="Track for second\.txt"><option value="">Not tagged<\/option><option value="data">Data<\/option><option value="llm">LLM<\/option><option value="agent" selected>AI Agent<\/option>/);
+    assert.equal((await hub.form('/settings/cover-letter/sample-track', { file: 'ghost.txt', track: 'data' })).status, 400);
+    assert.equal((await hub.form('/settings/cover-letter/sample-track', { file: profileAfter.samples[0].file, track: 'data' }, { origin: 'http://evil.example' })).status, 403);
+    for (let index = 5; index <= 10; index += 1) await hub.upload('/settings/cover-letter', PROFILE, [{ field: 'sample', name: `s${index}.txt`, data: Buffer.from(`Sample ${index} body, long enough to be stored as a style reference for the writer too, ok.`) }]);
+    const full = (await hub.request('GET', '/settings')).text;
+    assert.match(full, /<p class="sample-limit" data-sample-limit="reached">Sample limit reached \(10\)\. Remove one to add another\.<\/p>/);
+    assert.match(full, /name="sample" accept="[^"]+" multiple disabled>/);
+    const over = await hub.upload('/settings/cover-letter', PROFILE, [{ field: 'sample', name: 'eleven.txt', data: Buffer.from('Eleventh sample letter body, long enough to be stored as a style reference for the writer.') }]);
+    assert.match(decodeURIComponent(over.headers.location), /^\/settings\?error=At most 10 sample letters are kept; remove one first#cover-letters$/);
     assert.doesNotMatch(after.text, /Real evidence line/, 'material text is never rendered');
     const profile = JSON.parse(await fs.readFile(path.join(root, 'private', 'cover-letter', 'profile.json'), 'utf8'));
     assert.equal(profile.email, 'jane.doe@example.com');
     assert.equal((await hub.request('GET', `/letters/new?date=2026-09-15&job=${jobId}`)).text.includes('id="generate-button" type="button">Generate<'), true);
     const removed = await hub.form('/settings/cover-letter/remove-sample', { file: profile.samples[0].file });
     assert.equal(removed.status, 303);
-    assert.equal(JSON.parse(await fs.readFile(path.join(root, 'private', 'cover-letter', 'profile.json'), 'utf8')).samples.length, 0);
+    assert.equal(JSON.parse(await fs.readFile(path.join(root, 'private', 'cover-letter', 'profile.json'), 'utf8')).samples.length, 9, 'one of the ten samples was removed');
+    assert.doesNotMatch((await hub.request('GET', '/settings')).text, /data-sample-limit/, 'the limit notice clears once a slot is free');
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });
@@ -513,9 +560,13 @@ test('generate → edit → save renders a PDF, records the letter, marks the ca
     assert.equal((await hub.request('GET', '/letters/2026-09-15/AcmeInc')).status, 200);
     const reopened = (await hub.request('GET', '/letters/2026-09-15/AcmeInc')).text;
     assert.match(reopened, /I edited this paragraph by hand before rendering\./);
-    assert.match(reopened, /<details class="notes" id="editor-notes"><summary>Editor notes<\/summary><ul class="issues" id="editor-notes-list"><li>Paragraph 1 lacks the GPA<\/li><\/ul><\/details>/);
-    assert.match(reopened, /Samples used: sample\.txt/);
-    assert.match(reopened, /<p class="letter-meta" id="letter-counts">\d+ words · 1 page<\/p>/);
+    assert.match(reopened, /<details class="notes" id="editor-notes"><summary>Editor Notes<\/summary><ul class="issues" id="editor-notes-list"><li>Paragraph 1 lacks the GPA<\/li><\/ul><\/details>/);
+    assert.match(reopened, /<p class="letter-foot" id="letter-foot">Samples used: sample\.txt · Engine: claude · claude-fable-5 · PDF via pdfkit<\/p>/);
+    assert.match(reopened, /<p class="letter-counts" id="letter-counts">\d+ words · 5 paragraphs · 1 page<\/p>\s*<div id="paragraphs"><div class="para-row"><span class="num">1<\/span><textarea class="para" name="paragraph" data-index="0">/);
+    assert.match(reopened, /<span>Resume Track<\/span><select id="letter-track" class="control-input">/);
+    assert.match(reopened, /<span>Company Name<\/span>/);
+    assert.match(reopened, /id="generate-button" type="button">Regenerate<\/button>/);
+    assert.doesNotMatch(reopened, /private\/|config\.json|\{FirstLast\}/);
     const toggled = await hub.form('/settings', { minimumMatchScore: '70', acceptedMatchLevels: 'high', engine: 'claude', model_claude: 'fable', hubPort: '4747', editorReviewPresent: '1' });
     assert.equal(toggled.status, 303);
     assert.equal(JSON.parse(await fs.readFile(path.join(root, 'config.json'), 'utf8')).coverLetter.editorReview, false, 'an unchecked box switches the editor pass off');
@@ -526,7 +577,10 @@ test('generate → edit → save renders a PDF, records the letter, marks the ca
     assert.equal(again.reviewed, false);
 
     const list = await hub.request('GET', '/letters');
-    assert.match(list.text, /<td>2026-09-15<\/td>\s*<td>Acme, Inc\.<\/td>\s*<td>Data Analyst<\/td>\s*<td>LLM<\/td>\s*<td>claude · claude-fable-5<\/td>\s*<td>1 page<\/td>/);
+    assert.match(list.text, /<tr><th>Date<\/th><th>Company<\/th><th>Role<\/th><th>Track<\/th><th>Engine<\/th><th>Pages<\/th><th>Actions<\/th><\/tr>/);
+    assert.match(list.text, /<td>2026-09-15<\/td>\s*<td><a href="\/letters\/2026-09-15\/AcmeInc">Acme, Inc\.<\/a><\/td>\s*<td>Data Analyst<\/td>\s*<td><span class="badge" data-track-badge="llm">LLM<\/span><\/td>\s*<td>claude · claude-fable-5<\/td>\s*<td>1<\/td>/);
+    assert.match(list.text, /Letters you generate are kept on this Mac\. Reopen one to edit or download it again\./);
+    assert.doesNotMatch(list.text, /private\/cover-letters/);
     assert.match(list.text, /href="\/letters\/2026-09-15\/AcmeInc\/JaneDoe_Cover_Letter_AcmeInc\.pdf">Download PDF<\/a>/);
     const report = await hub.request('GET', '/reports/2026-09-15');
     assert.match(report.text, /<span class="badge badge-good" data-badge="letter-ready"[^>]*>Letter ready<\/span>/);

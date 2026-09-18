@@ -11,7 +11,7 @@ import {
   readReportPayload, readSettings, saveCliPath, saveSettings, selectResumeVersion, setTrackEnabled, sidebarSummary, uploadResumePdf,
 } from './services.mjs';
 import { localDate } from '../time-format.mjs';
-import { LETTER_SCRIPT, letterPanel, lettersPage } from './letter-views.mjs';
+import { LETTER_SCRIPT, SAMPLE_TRACK_SCRIPT, letterPanel, lettersPage, trackLabelOf } from './letter-views.mjs';
 import { todayTarget } from './views.mjs';
 import { findLetterJob, generateLetter, jobIdOf, letterEngineFor, saveLetter } from './letters.mjs';
 import { LetterInputError } from '../cover-letter/store.mjs';
@@ -80,7 +80,9 @@ export function createHubHandler(ctx) {
   };
   const json = (response, status, value) => send(response, status, JSON.stringify(value), 'application/json; charset=utf-8');
   const redirect = (response, location, message = null, kind = 'notice') => {
-    const target = message ? `${location}${location.includes('?') ? '&' : '?'}${kind}=${encodeURIComponent(message)}` : location;
+    // The query string must precede any #fragment, or browsers fold the notice into the fragment.
+    const [base, fragment] = String(location).split('#');
+    const target = message ? `${base}${base.includes('?') ? '&' : '?'}${kind}=${encodeURIComponent(message)}${fragment ? `#${fragment}` : ''}` : location;
     response.writeHead(303, { location: target, 'cache-control': 'no-store' });
     response.end();
   };
@@ -143,7 +145,7 @@ export function createHubHandler(ctx) {
     const connections = ctx.connections ? await ctx.connections.status({ commands: configuredCliCommands(config) }).catch(() => null) : null;
     const timeZone = config.timeZone || 'America/Chicago';
     const readiness = await ctx.letterStore.readiness();
-    await page(response, 200, { active: 'settings', title: 'Settings', content: settingsPage({ settings, connections, timeZone, coverLetter: { profile: readiness.profile, readiness } }), script: SETTINGS_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
+    await page(response, 200, { active: 'settings', title: 'Settings', content: settingsPage({ settings, connections, timeZone, coverLetter: { profile: readiness.profile, readiness } }), script: SETTINGS_SCRIPT + SAMPLE_TRACK_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
   }
 
   // Read-only pass-through of the Desktop folder's own files: the HTML report and the workbook.
@@ -172,7 +174,7 @@ export function createHubHandler(ctx) {
   async function getLetters(url, response) {
     const config = await ctx.loadConfig();
     const letters = await ctx.letterStore.listLetters();
-    await page(response, 200, { active: 'letters', title: 'Letters', content: lettersPage({ letters, timeZone: config.timeZone || 'America/Chicago' }), notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
+    await page(response, 200, { active: 'letters', title: 'Letters', content: lettersPage({ letters }), notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
   }
 
   async function getLetterPanel(url, response, { date, jobId, existing = null }) {
@@ -254,14 +256,22 @@ export function createHubHandler(ctx) {
         const notes = ['Contact block saved'];
         const playbook = files.find(file => file.field === 'playbook' && file.data?.length);
         if (playbook) { const saved = await ctx.letterStore.savePlaybook(playbook); notes.push(`playbook ${saved.originalName} (${saved.characters} characters)`); }
-        const sample = files.find(file => file.field === 'sample' && file.data?.length);
-        if (sample) { const saved = await ctx.letterStore.saveSample(sample, { track: fields.sampleTrack || null }); notes.push(`sample ${saved.originalName} (${saved.characters} characters${saved.track ? `, ${saved.track} track` : ''})`); }
+        const samples = files.filter(file => file.field === 'sample' && file.data?.length);
+        for (const sample of samples) {
+          const saved = await ctx.letterStore.saveSample(sample);
+          notes.push(`${saved.replaced ? 'replaced' : 'added'} sample ${saved.originalName} (${saved.characters} characters)`);
+        }
         redirect(response, '/settings#cover-letters', notes.join('; '));
         return;
       }
       case '/settings/cover-letter/remove-sample': {
         await ctx.letterStore.removeSample(fields.file);
         redirect(response, '/settings#cover-letters', 'Sample removed');
+        return;
+      }
+      case '/settings/cover-letter/sample-track': {
+        const sample = await ctx.letterStore.setSampleTrack(fields.file, fields.track || null);
+        json(response, 200, { file: sample.file, track: sample.track, trackLabel: sample.track ? trackLabelOf(sample.track) : null });
         return;
       }
       case '/run': {
@@ -316,7 +326,7 @@ export function createHubHandler(ctx) {
       if (request.method === 'POST') return await handlePost(url, request, response);
       return send(response, 405, 'Method not allowed', 'text/plain; charset=utf-8');
     } catch (error) {
-      const wantsJson = url.pathname === '/run' || url.pathname === '/letters/generate' || url.pathname === '/letters/save' || url.pathname.endsWith('.json');
+      const wantsJson = url.pathname === '/run' || url.pathname === '/letters/generate' || url.pathname === '/letters/save' || url.pathname === '/settings/cover-letter/sample-track' || url.pathname.endsWith('.json');
       const status = error instanceof HubInputError || error instanceof LetterInputError ? 400 : error instanceof HubLockedError ? 409 : Number(error?.status) || 500;
       const message = status === 500 ? `Hub error: ${error?.message || error}` : String(error.message || error);
       if (status === 500) console.error(error?.stack || error);

@@ -152,7 +152,7 @@ function monthLabel(date) {
 // Dates newest first, grouped by month with sticky month headings; empty days carry data-empty so the
 // "Only days with matches" toggle can hide them (and any month left without visible days).
 export function renderDateList({ dates, selected, today }) {
-  if (!dates.length) return '<p class="muted">No report payloads under state/ yet.</p>';
+  if (!dates.length) return '<p class="muted">No reports yet.</p>';
   const items = [];
   let month = null;
   for (const item of dates) {
@@ -265,7 +265,7 @@ function trackCard(track, timeZone) {
 
 export function resumesPage({ tracksView, timeZone }) {
   const intro = tracksView.legacy
-    ? '<div class="flash error">config.json still uses the legacy resumes layout. Move to resumes.tracks (see config.example.json) to manage resumes from the hub.</div>'
+    ? '<div class="flash error">The configuration still uses the older two-resume layout. Switch it to resume tracks (the example configuration shows how) to manage resumes from the hub.</div>'
     : (tracksView.error ? `<div class="flash error">${htmlEscape(tracksView.error)}</div>` : '');
   const cards = tracksView.tracks.map(track => trackCard(track, timeZone)).join('\n');
   const add = tracksView.legacy ? '' : `<article class="card"><h2>Add Track</h2>
@@ -276,7 +276,7 @@ export function resumesPage({ tracksView, timeZone }) {
       <button class="btn" type="submit">Add Track</button>
     </form></article>`;
   return `<h1 class="hub-title">Resumes</h1>
-  <p class="hub-sub">One PDF per resume track; upload a new version here and tonight's run scores against it.</p>
+  <p class="hub-sub">One PDF per resume track; upload a new version here and tonight's run scores against it. Files stay on this Mac.</p>
   ${intro}${cards}${add}`;
 }
 
@@ -294,7 +294,7 @@ export function statusPage({ status, timeZone }) {
   const { lastRun, nextRun, lock, runNow, run } = status;
   const at = value => htmlEscape(formatLocalDateTime(value, timeZone));
   const lockLine = lock.locked
-    ? `Held by PID ${lock.pid} <span class="muted mono">${htmlEscape(lock.path)}</span>`
+    ? `<span title="${htmlEscape(lock.path)}">Held by PID ${lock.pid}</span>`
     : (lock.stale ? `Stale lock from PID ${lock.pid ?? '?'}; the next run clears it` : 'Free');
   const errors = status.errors.length
     ? `<table class="plain"><tr><th>File</th><th>Written</th></tr>${status.errors.map(item => `<tr><td><a href="/status/error/${htmlEscape(item.name)}" title="${htmlEscape(item.path)}">${htmlEscape(item.name)}</a></td><td>${at(item.modifiedAt)}</td></tr>`).join('')}</table>`
@@ -432,7 +432,7 @@ export function settingsPage({ settings, connections = null, timeZone, coverLett
       <div class="field"><label class="check"><input type="checkbox" name="editorReview"${settings.editorReview ? ' checked' : ''}> Editor review pass (a second call to the same engine checks structure, evidence numbers, and tone before you see the draft)</label></div>
     </fieldset>
     <fieldset class="group"><legend>Hub</legend>
-      <label class="field"><span>Port (takes effect after <code>npm run hub:restart</code>)</span><input type="number" name="hubPort" min="1024" max="65535" step="1" value="${Number(settings.hubPort)}" required></label>
+      <label class="field"><span>Port (takes effect after the hub restarts)</span><input type="number" name="hubPort" min="1024" max="65535" step="1" value="${Number(settings.hubPort)}" required></label>
     </fieldset>
     <button class="btn" type="submit">Save</button>
     <p class="form-foot">Changes apply to the next run.</p>
