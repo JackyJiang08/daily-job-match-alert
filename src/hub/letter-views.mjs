@@ -30,10 +30,18 @@ details.notes{margin:var(--space-2) 0 0;font-size:var(--fs-meta)}
 details.notes>summary{cursor:pointer;color:var(--ink-2);font-weight:600}
 .two-col{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 var(--space-4)}
 .two-col .field input{min-width:0;width:100%}
-table.samples{border-collapse:collapse;width:100%;font-size:var(--fs-body);margin:0 0 var(--space-3)}
-table.samples td{padding:6px var(--space-2) 6px 0;border-bottom:1px solid var(--line);vertical-align:middle}
-table.samples td.meta{font-size:var(--fs-meta);color:var(--ink-3);white-space:nowrap}
-table.samples select{min-width:140px}
+.table-scroll{overflow-x:auto;margin:0 0 var(--space-3)}
+table.material{border-collapse:collapse;width:100%;min-width:800px;table-layout:fixed;font-size:var(--fs-body)}
+table.material td{padding:6px var(--space-2) 6px 0;border-bottom:1px solid var(--line);vertical-align:middle;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;height:46px}
+table.material td.meta{font-size:var(--fs-meta);color:var(--ink-3)}
+table.material td.actions{text-align:right;padding-right:0}
+table.material .c-track{width:160px}table.material .c-chars{width:120px}table.material .c-time{width:170px}table.material .c-actions{width:190px}
+table.material select{min-width:0;width:100%;max-width:150px}
+table.material .file{vertical-align:middle}
+table.material .file .file-name{max-width:100px}
+.upload-row{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2) var(--space-4)}
+.upload-row .track-for{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-meta);color:var(--ink-3)}
+.upload-row .track-for select{min-width:140px}
 .sample-limit{font-size:var(--fs-meta);color:var(--warn-ink);margin:0 0 var(--space-2)}
 @media (max-width:760px){.two-col{grid-template-columns:1fr}.letter-head{grid-template-columns:1fr}.letter-controls{min-width:0}}
 `;
@@ -53,20 +61,44 @@ function trackOptions(current) {
 
 // ---------------------------------------------------------------------------------------------- settings
 
-export function coverLetterSettingsSection({ profile, readiness, timeZone }) {
-  const playbook = profile.playbook?.file
-    ? `<span class="mono">${htmlEscape(profile.playbook.originalName || profile.playbook.file)}</span> · ${Number(profile.playbook.characters || 0).toLocaleString('en-US')} characters · uploaded ${readable(profile.playbook.uploadedAt, timeZone)}`
-    : '<span class="muted">No playbook yet</span>';
-  const samples = profile.samples || [];
-  const rows = samples.length
-    ? `<table class="samples" id="sample-rows">${samples.map(sample => `<tr data-sample="${htmlEscape(sample.file)}">
+const MATERIAL_COLUMNS = '<colgroup><col class="c-name"><col class="c-track"><col class="c-chars"><col class="c-time"><col class="c-actions"></colgroup>';
+
+function fileChooser(name, accept, label, { multiple = false, disabled = false, empty = '' } = {}) {
+  return `<label class="file"><input type="file" name="${name}" accept="${accept}"${multiple ? ' multiple' : ''}${disabled ? ' disabled' : ''}><span class="btn secondary${multiple ? '' : ' small'}">${label}</span><span class="file-name">${empty}</span></label>`;
+}
+
+// The playbook and every sample share one row layout: name · track · characters · uploaded · actions.
+// Remove buttons post to their own route through formaction, so the section stays one form.
+function playbookRow(profile, timeZone) {
+  const playbook = profile.playbook;
+  if (!playbook?.file) {
+    return `<div class="table-scroll"><table class="material" id="playbook-row">${MATERIAL_COLUMNS}<tr data-playbook="none">
+      <td colspan="4"><span class="muted">No playbook yet. Upload your writing rules and evidence library as a .md or .txt file.</span></td>
+      <td class="actions">${fileChooser('playbook', '.md,.txt,text/markdown,text/plain', 'Choose Playbook…')}</td>
+    </tr></table></div>`;
+  }
+  return `<div class="table-scroll"><table class="material" id="playbook-row">${MATERIAL_COLUMNS}<tr data-playbook="${htmlEscape(playbook.file)}">
+      <td><span class="mono">${htmlEscape(playbook.originalName || playbook.file)}</span></td>
+      <td class="meta"></td>
+      <td class="meta">${Number(playbook.characters || 0).toLocaleString('en-US')} characters</td>
+      <td class="meta">${readable(playbook.uploadedAt, timeZone)}</td>
+      <td class="actions">${fileChooser('playbook', '.md,.txt,text/markdown,text/plain', 'Replace')} <button class="btn secondary small" type="submit" formaction="/settings/cover-letter/remove-playbook" formnovalidate>Remove</button></td>
+    </tr></table></div>`;
+}
+
+function sampleRows(samples, timeZone) {
+  if (!samples.length) return '<p class="muted">No sample letters yet (optional). The three closest to the chosen track go into each letter.</p>';
+  return `<div class="table-scroll"><table class="material" id="sample-rows">${MATERIAL_COLUMNS}${samples.map(sample => `<tr data-sample="${htmlEscape(sample.file)}">
       <td><span class="mono">${htmlEscape(sample.originalName || sample.file)}</span></td>
       <td><select name="track" class="control-input sample-track" data-file="${htmlEscape(sample.file)}" aria-label="Track for ${htmlEscape(sample.originalName || sample.file)}">${trackOptions(sample.track)}</select></td>
       <td class="meta">${Number(sample.characters || 0).toLocaleString('en-US')} characters</td>
       <td class="meta">${readable(sample.uploadedAt, timeZone)}</td>
-      <td><form class="inline" method="post" action="/settings/cover-letter/remove-sample"><input type="hidden" name="file" value="${htmlEscape(sample.file)}"><button class="btn secondary small" type="submit">Remove</button></form></td>
-    </tr>`).join('')}</table>`
-    : '<p class="muted">No sample letters yet (optional). The three closest to the chosen track go into each letter.</p>';
+      <td class="actions"><button class="btn secondary small" type="submit" name="file" value="${htmlEscape(sample.file)}" formaction="/settings/cover-letter/remove-sample" formnovalidate>Remove</button></td>
+    </tr>`).join('')}</table></div>`;
+}
+
+export function coverLetterSettingsSection({ profile, readiness, timeZone }) {
+  const samples = profile.samples || [];
   const atLimit = samples.length >= MAX_SAMPLE_COUNT;
   const state = readiness.ready
     ? '<span class="badge badge-good" data-letter-ready="yes">Ready to generate</span>'
@@ -83,14 +115,17 @@ export function coverLetterSettingsSection({ profile, readiness, timeZone }) {
       </div>
     </fieldset>
     <fieldset class="group"><legend>Playbook</legend>
-      <p class="letter-foot" style="margin:0 0 var(--space-2)">${playbook}</p>
-      <div class="field"><label class="file"><input type="file" name="playbook" accept=".md,.txt,text/markdown,text/plain"><span class="btn secondary">Choose Playbook…</span><span class="file-name">No file chosen</span></label></div>
+      <p class="muted" style="margin:0 0 var(--space-2)">Your writing rules and evidence library; Replace swaps the whole file.</p>
+      ${playbookRow(profile, timeZone)}
     </fieldset>
     <fieldset class="group"><legend>Sample Letters</legend>
       <p class="muted" style="margin:0 0 var(--space-2)">Style references only; up to ${MAX_SAMPLE_COUNT}. Change a sample's track here and it saves at once. Uploading a file with the same name replaces the old version.</p>
-      ${rows}
+      ${sampleRows(samples, timeZone)}
       ${atLimit ? `<p class="sample-limit" data-sample-limit="reached">Sample limit reached (${MAX_SAMPLE_COUNT}). Remove one to add another.</p>` : ''}
-      <div class="field"><label class="file"><input type="file" name="sample" accept=".pdf,.txt,application/pdf,text/plain" multiple${atLimit ? ' disabled' : ''}><span class="btn secondary">Choose Samples…</span><span class="file-name">No files chosen</span></label></div>
+      <div class="upload-row">
+        ${fileChooser('sample', '.pdf,.txt,application/pdf,text/plain', 'Choose Samples…', { multiple: true, disabled: atLimit, empty: 'No files chosen' })}
+        <label class="track-for"><span>Track for these files</span><select name="sampleTrack" class="control-input" aria-label="Track for these files">${trackOptions('')}</select></label>
+      </div>
     </fieldset>
     <button class="btn" type="submit">Save Cover Letter Material</button>
   </form></article>`;

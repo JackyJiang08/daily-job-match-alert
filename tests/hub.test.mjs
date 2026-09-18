@@ -11,9 +11,9 @@ import test from 'node:test';
 import { createHubContext, createHubServer } from '../src/hub/server.mjs';
 import { detectIndent } from '../src/hub/config-file.mjs';
 import { parseMultipart } from '../src/hub/multipart.mjs';
-import { nextScheduledRun, validateSettings } from '../src/hub/services.mjs';
+import { nextScheduledRun, previousScheduledRun, validateSettings } from '../src/hub/services.mjs';
 import { hostIsLocal, originIsLocal } from '../src/hub/routes.mjs';
-import { formatDateLabel, formatLocalDateTime, formatLocalShort, localDate } from '../src/time-format.mjs';
+import { formatDateLabel, formatLocalDateTime, formatLocalShort, formatRelativeTime, localDate } from '../src/time-format.mjs';
 import { createConnectionsProbe } from '../src/hub/connections.mjs';
 
 const NOW = '2026-08-27T12:00:00Z';
@@ -147,7 +147,7 @@ test('Reports lists dates newest first with counts, titles the report by date, a
     assert.match(list.text, /<title>Report 2026-08-27 — Daily Job Match Alert Hub<\/title>/);
     assert.match(list.text, /<p class="brand">Job Match Hub<\/p>/);
     assert.match(list.text, /<div class="datetools"><a class="today-link" href="\/reports\/2026-08-27" id="today-link" title="Today's report \(2026-08-27\)">Today<\/a><label><input type="checkbox" id="only-matches"> Only days with matches<\/label><\/div>/);
-    assert.match(list.text, /<ul class="datelist" id="datelist"><li class="month" data-month="2026-08">August 2026<\/li><li data-month="2026-08"><a href="\/reports\/2026-08-27" class="active today" title="2026-08-27 \(today\)"><span>Thu, Aug 27<\/span><span class="n">1 match<\/span><span class="tag" data-tag="today">Today<\/span><\/a><\/li><li data-month="2026-08" data-empty="1"><a href="\/reports\/2026-08-26" class="quiet" title="2026-08-26"><span>Wed, Aug 26<\/span><span class="n">0 matches<\/span><\/a><\/li><\/ul>/);
+    assert.match(list.text, /<ul class="datelist" id="datelist"><li class="month" data-month="2026-08" data-current="1">August 2026<\/li><li data-month="2026-08"><a href="\/reports\/2026-08-27" class="active today" title="2026-08-27 \(today\)"><span>Thu, Aug 27<\/span><span class="n">1 match<\/span><span class="tag" data-tag="today">Today<\/span><\/a><\/li><li data-month="2026-08" data-empty="1"><a href="\/reports\/2026-08-26" class="quiet" title="2026-08-26"><span>Wed, Aug 26<\/span><span class="n">0 matches<\/span><\/a><\/li><\/ul>/);
     assert.match(list.text, /localStorage\.getItem\(key\)/, 'the toggle remembers itself');
     assert.doesNotMatch(list.text, /<h1 class="hub-title">Reports<\/h1>/, 'no page heading above the report');
     assert.match(list.text, /<header class="masthead"><h1>August 27, 2026<\/h1><p class="sub">1 match · Ran Aug 26, 8:00 PM<\/p><\/header>/);
@@ -158,7 +158,7 @@ test('Reports lists dates newest first with counts, titles the report by date, a
     assert.match(list.text, /<article class="job"/);
     assert.match(list.text, /<form class="toolbar/);
     assert.match(list.text, /<dt>Trigger<\/dt><dd>scheduled<\/dd>/);
-    assert.match(list.text, /<div class="mini"><b>Last run<\/b><span class="ok">✓<\/span> Aug 26, 2026, 8:00 PM<b>Next run<\/b>Aug 27, 2026, 8:00 PM<\/div>/);
+    assert.match(list.text, /<div class="mini"><b>Last run<\/b><span class="ok">✓<\/span> Aug 26, 8:00 PM<b>Next run<\/b><span id="next-run" data-at="2026-08-28T01:00:00\.000Z">Aug 27, 8:00 PM · <span class="rel">in 13h<\/span><\/span><\/div>/);
     assert.doesNotMatch(list.text, /\bUTC\b/);
     assert.match(list.text, /<a href="\/reports" class="active">Reports<\/a>/);
     const day = await hub.request('GET', '/reports/2026-08-26');
@@ -182,7 +182,7 @@ test('Reports reads payloads from disk on every request and normalizes locations
   const hub = await startHub(root);
   try {
     const before = await hub.request('GET', '/reports');
-    assert.doesNotMatch(before.text, /2026-08-28/);
+    assert.doesNotMatch(before.text, /reports\/2026-08-28/);
     const file = path.join(root, 'state', 'report-payload-2026-08-28.json');
     const raw = JSON.stringify({ meta: payloadMeta('2026-08-28', { matchCount: 1, trigger: 'manual' }), matches: [job({ location: 'Boston, MA Johnston, RI Columbus, OH', title: 'Multi Site Analyst' })], reviewed: [], complete: true });
     await fs.writeFile(file, raw);
@@ -194,7 +194,7 @@ test('Reports reads payloads from disk on every request and normalizes locations
     const sept = path.join(root, 'state', 'report-payload-2026-09-02.json');
     await fs.writeFile(sept, JSON.stringify({ meta: payloadMeta('2026-09-02', { matchCount: 2 }), matches: [job(), job({ url: 'https://example.com/jobs/9' })], reviewed: [], complete: true }));
     const grouped = await hub.request('GET', '/reports/2026-08-27');
-    assert.match(grouped.text, /<li class="month" data-month="2026-09">September 2026<\/li><li data-month="2026-09"><a href="\/reports\/2026-09-02"[^>]*><span>Wed, Sep 2<\/span><span class="n">2 matches<\/span><span class="tag" data-tag="tomorrow">Tomorrow<\/span><\/a><\/li><li class="month" data-month="2026-08">August 2026<\/li>/, 'months are grouped newest first');
+    assert.match(grouped.text, /<li class="month" data-month="2026-09"><button type="button" class="month-toggle" aria-expanded="true">September 2026<\/button><\/li><li data-month="2026-09"><a href="\/reports\/2026-09-02"[^>]*><span>Wed, Sep 2<\/span><span class="n">2 matches<\/span><span class="tag" data-tag="tomorrow">Tomorrow<\/span><\/a><\/li><li class="month" data-month="2026-08" data-current="1">August 2026<\/li>/, 'months are grouped newest first');
     assert.match(grouped.text, /<a class="today-link" href="\/reports\/2026-08-27" id="today-link" title="Today's report \(2026-08-27\)">Today<\/a>/, 'Today keeps pointing at the calendar day even when newer reports exist');
     assert.match(grouped.text, /<a href="\/reports\/2026-09-02"[^>]*title="2026-09-02 \(after today\)"><span>Wed, Sep 2<\/span><span class="n">2 matches<\/span><span class="tag" data-tag="tomorrow">Tomorrow<\/span><\/a>/, 'dates after today are tagged Tomorrow');
     assert.match((await hub.request('GET', '/reports')).text, /<a href="\/reports\/2026-08-27" class="active today"/, 'the default selection is calendar today, not the newest report');
@@ -225,6 +225,44 @@ test('without a report for today the list opens the newest one and the shortcut 
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });
   }
+});
+
+test('earlier months start collapsed with a toggle, the current and later months stay open, and the selected date opens its month', async () => {
+  const root = await prepareProject();
+  await fs.writeFile(path.join(root, 'state', 'report-payload-2026-07-15.json'), JSON.stringify({ meta: payloadMeta('2026-07-15', { matchCount: 2 }), matches: [job(), job({ url: 'https://example.com/jobs/2' })], reviewed: [], complete: true }));
+  await fs.writeFile(path.join(root, 'state', 'report-payload-2026-09-02.json'), JSON.stringify({ meta: payloadMeta('2026-09-02', { matchCount: 1 }), matches: [job()], reviewed: [], complete: true }));
+  const hub = await startHub(root);
+  try {
+    const list = await hub.request('GET', '/reports');
+    assert.match(list.text, /<div class="datetools"><a class="today-link" href="\/reports\/2026-08-27" id="today-link"[^>]*>Today<\/a><label><input type="checkbox" id="only-matches"> Only days with matches<\/label><\/div>/, 'the shortcut and the toggle share one row');
+    assert.match(list.text, /<li class="month" data-month="2026-09"><button type="button" class="month-toggle" aria-expanded="true">September 2026<\/button><\/li><li data-month="2026-09"><a href="\/reports\/2026-09-02"/, 'a later month (the tomorrow report) starts open');
+    assert.match(list.text, /<li class="month" data-month="2026-08" data-current="1">August 2026<\/li><li data-month="2026-08"><a href="\/reports\/2026-08-27" class="active today"/, 'the current month has no toggle');
+    assert.match(list.text, /<li class="month" data-month="2026-07" data-collapsed="1"><button type="button" class="month-toggle" aria-expanded="false">July 2026<\/button><\/li><li data-month="2026-07" hidden><a href="\/reports\/2026-07-15"/, 'an earlier month starts collapsed with its days hidden');
+    assert.match(list.text, /hub\.reports\.months/, 'the page script remembers month state in localStorage');
+    const july = await hub.request('GET', '/reports/2026-07-15');
+    assert.match(july.text, /<li class="month" data-month="2026-07"><button type="button" class="month-toggle" aria-expanded="true">July 2026<\/button><\/li><li data-month="2026-07"><a href="\/reports\/2026-07-15" class="active"/, 'the month holding the selected date opens');
+    assert.match(july.text, /<li class="month" data-month="2026-08" data-current="1">August 2026<\/li><li data-month="2026-08"><a href="\/reports\/2026-08-27" class="today"/);
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('relative run times read "in 3h 20m", switch to "due now" and then "overdue" once the slot has passed', () => {
+  const now = new Date('2026-09-18T21:40:00Z');
+  assert.equal(formatRelativeTime('2026-09-19T01:00:00Z', now), 'in 3h 20m');
+  assert.equal(formatRelativeTime('2026-09-18T22:25:00Z', now), 'in 45m');
+  assert.equal(formatRelativeTime('2026-09-18T21:40:30Z', now), 'in 1m');
+  assert.equal(formatRelativeTime('2026-09-19T00:40:00Z', now), 'in 3h');
+  assert.equal(formatRelativeTime('2026-09-21T01:40:00Z', now), 'in 2d 4h');
+  assert.equal(formatRelativeTime('2026-09-18T21:40:00Z', now), 'due now');
+  assert.equal(formatRelativeTime('2026-09-18T21:20:00Z', now), 'due now');
+  assert.equal(formatRelativeTime('2026-09-18T21:10:00Z', now), 'overdue');
+  assert.equal(formatRelativeTime('2026-09-01T00:00:00Z', now), 'overdue');
+  assert.equal(formatRelativeTime(null, now), '');
+  assert.equal(previousScheduledRun(new Date('2026-08-27T12:00:00Z'), 'America/Chicago', 20, 0).toISOString(), '2026-08-27T01:00:00.000Z', 'the most recent 8 PM Chicago slot');
+  assert.equal(previousScheduledRun(new Date('2026-08-27T12:00:00Z'), 'America/Chicago', 6, 30).toISOString(), '2026-08-27T11:30:00.000Z');
+  assert.equal(nextScheduledRun(new Date('2026-08-27T12:00:00Z'), 'America/Chicago', 6, 30).toISOString(), '2026-08-28T11:30:00.000Z');
 });
 
 test('uploading a PDF stores it under private/resumes, repoints only that track, and keeps five versions', async () => {
@@ -488,7 +526,7 @@ test('Status merges runs into one card, formats every time in the configured zon
     const installed = await hub.request('GET', '/status');
     assert.match(installed.text, /<dt>Next run<\/dt><dd>Aug 28, 2026, 6:30 AM<\/dd>/);
     assert.doesNotMatch(installed.text, /LaunchAgent not installed/);
-    assert.match(installed.text, /<b>Next run<\/b>Aug 28, 2026, 6:30 AM<\/div>/, 'the sidebar follows the installed schedule');
+    assert.match(installed.text, /<b>Next run<\/b><span id="next-run" data-at="2026-08-27T11:30:00\.000Z">Aug 27, 6:30 AM · <span class="rel overdue">overdue<\/span><\/span><\/div>/, 'the 6:30 slot passed 30 minutes ago with no run since, so the sidebar flags it instead of pointing at tomorrow');
 
     assert.equal(nextScheduledRun(new Date('2026-08-27T12:00:00Z'), 'America/Chicago', 20, 0).toISOString(), '2026-08-28T01:00:00.000Z');
     assert.equal(nextScheduledRun(new Date('2026-08-27T01:30:00Z'), 'America/Chicago', 20, 0).toISOString(), '2026-08-28T01:00:00.000Z', 'after 20:00 local the next slot is tomorrow');
@@ -557,7 +595,7 @@ test('Settings offers an engine choice with a model dropdown per engine, a custo
     const after = await hub.request('GET', '/settings');
     assert.match(after.text, /<input type="radio" name="engine" value="codex" checked data-connected="no">/);
     assert.match(after.text, /<div class="model-group" data-engine="claude" hidden>/);
-    assert.match(after.text, /<div class="model-group" data-engine="codex">\s*<label class="field"><span>Scoring Model<\/span><select name="model_codex" class="model-select control-input"><option value="gpt-5\.6-sol">gpt-5\.6-sol \(Codex default\)<\/option><option value="__custom__" selected>Custom…<\/option><\/select><\/label>\s*<label class="field model-custom"><span>Custom model name<\/span><input type="text" name="modelCustom_codex" value="gpt-5\.5-mini"/);
+    assert.match(after.text, /<div class="model-group" data-engine="codex">\s*<label class="field"><span>Scoring Model<\/span><select name="model_codex" class="model-select control-input"><option value="gpt-5\.6-sol">gpt-5\.6-sol \(Codex default\)<\/option><option value="__custom__" selected>Custom…<\/option><\/select><\/label>\s*<label class="field model-custom"><span>Custom model name<\/span><input type="text" name="modelCustom_codex" class="control-input" value="gpt-5\.5-mini"/);
     assert.match(after.text, /<select name="model_claude" class="model-select control-input"><option value="fable" selected>/, 'the Claude choice was not written, so it keeps its default');
 
     const back = await hub.form('/settings', { minimumMatchScore: '70', acceptedMatchLevels: 'high', engine: 'claude', model_claude: 'sonnet', model_codex: 'gpt-5.6-sol', hubPort: '4747' });
@@ -596,7 +634,7 @@ test('Connections shows the resolved CLI path, a not-found message with the inst
   });
   try {
     const page = await hub.request('GET', '/settings');
-    assert.match(page.text, /<dt>Claude<\/dt><dd><span class="badge badge-good" data-conn="connected">Connected<\/span> Claude · Max · claude\.ai<br><span class="muted mono" title="\/usr\/bin\/claude\n\/Users\/me\/\.local\/bin\/claude">\/Users\/me\/\.local\/bin\/claude<\/span> <form class="inline" method="post" action="\/settings\/cli-path"><input type="hidden" name="engine" value="claude"><input type="hidden" name="path" value="\/Users\/me\/\.local\/bin\/claude"><button class="btn secondary small" type="submit">Save this path to config<\/button><\/form><\/dd>/);
+    assert.match(page.text, /<dt>Claude<\/dt><dd><span class="badge badge-good" data-conn="connected">Connected<\/span> Claude · Max · claude\.ai<br><span class="muted mono" title="\/usr\/bin\/claude\n\/Users\/me\/\.local\/bin\/claude">\/Users\/me\/\.local\/bin\/claude<\/span> <form class="inline" method="post" action="\/settings\/cli-path"><input type="hidden" name="engine" value="claude"><input type="hidden" name="path" value="\/Users\/me\/\.local\/bin\/claude"><button class="btn secondary small" type="submit">Save This Path to Config<\/button><\/form><\/dd>/);
     assert.match(page.text, /<dt>Codex<\/dt><dd><span class="badge badge-muted" data-conn="missing">Not found on this Mac<\/span> <span class="muted">Install with <code>npm i -g @openai\/codex<\/code>; config points at <code>\/nowhere\/codex<\/code><\/span><br><span class="muted" title="[^"]*">Searched PATH, ~\/\.local\/bin, \/opt\/homebrew\/bin, \/usr\/local\/bin, ~\/\.npm-global\/bin, and nvm\.<\/span><\/dd>/);
     assert.doesNotMatch(page.text, /Not installed/);
     assert.match(page.text, /value="codex" data-connected="no"> ChatGPT subscription via Codex <span class="badge badge-muted" data-engine-state="missing">Not found<\/span>/);

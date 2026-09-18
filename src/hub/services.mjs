@@ -7,7 +7,7 @@ import { enabledResumeTracks, normalizeResumeConfig } from '../config.mjs';
 import { TRACK_ID_PATTERN, defaultTrackLabel } from '../resume-tracks.mjs';
 import { REPORT_TITLE } from '../report.mjs';
 import { resolveFrom } from '../utils.mjs';
-import { localDate } from '../time-format.mjs';
+import { OVERDUE_GRACE_MS, localDate } from '../time-format.mjs';
 import { ENGINE_DEFAULT_MODELS, ENGINE_IDS, ENGINE_LABELS, normalizeEngineId, resolveModel } from '../engines/index.mjs';
 import { readConfigFile, updateConfigFile } from './config-file.mjs';
 import { readLockStatus } from './run.mjs';
@@ -280,16 +280,32 @@ function tzOffsetMinutes(date, timeZone) {
   return Math.round((asUtc - date.getTime()) / 60_000);
 }
 
+// Wall-clock hour:minute in the given zone on the day of `now` shifted by `dayOffset` days.
+function scheduledInstant(now, zone, hour, minute, dayOffset) {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now);
+  const value = type => Number(parts.find(part => part.type === type)?.value || 0);
+  const guess = Date.UTC(value('year'), value('month') - 1, value('day') + dayOffset, Number(hour), Number(minute));
+  let instant = guess - tzOffsetMinutes(new Date(guess), zone) * 60_000;
+  instant = guess - tzOffsetMinutes(new Date(instant), zone) * 60_000;
+  return instant;
+}
+
 // Next wall-clock occurrence of hour:minute in the given zone strictly after `now`.
 export function nextScheduledRun(now, timeZone, hour = 20, minute = 0) {
   const zone = timeZone || 'America/Chicago';
-  const parts = new Intl.DateTimeFormat('en-US', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now);
-  const value = type => Number(parts.find(part => part.type === type)?.value || 0);
   for (let offset = 0; offset <= 2; offset += 1) {
-    const guess = Date.UTC(value('year'), value('month') - 1, value('day') + offset, Number(hour), Number(minute));
-    let instant = guess - tzOffsetMinutes(new Date(guess), zone) * 60_000;
-    instant = guess - tzOffsetMinutes(new Date(instant), zone) * 60_000;
+    const instant = scheduledInstant(now, zone, hour, minute, offset);
     if (instant > now.getTime()) return new Date(instant);
+  }
+  return null;
+}
+
+// Most recent occurrence at or before `now`: the run that should already have happened.
+export function previousScheduledRun(now, timeZone, hour = 20, minute = 0) {
+  const zone = timeZone || 'America/Chicago';
+  for (let offset = 0; offset >= -2; offset -= 1) {
+    const instant = scheduledInstant(now, zone, hour, minute, offset);
+    if (instant <= now.getTime()) return new Date(instant);
   }
   return null;
 }
@@ -305,16 +321,25 @@ async function installedSchedule(ctx) {
   return { hour: 20, minute: 0, installed: false, path: plist };
 }
 
-// Small summary for the sidebar of every page: last run time and result, next run time.
+// Small summary for the sidebar of every page: last run time and result, next run time. When the most
+// recent scheduled time passed (plus a grace period) without a completed run, the sidebar shows that
+// missed time as overdue instead of the following occurrence.
 export async function sidebarSummary(ctx, config) {
   const dates = await listReportDates(ctx);
   const latest = dates[0] ? await readReportPayload(ctx, dates[0]) : null;
   const schedule = await installedSchedule(ctx);
-  const next = nextScheduledRun(ctx.now(), config.timeZone || 'America/Chicago', schedule.hour, schedule.minute);
+  const now = ctx.now();
+  const timeZone = config.timeZone || 'America/Chicago';
+  const next = nextScheduledRun(now, timeZone, schedule.hour, schedule.minute);
+  const previous = previousScheduledRun(now, timeZone, schedule.hour, schedule.minute);
+  const lastRunAt = latest?.meta?.completedAt || latest?.meta?.lastUpdatedAt || latest?.meta?.generatedAt || null;
+  const lastRunTime = lastRunAt ? new Date(lastRunAt).getTime() : NaN;
+  const overdue = Boolean(previous) && now.getTime() - previous.getTime() >= OVERDUE_GRACE_MS && (Number.isNaN(lastRunTime) || lastRunTime < previous.getTime());
   return {
-    lastRunAt: latest?.meta?.completedAt || latest?.meta?.lastUpdatedAt || latest?.meta?.generatedAt || null,
+    lastRunAt,
     lastResult: latest ? (latest.complete === true ? 'success' : 'incomplete') : null,
-    nextRunAt: next ? next.toISOString() : null,
+    nextRunAt: overdue ? previous.toISOString() : (next ? next.toISOString() : null),
+    overdue,
   };
 }
 

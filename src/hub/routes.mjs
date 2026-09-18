@@ -91,7 +91,7 @@ export function createHubHandler(ctx) {
     const config = await ctx.loadConfig().catch(() => ({}));
     const timeZone = config.timeZone || 'America/Chicago';
     const sidebar = await sidebarSummary(ctx, config).catch(() => null);
-    send(response, status, renderHubPage({ port: ctx.port, timeZone, sidebar, ...options }));
+    send(response, status, renderHubPage({ port: ctx.port, timeZone, sidebar, now: ctx.now(), ...options }));
   };
 
   async function getReports(url, response) {
@@ -114,9 +114,11 @@ export function createHubHandler(ctx) {
       const decorate = job => {
         const id = jobIdOf(job);
         const letter = lettersByJob.get(id);
+        // A saved letter gets Open Letter plus a direct PDF download; the PDF link exists only once rendered.
+        const download = letter?.pdf && letter.pdfFileName ? [{ href: `/letters/${letter.date}/${letter.slug}/${encodeURIComponent(letter.pdfFileName)}`, label: 'Download PDF' }] : [];
         return {
           actions: letter
-            ? [{ href: `/letters/${letter.date}/${letter.slug}`, label: 'Open Letter' }]
+            ? [{ href: `/letters/${letter.date}/${letter.slug}`, label: 'Open Letter' }, ...download]
             : [{ href: `/letters/new?date=${selected}&job=${id}`, label: 'Generate Cover Letter' }],
           badges: letter ? [{ key: 'letter-ready', label: 'Letter ready', tone: 'good', title: `Cover letter saved ${letter.savedAt || ''}` }] : [],
         };
@@ -256,12 +258,18 @@ export function createHubHandler(ctx) {
         const notes = ['Contact block saved'];
         const playbook = files.find(file => file.field === 'playbook' && file.data?.length);
         if (playbook) { const saved = await ctx.letterStore.savePlaybook(playbook); notes.push(`playbook ${saved.originalName} (${saved.characters} characters)`); }
+        // Every file chosen in this batch gets the "Track for these files" tag; rows can be retagged later.
         const samples = files.filter(file => file.field === 'sample' && file.data?.length);
         for (const sample of samples) {
-          const saved = await ctx.letterStore.saveSample(sample);
-          notes.push(`${saved.replaced ? 'replaced' : 'added'} sample ${saved.originalName} (${saved.characters} characters)`);
+          const saved = await ctx.letterStore.saveSample(sample, { track: fields.sampleTrack || null });
+          notes.push(`${saved.replaced ? 'replaced' : 'added'} sample ${saved.originalName}${saved.track ? ` as ${trackLabelOf(saved.track)}` : ''} (${saved.characters} characters)`);
         }
         redirect(response, '/settings#cover-letters', notes.join('; '));
+        return;
+      }
+      case '/settings/cover-letter/remove-playbook': {
+        await ctx.letterStore.removePlaybook();
+        redirect(response, '/settings#cover-letters', 'Playbook removed');
         return;
       }
       case '/settings/cover-letter/remove-sample': {

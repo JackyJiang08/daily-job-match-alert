@@ -78,6 +78,14 @@ export function createLetterStore({ root, io = fs, now = () => new Date(), extra
     return profile.playbook;
   }
 
+  async function removePlaybook() {
+    const profile = await readProfile();
+    for (const stale of ['playbook.md', 'playbook.txt']) await io.rm(path.join(materialDirectory, stale), { force: true }).catch(() => {});
+    profile.playbook = null;
+    await writeJson(profilePath, profile);
+    return profile;
+  }
+
   function normalizeTrack(track) {
     return SAMPLE_TRACKS.includes(String(track || '').toLowerCase()) ? String(track).toLowerCase() : null;
   }
@@ -224,7 +232,7 @@ export function createLetterStore({ root, io = fs, now = () => new Date(), extra
 
   return {
     materialDirectory, lettersDirectory, profilePath,
-    readProfile, readiness, saveProfileFields, savePlaybook, saveSample, setSampleTrack, removeSample, loadMaterial,
+    readProfile, readiness, saveProfileFields, savePlaybook, removePlaybook, saveSample, setSampleTrack, removeSample, loadMaterial,
     saveLetter, loadLetter, listLetters, resolveDownload, lettersByJob,
     fileNameFor: (template, profile, company) => letterFileName(template || DEFAULT_FILE_NAME_TEMPLATE, { name: profile.name, company }),
   };

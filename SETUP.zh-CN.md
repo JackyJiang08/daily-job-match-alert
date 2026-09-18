@@ -100,7 +100,7 @@ LLM batch 失败会在 10 秒后重试一次。`unreviewed` 岗位只有本地�
 
 `semanticMatching.engine` 选择评分用的订阅 CLI：`claude`（默认，Claude Code 以 claude.ai 订阅登录）或 `codex`（OpenAI Codex CLI 以 ChatGPT 账号登录）。两者都以本机子进程运行，启动前统一删除 `ANTHROPIC_*`、`AWS_*`、`OPENAI_*` 环境变量，因此都不可能走 API key 或网关。各引擎的模型写在 `semanticMatching.models`（`{ "claude": "fable", "codex": "gpt-5.6-sol" }`），旧的单个 `model` 键仍对 Claude 生效。引擎抽象在 `src/engines/`（统一接口 `verifyAuth` / `reviewBatch` / `describeModel`），`src/subscription-match.mjs` 只负责分批、重试、补审与本地降级。
 
-两个 CLI 都由 `resolveCliCommand`（`src/engines/cli-path.mjs`）定位：config 里的 `semanticMatching.claudeCommand` / `codexCommand`（存在时）优先，其次是 `PATH`，再是 `~/.local/bin`、`/opt/homebrew/bin`、`/usr/local/bin`、`~/.npm-global/bin` 与 `~/.nvm/versions/node/*/bin`。launchd 任务默认 `PATH=/usr/bin:/bin`，因此两个 LaunchAgent 模板也把这些目录写进了 `PATH`。中枢 Connections 卡显示实际解析到的路径；在扩展目录找到但 config 未配置时提供 "Save this path to config" 一键写入。
+两个 CLI 都由 `resolveCliCommand`（`src/engines/cli-path.mjs`）定位：config 里的 `semanticMatching.claudeCommand` / `codexCommand`（存在时）优先，其次是 `PATH`，再是 `~/.local/bin`、`/opt/homebrew/bin`、`/usr/local/bin`、`~/.npm-global/bin` 与 `~/.nvm/versions/node/*/bin`。launchd 任务默认 `PATH=/usr/bin:/bin`，因此两个 LaunchAgent 模板也把这些目录写进了 `PATH`。中枢 Connections 卡显示实际解析到的路径；在扩展目录找到但 config 未配置时提供 "Save This Path to Config" 一键写入。
 
 使用 Codex 前在终端执行一次 `codex login` 并选择 ChatGPT 账号；`codex login status` 必须显示 "Logged in using ChatGPT"。API key 登录（`codex login --with-api-key`）或未登录会被拒绝并给出人话提示，运行按现有方式降级为本地评分。批次通过 `codex exec --ephemeral --sandbox read-only --output-schema <schema> --output-last-message <file> -m <model>` 执行，JSON schema 由 CLI 原生约束，最终消息严格解析。中枢 Settings 页显示两个连接状态，并可切换引擎与模型。
 
@@ -116,12 +116,12 @@ LLM batch 失败会在 10 秒后重试一次。`unreviewed` 岗位只有本地�
 
 `npm run hub` 在 `http://127.0.0.1:4747/` 启动一个只运行在本机的 Web 中枢（端口来自 `config.json` 的 `hub.port`）。它是加法：夜间管道、桌面输出、xlsx、`warnings.txt` 全部不变；中枢只读管道产物，只写 `config.json` 与仓库内 gitignored 的 `private/` 目录。只绑定 127.0.0.1，不发起任何外部网络请求，不显示 API key，不渲染简历正文（只显示文件元数据）。左侧导航四个页面：
 
-- **Reports**：按日期倒序列出 `state/report-payload-*.json`，选中后用与桌面 HTML 相同的组件、工具栏与深色模式渲染；右上角 "Open Desktop Copy" 通过只读路由 `/desktop/<日期>` 在新标签打开桌面文件夹里的 HTML（`/desktop/<日期>/xlsx` 下载工作簿）；桌面副本始终是权威副本，中枢不会修改它。
+- **Reports**：按日期倒序、按月分组列出 `state/report-payload-*.json`（当前月始终展开，更早的月份默认折叠并记住你的展开状态），"Today" 快捷链接与 "Only days with matches" 开关同在一行；选中后用与桌面 HTML 相同的组件、工具栏与深色模式渲染；右上角 "Open Desktop Copy" 通过只读路由 `/desktop/<日期>` 在新标签打开桌面文件夹里的 HTML（`/desktop/<日期>/xlsx` 下载工作簿）；桌面副本始终是权威副本，中枢不会修改它。
 - **Resumes**：每条轨道一张卡：label、启用状态、PDF 文件名与路径、最近上传时间、中枢试抽取结果（字符数或 pdftotext 报错）、夜间 profile 状态。上传替换 PDF 或新增轨道（id/label/PDF）时，文件存到 `private/resumes/<id>/<ISO时间>-<原文件名>.pdf`，并把 `config.json` 里该轨道的 `pdf` 改为新文件，保留最近 5 个版本可回退。仍指向桌面等外部路径的轨道标为 "External file"，原样工作、不强制迁移；上传过的标为 "Managed by hub"。只接受 .pdf，上限 5 MB。
 - **Status**：上次运行（时间、trigger、结果、匹配数）、从已安装 LaunchAgent 读取的下次计划时间、锁状态、最近 7 个报告日期的 warnings 计数并可展开当日 `warnings.txt`、`ERROR-*.html` 列表。**Run Now** 弹出确认后以子进程执行 `node src/index.mjs --config config.json`，环境变量 `DAILY_JOB_MATCH_ALERT_TRIGGER=manual`，严格遵守现有锁文件（锁被占用时按钮禁用并显示原因），页面轮询显示进度与日志尾部 50 行；日志在 `private/hub/logs/`。
 - **Settings**：顶部 Connections 卡显示 Claude 与 Codex 的连接状态（每分钟检查一次、只读，登录请在终端完成）；表单暴露 `minimumMatchScore`、`semanticMatching.acceptedMatchLevels`、引擎单选（Claude / Codex）与随引擎切换的模型下拉（选项来自 `hub.modelChoices`，末尾 Custom… 可手填）、`reports.xlsx.required`、`hub.port`，校验后写回 `config.json`，其他键与顺序原样保留；写入时使用与管道相同的锁，避免与 20:00 运行并发。
 
-- **Letters**：已生成 cover letter 的历史列表（日期、公司、岗位、轨道、引擎），可重新打开编辑或再次下载。
+- **Letters**：已生成 cover letter 的历史列表（日期、公司、岗位、轨道、引擎、页数），每行有 Open 与 Download PDF；报告里已生成信件的岗位卡同样显示这两个按钮。
 
 ### Cover letter
 
@@ -129,7 +129,7 @@ LLM batch 失败会在 10 秒后重试一次。`unreviewed` 岗位只有本地�
 
 信件在 playbook 之外遵守固定架构：P1 写岗位与地点、简历中的学位/GPA、按岗位类型选择的时间线句（实习：在配置的毕业月完成本科并计划次年秋季开始硕士；new grad / entry level：毕业时间落在对方窗口内）、伊利诺伊州岗位加 in state 表述、末句是关于该公司的具体判断；中间 3–4 段每段首句用 JD 词汇点名一条职责、给出带数字的证据、段尾以原则收束；仅当评分发现 JD 明确要求的工具不在简历中时才出现以 "I should be straightforward about" 开头的坦白段；结尾两句。随后同一引擎再以编辑身份复核一次（结构、数字逐字一致、语气），有 issue 时采用其修订并在面板的 Editor notes 中展示；该复核可在 Settings 关闭。正文自动规范化（去 bullet、破折号改逗号），目标 460–600 词；是否一页由渲染后的页数判定，首次渲染超页时先让引擎精简 15% 再尝试更小版式。样稿最多 10 封，可一次多选上传，同名文件替换旧版；每封一行、行内改轨道即时保存；每次按推荐轨道挑最接近的 3 封进 prompt 并在面板显示。"Save & Render PDF" 把 `letter.md`、`letter.json` 与 PDF 写到 `private/cover-letters/<日期>/<Company>/`，文件名由 `coverLetter.fileNameTemplate` 决定（默认 `{FirstLast}_Cover_Letter_{Company}.pdf`）。PDF 首选本机 Chrome/Chromium headless 打印（可用 `hub.chromeCommand` 指定；Letter、Times New Roman 11pt、1 英寸页边距），不可用时回退 pdfkit；超过一页时先按 B5 重试，仍超则缩小页边距到 0.8 英寸并在面板提示。
 
-素材在 **Settings → Cover Letters** 维护：姓名、电话、邮箱、签名名，playbook（.md/.txt，写作规则与证据库），最多 10 封样稿（.pdf 经 pdftotext 抽文本，或 .txt，可标注 Data / LLM / AI Agent 轨道）。全部存于已 gitignore 的 `private/cover-letter/`；仓库、文档与测试里只出现 Jane Doe 之类的占位数据。缺少 playbook 或联系方式时，Generate 按钮禁用并提示先去 Settings。
+素材在 **Settings → Cover Letters** 维护：姓名、电话、邮箱、签名名，playbook（.md/.txt，写作规则与证据库），最多 10 封样稿（.pdf 经 pdftotext 抽文本，或 .txt）。playbook 与每封样稿共用同一种行样式（文件名 · 字符数 · 上传时间 · Replace / Remove）；批量上传时可用 "Track for these files" 给这一批统一标注 Data / LLM / AI Agent，之后仍可在行内单独修改。全部存于已 gitignore 的 `private/cover-letter/`；仓库、文档与测试里只出现 Jane Doe 之类的占位数据。缺少 playbook 或联系方式时，Generate 按钮禁用并提示先去 Settings。
 
 所有写操作都是 POST，且 `Host`/`Origin` 必须是 127.0.0.1 或 localhost，否则 403；日期、轨道 id、错误报告文件名等路径参数都做严格白名单校验。
 
@@ -141,7 +141,7 @@ LLM batch 失败会在 10 秒后重试一次。`unreviewed` 岗位只有本地�
 npm run hub:restart                         # 更新代码或修改 hub.port 后重启常驻中枢
 ```
 
-`git pull` 更新代码后运行 `npm run hub:restart`（未安装 LaunchAgent 时会给出提示，直接重新 `npm run hub` 即可）。中枢内所有时间都按 `config.timeZone` 显示，侧栏底部常驻显示上次运行时间与结果、下次运行时间；夜间运行会把 trigger（scheduled / catchup / manual）与完成时间写进当日 payload，Status 页与报告页眉（`Ran Sep 12, 8:00 PM`）直接读取。
+`git pull` 更新代码后运行 `npm run hub:restart`（未安装 LaunchAgent 时会给出提示，直接重新 `npm run hub` 即可）。中枢内所有时间都按 `config.timeZone` 显示，侧栏底部常驻显示上次运行时间与结果、下次运行时间及相对倒计时（`Sep 18, 8:00 PM · in 3h 20m`，每分钟刷新；定时已过而没有完成的运行时显示 `overdue`）；夜间运行会把 trigger（scheduled / catchup / manual）与完成时间写进当日 payload，Status 页与报告页眉（`Ran Sep 12, 8:00 PM`）直接读取。
 
 ## 第一次启用
 

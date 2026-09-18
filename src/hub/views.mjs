@@ -2,7 +2,7 @@
 // tokens as the Desktop report (report-components.mjs / report-theme.mjs), so both look alike in light
 // and dark mode. Every timestamp is shown in config.timeZone; resume text is never rendered here.
 import { REPORT_SCRIPT, REPORT_STYLES } from '../report-theme.mjs';
-import { formatCount, formatDateLabel, formatLocalDateTime, formatLocalDay } from '../time-format.mjs';
+import { formatCount, formatDateLabel, formatLocalDateTime, formatLocalDay, formatLocalShort, formatRelativeTime } from '../time-format.mjs';
 import { htmlEscape } from '../utils.mjs';
 import { LETTER_STYLES, coverLetterSettingsSection } from './letter-views.mjs';
 
@@ -26,6 +26,7 @@ export const HUB_STYLES = `
 .hub-nav .mini{margin:auto 0 0 var(--space-3);padding-top:var(--space-4);border-top:1px solid var(--line);font-size:11px;line-height:1.5;color:var(--ink-3)}
 .hub-nav .mini b{display:block;font-weight:600;color:var(--ink-2)}
 .hub-nav .mini .ok{color:var(--accent)}.hub-nav .mini .bad{color:var(--bad-ink)}.hub-nav .mini .warn{color:var(--warn-ink)}
+.hub-nav .mini .rel{white-space:nowrap}.hub-nav .mini .rel.overdue{color:var(--bad-ink);font-weight:600}
 .hub-main{padding:var(--space-5) var(--space-5) var(--space-6);min-width:0}
 .hub-content{max-width:1280px;margin:0}
 .hub-main .page{padding:0;margin:0;max-width:none}
@@ -34,13 +35,16 @@ export const HUB_STYLES = `
 .flash{margin:0 0 var(--space-4);padding:var(--space-3) var(--space-4);border-radius:var(--radius);font-size:var(--fs-body)}
 .flash.notice{background:var(--accent-soft);color:var(--accent)}
 .flash.error{background:var(--bad-bg);color:var(--bad-ink)}
-.split{display:grid;grid-template-columns:200px minmax(0,1fr);gap:var(--space-4);align-items:start}
+.split{display:grid;grid-template-columns:232px minmax(0,1fr);gap:var(--space-4);align-items:start}
 .split aside{position:sticky;top:var(--space-4);max-height:calc(100vh - 2 * var(--space-4));overflow:auto;display:flex;flex-direction:column}
-.datetools{display:flex;flex-direction:column;gap:var(--space-2);padding:0 var(--space-2) var(--space-2);font-size:var(--fs-meta);color:var(--ink-3)}
-.datetools .today-link{align-self:flex-start;text-decoration:none;color:var(--accent);font-weight:650}
-.datetools label{display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+.datetools{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-1) var(--space-2);padding:0 var(--space-2) var(--space-2);font-size:var(--fs-meta);color:var(--ink-3)}
+.datetools .today-link{text-decoration:none;color:var(--accent);font-weight:650}
+.datetools label{display:inline-flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap}
 .datelist{margin:0;padding:0;list-style:none;font-size:var(--fs-body)}
 .datelist .month{position:sticky;top:0;z-index:1;margin:0;padding:var(--space-2) var(--space-2) var(--space-1);background:var(--bg);font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.datelist .month-toggle{display:flex;align-items:center;gap:6px;width:100%;margin:0;padding:0;border:0;background:none;font:inherit;color:inherit;letter-spacing:inherit;text-transform:inherit;cursor:pointer;text-align:left}
+.datelist .month-toggle::before{content:"";width:5px;height:5px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg);margin:-2px 2px 0 0;transition:transform .12s}
+.datelist .month[data-collapsed="1"] .month-toggle::before{transform:rotate(-45deg);margin:0 2px 0 0}
 .datelist li[hidden]{display:none}
 .datelist a{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:baseline;gap:2px 6px;padding:6px var(--space-2);border-radius:var(--radius-sm);text-decoration:none;color:var(--ink-2)}
 .datelist a>span:first-child{margin-right:auto;white-space:nowrap}
@@ -75,11 +79,11 @@ export const HUB_STYLES = `
 .conn{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:var(--space-2) var(--space-4);font-size:var(--fs-body)}
 .conn dt{color:var(--ink-3)}.conn dd{margin:0}
 .conn .badge{vertical-align:middle}
-fieldset.group{border:1px solid var(--line);border-radius:var(--radius);padding:var(--space-3) var(--space-4) var(--space-2);margin:0 0 var(--space-3)}
+fieldset.group{min-inline-size:0;border:1px solid var(--line);border-radius:var(--radius);padding:var(--space-3) var(--space-4) var(--space-2);margin:0 0 var(--space-3)}
 fieldset.group legend{font-size:var(--fs-meta);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);padding:0 6px}
 .field{display:block;margin:0 0 var(--space-3);font-size:var(--fs-body)}
 .field>span{display:block;font-size:var(--fs-meta);color:var(--ink-3);margin-bottom:4px}
-.field input[type=text],.field input[type=number],.field select{font:inherit;font-size:var(--fs-body);line-height:1.3;color:var(--ink);background:var(--surface);border:1px solid var(--line-2);border-radius:var(--radius-sm);padding:6px 9px;min-height:32px;min-width:240px;max-width:100%;box-sizing:border-box}
+.field input[type=text],.field input[type=number],.field input[type=email],.field select{font:inherit;font-size:var(--fs-body);line-height:1.3;color:var(--ink);background:var(--surface);border:1px solid var(--line-2);border-radius:var(--radius-sm);padding:6px 9px;min-height:32px;min-width:240px;max-width:100%;box-sizing:border-box}
 .field select{appearance:none;-webkit-appearance:none;background-image:var(--chevron);background-repeat:no-repeat;background-position:right 9px center;padding-right:28px;cursor:pointer}
 .field input:focus,.field select:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
 .radio-row .badge{margin-left:4px}
@@ -109,6 +113,26 @@ export const HUB_SCRIPT = `
       if (name) name.textContent = input.files && input.files[0] ? input.files[0].name : 'No file chosen';
     });
   });
+  // Sidebar "Next run" countdown, refreshed every minute; mirrors formatRelativeTime in time-format.mjs.
+  var next = document.getElementById('next-run');
+  var rel = next && next.querySelector('.rel');
+  if (next && rel && next.dataset.at) {
+    var at = new Date(next.dataset.at).getTime();
+    function relative() {
+      var diff = at - Date.now();
+      if (diff <= -1800000) return 'overdue';
+      if (diff <= 0) return 'due now';
+      var minutes = Math.ceil(diff / 60000);
+      if (minutes < 60) return 'in ' + minutes + 'm';
+      var hours = Math.floor(minutes / 60);
+      if (hours < 24) return 'in ' + hours + 'h' + (minutes % 60 ? ' ' + (minutes % 60) + 'm' : '');
+      var days = Math.floor(hours / 24);
+      return 'in ' + days + 'd' + (hours % 24 ? ' ' + (hours % 24) + 'h' : '');
+    }
+    function tick() { var text = relative(); rel.textContent = text; rel.classList.toggle('overdue', text === 'overdue'); }
+    tick();
+    setInterval(tick, 60000);
+  }
 })();
 `;
 
@@ -119,14 +143,19 @@ function resultIcon(result) {
   return '<span>–</span>';
 }
 
-function renderMiniStatus(sidebar, timeZone) {
+// Sidebar summary. "Next run" carries the instant so the page script can keep the relative part
+// ("in 3h 20m", then "due now" / "overdue") current without a reload.
+function renderMiniStatus(sidebar, timeZone, now) {
   if (!sidebar) return '';
-  const last = sidebar.lastRunAt ? `${resultIcon(sidebar.lastResult)} ${htmlEscape(formatLocalDateTime(sidebar.lastRunAt, timeZone))}` : '– No run yet';
-  const next = sidebar.nextRunAt ? htmlEscape(formatLocalDateTime(sidebar.nextRunAt, timeZone)) : '—';
+  const last = sidebar.lastRunAt ? `${resultIcon(sidebar.lastResult)} ${htmlEscape(formatLocalShort(sidebar.lastRunAt, timeZone))}` : '– No run yet';
+  const relative = sidebar.nextRunAt ? formatRelativeTime(sidebar.nextRunAt, now) : '';
+  const next = sidebar.nextRunAt
+    ? `<span id="next-run" data-at="${htmlEscape(sidebar.nextRunAt)}">${htmlEscape(formatLocalShort(sidebar.nextRunAt, timeZone))} · <span class="rel${relative === 'overdue' ? ' overdue' : ''}">${htmlEscape(relative)}</span></span>`
+    : '—';
   return `<div class="mini"><b>Last run</b>${last}<b>Next run</b>${next}</div>`;
 }
 
-export function renderHubPage({ active, title, content, notice = '', error = '', port, script = '', sidebar = null, timeZone }) {
+export function renderHubPage({ active, title, content, notice = '', error = '', port, script = '', sidebar = null, timeZone, now = null }) {
   const nav = NAV.map(item => `<a href="${item.href}"${item.id === active ? ' class="active"' : ''}>${htmlEscape(item.label)}</a>`).join('');
   const flash = [
     notice ? `<div class="flash notice">${htmlEscape(notice)}</div>` : '',
@@ -135,7 +164,7 @@ export function renderHubPage({ active, title, content, notice = '', error = '',
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${htmlEscape(title)} — ${htmlEscape(HUB_TITLE)}</title>
 <style>${REPORT_STYLES}${HUB_STYLES}${LETTER_STYLES}</style></head>
-<body><div class="hub"><nav class="hub-nav"><p class="brand">${htmlEscape(HUB_BRAND)}</p>${nav}${renderMiniStatus(sidebar, timeZone)}</nav>
+<body><div class="hub"><nav class="hub-nav"><p class="brand">${htmlEscape(HUB_BRAND)}</p>${nav}${renderMiniStatus(sidebar, timeZone, now)}</nav>
 <main class="hub-main"><div class="hub-content">${flash}${content}</div></main></div>
 <script>${REPORT_SCRIPT}${HUB_SCRIPT}${script}</script>
 </body></html>`;
@@ -150,16 +179,27 @@ function monthLabel(date) {
 }
 
 // Dates newest first, grouped by month with sticky month headings; empty days carry data-empty so the
-// "Only days with matches" toggle can hide them (and any month left without visible days).
+// "Only days with matches" toggle can hide them (and any month left without visible days). The current
+// month (of `today` in config.timeZone) is always open; earlier months start collapsed unless they hold
+// the selected date (a later month, which only the tomorrow report creates, starts open), and the page
+// script restores what the owner opened or closed before.
 export function renderDateList({ dates, selected, today }) {
   if (!dates.length) return '<p class="muted">No reports yet.</p>';
   const items = [];
+  const currentMonth = String(today || '').slice(0, 7);
+  const selectedMonth = String(selected || '').slice(0, 7);
   let month = null;
+  let collapsed = false;
   for (const item of dates) {
     const label = monthLabel(item.date);
+    const key = item.date.slice(0, 7);
     if (label !== month) {
       month = label;
-      items.push(`<li class="month" data-month="${htmlEscape(item.date.slice(0, 7))}">${htmlEscape(label)}</li>`);
+      const current = key === currentMonth;
+      collapsed = !current && key < currentMonth && key !== selectedMonth;
+      items.push(current
+        ? `<li class="month" data-month="${htmlEscape(key)}" data-current="1">${htmlEscape(label)}</li>`
+        : `<li class="month" data-month="${htmlEscape(key)}"${collapsed ? ' data-collapsed="1"' : ''}><button type="button" class="month-toggle" aria-expanded="${collapsed ? 'false' : 'true'}">${htmlEscape(label)}</button></li>`);
     }
     const isToday = item.date === today;
     const isFuture = Boolean(today) && item.date > today;
@@ -168,7 +208,7 @@ export function renderDateList({ dates, selected, today }) {
     // Calendar tags: "Today" for the current date in config.timeZone, "Tomorrow" for anything later (the
     // evening run writes the next application date, so that is usually the newest report).
     const tag = isToday ? '<span class="tag" data-tag="today">Today</span>' : isFuture ? '<span class="tag" data-tag="tomorrow">Tomorrow</span>' : '';
-    items.push(`<li data-month="${htmlEscape(item.date.slice(0, 7))}"${item.matchCount === 0 ? ' data-empty="1"' : ''}><a href="/reports/${item.date}"${classes ? ` class="${classes}"` : ''} title="${item.date}${isToday ? ' (today)' : isFuture ? ' (after today)' : ''}"><span>${htmlEscape(formatDateLabel(item.date))}</span>${count}${tag}</a></li>`);
+    items.push(`<li data-month="${htmlEscape(key)}"${item.matchCount === 0 ? ' data-empty="1"' : ''}${collapsed ? ' hidden' : ''}><a href="/reports/${item.date}"${classes ? ` class="${classes}"` : ''} title="${item.date}${isToday ? ' (today)' : isFuture ? ' (after today)' : ''}"><span>${htmlEscape(formatDateLabel(item.date))}</span>${count}${tag}</a></li>`);
   }
   const jump = todayTarget(dates, today);
   return `<div class="datetools"><a class="today-link" href="/reports/${jump.date}" id="today-link" title="${jump.isToday ? `Today's report (${jump.date})` : `No report for today; newest report (${jump.date})`}">${jump.isToday ? 'Today' : 'Latest'}</a><label><input type="checkbox" id="only-matches"> Only days with matches</label></div><ul class="datelist" id="datelist">${items.join('')}</ul>`;
@@ -198,22 +238,50 @@ export const REPORTS_SCRIPT = `
   var column = document.getElementById('date-column');
   if (!list || !toggle) return;
   var key = 'hub.reports.onlyMatches';
+  var monthsKey = 'hub.reports.months';
+  var active = list.querySelector('a.active');
+  var activeMonth = active ? active.closest('li').dataset.month : null;
+  // Open/closed state per month; the current month is always open and the month holding the selected
+  // date opens for this page view without being remembered.
+  var months = {};
+  try { months = JSON.parse(localStorage.getItem(monthsKey) || '{}') || {}; } catch (e) { months = {}; }
+  var collapsed = {};
+  list.querySelectorAll('li.month').forEach(function (heading) {
+    var month = heading.dataset.month;
+    if (heading.dataset.current === '1') { collapsed[month] = false; return; }
+    collapsed[month] = months[month] === 'open' ? false : months[month] === 'closed' ? true : heading.dataset.collapsed === '1';
+    if (month === activeMonth) collapsed[month] = false;
+  });
   function apply() {
     var only = toggle.checked;
     try { localStorage.setItem(key, only ? '1' : '0'); } catch (e) {}
-    var visibleMonths = {};
+    var monthsWithDays = {};
     list.querySelectorAll('li:not(.month)').forEach(function (item) {
-      var hide = only && item.dataset.empty === '1';
-      item.hidden = hide;
-      if (!hide) visibleMonths[item.dataset.month] = true;
+      var shown = !(only && item.dataset.empty === '1');
+      if (shown) monthsWithDays[item.dataset.month] = true;
+      item.hidden = !shown || collapsed[item.dataset.month] === true;
     });
-    list.querySelectorAll('li.month').forEach(function (heading) { heading.hidden = !visibleMonths[heading.dataset.month]; });
+    list.querySelectorAll('li.month').forEach(function (heading) {
+      var month = heading.dataset.month;
+      heading.hidden = !monthsWithDays[month];
+      if (collapsed[month]) heading.dataset.collapsed = '1'; else delete heading.dataset.collapsed;
+      var button = heading.querySelector('.month-toggle');
+      if (button) button.setAttribute('aria-expanded', collapsed[month] ? 'false' : 'true');
+    });
   }
+  list.addEventListener('click', function (event) {
+    var button = event.target.closest('.month-toggle');
+    if (!button) return;
+    var month = button.closest('li').dataset.month;
+    collapsed[month] = !collapsed[month];
+    months[month] = collapsed[month] ? 'closed' : 'open';
+    try { localStorage.setItem(monthsKey, JSON.stringify(months)); } catch (e) {}
+    apply();
+  });
   try { toggle.checked = localStorage.getItem(key) === '1'; } catch (e) {}
   toggle.addEventListener('change', apply);
   apply();
   if (today && column) today.addEventListener('click', function () { column.scrollTop = 0; });
-  var active = list.querySelector('a.active');
   if (active && column && active.offsetTop > column.clientHeight - 40) column.scrollTop = active.offsetTop - 80;
 })();
 `;
@@ -270,8 +338,8 @@ export function resumesPage({ tracksView, timeZone }) {
   const cards = tracksView.tracks.map(track => trackCard(track, timeZone)).join('\n');
   const add = tracksView.legacy ? '' : `<article class="card"><h2>Add Track</h2>
     <form method="post" action="/resumes/add" enctype="multipart/form-data">
-      <label class="field"><span>ID (letters, digits, _ or -)</span><input type="text" name="trackId" pattern="[A-Za-z][A-Za-z0-9_-]{0,31}" required></label>
-      <label class="field"><span>Label shown in reports</span><input type="text" name="label" required></label>
+      <label class="field"><span>ID (letters, digits, _ or -)</span><input type="text" name="trackId" class="control-input" pattern="[A-Za-z][A-Za-z0-9_-]{0,31}" required></label>
+      <label class="field"><span>Label shown in reports</span><input type="text" name="label" class="control-input" required></label>
       <div class="field"><span>PDF</span><label class="file"><input type="file" name="file" accept=".pdf,application/pdf" required><span class="btn secondary">Choose PDF…</span><span class="file-name">No file chosen</span></label></div>
       <button class="btn" type="submit">Add Track</button>
     </form></article>`;
@@ -384,7 +452,7 @@ function connectionRow(name, engine, item) {
   const stale = item.configuredMissing && item.configured ? ` <span class="badge badge-warn" data-conn="stale-config" title="config points at ${htmlEscape(item.configured)}, which does not exist">config path missing</span>` : '';
   const where = item.path ? `<br><span class="muted mono" title="${htmlEscape((item.searched || []).join('\n'))}">${htmlEscape(item.path)}${item.source === 'config' ? ' (from config)' : ''}</span>${stale}` : '';
   const savePath = item.path && item.source !== 'config'
-    ? `<form class="inline" method="post" action="/settings/cli-path"><input type="hidden" name="engine" value="${engine}"><input type="hidden" name="path" value="${htmlEscape(item.path)}"><button class="btn secondary small" type="submit">Save this path to config</button></form>`
+    ? `<form class="inline" method="post" action="/settings/cli-path"><input type="hidden" name="engine" value="${engine}"><input type="hidden" name="path" value="${htmlEscape(item.path)}"><button class="btn secondary small" type="submit">Save This Path to Config</button></form>`
     : '';
   if (!item.installed) {
     return `<dt>${htmlEscape(name)}</dt><dd><span class="badge badge-muted" data-conn="missing">Not found on this Mac</span> <span class="muted">Install with <code>${htmlEscape(item.hint)}</code>${item.configured ? `; config points at <code>${htmlEscape(item.configured)}</code>` : ''}</span><br><span class="muted" title="${htmlEscape((item.searched || []).join('\n'))}">Searched PATH, ~/.local/bin, /opt/homebrew/bin, /usr/local/bin, ~/.npm-global/bin, and nvm.</span></dd>`;
@@ -407,7 +475,7 @@ function modelSelect(engine, settings) {
   const options = choices.map(choice => `<option value="${htmlEscape(choice.value)}"${choice.value === current ? ' selected' : ''}>${htmlEscape(choice.label)}</option>`).join('');
   return `<div class="model-group" data-engine="${engine}"${engine === settings.engine ? '' : ' hidden'}>
       <label class="field"><span>Scoring Model</span><select name="model_${engine}" class="model-select control-input">${options}<option value="__custom__"${listed ? '' : ' selected'}>Custom…</option></select></label>
-      <label class="field model-custom"${listed ? ' hidden' : ''}><span>Custom model name</span><input type="text" name="modelCustom_${engine}" value="${listed ? '' : htmlEscape(current)}" placeholder="${engine === 'codex' ? 'gpt-5.6-sol' : 'claude-fable-5'}"></label>
+      <label class="field model-custom"${listed ? ' hidden' : ''}><span>Custom model name</span><input type="text" name="modelCustom_${engine}" class="control-input" value="${listed ? '' : htmlEscape(current)}" placeholder="${engine === 'codex' ? 'gpt-5.6-sol' : 'claude-fable-5'}"></label>
     </div>`;
 }
 
@@ -419,7 +487,7 @@ export function settingsPage({ settings, connections = null, timeZone, coverLett
   <article class="card"><h2>Connections</h2><dl class="conn">${connectionRow('Claude', 'claude', connections?.claude)}${connectionRow('Codex', 'codex', connections?.codex)}</dl>${checked}</article>
   <article class="card"><form method="post" action="/settings" id="settings-form">
     <fieldset class="group"><legend>Matching</legend>
-      <label class="field"><span>Minimum Match Score (0–100)</span><input type="number" name="minimumMatchScore" min="0" max="100" step="1" value="${Number(settings.minimumMatchScore)}" required></label>
+      <label class="field"><span>Minimum Match Score (0–100)</span><input type="number" name="minimumMatchScore" class="control-input" min="0" max="100" step="1" value="${Number(settings.minimumMatchScore)}" required></label>
       <div class="field"><span>Accepted Match Levels</span>${levels}</div>
       <div class="field"><span>Engine</span><div class="radio-row">${engines}</div><p class="engine-warning" id="engine-warning" hidden>This engine is not connected on this Mac; the nightly run will keep local scores (unreviewed) until it is signed in. You can still save.</p></div>
       ${settings.engines.map(engine => modelSelect(engine.id, settings)).join('')}
@@ -432,7 +500,7 @@ export function settingsPage({ settings, connections = null, timeZone, coverLett
       <div class="field"><label class="check"><input type="checkbox" name="editorReview"${settings.editorReview ? ' checked' : ''}> Editor review pass (a second call to the same engine checks structure, evidence numbers, and tone before you see the draft)</label></div>
     </fieldset>
     <fieldset class="group"><legend>Hub</legend>
-      <label class="field"><span>Port (takes effect after the hub restarts)</span><input type="number" name="hubPort" min="1024" max="65535" step="1" value="${Number(settings.hubPort)}" required></label>
+      <label class="field"><span>Port (takes effect after the hub restarts)</span><input type="number" name="hubPort" class="control-input" min="1024" max="65535" step="1" value="${Number(settings.hubPort)}" required></label>
     </fieldset>
     <button class="btn" type="submit">Save</button>
     <p class="form-foot">Changes apply to the next run.</p>
