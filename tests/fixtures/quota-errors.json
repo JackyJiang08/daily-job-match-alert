@@ -1,0 +1,96 @@
+{
+  "recordedFrom": "Claude Code 2.1.269 binary strings (2026-09-19); print-mode wrappers around each notice are inferred, the notice text itself is verbatim",
+  "cases": [
+    {
+      "text": "claude exited 1: Usage limit reached|1789822800",
+      "kind": "fiveHourLimit",
+      "note": "generic notice with an epoch reset 3 hours after the test clock",
+      "resetsAt": "2026-09-19T13:00:00.000Z"
+    },
+    {
+      "text": "claude exited 1: Usage limit reached · your usage limit resets 9am (America/Chicago)",
+      "kind": "fiveHourLimit",
+      "note": "generic notice, reset at a clock time within five hours of the test clock (5am Chicago)",
+      "resetsAt": "2026-09-19T14:00:00.000Z"
+    },
+    {
+      "text": "claude exited 1: Usage limit reached|1790164800",
+      "kind": "accountWeeklyLimit",
+      "note": "generic notice whose reset is days away is read as the weekly window"
+    },
+    {
+      "text": "claude exited 1: Usage limit reached",
+      "kind": "accountWeeklyLimit",
+      "note": "generic notice with no reset time is read conservatively as the weekly window"
+    },
+    {
+      "text": "claude exited 1: five_hour limit reached, resets in 2 hours",
+      "kind": "fiveHourLimit",
+      "note": "internal window name"
+    },
+    {
+      "text": "claude exited 1: You've hit your session limit. Your usage limit resets at 11:30pm (America/Chicago)",
+      "kind": "fiveHourLimit"
+    },
+    {
+      "text": "claude exited 1: you have reached your weekly usage limit. Lower-priority mode is offered again after your weekly limit resets.",
+      "kind": "accountWeeklyLimit",
+      "note": "verbatim weekly notice"
+    },
+    {
+      "text": "claude exited 1: seven_day limit reached; resets_at 1790164800",
+      "kind": "accountWeeklyLimit",
+      "resetsAt": "2026-09-23T12:00:00.000Z"
+    },
+    {
+      "text": "claude exited 1: Your organization is out of usage credits. Contact your admin to add more.",
+      "kind": "accountWeeklyLimit",
+      "note": "credits exhausted is treated like the account window"
+    },
+    {
+      "text": "claude exited 1: You've reached your Fable limit. Your Fable limit resets at 9am (America/Chicago).",
+      "kind": "modelWeeklyLimit",
+      "model": "fable",
+      "note": "verbatim model notice"
+    },
+    {
+      "text": "claude exited 1: Fable limit reached · continuing on Opus",
+      "kind": "modelWeeklyLimit",
+      "model": "fable"
+    },
+    {
+      "text": "claude exited 1: Opus limit reached",
+      "kind": "modelWeeklyLimit",
+      "model": "opus"
+    },
+    {
+      "text": "claude exited 1: seven_day_opus utilization 100%",
+      "kind": "modelWeeklyLimit",
+      "model": "opus"
+    },
+    {
+      "text": "claude exited 1: Fable 5 requires usage credits",
+      "kind": "modelWeeklyLimit",
+      "model": "fable"
+    },
+    {
+      "text": "claude exited 1: Server is temporarily limiting requests (not your usage limit)",
+      "kind": null,
+      "note": "transient, not a quota"
+    },
+    {
+      "text": "claude exited 1: Fable is experiencing high load, please use /model to switch to Sonnet",
+      "kind": null,
+      "note": "transient, not a quota"
+    },
+    {
+      "text": "claude exited 1: Unexpected token in JSON at position 0",
+      "kind": null
+    },
+    {
+      "text": "claude timed out after 600000ms",
+      "kind": null
+    }
+  ],
+  "testClock": "2026-09-19T10:00:00Z"
+}

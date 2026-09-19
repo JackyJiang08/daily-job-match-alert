@@ -633,6 +633,55 @@ test('a persisted Workday company name is cleaned when rendered in the report an
   }
 });
 
+test('the Quota card shows the last limit event, the model in effect, and the deferral queue; Settings saves the ladder and the Codex fallback; month headings are bold and darker', async () => {
+  const root = await prepareProject();
+  const payloadPath = path.join(root, 'state', 'report-payload-2026-08-27.json');
+  const payload = JSON.parse(await fs.readFile(payloadPath, 'utf8'));
+  payload.meta.quota = { events: [{ kind: 'modelWeeklyLimit', model: 'fable', resetsAt: '2026-08-29T14:00:00Z', at: '2026-08-27T01:02:00Z', action: 'downgraded', detail: 'switched to opus', engine: 'claude' }], lastEvent: { kind: 'modelWeeklyLimit', model: 'fable', resetsAt: '2026-08-29T14:00:00Z', at: '2026-08-27T01:02:00Z', action: 'downgraded', detail: 'switched to opus', engine: 'claude' }, effectiveEngine: 'claude', effectiveModel: 'opus', configuredModel: 'fable', modelLadder: ['fable', 'opus'], fallbackEngine: null, deferredByQuota: 0, banner: null };
+  await fs.writeFile(payloadPath, JSON.stringify(payload));
+  const statePath = path.join(root, 'state', 'state.json');
+  const state = JSON.parse(await fs.readFile(statePath, 'utf8'));
+  state.deferred = { a: { url: 'https://example.com/a', deferredCount: 1, lastDeferredAt: '2026-08-27T01:00:00Z' }, b: { url: 'https://example.com/b', deferredCount: 2, lastDeferredAt: '2026-08-27T01:00:00Z' } };
+  await fs.writeFile(statePath, JSON.stringify(state));
+  const hub = await startHub(root);
+  try {
+    const page = await hub.request('GET', '/status');
+    assert.match(page.text, /<article class="card" id="quota-card"><h2>Quota<\/h2>/);
+    assert.match(page.text, /<dt>Last limit event<\/dt><dd id="quota-last">Claude subscription Fable weekly limit reached; expected to reset Aug 29, 2026, 9:00 AM · Aug 26, 2026, 8:02 PM · <span class="badge badge-warn" data-badge="quota-action">downgraded<\/span> <span class="muted">switched to opus<\/span> <span class="muted">\(nightly run\)<\/span><\/dd>/);
+    assert.match(page.text, /<dt>Model in effect<\/dt><dd id="quota-model">claude · opus <span class="badge badge-warn" data-badge="downgraded">downgraded from fable<\/span><\/dd>/);
+    assert.match(page.text, /<dt>Deferred postings<\/dt><dd id="quota-deferred">2 waiting for the next run<\/dd>/);
+    assert.match(page.text, /<dt>Policy<\/dt><dd>Ladder fable → opus · no engine fallback<\/dd>/);
+    assert.doesNotMatch(page.text, /\bUTC\b/);
+
+    // A cover-letter refusal seen by this hub process outranks an older run event.
+    hub.ctx.quotaLog.record({ kind: 'accountWeeklyLimit', at: '2026-08-27T13:00:00Z', action: 'refused', source: 'cover-letter', engine: 'claude', model: 'fable' });
+    assert.match((await hub.request('GET', '/status')).text, /<dd id="quota-last">Claude subscription weekly account limit reached · Aug 27, 2026, 8:00 AM · <span class="badge badge-warn" data-badge="quota-action">refused<\/span> <span class="muted">\(cover-letter\)<\/span><\/dd>/);
+
+    const settings = await hub.request('GET', '/settings');
+    assert.match(settings.text, /<span>Model Ladder \(tried in order when a model hits its weekly limit\)<\/span><input type="text" name="modelLadder" class="control-input" value="fable, opus" placeholder="fable, opus">/);
+    assert.match(settings.text, /<input type="checkbox" name="fallbackEngine" value="codex"> Fall Back to Codex on a Weekly Account Limit/);
+    const saved = await hub.form('/settings', { minimumMatchScore: '60', acceptedMatchLevels: 'high', model: 'fable', hubPort: '4747', modelLadder: 'fable, opus, sonnet', quotaPresent: '1', fallbackEngine: 'codex' });
+    assert.equal(saved.status, 303);
+    const config = await readConfig(root);
+    assert.deepEqual(config.semanticMatching.quotaPolicy, { modelLadder: ['fable', 'opus', 'sonnet'], fallbackEngine: 'codex' });
+    assert.match((await hub.request('GET', '/settings')).text, /name="modelLadder" class="control-input" value="fable, opus, sonnet"/);
+    assert.match((await hub.request('GET', '/settings')).text, /name="fallbackEngine" value="codex" checked/);
+    const off = await hub.form('/settings', { minimumMatchScore: '60', acceptedMatchLevels: 'high', model: 'fable', hubPort: '4747', quotaPresent: '1' });
+    assert.equal(off.status, 303);
+    assert.deepEqual((await readConfig(root)).semanticMatching.quotaPolicy, { modelLadder: ['fable', 'opus', 'sonnet'], fallbackEngine: null }, 'an unchecked box switches the fallback off; the ladder is left alone when the field is empty');
+    const bad = await hub.form('/settings', { minimumMatchScore: '60', acceptedMatchLevels: 'high', model: 'fable', hubPort: '4747', modelLadder: 'fable, not a model!' });
+    assert.match(decodeURIComponent(bad.headers.location), /error=Model ladder must be a comma-separated list/);
+    assert.match((await hub.request('GET', '/status')).text, /<dt>Policy<\/dt><dd>Ladder fable → opus → sonnet · no engine fallback<\/dd>/);
+
+    const reports = await hub.request('GET', '/reports');
+    assert.match(reports.text, /\.datelist \.month\{[^}]*font-size:11px;font-weight:700;letter-spacing:\.06em;text-transform:uppercase;color:var\(--ink-2\)\}/, 'month headings: bold, one step darker, same size, no background change or rule');
+    assert.doesNotMatch(reports.text, /\.datelist \.month\{[^}]*border-bottom/);
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('/desktop serves the Desktop HTML and workbook read-only, and refuses anything but a valid date', async () => {
   const root = await prepareProject();
   const hub = await startHub(root);

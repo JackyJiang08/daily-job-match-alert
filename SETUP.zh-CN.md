@@ -36,6 +36,8 @@ Cover letter 由同一个订阅引擎根据你的 playbook、最多三封样稿�
 | `claude`（默认） | Claude Code 2.1.250+ | `claude auth login --claudeai`；`claude auth status --json` 必须显示 claude.ai 订阅（`pro` / `max` / `team` / `enterprise`） |
 | `codex` | OpenAI Codex CLI | `codex login` 选 ChatGPT；`codex login status` 必须显示 "Logged in using ChatGPT" |
 
+订阅额度耗尽时按类别降级而不是失败：五小时滚动限额会等待重试（每 10 分钟一次、最长 90 分钟，超时后其余岗位顺延到下一轮）；单模型周限额沿配置的阶梯降级（`quotaPolicy.modelLadder`，默认 Fable → Opus），只写一条 info（如 "scored by opus: fable weekly limit"）而不是 mismatch 警告，下一轮先试首选模型；账户总周限额把剩余岗位全部顺延，并在报告顶部横幅说明额度耗尽与预计恢复时间，`quotaPolicy.fallbackEngine` 设为 `codex` 且 Codex 已登录时自动切换到 Codex。Cover letter 走同一阶梯并提供 "Generate with Codex"；Status 页有 Quota 卡。CLI 本身没有查询用量的命令，因此三类限额靠可配置的正则表从其错误文本识别，正则从已安装的二进制中录制。
+
 两者都以子进程运行，启动前删除全部 `ANTHROPIC_*`、`AWS_*`、`OPENAI_*` 环境变量以及 Bedrock / Vertex / Google 凭据开关，因此不可能走 API key 或网关；项目里没有任何 API 客户端。Console 计费、API key 登录、版本过低或 batch 失败都降级为本地关键词分数（标记 `unreviewed`）并写 warning，绝不回退到 API。订阅用量计入各自计划额度。每个 batch 实际使用的模型会从 CLI 输出中读出并记录为 `scoringModel`，与配置不符时给出 warning。
 
 ## 隐私模型
@@ -90,7 +92,7 @@ Cover letter 由同一个订阅引擎根据你的 playbook、最多三封样稿�
 - **锁。** `state/.lock` 保存持有者 PID；第二个实例直接退出，PID 已死的陈旧锁自动清除。
 - **同日累积。** `state/report-payload-<日期>.json` 保存该投递日期的全部结果；每次运行合并进去（语义评审过的版本优先、更长的 JD 优先）并以 `Daily update #N` 重新渲染；未完成的日期在下一次运行开始时先重建。
 - **评分配额。** `semanticMatching.maxReviewedPerRun`（默认 120，`0` 为不限）限制每晚送引擎评审的本地候选数：本地分数高的先评，超出的岗位顺延到下一轮且不写 seen，次晚无论多旧都会回来，连续两轮被顺延的岗位第三轮优先。Run Details 与 Status 显示候选数 / 评审数 / 顺延数，Settings 可改上限。
-- **chaos 套件。** `npm run chaos` 在临时目录跑七个场景，CI 每次执行：基线、全部采集源断网、订阅 CLI 不可用、畸形 `.eml`、XLSX 失败后恢复、某 ATS 接口返回 500、候选超出评审上限。每个场景都必须仍留下当日文件夹与 HTML。
+- **chaos 套件。** `npm run chaos` 在临时目录跑九个场景，CI 每次执行：基线、全部采集源断网、订阅 CLI 不可用、畸形 `.eml`、XLSX 失败后恢复、某 ATS 接口返回 500、候选超出评审上限、Fable 周限额（降级到 Opus）、账户总限额（全部顺延并显示横幅）。每个场景都必须仍留下当日文件夹与 HTML。
 
 ## 快速开始
 

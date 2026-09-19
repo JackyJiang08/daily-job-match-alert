@@ -1,7 +1,7 @@
 // One chaos scenario: build an isolated config under <workRoot>/<scenario>, run src/index.mjs
 // against it, and assert that the Desktop-equivalent output folder still holds a usable report.
 //
-//   node scripts/chaos-scenario.mjs <baseline|offline|llm-down|bad-input|xlsx-recovery|ats-500|review-cap> <workRoot>
+//   node scripts/chaos-scenario.mjs <baseline|offline|llm-down|bad-input|xlsx-recovery|ats-500|review-cap|fable-weekly-limit|account-limit> <workRoot>
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -117,8 +117,8 @@ async function writeConfig(directory, config) {
   return configPath;
 }
 
-async function runPipeline(configPath, now = NOW) {
-  const env = { ...process.env };
+async function runPipeline(configPath, now = NOW, extraEnv = {}) {
+  const env = { ...process.env, ...extraEnv };
   for (const key of Object.keys(env)) {
     if (/^(?:ANTHROPIC_|AWS_)/.test(key) || ['OPENAI_API_KEY', 'CLAUDE_API_KEY', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'GOOGLE_APPLICATION_CREDENTIALS', 'CLOUD_ML_REGION'].includes(key)) delete env[key];
   }
@@ -414,6 +414,55 @@ scenarios['review-cap'] = async function reviewCap() {
   const later = JSON.parse(await fs.readFile(path.join(directory, 'state', 'state.json'), 'utf8'));
   assert.equal(Object.keys(later.deferred || {}).length, Math.max(0, first.summary.meta.deferredCount - 1));
   return `${first.summary.meta.candidateCount} candidates, 1 reviewed, ${first.summary.meta.deferredCount} deferred (not seen); next run reviewed the deferred posting first`;
+};
+
+// The stand-in CLI (scripts/chaos/fake-claude.sh) refuses --model fable with the recorded Fable weekly
+// notice and scores with any other model: the run must step down to opus, keep every posting, audit the
+// switch as an info line, and never write a MODEL MISMATCH warning.
+scenarios['fable-weekly-limit'] = async function fableWeeklyLimit() {
+  const directory = await prepareDirectory('fable-weekly-limit');
+  await addFixtureEmail(directory, 'demo-new-grad-alert.eml');
+  const config = baseConfig(directory);
+  config.semanticMatching = { engine: 'claude', claudeCommand: path.join(projectDirectory, 'scripts', 'chaos', 'fake-claude.sh'), models: { claude: 'fable' }, required: true, batchSize: 6, acceptedMatchLevels: ['high'], timeoutMs: 30_000, quotaPolicy: { modelLadder: ['fable', 'opus'] } };
+  const run = await runPipeline(await writeConfig(directory, config), NOW, { FAKE_CLAUDE_MODE: 'fable-weekly-limit' });
+  const artifacts = await assertDesktopArtifacts(config, run);
+  assert.equal(run.exitCode, 0, `fable-weekly-limit run exited ${run.exitCode}`);
+  assert.ok(run.summary.meta.matchCount >= 1, 'the posting was not scored after the downgrade');
+  assert.equal(run.summary.meta.scoringModel, 'claude-opus-5', 'opus scored the run');
+  assert.equal(run.summary.meta.quota.effectiveModel, 'opus');
+  assert.equal(run.summary.meta.quota.deferredByQuota, 0);
+  assert.deepEqual(run.summary.meta.quota.events.map(event => [event.kind, event.action, event.detail]), [['modelWeeklyLimit', 'downgraded', 'switched to opus']]);
+  assert.ok(!artifacts.warnings.some(warning => /MODEL MISMATCH/.test(warning.message)), `a strategic downgrade must not be a mismatch: ${warningLines(artifacts.warnings).join(' | ')}`);
+  const audit = artifacts.warnings.find(warning => warning.level === 'info' && /scored by opus: fable weekly limit/.test(warning.message));
+  assert.ok(audit, `no audit line for the downgrade: ${warningLines(artifacts.warnings).join(' | ')}`);
+  assert.match(artifacts.html, /Subscription quota<\/dt><dd>1 event\(s\) · scored by claude · opus/);
+  assert.doesNotMatch(artifacts.html, /data-banner="quota"/, 'a downgrade needs no banner');
+  assert.doesNotMatch(artifacts.html, /data-badge="unreviewed"/, 'nothing fell back to local scores');
+  return `Fable refused, run scored by opus (${run.summary.meta.matchCount} match(es)), info audit line, no mismatch warning`;
+};
+
+// Every scoring call is refused with the recorded weekly account notice: the report is still written with
+// a banner, and every candidate waits in the deferral queue instead of being lost or marked unreviewed.
+scenarios['account-limit'] = async function accountLimit() {
+  const directory = await prepareDirectory('account-limit');
+  await addFixtureEmail(directory, 'demo-new-grad-alert.eml');
+  const config = baseConfig(directory);
+  config.semanticMatching = { engine: 'claude', claudeCommand: path.join(projectDirectory, 'scripts', 'chaos', 'fake-claude.sh'), models: { claude: 'fable' }, required: true, batchSize: 6, acceptedMatchLevels: ['high'], timeoutMs: 30_000 };
+  const run = await runPipeline(await writeConfig(directory, config), NOW, { FAKE_CLAUDE_MODE: 'account-limit' });
+  const artifacts = await assertDesktopArtifacts(config, run);
+  assert.equal(run.exitCode, 0, `account-limit run exited ${run.exitCode}`);
+  assert.equal(run.summary.meta.matchCount, 0, 'nothing was scored, so nothing is a match');
+  assert.ok(run.summary.meta.candidateCount >= 1, 'the fixture must yield at least one candidate');
+  assert.equal(run.summary.meta.quota.deferredByQuota, run.summary.meta.candidateCount, 'every candidate is deferred');
+  assert.deepEqual(run.summary.meta.quota.events.map(event => [event.kind, event.action]), [['accountWeeklyLimit', 'deferred']]);
+  assert.match(artifacts.html, /<div class="banner" data-banner="quota">Claude subscription weekly account limit reached; expected to reset [^<]*; \d+ posting\(s\) were deferred to the next run and are not lost<\/div>/);
+  assert.doesNotMatch(artifacts.html, /data-badge="unreviewed"/, 'a refused posting is deferred, never unreviewed');
+  const state = JSON.parse(await fs.readFile(path.join(directory, 'state', 'state.json'), 'utf8'));
+  const deferred = Object.values(state.deferred || {});
+  assert.equal(deferred.length, run.summary.meta.candidateCount, 'the deferral queue holds every refused posting');
+  for (const entry of deferred) assert.ok(!Object.values(state.seen).some(seen => seen.url === entry.url), `${entry.url} was deferred but marked seen`);
+  assert.match(await readWarningsFile(config, run) || '', /^\[llm \/ claude\] info: Claude subscription weekly account limit reached/m);
+  return `all ${run.summary.meta.candidateCount} candidate(s) deferred, banner shown, report still written`;
 };
 
 const scenario = scenarios[scenarioName];

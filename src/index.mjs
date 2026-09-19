@@ -26,6 +26,8 @@ import { canonicalUrl, dateWithOffset, htmlEscape, mapLimit, resolveFrom, sha256
 import { createWarning, errorSummary } from './warnings.mjs';
 import { formatLocalDateTime } from './time-format.mjs';
 import { holdsToExactWindow } from './posting-fields.mjs';
+import { describeConnections } from './engines/index.mjs';
+import { describeQuota, normalizeQuotaPolicy } from './engines/quota.mjs';
 
 const execFileAsync = promisify(execFile);
 const REPORT_PAYLOAD_PREFIX = 'report-payload-';
@@ -441,6 +443,43 @@ export function applyFreshnessRecheck(jobs, cutoff, isDeferred = () => false) {
   return { jobs: kept, dropped };
 }
 
+// What the report and the hub show about quota handling: every event of this run, the model and engine
+// that ended up scoring, and how many postings the refusal pushed to the next run.
+export function summarizeQuota(events, policy, config, deferredCount = 0) {
+  const last = events.length ? events[events.length - 1] : null;
+  const configuredModel = resolveModelFor(config);
+  const downgrade = [...events].reverse().find(event => event.action === 'downgraded');
+  const fallback = [...events].reverse().find(event => event.action === 'fallback-engine');
+  return {
+    events,
+    lastEvent: last,
+    effectiveEngine: fallback ? policy.fallbackEngine : (normalizeEngineId(config.semanticMatching?.engine || 'claude') || 'claude'),
+    effectiveModel: fallback ? null : downgrade ? String(downgrade.detail || '').replace(/^switched to /, '') : configuredModel,
+    configuredModel,
+    modelLadder: policy.modelLadder,
+    fallbackEngine: policy.fallbackEngine,
+    deferredByQuota: deferredCount,
+    banner: bannerFor(events, deferredCount, config.timeZone || 'America/Chicago'),
+  };
+}
+
+function resolveModelFor(config) {
+  const semantic = config.semanticMatching || {};
+  const engineId = normalizeEngineId(semantic.engine || 'claude') || 'claude';
+  return semantic.models?.[engineId] || semantic.model || (engineId === 'claude' ? 'fable' : null);
+}
+
+// A report banner only for an account-wide refusal (or a ladder that ran out), never for a wait that
+// succeeded or a model downgrade, which Run Details already explains.
+function bannerFor(events, deferredCount, timeZone) {
+  const halted = [...events].reverse().find(event => event.action === 'deferred' || event.action === 'fallback-engine');
+  if (!halted) return null;
+  const parts = [describeQuota(halted, { timeZone })];
+  if (halted.action === 'fallback-engine') parts.push(`the rest of the run was scored by ${halted.detail?.replace(/^switched to /, '') || 'the fallback engine'}`);
+  else if (deferredCount) parts.push(`${deferredCount} posting(s) were deferred to the next run and are not lost`);
+  return parts.join('; ');
+}
+
 // Keeps the best `limit` local candidates for the engine (0 or a non-number means no limit). Ranking:
 // postings already deferred twice go first, then local best score with a small bonus per deferral.
 // Non-candidates (no role relevance or a hard blocker) never reach the engine and pass through as-is.
@@ -546,15 +585,26 @@ async function runPipeline(config, clock) {
     warnings.push(createWarning('llm', 'review budget', `deferred ${budget.deferred.length} postings to the next run (review limit ${budget.limit} per run); they are not marked as seen`, 'info'));
   }
   let evaluated;
+  const quotaEvents = [];
+  const quotaPolicy = normalizeQuotaPolicy(config.semanticMatching?.quotaPolicy);
   try {
     evaluated = await applySubscriptionMatching(budget.jobs, resumes, prefs, {
       ...(config.semanticMatching || {}),
       warnings,
+      quotaEvents,
+      now: () => new Date(),
+      // The Codex fallback only runs when the CLI is installed and signed in with a ChatGPT subscription.
+      fallbackConnected: async engineId => (await describeConnections({ ...(config.semanticMatching || {}) }))[engineId]?.connected === true,
     });
   } catch (error) {
     warnings.push(createWarning('llm', config.semanticMatching?.engine || 'subscription', `Semantic matching failed; all jobs used local fallback: ${errorSummary(error)}`));
     evaluated = budget.jobs.map(localFallbackJob);
   }
+  // Postings a quota refusal left unscored wait for the next run like budget deferrals: never seen, never unreviewed.
+  const quotaDeferred = evaluated.filter(job => job.quotaDeferred);
+  for (const job of quotaDeferred) markDeferred(state, job, now.toISOString());
+  evaluated = evaluated.filter(job => !job.quotaDeferred);
+  const quota = summarizeQuota(quotaEvents, quotaPolicy, config, quotaDeferred.length);
   // Deterministic eligibility is applied after semantic review so the location gap survives the merge.
   evaluated = evaluated.map(job => annotateEligibility(job, prefs));
 
@@ -589,6 +639,7 @@ async function runPipeline(config, clock) {
     newCount: reviewed.length, newThisRun: enriched.length, reviewedCount: reviewed.length, matchCount: matches.length,
     candidateCount: budget.candidateCount, reviewedThisRun: budget.reviewedCount, deferredCount: budget.deferred.length, maxReviewedPerRun: budget.limit,
     droppedAfterPreciseTimestamps: freshness.dropped.length,
+    quota,
     warnings: finalWarnings,
     runsToday, firstGeneratedAt: previous?.meta?.firstGeneratedAt || now.toISOString(), lastUpdatedAt: now.toISOString(),
     trigger, completedAt: now.toISOString(), completedAtLocal: formatLocalDateTime(now, timeZone),

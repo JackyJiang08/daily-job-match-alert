@@ -15,6 +15,7 @@ import { LETTER_SCRIPT, ONECLICK_SCRIPT, SAMPLE_TRACK_SCRIPT, letterPanel, lette
 import { todayTarget } from './views.mjs';
 import { findLetterJob, generateLetter, jobIdOf, letterEngineFor, oneClickLetter, saveLetter } from './letters.mjs';
 import { LetterBusyError } from './letter-jobs.mjs';
+import { QuotaError, describeQuota } from '../engines/quota.mjs';
 import { LetterInputError } from '../cover-letter/store.mjs';
 import { displayCompanyName } from '../posting-fields.mjs';
 import { REPORTS_SCRIPT, SETTINGS_SCRIPT, STATUS_SCRIPT, renderHubPage, reportsPage, resumesPage, settingsPage, statusPage } from './views.mjs';
@@ -88,6 +89,15 @@ export function createHubHandler(ctx) {
     response.writeHead(303, { location: target, 'cache-control': 'no-store' });
     response.end();
   };
+  // A quota refusal reaches the card or the panel as a plain sentence, the reset time when the CLI gave
+  // one, and whether the Codex engine is signed in and can take over.
+  async function quotaReply(quota) {
+    const config = await ctx.loadConfig().catch(() => ({}));
+    const timeZone = config.timeZone || 'America/Chicago';
+    let codexAvailable = false;
+    try { codexAvailable = (await ctx.connections.status({ commands: configuredCliCommands(config) }))?.codex?.connected === true; } catch {}
+    return { kind: quota.kind, model: quota.model || null, resetsAt: quota.resetsAt || null, message: describeQuota(quota, { timeZone }), codexAvailable };
+  }
   // Every page carries the sidebar summary; config is re-read per request so nothing is cached in-process.
   const page = async (response, status, options) => {
     const config = await ctx.loadConfig().catch(() => ({}));
@@ -244,7 +254,7 @@ export function createHubHandler(ctx) {
         return;
       }
       case '/letters/generate': {
-        json(response, 200, await generateLetter(ctx, { date: assertDate(fields.date), jobId: fields.job, trackId: fields.track || null, company: fields.company }));
+        json(response, 200, await generateLetter(ctx, { date: assertDate(fields.date), jobId: fields.job, trackId: fields.track || null, company: fields.company, engine: fields.engine || null }));
         return;
       }
       case '/letters/oneclick': {
@@ -252,7 +262,8 @@ export function createHubHandler(ctx) {
         const readiness = await ctx.letterStore.readiness();
         if (!readiness.ready) throw new HubInputError(`Cover-letter material is incomplete (${readiness.missing.join(', ')}); upload it under Settings first`);
         const { job, id } = await findLetterJob(ctx, date, fields.job);
-        const started = ctx.letterJobs.start({ date, jobId: id, company: displayCompanyName(job) || job.company || null, run: () => oneClickLetter(ctx, { date, jobId: id }) });
+        const engineChoice = fields.engine ? String(fields.engine).toLowerCase() : null;
+        const started = ctx.letterJobs.start({ date, jobId: id, company: displayCompanyName(job) || job.company || null, run: () => oneClickLetter(ctx, { date, jobId: id, engine: engineChoice }) });
         json(response, 202, started);
         return;
       }
@@ -337,7 +348,10 @@ export function createHubHandler(ctx) {
         if (desktopMatch) return await getDesktop(assertDate(desktopMatch[1]), desktopMatch[2] ? 'xlsx' : 'html', response);
         if (url.pathname === '/settings') return await getSettings(url, response);
         if (url.pathname === '/letters') return await getLetters(url, response);
-        if (url.pathname === '/letters/oneclick.json') return json(response, 200, ctx.letterJobs.status());
+        if (url.pathname === '/letters/oneclick.json') {
+          const status = ctx.letterJobs.status();
+          return json(response, 200, status.quota ? { ...status, codexAvailable: (await quotaReply(status.quota)).codexAvailable } : status);
+        }
         if (url.pathname === '/letters/new') return await getLetterPanel(url, response, { date: assertDate(url.searchParams.get('date')), jobId: url.searchParams.get('job') });
         const letterOpen = /^\/letters\/(\d{4}-\d{2}-\d{2})\/([A-Za-z0-9]{1,80})$/.exec(url.pathname);
         if (letterOpen) {
@@ -354,10 +368,10 @@ export function createHubHandler(ctx) {
       return send(response, 405, 'Method not allowed', 'text/plain; charset=utf-8');
     } catch (error) {
       const wantsJson = url.pathname === '/run' || url.pathname === '/letters/generate' || url.pathname === '/letters/save' || url.pathname === '/letters/oneclick' || url.pathname === '/settings/cover-letter/sample-track' || url.pathname.endsWith('.json');
-      const status = error instanceof HubInputError || error instanceof LetterInputError ? 400 : error instanceof HubLockedError || error instanceof LetterBusyError ? 409 : Number(error?.status) || 500;
+      const status = error instanceof HubInputError || error instanceof LetterInputError ? 400 : error instanceof HubLockedError || error instanceof LetterBusyError ? 409 : error instanceof QuotaError ? 429 : Number(error?.status) || 500;
       const message = status === 500 ? `Hub error: ${error?.message || error}` : String(error.message || error);
       if (status === 500) console.error(error?.stack || error);
-      if (wantsJson) return json(response, status, { error: message, ...(error instanceof LetterBusyError ? { job: error.job } : {}) });
+      if (wantsJson) return json(response, status, { error: message, ...(error instanceof LetterBusyError ? { job: error.job } : {}), ...(error instanceof QuotaError ? { quota: await quotaReply(error.quota) } : {}) });
       const back = url.pathname.startsWith('/resumes') ? '/resumes' : url.pathname.startsWith('/settings/cover-letter') ? '/settings#cover-letters' : url.pathname.startsWith('/settings') ? '/settings' : url.pathname.startsWith('/status') ? '/status' : url.pathname.startsWith('/letters') ? '/letters' : '/reports';
       if (request.method === 'POST' && status !== 403) return redirect(response, back, message, 'error');
       return await page(response, status, { active: '', title: 'Error', content: '<h1 class="hub-title">Error</h1>', error: message });

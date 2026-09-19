@@ -218,6 +218,7 @@ export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, 
       <div class="row">
         <button class="btn" id="generate-button" type="button"${readiness.ready ? '' : ' disabled'}>Regenerate</button>
         <button class="btn secondary" id="save-button" type="button"${paragraphs.length ? '' : ' hidden'}>Save &amp; Render PDF</button>
+        <button class="btn secondary" id="codex-button" type="button" hidden>Generate with Codex</button>
         ${download}
       </div>
       <p class="letter-status" id="letter-status"></p>
@@ -272,7 +273,7 @@ export const LETTER_SCRIPT = `
   function showCounts(list, pages) { counts.textContent = words(list) + ' words · ' + list.length + ' paragraphs' + (pages != null ? ' · ' + pages + ' page' + (pages === 1 ? '' : 's') : ''); }
   function showFoot(result) {
     var samples = (result.samplesUsed || []).map(function (s) { return s.name + (s.track ? ' (' + (TRACKS[s.track] || s.track) + ')' : ''); }).join(', ');
-    foot.textContent = (samples ? 'Samples used: ' + samples + ' · ' : 'No samples used · ') + 'Engine: ' + (result.engineLabel || result.engine) + (result.model ? ' · ' + result.model : '') + (result.reviewed ? (result.revisionAdopted ? ' · editor revision applied' : ' · editor pass: no changes') : '');
+    foot.textContent = (samples ? 'Samples used: ' + samples + ' · ' : 'No samples used · ') + 'Engine: ' + (result.engineLabel || result.engine) + (result.model ? ' · ' + result.model : '') + (result.downgradeNote ? ' · ' + result.downgradeNote : '') + (result.reviewed ? (result.revisionAdopted ? ' · editor revision applied' : ' · editor pass: no changes') : '');
   }
   function render(result) {
     fill(result.paragraphs);
@@ -286,13 +287,30 @@ export const LETTER_SCRIPT = `
     editor.dataset.state = 'editing'; if (emptyHint) emptyHint.hidden = true; save.hidden = false; download.hidden = true; generate.textContent = 'Regenerate';
   }
   box.addEventListener('input', function () { showCounts(paragraphs(), state.pages); });
-  generate.addEventListener('click', function () {
-    generate.disabled = true; say('Generating…');
-    post('/letters/generate', { date: panel.dataset.date, job: panel.dataset.job, track: document.getElementById('letter-track').value, company: document.getElementById('letter-company').value })
-      .then(function (result) { render(result); say('Draft ready. Edit the paragraphs, then save and render the PDF.'); })
+  var codexButton = document.getElementById('codex-button');
+  function postGenerate(engine) {
+    var fields = { date: panel.dataset.date, job: panel.dataset.job, track: document.getElementById('letter-track').value, company: document.getElementById('letter-company').value };
+    if (engine) fields.engine = engine;
+    return fetch('/letters/generate', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form(fields) }).then(function (r) { return r.json().then(function (data) { data.httpStatus = r.status; return data; }); });
+  }
+  function runGenerate(engine) {
+    generate.disabled = true; if (codexButton) codexButton.hidden = true; say('Generating…');
+    postGenerate(engine)
+      .then(function (data) {
+        if (data.httpStatus !== 200) {
+          var quota = data.quota || null;
+          say(quota ? quota.message + (quota.resetsAt ? '' : '') + (!quota.codexAvailable ? '. Try again after the reset, or sign in to Codex to generate with ChatGPT.' : '') : data.error, true);
+          if (quota && quota.codexAvailable && codexButton) codexButton.hidden = false;
+          return;
+        }
+        render(data);
+        say(data.downgradeNote ? 'Draft ready (' + data.downgradeNote + '). Edit the paragraphs, then save and render the PDF.' : 'Draft ready. Edit the paragraphs, then save and render the PDF.');
+      })
       .catch(function (error) { say(error.message, true); })
       .then(function () { generate.disabled = false; });
-  });
+  }
+  generate.addEventListener('click', function () { runGenerate(null); });
+  if (codexButton) codexButton.addEventListener('click', function () { runGenerate('codex'); });
   save.addEventListener('click', function () {
     save.disabled = true; say('Rendering PDF…');
     post('/letters/save', { date: panel.dataset.date, job: panel.dataset.job, track: document.getElementById('letter-track').value, company: document.getElementById('letter-company').value, paragraph: paragraphs(), engine: state.engine || '', model: state.model || '', issues: JSON.stringify(state.issues), editorNotes: JSON.stringify(state.editorNotes), samplesUsed: JSON.stringify(state.samplesUsed) })
@@ -356,9 +374,17 @@ export const ONECLICK_SCRIPT = `
     if (badges && !badges.querySelector('[data-badge="letter-ready"]')) { var badge = document.createElement('span'); badge.className = 'badge badge-good'; badge.setAttribute('data-badge', 'letter-ready'); badge.textContent = 'Letter ready'; badges.appendChild(badge); }
     var anchor = document.createElement('a'); anchor.href = result.downloadUrl; anchor.download = ''; anchor.hidden = true; document.body.appendChild(anchor); anchor.click(); anchor.remove();
   }
-  function markFailed(button, message) {
+  function markFailed(button, message, quota) {
     button.dataset.state = ''; button.disabled = false; button.textContent = 'Generate Cover Letter'; button.title = '';
-    noteOn(button, 'Could not generate: ' + (message || 'unknown error'));
+    noteOn(button, (quota && quota.message ? quota.message : 'Could not generate: ' + (message || 'unknown error')) + (quota && !quota.codexAvailable && quota.kind ? '. Try again after the reset, or sign in to Codex to generate with ChatGPT.' : ''));
+    var actions = button.closest('.actions');
+    var old = actions && actions.querySelector('[data-codex]');
+    if (old) old.remove();
+    if (quota && quota.codexAvailable && actions) {
+      var codex = document.createElement('button'); codex.type = 'button'; codex.className = 'btn secondary small'; codex.setAttribute('data-codex', '1'); codex.textContent = 'Generate with Codex';
+      codex.addEventListener('click', function () { codex.remove(); start(button, 'codex'); });
+      button.insertAdjacentElement('afterend', codex);
+    }
   }
   function poll() {
     fetch('/letters/oneclick.json', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (job) {
@@ -371,24 +397,25 @@ export const ONECLICK_SCRIPT = `
       }
       if (button && button.dataset.state === 'generating') {
         if (job.state === 'ready' && job.result) markReady(button, job.result);
-        else markFailed(button, job.error);
+        else markFailed(button, job.error, job.quota ? { kind: job.quota.kind, message: job.error, codexAvailable: job.codexAvailable === true } : null);
       }
       active = null;
       setBusy(false, null);
     }).catch(function () { setTimeout(poll, 3000); });
   }
-  buttons.forEach(function (button) {
-    button.addEventListener('click', function () {
-      if (button.disabled) return;
-      markGenerating(button);
-      setBusy(true, null);
-      post('/letters/oneclick', { date: button.dataset.date, job: button.dataset.job }).then(function (data) {
-        if (data.httpStatus !== 202) { markFailed(button, data.error); if (data.httpStatus === 409) { setBusy(true, data.job); setTimeout(poll, 1500); } else { setBusy(false, null); } return; }
-        active = data.id;
-        setTimeout(poll, 1000);
-      }).catch(function (error) { markFailed(button, error.message); setBusy(false, null); });
-    });
-  });
+  function start(button, engine) {
+    if (button.disabled) return;
+    markGenerating(button);
+    setBusy(true, null);
+    var fields = { date: button.dataset.date, job: button.dataset.job };
+    if (engine) fields.engine = engine;
+    post('/letters/oneclick', fields).then(function (data) {
+      if (data.httpStatus !== 202) { markFailed(button, data.error, data.quota || null); if (data.httpStatus === 409) { setBusy(true, data.job); setTimeout(poll, 1500); } else { setBusy(false, null); } return; }
+      active = data.id;
+      setTimeout(poll, 1000);
+    }).catch(function (error) { markFailed(button, error.message); setBusy(false, null); });
+  }
+  buttons.forEach(function (button) { button.addEventListener('click', function () { start(button, null); }); });
   poll();
 })();
 `;

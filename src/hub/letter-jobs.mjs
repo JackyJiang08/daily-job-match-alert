@@ -20,7 +20,7 @@ export function createLetterJobs({ now = () => new Date() } = {}) {
     return {
       id: job.id, state: job.state, busy: job.state === 'generating',
       date: job.date, jobId: job.jobId, company: job.company || null,
-      startedAt: job.startedAt, finishedAt: job.finishedAt, error: job.error, result: job.result,
+      startedAt: job.startedAt, finishedAt: job.finishedAt, error: job.error, result: job.result, quota: job.quota || null,
     };
   }
 
@@ -40,6 +40,7 @@ export function createLetterJobs({ now = () => new Date() } = {}) {
       }, error => {
         job.state = 'failed';
         job.error = String(error?.message || error || 'generation failed');
+        if (error?.code === 'SUBSCRIPTION_QUOTA') job.quota = { kind: error.quota.kind, model: error.quota.model || null, resetsAt: error.quota.resetsAt || null };
       }).then(() => { job.finishedAt = now().toISOString(); });
       return snapshot(job);
     },

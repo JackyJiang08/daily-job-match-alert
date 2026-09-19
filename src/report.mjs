@@ -10,6 +10,7 @@ import { warningText } from './warnings.mjs';
 import { formatLocalDateTime, formatLocalDay, formatLocalShort } from './time-format.mjs';
 import { normalizeLocation, sha256 } from './utils.mjs';
 import { displayCompanyName, postedAtPrecision } from './posting-fields.mjs';
+import { describeQuota } from './engines/quota.mjs';
 
 export const REPORT_TITLE = 'Daily Job Match Alert';
 export const WARNINGS_FILE_NAME = 'warnings.txt';
@@ -170,6 +171,10 @@ export function runDetailsView(jobs, meta, tracks) {
     counts.push(`${jobs.length} matched`);
     rows.push({ term: 'Postings', detail: counts.join(' · ') });
   }
+  if (meta.quota?.events?.length) {
+    const events = meta.quota.events.map(event => `${describeQuota(event, { timeZone: meta.timeZone })}: ${event.action}${event.detail ? ` (${event.detail})` : ''}`);
+    rows.push({ term: 'Subscription quota', detail: `${events.length} event(s)${meta.quota.effectiveModel || meta.quota.effectiveEngine ? ` · scored by ${meta.quota.effectiveEngine || 'claude'}${meta.quota.effectiveModel ? ` · ${meta.quota.effectiveModel}` : ''}` : ''}${meta.quota.deferredByQuota ? ` · ${meta.quota.deferredByQuota} deferred` : ''}`, items: events });
+  }
   if (meta.droppedAfterPreciseTimestamps != null) {
     rows.push({ term: 'Freshness check', detail: `dropped ${Number(meta.droppedAfterPreciseTimestamps)} postings after precise timestamps` });
   }
@@ -242,6 +247,7 @@ export function buildReportView(jobs, meta, options = {}) {
       ? { title: readableDate(meta.date), subtitle: mastheadSubtitle(jobs, meta, { withDate: false }) }
       : { title: REPORT_TITLE, subtitle: mastheadSubtitle(jobs, meta) },
     toolbar: { roleTypes, tracks, quiet: jobs.length < 5, total: jobs.length },
+    banner: meta.quota?.banner || null,
     cards,
     emptyMessage: 'No new postings cleared the configured threshold for this date.',
     runDetails: runDetailsView(jobs, meta, tracks),

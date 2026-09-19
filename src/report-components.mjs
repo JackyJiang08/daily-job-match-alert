@@ -110,6 +110,7 @@ export function renderReportBody(view) {
     ? `<section class="jobs" id="jobs">${view.cards.map(renderJobCard).join('\n')}</section><div class="empty" id="no-results" hidden>No matches for the current filters.</div>`
     : renderEmptyState(view.emptyMessage);
   return `${renderMasthead(view)}
+${view.banner ? `<div class="banner" data-banner="quota">${htmlEscape(view.banner)}</div>` : ''}
 ${renderToolbar(view.toolbar)}
 ${list}
 ${renderRunDetails(view.runDetails)}

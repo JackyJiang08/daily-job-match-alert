@@ -68,6 +68,17 @@ disabled; do not expand them unless a task says so.
   (meta.droppedAfterPreciseTimestamps). Day-level sources stay lenient. Workday
   company names prefer the list/registry label, else `cleanWorkdayCompany`;
   `displayCompanyName` is applied at render time (cards, xlsx, letter panel).
+- Subscription quota (src/engines/quota.mjs): the CLI has no usage command, so
+  refusal text is classified with a configurable regex table into fiveHourLimit
+  (wait 10 min up to 90 min, then defer), modelWeeklyLimit (step down
+  quotaPolicy.modelLadder, default fable → opus, audited as an info line, never
+  MODEL MISMATCH; next run starts on the preferred model), and
+  accountWeeklyLimit (defer everything, report banner; optional
+  quotaPolicy.fallbackEngine "codex" when Codex is signed in). Deferred
+  postings use state.deferred (quotaDeferred), never unreviewed. Cover letters
+  step down the same ladder (editor note + footer) and offer "Generate with
+  Codex"; Status has a Quota card; Settings exposes the ladder and fallback.
+  Fixture: tests/fixtures/quota-errors.json (recorded from the CLI binary).
 - Review budget: config.semanticMatching.maxReviewedPerRun (default 120,
   0 = no limit) caps the local candidates sent to the engine per run; the
   rest are deferred in state.deferred (not seen), come back next run whatever
@@ -91,7 +102,10 @@ disabled; do not expand them unless a task says so.
 ## Cover letters (src/cover-letter/ + hub Letters pages)
 - Engines expose generateText(prompt, { schema, tempDirectory }); local_only
   gets a labelled placeholder engine (src/engines/fake.mjs) so demos and tests
-  never call a model. compose.mjs holds the fixed letter architecture (P1:
+  never call a model. compose.mjs holds the fixed letter architecture (sign-off "Sincerely," and the
+  name on consecutive lines; openings follow the samples with "with a 3.91 GPA"
+  wording and varied phrasing across letters; the editor pass lists unverified
+  scenario details as "unverified detail:" notes without deleting them)  (P1:
   role + location, degree/GPA, role-type timeline sentence, in-state line for
   Illinois, hook; 3–4 responsibility paragraphs with numbered evidence and a
   principle; a candid "I should be straightforward about" paragraph only when

@@ -45,6 +45,8 @@ export function createHubContext(options) {
   });
   ctx.letterEngine = options.letterEngine || null;
   ctx.letterJobs = options.letterJobs || createLetterJobs({ now });
+  // The most recent quota refusal seen by the hub itself (cover letters); the pipeline's own events live in the day payload.
+  ctx.quotaLog = options.quotaLog || { last: null, record(event) { this.last = event; return event; } };
   ctx.renderPdf = options.renderPdf || null;
   ctx.chromeCommand = options.chromeCommand;
   ctx.connections = options.connections || createConnectionsProbe({ now, runner: options.cliRunner, describe: options.describeConnections || (commands => describeConnections({ runner: options.cliRunner, homedir: ctx.homedir, env: process.env, ...commands })) });

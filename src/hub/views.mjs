@@ -41,7 +41,7 @@ export const HUB_STYLES = `
 .datetools .today-link{text-decoration:none;color:var(--accent);font-weight:650}
 .datetools label{display:inline-flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap}
 .datelist{margin:0;padding:0;list-style:none;font-size:var(--fs-body)}
-.datelist .month{position:sticky;top:0;z-index:1;margin:0;padding:var(--space-2) var(--space-2) var(--space-1);background:var(--bg);font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.datelist .month{position:sticky;top:0;z-index:1;margin:0;padding:var(--space-2) var(--space-2) var(--space-1);background:var(--bg);font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2)}
 .datelist .month-toggle{display:flex;align-items:center;gap:6px;width:100%;margin:0;padding:0;border:0;background:none;font:inherit;color:inherit;letter-spacing:inherit;text-transform:inherit;cursor:pointer;text-align:left}
 .datelist .month-toggle::before{content:"";width:5px;height:5px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg);margin:-2px 2px 0 0;transition:transform .12s}
 .datelist .month[data-collapsed="1"] .month-toggle::before{transform:rotate(-45deg);margin:0 2px 0 0}
@@ -377,6 +377,23 @@ function sourceRow(row, timeZone) {
   return `<tr data-source="${htmlEscape(row.key)}"><td>${htmlEscape(row.label)}${kind}</td><td>${enabled}</td><td>${last}</td><td>${fresh}</td><td>${notes.join(' ')}</td></tr>`;
 }
 
+// The Quota card: last limit event, the model or engine in effect, and the deferral queue.
+function quotaCard(quota, timeZone) {
+  if (!quota) return '';
+  const event = quota.lastEvent
+    ? `${htmlEscape(quota.lastEvent.description)} · ${htmlEscape(formatLocalDateTime(quota.lastEvent.at, timeZone))} · <span class="badge badge-warn" data-badge="quota-action">${htmlEscape(quota.lastEvent.action || 'refused')}</span>${quota.lastEvent.detail ? ` <span class="muted">${htmlEscape(quota.lastEvent.detail)}</span>` : ''}${quota.lastEvent.source ? ` <span class="muted">(${htmlEscape(quota.lastEvent.source)})</span>` : ''}`
+    : '<span class="muted">No limit reached so far</span>';
+  const effective = quota.effectiveEngine === 'codex'
+    ? 'codex (fallback engine)'
+    : `${htmlEscape(quota.effectiveEngine)} · ${htmlEscape(quota.effectiveModel || 'default')}${quota.effectiveModel && quota.configuredModel && quota.effectiveModel !== quota.configuredModel ? ` <span class="badge badge-warn" data-badge="downgraded">downgraded from ${htmlEscape(quota.configuredModel)}</span>` : ''}`;
+  return `<article class="card" id="quota-card"><h2>Quota</h2><dl class="kv">
+    <dt>Last limit event</dt><dd id="quota-last">${event}</dd>
+    <dt>Model in effect</dt><dd id="quota-model">${effective}</dd>
+    <dt>Deferred postings</dt><dd id="quota-deferred">${Number(quota.deferredCount || 0)} waiting for the next run${quota.deferredByQuota ? ` · ${Number(quota.deferredByQuota)} of them because of a limit` : ''}</dd>
+    <dt>Policy</dt><dd>Ladder ${htmlEscape((quota.modelLadder || []).join(' → '))} · ${quota.fallbackEngine ? `Codex fallback on` : 'no engine fallback'}</dd>
+  </dl></article>`;
+}
+
 function sourcesCard(rows, timeZone) {
   const body = rows.length
     ? `<table class="plain" id="sources-table"><tr><th>Source</th><th>Enabled</th><th>Last Success</th><th>New This Run</th><th>Status</th></tr>${rows.map(row => sourceRow(row, timeZone)).join('')}</table>`
@@ -428,6 +445,7 @@ export function statusPage({ status, timeZone }) {
     <pre class="log" id="run-tail">${htmlEscape(run.tail.join('\n'))}</pre>
     </div>
   </article>
+  ${quotaCard(status.quota, timeZone)}
   ${sourcesCard(status.sources || [], timeZone)}
   <article class="card"><h2>Warnings</h2><p class="muted">Last 7 report dates.</p>${status.days.length ? status.days.map(dayRow).join('') : '<p class="muted">No reports yet.</p>'}</article>
   <article class="card"><h2>Error Reports</h2>${errors}</article>`;
@@ -522,6 +540,9 @@ export function settingsPage({ settings, connections = null, timeZone, coverLett
       <label class="field"><span>Minimum Match Score (0–100)</span><input type="number" name="minimumMatchScore" class="control-input" min="0" max="100" step="1" value="${Number(settings.minimumMatchScore)}" required></label>
       <div class="field"><span>Accepted Match Levels</span>${levels}</div>
       <label class="field"><span>Max Reviewed Per Run (0 = no limit)</span><input type="number" name="maxReviewedPerRun" class="control-input" min="0" max="5000" step="1" value="${Number(settings.maxReviewedPerRun ?? 120)}" required></label>
+      <label class="field"><span>Model Ladder (tried in order when a model hits its weekly limit)</span><input type="text" name="modelLadder" class="control-input" value="${htmlEscape(settings.modelLadder || 'fable, opus')}" placeholder="fable, opus"></label>
+      <input type="hidden" name="quotaPresent" value="1">
+      <div class="field"><label class="check"><input type="checkbox" name="fallbackEngine" value="codex"${settings.fallbackEngine === 'codex' ? ' checked' : ''}> Fall Back to Codex on a Weekly Account Limit (only when Codex is signed in)</label></div>
       <div class="field"><span>Engine</span><div class="radio-row">${engines}</div><p class="engine-warning" id="engine-warning" hidden>This engine is not connected on this Mac; the nightly run will keep local scores (unreviewed) until it is signed in. You can still save.</p></div>
       ${settings.engines.map(engine => modelSelect(engine.id, settings)).join('')}
     </fieldset>

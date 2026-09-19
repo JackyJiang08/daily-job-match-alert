@@ -36,7 +36,7 @@ header .contact { font-size: 11pt; margin: 0; }
 p { margin: 0 0 7pt; text-align: left; }
 header p { text-align: center; }
 p.date, p.salutation { margin-bottom: 7pt; }
-p.closing { margin-top: 4pt; margin-bottom: 14pt; }
+p.closing { margin-top: 4pt; margin-bottom: 0; }
 p.signature { margin: 0; }
 </style></head><body>
 <header><p class="name">${htmlEscape(letter.name)}</p>${letter.contact ? `<p class="contact">${htmlEscape(letter.contact)}</p>` : ''}</header>
@@ -116,7 +116,6 @@ async function renderWithPdfkit(letter, layout, outputPath, io) {
     document.moveDown(0.5);
   }
   document.text(letter.closing);
-  document.moveDown(1.4);
   document.text(letter.signature);
   const pages = document.bufferedPageRange().count;
   document.end();

@@ -11,6 +11,7 @@ import { LetterInputError } from '../cover-letter/store.mjs';
 import { sha256 } from '../utils.mjs';
 import { HubInputError, readReportPayload } from './services.mjs';
 import { displayCompanyName } from '../posting-fields.mjs';
+import { QuotaError, classifyQuotaError, describeQuota, nextLadderModel, normalizeQuotaPolicy } from '../engines/quota.mjs';
 
 export function jobIdOf(job) {
   return job.semanticId || sha256(job.url || '').slice(0, 16);
@@ -37,14 +38,43 @@ export async function resumeTextFor(ctx, config, trackId) {
   }
 }
 
-export function letterEngineFor(ctx, config) {
-  if (ctx.letterEngine) return ctx.letterEngine;
+export function letterEngineFor(ctx, config, { engine: engineOverride = null, model: modelOverride = null } = {}) {
+  if (ctx.letterEngine && !engineOverride && !modelOverride) return ctx.letterEngine;
   const semantic = config.semanticMatching || {};
-  const engineId = normalizeEngineId(semantic.engine || 'claude') || 'claude';
-  return createEngine(engineId, { ...semantic, model: resolveModel(semantic, engineId), allowPlaceholder: true, homedir: ctx.homedir });
+  const engineId = normalizeEngineId(engineOverride || semantic.engine || 'claude') || 'claude';
+  if (ctx.letterEngine && ctx.makeLetterEngine) return ctx.makeLetterEngine({ engine: engineId, model: modelOverride || resolveModel(semantic, engineId) });
+  return createEngine(engineId, { ...semantic, model: modelOverride || resolveModel(semantic, engineId), allowPlaceholder: true, homedir: ctx.homedir });
 }
 
-export async function generateLetter(ctx, { date, jobId, trackId, company }) {
+// Runs one generation attempt; on a model weekly limit it steps down the model ladder once and notes
+// it, on any other quota refusal it throws a QuotaError the routes turn into a plain-language reply.
+async function withQuotaPolicy(ctx, config, engineChoice, attempt) {
+  const policy = normalizeQuotaPolicy(config.semanticMatching?.quotaPolicy);
+  const first = letterEngineFor(ctx, config, engineChoice);
+  try {
+    return { result: await attempt(first), engine: first, downgradeNote: null };
+  } catch (error) {
+    const quota = classifyQuotaError(error, { policy });
+    if (!quota) throw error;
+    ctx.quotaLog?.record?.({ ...quota, at: ctx.now().toISOString(), engine: first.id, model: first.model, source: 'cover-letter', action: 'refused' });
+    const next = quota.kind === 'modelWeeklyLimit' ? nextLadderModel(policy, first.model) : null;
+    if (next && first.id === 'claude') {
+      const fallback = letterEngineFor(ctx, config, { ...engineChoice, engine: first.id, model: next });
+      const note = `Generated with ${next}: ${quota.model || first.model} weekly limit`;
+      ctx.quotaLog?.record?.({ ...quota, at: ctx.now().toISOString(), engine: first.id, model: first.model, source: 'cover-letter', action: 'downgraded', detail: `switched to ${next}` });
+      try {
+        return { result: await attempt(fallback), engine: fallback, downgradeNote: note };
+      } catch (secondError) {
+        const again = classifyQuotaError(secondError, { policy });
+        if (!again) throw secondError;
+        throw new QuotaError(again, secondError);
+      }
+    }
+    throw new QuotaError(quota, error);
+  }
+}
+
+export async function generateLetter(ctx, { date, jobId, trackId, company, engine: engineChoice = null }) {
   const config = await ctx.loadConfig();
   const readiness = await ctx.letterStore.readiness();
   if (!readiness.ready) throw new HubInputError(`Cover-letter material is incomplete (${readiness.missing.join(', ')}); upload it under Settings first`);
@@ -52,10 +82,12 @@ export async function generateLetter(ctx, { date, jobId, trackId, company }) {
   const chosenTrack = trackId || job.recommendedTrack || tracks[0]?.id;
   const { track, text } = await resumeTextFor(ctx, config, chosenTrack);
   const { playbook, samples } = await ctx.letterStore.loadMaterial();
-  const engine = letterEngineFor(ctx, config);
   const graduation = graduationTerms(config.preferences?.graduationDate);
   const review = config.coverLetter?.editorReview !== false;
-  const result = await generateCoverLetter({ engine, inputs: { playbook, samples, track, resumeText: text, job, graduation }, review, io: ctx.io });
+  const engineId = engineChoice ? (normalizeEngineId(engineChoice) || null) : null;
+  if (engineChoice && !engineId) throw new HubInputError('Engine must be claude or codex');
+  const generated = await withQuotaPolicy(ctx, config, engineId ? { engine: engineId } : {}, engine => generateCoverLetter({ engine, inputs: { playbook, samples, track, resumeText: text, job, graduation }, review, io: ctx.io }));
+  const result = generated.downgradeNote ? { ...generated.result, editorNotes: [generated.downgradeNote, ...(generated.result.editorNotes || [])], downgradeNote: generated.downgradeNote } : generated.result;
   return {
     ...result,
     jobId: id,
@@ -69,13 +101,13 @@ export async function generateLetter(ctx, { date, jobId, trackId, company }) {
 
 // One click from a job card: draft with the recommended track and the cleaned company name (editor pass
 // included), then save and render at once. Returns what the card needs to offer both buttons.
-export async function oneClickLetter(ctx, { date, jobId }) {
-  const draft = await generateLetter(ctx, { date, jobId, trackId: null, company: null });
+export async function oneClickLetter(ctx, { date, jobId, engine = null }) {
+  const draft = await generateLetter(ctx, { date, jobId, trackId: null, company: null, engine });
   const saved = await saveLetter(ctx, {
     date, jobId, trackId: draft.track.id, company: draft.company, paragraphs: draft.paragraphs,
     engine: draft.engine, model: draft.model, issues: draft.issues || [], editorNotes: draft.editorNotes || [], samplesUsed: draft.samplesUsed || [],
   });
-  return { downloadUrl: saved.downloadUrl, openUrl: `/letters/${date}/${saved.slug}`, pdf: saved.pdf, company: draft.company, track: draft.track, wordCount: saved.wordCount };
+  return { downloadUrl: saved.downloadUrl, openUrl: `/letters/${date}/${saved.slug}`, pdf: saved.pdf, company: draft.company, track: draft.track, wordCount: saved.wordCount, engine: draft.engine, model: draft.model, downgradeNote: draft.downgradeNote || null };
 }
 
 // Persists edited paragraphs, renders the PDF, and records everything needed to reopen or re-download.
@@ -105,7 +137,7 @@ export async function saveLetter(ctx, { date, jobId, trackId, company, paragraph
   }
   const pdfPath = path.join(saved.directory, pdfFileName);
   // A first render past one page asks the same engine for a 15 percent trim before smaller layouts are tried.
-  const letterEngine = letterEngineFor(ctx, config);
+  const letterEngine = letterEngineFor(ctx, config, engine === 'codex' ? { engine: 'codex' } : {});
   const condense = (currentParagraphs, pages) => condenseCoverLetter({ engine: letterEngine, paragraphs: currentParagraphs, pages, io: ctx.io });
   const pdf = await (ctx.renderPdf || renderLetterPdf)(letter, pdfPath, { chromeCommand: ctx.chromeCommand ?? (config.hub?.chromeCommand || null), io: ctx.io, condense });
   const finalParagraphs = Array.isArray(pdf.paragraphs) && pdf.paragraphs.length ? pdf.paragraphs : body;

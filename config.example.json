@@ -16,6 +16,12 @@
     "maximumDescriptionCharacters": 7000,
     "acceptedMatchLevels": ["high"],
     "maxReviewedPerRun": 120,
+    "quotaPolicy": {
+      "fiveHourLimit": { "retryIntervalMs": 600000, "maxWaitMs": 5400000 },
+      "modelLadder": ["fable", "opus"],
+      "fallbackEngine": null,
+      "patternsNote": "Optional regex overrides per class (fiveHourLimit, modelWeeklyLimit, accountWeeklyLimit, notQuota, genericLimit); see src/engines/quota.mjs for the recorded defaults."
+    },
     "timeoutMs": 600000
   },
   "reports": {

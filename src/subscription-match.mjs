@@ -6,6 +6,7 @@ import { sha256, unique } from './utils.mjs';
 import { createWarning, errorSummary } from './warnings.mjs';
 
 import { createEngine, normalizeEngineId, resolveModel } from './engines/index.mjs';
+import { classifyQuotaError, describeQuota, nextLadderModel, normalizeQuotaPolicy } from './engines/quota.mjs';
 import { MINIMUM_CLAUDE_CODE_VERSION, assessClaudeAuthStatus, claudeModelMatches, expandModelAlias, extractScoringModel, parseClaudeCodeVersion, parseStructuredOutput, verifyClaudeSubscription } from './engines/claude.mjs';
 import { compareVersions, isCredentialEnvironmentKey, normalizeModelName, run, subscriptionEnvironment } from './engines/shared.mjs';
 
@@ -97,8 +98,8 @@ function chunks(items, size) {
   return output;
 }
 
-function addWarning(options, message) {
-  if (Array.isArray(options.warnings)) options.warnings.push(createWarning('llm', normalizeEngineId(options.engine || 'claude') || String(options.engine), message));
+function addWarning(options, message, level = 'warning') {
+  if (Array.isArray(options.warnings)) options.warnings.push(createWarning('llm', normalizeEngineId(options.engine || 'claude') || String(options.engine), message, level));
 }
 
 function wait(milliseconds) {
@@ -170,7 +171,7 @@ export function mergeSemanticResults(jobs, results, engine, resumes = null) {
       gaps: item.gaps,
       blockers: unique([...(job.blockers || []), ...item.blockers]),
       semanticReviewed: true,
-      scoringEngine: engine,
+      scoringEngine: item.scoringEngine || engine,
       scoringModel: item.scoringModel || 'unknown',
     };
   });
@@ -193,8 +194,20 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
   if (!engineId) {
     throw new Error(`Unsupported semanticMatching.engine: ${options.engine}. Only claude, codex, and local_only exist; API-backed engines are intentionally unavailable.`);
   }
-  const engine = options.engineInstance || createEngine(engineId, { ...options, model: resolveModel(options, engineId) });
-  const engineName = engineId;
+  const preferredModel = options.engineInstance?.model || resolveModel(options, engineId);
+  const makeEngine = options.makeEngine || ((id, model) => createEngine(id, { ...options, model }));
+  let engine = options.engineInstance || makeEngine(engineId, preferredModel);
+  let engineName = engineId;
+  // Quota policy: how a refused call is handled (see engines/quota.mjs). Events are reported back through
+  // options.quotaEvents; postings the policy could not score are returned with quotaDeferred: true so the
+  // caller can hold them for the next run instead of marking them unreviewed.
+  const policy = normalizeQuotaPolicy(options.quotaPolicy);
+  const quotaEvents = Array.isArray(options.quotaEvents) ? options.quotaEvents : [];
+  const clock = options.now || (() => new Date());
+  const sleep = options.sleep || wait;
+  const strategicModels = new Set();
+  let downgradeNote = null;
+  const deferredIds = new Set();
 
   const tracks = resumeTrackList(resumes);
   if (!tracks.length) throw new Error('applySubscriptionMatching needs at least one enabled resume track');
@@ -230,13 +243,16 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
       }
       if (!observedModels.has(model)) {
         observedModels.add(model);
-        if (engine.model && !engine.modelMatches(model)) {
+        // A model the policy switched to on purpose is audited as an info line, never as a mismatch.
+        if (strategicModels.has(engine.model) && engine.modelMatches(model)) {
+          addWarning(options, `scored by ${engine.model}: ${downgradeNote}`, 'info');
+        } else if (engine.model && !engine.modelMatches(model)) {
           addWarning(options, `MODEL MISMATCH: semanticMatching.model is "${engine.model}" but the ${engine.label} CLI reported "${model}". Scores from this run were kept; fix the model configuration before the next run.`);
         }
       }
       return model;
     };
-    const stampModel = (items, model) => items.map(item => ({ ...item, scoringModel: model }));
+    const stampModel = (items, model) => items.map(item => ({ ...item, scoringModel: model, scoringEngine: engineName }));
     const invokeWithRetry = async batch => {
       let lastError;
       for (let attempt = 1; attempt <= 2; attempt++) {
@@ -244,17 +260,95 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
           return { response: await invokeBatch(batch), error: null };
         } catch (error) {
           lastError = error;
-          if (attempt === 1) await (options.sleep || wait)(Number(options.retryDelayMs ?? 10_000));
+          // A quota refusal is not retried blindly; the policy below decides.
+          if (classifyQuotaError(error, { now: clock(), policy })) return { response: null, error };
+          if (attempt === 1) await sleep(Number(options.retryDelayMs ?? 10_000));
         }
       }
       return { response: null, error: lastError };
     };
+    const recordEvent = (quota, action, detail = null) => {
+      const event = { kind: quota.kind, model: quota.model || engine.model, resetsAt: quota.resetsAt, at: clock().toISOString(), action, detail, engine: engineName, message: quota.message };
+      quotaEvents.push(event);
+      return event;
+    };
+    // fiveHourLimit: wait and retry the same batch every retryIntervalMs until maxWaitMs has passed.
+    const waitOutFiveHourLimit = async (batch, quota) => {
+      const deadline = clock().getTime() + policy.fiveHourLimit.maxWaitMs;
+      let attempts = 0;
+      while (clock().getTime() + policy.fiveHourLimit.retryIntervalMs <= deadline) {
+        await sleep(policy.fiveHourLimit.retryIntervalMs);
+        attempts += 1;
+        try {
+          return { response: await invokeBatch(batch), attempts };
+        } catch (error) {
+          const again = classifyQuotaError(error, { now: clock(), policy });
+          if (!again) throw error;
+          if (again.kind !== 'fiveHourLimit') return { response: null, attempts, quota: again };
+        }
+      }
+      return { response: null, attempts, quota };
+    };
+    const deferRemaining = (remaining, quota, action) => {
+      for (const job of remaining) deferredIds.add(job.semanticId);
+      addWarning(options, `${describeQuota(quota)}; ${remaining.length} postings were deferred to the next run (${action})`, 'info');
+    };
 
     const missingJobs = [];
+    const batches = chunks(candidates, Number(options.batchSize || 6));
     let batchNumber = 0;
-    for (const batch of chunks(candidates, Number(options.batchSize || 6))) {
+    for (let index = 0; index < batches.length; index += 1) {
+      const batch = batches[index];
       batchNumber += 1;
-      const { response, error } = await invokeWithRetry(batch);
+      let { response, error } = await invokeWithRetry(batch);
+      let quota = error ? classifyQuotaError(error, { now: clock(), policy }) : null;
+      if (quota?.kind === 'fiveHourLimit') {
+        const event = recordEvent(quota, 'wait');
+        const waited = await waitOutFiveHourLimit(batch, quota);
+        event.detail = `retried ${waited.attempts} time(s) at ${Math.round(policy.fiveHourLimit.retryIntervalMs / 60000)}-minute intervals`;
+        if (waited.response) { response = waited.response; error = null; quota = null; event.action = 'waited'; }
+        else if (waited.quota && waited.quota.kind !== 'fiveHourLimit') { quota = waited.quota; }
+        else {
+          event.action = 'deferred';
+          deferRemaining(batches.slice(index).flat(), quota, `waited ${Math.round(policy.fiveHourLimit.maxWaitMs / 60000)} minutes without the limit clearing`);
+          break;
+        }
+      }
+      if (quota?.kind === 'modelWeeklyLimit') {
+        const next = nextLadderModel(policy, engine.model);
+        if (next) {
+          const reason = `${(quota.model || engine.model)} weekly limit`;
+          recordEvent(quota, 'downgraded', `switched to ${next}`);
+          downgradeNote = reason;
+          engine = makeEngine(engineName, next);
+          strategicModels.add(next);
+          addWarning(options, `${describeQuota(quota)}; continuing with ${next}`, 'info');
+          index -= 1;
+          batchNumber -= 1;
+          continue;
+        }
+        recordEvent(quota, 'deferred', 'no model left on the ladder');
+        deferRemaining(batches.slice(index).flat(), quota, 'no model left on the ladder');
+        break;
+      }
+      if (quota?.kind === 'accountWeeklyLimit') {
+        const fallback = policy.fallbackEngine;
+        const connected = fallback && options.fallbackConnected ? await options.fallbackConnected(fallback).catch(() => false) : false;
+        if (fallback && connected && engineName !== fallback) {
+          recordEvent(quota, 'fallback-engine', `switched to ${fallback}`);
+          addWarning(options, `${describeQuota(quota)}; continuing with the ${fallback} engine`, 'info');
+          engine = makeEngine(fallback, resolveModel(options, fallback));
+          engineName = fallback;
+          strategicModels.add(engine.model);
+          downgradeNote = 'Claude weekly account limit';
+          index -= 1;
+          batchNumber -= 1;
+          continue;
+        }
+        recordEvent(quota, 'deferred', fallback ? `${fallback} fallback is ${connected ? 'active' : 'not connected'}` : 'no fallback engine configured');
+        deferRemaining(batches.slice(index).flat(), quota, 'all remaining postings wait for the next run');
+        break;
+      }
       if (error) {
         for (const job of batch) fallbackIds.add(job.semanticId);
         addWarning(options, `Batch ${batchNumber} failed twice; ${batch.length} jobs used local fallback: ${errorSummary(error)}`);
@@ -302,7 +396,7 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
   const candidateResults = mergeSemanticResults(candidates, allResults, engineName, tracks);
   const mergedByUrl = new Map(candidateResults.map(job => [
     job.url,
-    fallbackIds.has(job.semanticId) || !resultIds.has(job.semanticId) ? localFallbackJob(job) : job,
+    deferredIds.has(job.semanticId) ? { ...job, quotaDeferred: true } : fallbackIds.has(job.semanticId) || !resultIds.has(job.semanticId) ? localFallbackJob(job) : job,
   ]));
   return jobs.map(job => mergedByUrl.get(job.url) || job);
 }

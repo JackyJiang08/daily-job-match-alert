@@ -13,6 +13,7 @@ import { readConfigFile, updateConfigFile } from './config-file.mjs';
 import { readLockStatus } from './run.mjs';
 import { boardLabel, readRegistry, resumeBoard, writeRegistry } from '../collectors/ats-boards.mjs';
 import { builtinSources } from '../collectors/catalog.mjs';
+import { describeQuota, normalizeQuotaPolicy } from '../engines/quota.mjs';
 import { HubLockedError } from './config-file.mjs';
 import { acquireRunLock, releaseRunLock } from '../lock.mjs';
 
@@ -408,7 +409,33 @@ export async function buildStatusView(ctx, config) {
     days,
     errors,
     sources: await sourcesView(ctx, config, latest),
+    quota: quotaView(ctx, config, latest, state),
     outputDirectory: config.outputDirectory,
+  };
+}
+
+// ---------------------------------------------------------------------------------------------- quota
+
+// The Quota card: the most recent limit event (from the newest payload or from a cover-letter attempt
+// in this hub process, whichever is later), the model and engine now in effect, and how many postings
+// wait in the deferral queue.
+export function quotaView(ctx, config, latest, state) {
+  const timeZone = config.timeZone || 'America/Chicago';
+  const policy = normalizeQuotaPolicy(config.semanticMatching?.quotaPolicy);
+  const runQuota = latest?.meta?.quota || null;
+  const candidates = [runQuota?.lastEvent ? { ...runQuota.lastEvent, source: 'nightly run' } : null, ctx.quotaLog?.last || null].filter(Boolean);
+  candidates.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+  const last = candidates[0] || null;
+  return {
+    lastEvent: last ? { ...last, description: describeQuota(last, { timeZone }) } : null,
+    effectiveEngine: runQuota?.effectiveEngine || (normalizeEngineId(config.semanticMatching?.engine || 'claude') || 'claude'),
+    effectiveModel: runQuota ? runQuota.effectiveModel : (resolveModel(config.semanticMatching || {}, normalizeEngineId(config.semanticMatching?.engine || 'claude') || 'claude') || null),
+    configuredModel: runQuota?.configuredModel || resolveModel(config.semanticMatching || {}, normalizeEngineId(config.semanticMatching?.engine || 'claude') || 'claude') || null,
+    deferredCount: Object.keys(state?.deferred && typeof state.deferred === 'object' ? state.deferred : {}).length,
+    deferredByQuota: runQuota?.deferredByQuota || 0,
+    modelLadder: policy.modelLadder,
+    fallbackEngine: policy.fallbackEngine,
+    runDate: latest?.meta?.date || null,
   };
 }
 
@@ -493,6 +520,8 @@ export async function readSettings(ctx) {
   return {
     minimumMatchScore: config.minimumMatchScore ?? 60,
     maxReviewedPerRun: semantic.maxReviewedPerRun == null ? 120 : Number(semantic.maxReviewedPerRun),
+    modelLadder: normalizeQuotaPolicy(semantic.quotaPolicy).modelLadder.join(', '),
+    fallbackEngine: normalizeQuotaPolicy(semantic.quotaPolicy).fallbackEngine,
     acceptedMatchLevels: Array.isArray(semantic.acceptedMatchLevels) ? semantic.acceptedMatchLevels : ['high'],
     engine,
     engines: ENGINE_IDS.map(id => ({ id, label: ENGINE_LABELS[id] })),
@@ -527,11 +556,16 @@ export function validateSettings(form) {
   const budgetGiven = form.maxReviewedPerRun != null && String(form.maxReviewedPerRun).trim() !== '';
   const maxReviewedPerRun = budgetGiven ? Number(form.maxReviewedPerRun) : null;
   if (budgetGiven && (!Number.isInteger(maxReviewedPerRun) || maxReviewedPerRun < 0 || maxReviewedPerRun > 5000)) errors.push('Max reviewed per run must be a whole number from 0 (no limit) to 5000');
+  // Quota policy fields are optional too; quotaPresent marks a form that carries the fallback checkbox.
+  const ladderGiven = form.modelLadder != null && String(form.modelLadder).trim() !== '';
+  const modelLadder = ladderGiven ? String(form.modelLadder).split(',').map(item => item.trim()).filter(Boolean) : null;
+  if (modelLadder && (!modelLadder.length || modelLadder.some(item => !MODEL_PATTERN.test(item)))) errors.push('Model ladder must be a comma-separated list of Claude model names such as fable, opus');
+  const fallbackEngine = form.quotaPresent != null ? ((form.fallbackEngine === 'on' || form.fallbackEngine === 'true' || form.fallbackEngine === 'codex' || form.fallbackEngine === true) ? 'codex' : null) : undefined;
   const xlsxRequired = form.xlsxRequired === 'on' || form.xlsxRequired === 'true' || form.xlsxRequired === true;
   // Only the settings form carries the flag; a form without it (older callers) leaves the config value alone.
   const editorReview = form.editorReviewPresent != null ? (form.editorReview === 'on' || form.editorReview === 'true' || form.editorReview === true) : null;
   if (errors.length) throw new HubInputError(errors.join('; '));
-  return { minimumMatchScore, acceptedMatchLevels: MATCH_LEVELS.filter(level => levels.includes(level)), engine, model, xlsxRequired, editorReview, hubPort, maxReviewedPerRun };
+  return { minimumMatchScore, acceptedMatchLevels: MATCH_LEVELS.filter(level => levels.includes(level)), engine, model, xlsxRequired, editorReview, hubPort, maxReviewedPerRun, modelLadder, fallbackEngine };
 }
 
 // "Save this path to config": pins the resolved binary as semanticMatching.<engine>Command.
@@ -566,6 +600,11 @@ export async function saveSettings(ctx, form) {
     config.semanticMatching = config.semanticMatching && typeof config.semanticMatching === 'object' ? config.semanticMatching : {};
     config.semanticMatching.acceptedMatchLevels = settings.acceptedMatchLevels;
     if (settings.maxReviewedPerRun != null) config.semanticMatching.maxReviewedPerRun = settings.maxReviewedPerRun;
+    if (settings.modelLadder || settings.fallbackEngine !== undefined) {
+      config.semanticMatching.quotaPolicy = config.semanticMatching.quotaPolicy && typeof config.semanticMatching.quotaPolicy === 'object' ? config.semanticMatching.quotaPolicy : {};
+      if (settings.modelLadder) config.semanticMatching.quotaPolicy.modelLadder = settings.modelLadder;
+      if (settings.fallbackEngine !== undefined) config.semanticMatching.quotaPolicy.fallbackEngine = settings.fallbackEngine;
+    }
     if (settings.engine) config.semanticMatching.engine = settings.engine;
     config.semanticMatching.model = settings.model;
     const activeEngine = settings.engine || normalizeEngineId(config.semanticMatching.engine);

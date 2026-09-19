@@ -80,6 +80,7 @@ a{color:inherit}
 .masthead h1{margin:0;font-size:var(--fs-page);font-weight:650;letter-spacing:-0.01em;line-height:1.25}
 .masthead .sub{margin:var(--space-1) 0 0;font-size:var(--fs-body);color:var(--ink-2)}
 
+.banner{margin:0 0 var(--space-4);padding:var(--space-3) var(--space-4);border-radius:var(--radius);background:var(--warn-bg);color:var(--warn-ink);font-size:var(--fs-body)}
 .toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2);margin:0 0 var(--space-4)}
 /* One control style for every text input and select, in the report toolbar and in the hub forms. */
 .control-input,.toolbar input,.toolbar select{font:inherit;font-size:var(--fs-body);line-height:1.3;color:var(--ink);background:var(--surface);border:1px solid var(--line-2);border-radius:var(--radius-sm);padding:6px 9px;min-height:32px;box-sizing:border-box}

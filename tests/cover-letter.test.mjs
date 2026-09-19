@@ -75,8 +75,12 @@ test('the prompt carries the playbook, the chosen track resume, the samples with
   assert.match(prompt, /"gaps": \[\s*"No Kubernetes"\s*\]/);
   assert.doesNotMatch(prompt, /Condense it/);
   assert.match(buildCoverLetterPrompt({ playbook: 'P', track: { id: 'data', label: 'Data' }, resumeText: 'R', job: {}, condense: true }), /Condense it by about 15 percent/);
-  assert.equal(letterRules().split('\n').length, 9);
-  assert.equal(letterRules({ condense: true }).split('\n').length, 10);
+  assert.equal(letterRules().split('\n').length, 11);
+  assert.equal(letterRules({ condense: true }).split('\n').length, 12);
+  assert.match(prompt, /Prefer opening with "I am writing to apply for the <role> position at <company>" unless the samples open differently/);
+  assert.match(prompt, /State the GPA as "with a 3\.91 GPA" \(the number exactly as the RESUME or PLAYBOOK gives it\), never as "3\.91\/4\.00"/);
+  assert.match(prompt, /Vary the phrasing between letters: do not reuse one fixed set of opening, transition, and closing phrases/);
+  assert.match(buildReviewPrompt({ paragraphs: ['x'], job: {}, resumeText: 'R', playbook: 'P' }), /List each one you cannot find as an issue that starts with "unverified detail:" and names the detail\. Do NOT remove or rewrite those details in revised_paragraphs/);
 });
 
 test('header, date, salutation, and sign-off are assembled by code, never by the model', () => {
@@ -87,7 +91,7 @@ test('header, date, salutation, and sign-off are assembled by code, never by the
   assert.equal(letter.salutation, 'Dear Acme, Inc. Recruiting Team,');
   assert.equal(letter.closing, 'Sincerely,');
   assert.equal(letter.signature, 'Jane Doe');
-  assert.equal(letter.markdown, '# Jane Doe\n555-0100 · jane.doe@example.com\n\nSeptember 15, 2026\n\nDear Acme, Inc. Recruiting Team,\n\nOne.\n\nTwo.\n\nSincerely,\n\nJane Doe\n');
+  assert.equal(letter.markdown, '# Jane Doe\n555-0100 · jane.doe@example.com\n\nSeptember 15, 2026\n\nDear Acme, Inc. Recruiting Team,\n\nOne.\n\nTwo.\n\nSincerely,\nJane Doe\n');
   assert.equal(letterDate(new Date('2026-01-01T03:00:00Z'), 'America/Chicago'), 'December 31, 2025', 'the date follows the configured zone');
   assert.equal(assembleLetter({ profile: { name: 'Jane Doe' }, company: '', paragraphs: [], now: new Date(NOW) }).salutation, 'Dear Hiring Recruiting Team,');
   const html = letterHtml(letter);
@@ -568,7 +572,7 @@ test('generate → edit → save renders a PDF, records the letter, marks the ca
     assert.equal(record.jobId, jobId);
     const markdown = await fs.readFile(path.join(root, 'private', 'cover-letters', '2026-09-15', 'AcmeInc', 'letter.md'), 'utf8');
     assert.match(markdown, /^# Jane Doe\n555-0100 · jane\.doe@example\.com\n\nSeptember 15, 2026\n\nDear Acme, Inc\. Recruiting Team,\n/);
-    assert.match(markdown, /\nSincerely,\n\nJane Doe\n$/);
+    assert.match(markdown, /\nSincerely,\nJane Doe\n$/, 'sign-off and name on consecutive lines, as in the samples');
 
     const pdf = await hub.request('GET', result.downloadUrl);
     assert.equal(pdf.status, 200);
@@ -709,6 +713,76 @@ test('one click on a card generates in the background: generating → ready with
     assert.equal((await hub.form('/letters/oneclick', { date: '2026-09-15', job: secondId })).status, 202, 'a failed job does not hold the lock');
     assert.equal((await hub.ctx.letterJobs.settle()).state, 'ready');
     assert.equal((await hub.form('/letters/oneclick', { date: '2026-09-15', job: jobId }, { origin: 'http://evil.example' })).status, 403);
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a quota refusal reaches the panel and the card as a plain sentence with a Codex option, and a Fable weekly limit steps the letter down to opus with a note', async () => {
+  const root = await prepareProject();
+  const calls = [];
+  const mode = { value: null };
+  const engineFor = ({ engine = 'claude', model = 'fable' } = {}) => ({
+    id: engine, label: engine === 'codex' ? 'ChatGPT subscription via Codex' : 'Claude subscription', model,
+    async generateText(prompt) {
+      calls.push({ engine, model, kind: prompt.startsWith('EDITOR REVIEW') ? 'review' : 'draft' });
+      if (engine === 'claude' && model === 'fable' && mode.value === 'fable-limit') throw new Error("claude exited 1: You've reached your Fable limit. Your Fable limit resets at 9am (America/Chicago).");
+      if (engine === 'claude' && mode.value === 'account-limit') throw new Error('claude exited 1: you have reached your weekly usage limit|1790200000');
+      if (prompt.startsWith('EDITOR REVIEW')) return { output: { issues: [], revised_paragraphs: [] }, scoringModel: `${engine}-${model}` };
+      return { output: { paragraphs: fiveParagraphs(100) }, scoringModel: `${engine}-${model}` };
+    },
+  });
+  const hub = await startHub(root, { letterEngine: engineFor() });
+  hub.ctx.makeLetterEngine = engineFor;
+  const jobId = sha256('https://example.com/jobs/1').slice(0, 16);
+  try {
+    await hub.upload('/settings/cover-letter', PROFILE, [{ field: 'playbook', name: 'playbook.md', data: Buffer.from(`# Playbook\n${'Real evidence line. '.repeat(10)}`) }]);
+
+    mode.value = 'fable-limit';
+    const downgraded = await hub.form('/letters/generate', { date: '2026-09-15', job: jobId, track: 'data', company: 'Acme' });
+    assert.equal(downgraded.status, 200);
+    const draft = JSON.parse(downgraded.text);
+    assert.equal(draft.model, 'claude-opus');
+    assert.equal(draft.downgradeNote, 'Generated with opus: fable weekly limit');
+    assert.equal(draft.editorNotes[0], 'Generated with opus: fable weekly limit', 'the downgrade is the first editor note');
+    assert.deepEqual(calls.map(call => [call.engine, call.model, call.kind]), [['claude', 'fable', 'draft'], ['claude', 'opus', 'draft'], ['claude', 'opus', 'review']]);
+    assert.equal(hub.ctx.quotaLog.last.action, 'downgraded');
+    assert.equal(hub.ctx.quotaLog.last.source, 'cover-letter');
+
+    mode.value = 'account-limit';
+    const refused = await hub.form('/letters/generate', { date: '2026-09-15', job: jobId, track: 'data', company: 'Acme' });
+    assert.equal(refused.status, 429);
+    const body = JSON.parse(refused.text);
+    assert.equal(body.error, 'Claude subscription weekly account limit reached; expected to reset Sep 23, 2026, 4:46 PM');
+    assert.deepEqual(body.quota, { kind: 'accountWeeklyLimit', model: null, resetsAt: '2026-09-23T21:46:40.000Z', message: body.error, codexAvailable: false });
+    assert.equal(hub.ctx.quotaLog.last.action, 'refused');
+
+    hub.ctx.connections = { status: async () => ({ codex: { connected: true } }) };
+    const refusedWithCodex = JSON.parse((await hub.form('/letters/generate', { date: '2026-09-15', job: jobId, track: 'data', company: 'Acme' })).text);
+    assert.equal(refusedWithCodex.quota.codexAvailable, true, 'the panel can offer Generate with Codex');
+    const viaCodex = await hub.form('/letters/generate', { date: '2026-09-15', job: jobId, track: 'data', company: 'Acme', engine: 'codex' });
+    assert.equal(viaCodex.status, 200);
+    assert.equal(JSON.parse(viaCodex.text).engine, 'codex');
+    assert.equal(JSON.parse(viaCodex.text).downgradeNote, undefined);
+    assert.equal((await hub.form('/letters/generate', { date: '2026-09-15', job: jobId, engine: 'gpt' })).status, 400);
+
+    const started = await hub.form('/letters/oneclick', { date: '2026-09-15', job: jobId });
+    assert.equal(started.status, 202);
+    const failed = await hub.ctx.letterJobs.settle();
+    assert.equal(failed.state, 'failed');
+    assert.deepEqual(failed.quota, { kind: 'accountWeeklyLimit', model: null, resetsAt: '2026-09-23T21:46:40.000Z' });
+    assert.match(failed.error, /weekly account limit reached; expected to reset/);
+    const status = JSON.parse((await hub.request('GET', '/letters/oneclick.json')).text);
+    assert.equal(status.codexAvailable, true, 'the card can offer Generate with Codex');
+    const codexOneClick = await hub.form('/letters/oneclick', { date: '2026-09-15', job: jobId, engine: 'codex' });
+    assert.equal(codexOneClick.status, 202);
+    const ready = await hub.ctx.letterJobs.settle();
+    assert.equal(ready.state, 'ready');
+    assert.equal(ready.result.engine, 'codex');
+    const panel = await hub.request('GET', '/letters/2026-09-15/Acme');
+    assert.match(panel.text, /<button class="btn secondary" id="codex-button" type="button" hidden>Generate with Codex<\/button>/);
+    assert.match(panel.text, /Generate with Codex/);
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });
