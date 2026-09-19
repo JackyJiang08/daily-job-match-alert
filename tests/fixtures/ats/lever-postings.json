@@ -1,0 +1,90 @@
+[
+  {
+    "additionalPlain": "About Example Corp\nExample Corp is developing the first ground-up, fully autonomous vehicle fleet and the supporting ecosystem required to bring this technology to market. Sitting at the intersection of robotics, machine learning, and design, Example Corp aims to provide the next generation of mobility-as-a-service in urba …",
+    "additional": "<div><b>About Example Corp</b></div><div>Example Corp is developing the first ground-up, fully autonomous vehicle fleet and the supporting ecosystem required to bring this technology to market. Sitting at the intersection of robotics, machine learning, and design, Example Corp aims to provide the next generation of mobilit …",
+    "categories": {
+      "commitment": "Full-time",
+      "department": "Software",
+      "location": "Foster City, CA",
+      "team": "Software Platforms and Product",
+      "allLocations": [
+        "Foster City, CA"
+      ]
+    },
+    "createdAt": 1777936261125,
+    "descriptionPlain": "Autonomous vehicles have some of the largest, most complex software ever shipped in a safety-critical environment. Solving that problem is one of the most exciting technical challenges of our lifetime.\n \nAs an Autonomy Systems Test Engineer at Example Corp, you will help accelerate our product development b …",
+    "description": "<div>Autonomous vehicles have some of the largest, most complex software ever shipped in a safety-critical environment. Solving that problem is one of the most exciting technical challenges of our lifetime.</div>\n<div>&nbsp;</div>\n<div>As an Autonomy Systems Test Engineer at Example Corp, you will help acce …",
+    "id": "f4746da4-8eb8-43e2-b7ce-bf3c7cf9640d",
+    "lists": [
+      {
+        "text": "In this role, you will: ",
+        "content": "<div>\n<ul style=\"margin-top: 0px; margin-bottom: 0px; padding-inline-start: 48px;\">\n<li style=\"font-size: 10pt; font-family: Rajdhani, sans-serif; color: #515357;\">\n<p style=\"margin-top: 6pt; margin-bottom: 0pt;\"><span style=\"font-size: 10pt;\">Create test strategies and test plans for Example Corp’s self-dr …"
+      },
+      {
+        "text": "Qualifications: ",
+        "content": "\n<li>Bachelor’s or Master’s in Computer Science, Electrical Engineering, or related field</li>\n<li>3+ years of experience in designing and implementing scalable software systems test strategies with excellent analytical, problem-solving, and prioritization skills</li>\n<li>Proficiency with automated  …"
+      }
+    ],
+    "salaryRange": {
+      "currency": "USD",
+      "interval": "per-year-salary",
+      "min": 144000,
+      "max": 193000
+    },
+    "salaryDescription": "<div><strong style=\"font-size: 16px;\">Base Salary Range</strong></div>\n<div>&nbsp;</div>\n<div><span style=\"font-size: 16px;\">There are three major components to compensation for this position: salary, a parent company Restricted Stock Units (RSUs), and Example Corp Stock Appreciation Rights. A sign-on bonus may be of …",
+    "salaryDescriptionPlain": "Base Salary Range\n \nThere are three major components to compensation for this position: salary, a parent company Restricted Stock Units (RSUs), and Example Corp Stock Appreciation Rights. A sign-on bonus may be offered as part of the compensation package. The listed range applies only to the base salary. Compensation …",
+    "text": "Autonomy System Test Engineer",
+    "country": "US",
+    "workplaceType": "hybrid",
+    "opening": "",
+    "openingPlain": "",
+    "descriptionBody": "<div>Autonomous vehicles have some of the largest, most complex software ever shipped in a safety-critical environment. Solving that problem is one of the most exciting technical challenges of our lifetime.</div>\n<div>&nbsp;</div>\n<div>As an Autonomy Systems Test Engineer at Example Corp, you will help acce …",
+    "descriptionBodyPlain": "Autonomous vehicles have some of the largest, most complex software ever shipped in a safety-critical environment. Solving that problem is one of the most exciting technical challenges of our lifetime.\n \nAs an Autonomy Systems Test Engineer at Example Corp, you will help accelerate our product development b …",
+    "hostedUrl": "https://jobs.lever.co/examplecorp/f4746da4-8eb8-43e2-b7ce-bf3c7cf9640d",
+    "applyUrl": "https://jobs.lever.co/examplecorp/f4746da4-8eb8-43e2-b7ce-bf3c7cf9640d/apply"
+  },
+  {
+    "additionalPlain": "About Example Corp\nExample Corp is developing the first ground-up, fully autonomous vehicle fleet and the supporting ecosystem required to bring this technology to market. Sitting at the intersection of robotics, machine learning, and design, Example Corp aims to provide the next generation of mobility-as-a-service in urba …",
+    "additional": "<div><b>About Example Corp</b></div><div>Example Corp is developing the first ground-up, fully autonomous vehicle fleet and the supporting ecosystem required to bring this technology to market. Sitting at the intersection of robotics, machine learning, and design, Example Corp aims to provide the next generation of mobilit …",
+    "categories": {
+      "commitment": "Full-time",
+      "department": "Safety Strategy and Operations",
+      "location": "Foster City, CA",
+      "team": "Safety Strategy and Operations",
+      "allLocations": [
+        "Foster City, CA"
+      ]
+    },
+    "createdAt": 1757985728853,
+    "descriptionPlain": "The AV Safety Software Data Engineer will play a critical role in supporting Example Corp’s safety data reporting and compliance efforts. In this position, you will work with large-scale fleet data to gather, analyze, and triage events for internal safety learnings and external compliance requirements. \nAs  …",
+    "description": "<div><span style=\"font-size: 12pt; font-family: Arial, sans-serif; color: #231f20;\">The AV Safety Software Data Engineer will play a critical role in supporting Example Corp’s safety data reporting and compliance efforts. In this position, you will work with large-scale fleet data to gather, analyze, and tr …",
+    "id": "e36cc53e-5bd5-43b9-9a90-ec9b7c6abda9",
+    "lists": [
+      {
+        "text": "In this role, you will: ",
+        "content": "\n<li style=\"font-size: 12pt; font-family: Arial, sans-serif; text-align: left;\"><span style=\"font-size: 12pt; color: #000000;\">Create, implement, and maintain our internal and external safety data gathering, analysis, and reporting processes, and work cross-functionally with other internal organizat …"
+      },
+      {
+        "text": "Qualifications",
+        "content": "\n<li style=\"font-size: 12pt; font-family: Arial, sans-serif;\"><span style=\"font-size: 12pt; color: #000000;\">BS or MS in Computer Science, Data Science, Robotics, Statistics, or a related field.</span></li>\n<li style=\"font-size: 12pt; font-family: Arial, sans-serif; color: #000000;\"><span style=\"fon …"
+      }
+    ],
+    "salaryRange": {
+      "currency": "USD",
+      "interval": "per-year-salary",
+      "min": 160000,
+      "max": 221000
+    },
+    "salaryDescription": "<div><strong style=\"font-size: 16px;\">Base Salary Range</strong></div>\n<div>&nbsp;</div>\n<div><span style=\"font-size: 16px;\">There are three major components to compensation for this position: salary, a parent company Restricted Stock Units (RSUs), and Example Corp Stock Appreciation Rights. A sign-on bonus may be of …",
+    "salaryDescriptionPlain": "Base Salary Range\n \nThere are three major components to compensation for this position: salary, a parent company Restricted Stock Units (RSUs), and Example Corp Stock Appreciation Rights. A sign-on bonus may be offered as part of the compensation package. The listed range applies only to the base salary. Compensation …",
+    "text": "AV Safety Data Reporting Engineer",
+    "country": "US",
+    "workplaceType": "hybrid",
+    "opening": "",
+    "openingPlain": "",
+    "descriptionBody": "<div><span style=\"font-size: 12pt; font-family: Arial, sans-serif; color: #231f20;\">The AV Safety Software Data Engineer will play a critical role in supporting Example Corp&rsquo;s safety data reporting and compliance efforts. In this position, you will work with large-scale fleet data to gather, analyze,  …",
+    "descriptionBodyPlain": "The AV Safety Software Data Engineer will play a critical role in supporting Example Corp’s safety data reporting and compliance efforts. In this position, you will work with large-scale fleet data to gather, analyze, and triage events for internal safety learnings and external compliance requirements. \nAs  …",
+    "hostedUrl": "https://jobs.lever.co/examplecorp/e36cc53e-5bd5-43b9-9a90-ec9b7c6abda9",
+    "applyUrl": "https://jobs.lever.co/examplecorp/e36cc53e-5bd5-43b9-9a90-ec9b7c6abda9/apply"
+  }
+]

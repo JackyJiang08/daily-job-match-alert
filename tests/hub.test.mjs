@@ -537,6 +537,57 @@ test('Status merges runs into one card, formats every time in the configured zon
   }
 });
 
+test('Status lists every source with its last success and new-posting count, and a dormant ATS board can be resumed', async () => {
+  const root = await prepareProject();
+  const registry = { version: 1, boards: {
+    'greenhouse:examplecorp': { key: 'greenhouse:examplecorp', kind: 'greenhouse', token: 'examplecorp', company: 'Example Corp', boardUrl: 'https://job-boards.greenhouse.io/examplecorp', apiUrl: 'https://boards-api.greenhouse.io/v1/boards/examplecorp/jobs?content=true', origin: 'discovered', discoveredAt: '2026-08-20T01:00:00.000Z', enabled: true, lastPolledAt: '2026-08-27T01:00:00.000Z', lastSuccessAt: '2026-08-27T01:00:00.000Z', lastJobCount: 40, lastNewCount: 3, baselinedAt: '2026-08-20T01:00:00.000Z', baselineCount: 38, consecutiveFailures: 0, lastError: null, dormant: false, dormantSince: null },
+    'lever:broken': { key: 'lever:broken', kind: 'lever', slug: 'broken', company: 'Broken Co', boardUrl: 'https://jobs.lever.co/broken', apiUrl: 'https://api.lever.co/v0/postings/broken?mode=json', origin: 'config', discoveredAt: '2026-08-10T01:00:00.000Z', enabled: true, lastPolledAt: '2026-08-27T01:00:00.000Z', lastSuccessAt: '2026-08-19T01:00:00.000Z', lastJobCount: 12, lastNewCount: 0, baselinedAt: '2026-08-10T01:00:00.000Z', baselineCount: 12, consecutiveFailures: 7, lastError: 'HTTP 500', dormant: true, dormantSince: '2026-08-27T01:00:00.000Z' },
+  } };
+  await fs.writeFile(path.join(root, 'state', 'ats-boards.json'), JSON.stringify(registry));
+  const payloadPath = path.join(root, 'state', 'report-payload-2026-08-27.json');
+  const payload = JSON.parse(await fs.readFile(payloadPath, 'utf8'));
+  payload.meta.sourceCounts = [
+    { name: 'SimplifyJobs New Grad', kind: 'builtin', ok: true, count: 120, error: null },
+    { name: 'Email files', kind: 'builtin', ok: false, count: 0, error: 'ENOENT' },
+    { name: 'Greenhouse · Example Corp', kind: 'ats', key: 'greenhouse:examplecorp', ok: true, count: 3, jobCount: 40, baseline: false, skipped: null, notModified: false, dormant: false, error: null },
+    { name: 'Lever · Broken Co', kind: 'ats', key: 'lever:broken', ok: false, count: 0, jobCount: 12, baseline: false, skipped: null, notModified: false, dormant: true, error: 'HTTP 500' },
+  ];
+  await fs.writeFile(payloadPath, JSON.stringify(payload));
+  const hub = await startHub(root);
+  try {
+    const page = await hub.request('GET', '/status');
+    assert.match(page.text, /<article class="card" id="sources-card"><h2>Sources<\/h2>/);
+    assert.match(page.text, /<tr><th>Source<\/th><th>Enabled<\/th><th>Last Success<\/th><th>New This Run<\/th><th>Status<\/th><\/tr>/);
+    assert.match(page.text, /<tr data-source="simplifyNewGrad"><td>SimplifyJobs New Grad<\/td><td><span class="badge badge-muted" data-badge="disabled">Disabled<\/span><\/td><td>Aug 26, 2026, 8:00 PM<\/td><td>120<\/td>/, 'a built-in source shows the last run time as its success and the count from the payload');
+    assert.match(page.text, /<tr data-source="emailFiles"><td>Email files<\/td><td><span class="badge badge-good" data-badge="enabled">Enabled<\/span><\/td><td><span class="muted">Never<\/span><\/td><td>0<\/td><td><span class="badge badge-warn" data-badge="failing">Failing<\/span> <span class="muted">ENOENT<\/span><\/td>/);
+    assert.match(page.text, /<tr data-source="greenhouse:examplecorp"><td>Greenhouse · Example Corp <span class="muted">greenhouse<\/span><\/td><td><span class="badge badge-good" data-badge="enabled">Enabled<\/span><\/td><td>Aug 26, 2026, 8:00 PM<\/td><td>3 <span class="muted">of 40 listed<\/span><\/td><td><span class="muted">OK<\/span><\/td>/);
+    assert.match(page.text, /<tr data-source="lever:broken"><td>Lever · Broken Co <span class="muted">lever<\/span><\/td><td><span class="badge badge-good" data-badge="enabled">Enabled<\/span><\/td><td>Aug 18, 2026, 8:00 PM<\/td><td>0 <span class="muted">of 12 listed<\/span><\/td><td><span class="badge badge-bad" data-badge="dormant" title="HTTP 500">Dormant<\/span> <form class="inline" method="post" action="\/status\/sources\/resume"><input type="hidden" name="board" value="lever:broken"><button class="btn secondary small" type="submit">Resume Polling<\/button><\/form><\/td>/);
+    assert.doesNotMatch(page.text, /\bUTC\b/);
+
+    const report = await hub.request('GET', '/reports/2026-08-27');
+    assert.match(report.text, /<dt>Sources<\/dt><dd>4 polled · 123 posting\(s\) collected · 2 failed<ul><li>SimplifyJobs New Grad: 120 collected<\/li><li>Email files: failed \(ENOENT\)<\/li><li>Greenhouse · Example Corp: 3 new, 40 listed<\/li><li>Lever · Broken Co: failed \(HTTP 500\)<\/li><\/ul><\/dd>/, 'Run Details carries one line per source');
+
+    const resumed = await hub.form('/status/sources/resume', { board: 'lever:broken' });
+    assert.equal(resumed.status, 303);
+    assert.match(decodeURIComponent(resumed.headers.location), /^\/status\?notice=Lever · Broken Co will be polled again on the next run$/);
+    const after = JSON.parse(await fs.readFile(path.join(root, 'state', 'ats-boards.json'), 'utf8'));
+    assert.equal(after.boards['lever:broken'].dormant, false);
+    assert.equal(after.boards['lever:broken'].consecutiveFailures, 0);
+    assert.equal(after.boards['lever:broken'].lastError, null);
+    assert.equal(after.boards['greenhouse:examplecorp'].lastNewCount, 3, 'other boards are untouched');
+    assert.doesNotMatch((await hub.request('GET', '/status')).text, /data-badge="dormant"/);
+    const unknown = await hub.form('/status/sources/resume', { board: 'lever:nope' });
+    assert.match(decodeURIComponent(unknown.headers.location), /error=Unknown source "lever:nope"/);
+    assert.equal((await hub.form('/status/sources/resume', { board: 'lever:broken' }, { origin: 'http://evil.example' })).status, 403);
+    hub.alivePids.add(9001);
+    await fs.writeFile(path.join(root, 'state', '.lock'), '9001\n');
+    assert.match(decodeURIComponent((await hub.form('/status/sources/resume', { board: 'lever:broken' })).headers.location), /error=The pipeline is running \(PID 9001\)/);
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('/desktop serves the Desktop HTML and workbook read-only, and refuses anything but a valid date', async () => {
   const root = await prepareProject();
   const hub = await startHub(root);

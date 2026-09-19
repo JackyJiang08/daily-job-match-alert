@@ -1,0 +1,50 @@
+{
+  "total": 4,
+  "jobPostings": [
+    {
+      "title": "Research Scientist, Networking Research - PhD New College Grad 2026",
+      "externalPath": "/job/US-CA-Santa-Clara/Research-Scientist--Networking-Research---PhD-New-College-Grad-2026_JR2024900-1",
+      "locationsText": "US, CA, Santa Clara",
+      "postedOn": "Posted Today",
+      "bulletFields": [
+        "JR2024900"
+      ]
+    },
+    {
+      "title": "Senior Developer Relations Lead, AI-Enabled Drug Discovery Science",
+      "externalPath": "/job/US-CA-Santa-Clara/Senior-Developer-Relations-Lead--AI-Enabled-Drug-Discovery-Science_JR2025378-1",
+      "locationsText": "US, CA, Santa Clara",
+      "postedOn": "Posted 3 Days Ago",
+      "bulletFields": [
+        "JR2025378"
+      ]
+    },
+    {
+      "title": "Senior Manager, Business Operations – Global Events and Experiences",
+      "externalPath": "/job/US-CA-Santa-Clara/Senior-Manager--Business-Operations---Global-Events-and-Experiences_JR2021639",
+      "locationsText": "US, CA, Santa Clara",
+      "postedOn": "Posted Today",
+      "bulletFields": [
+        "JR2021639"
+      ]
+    },
+    {
+      "title": "Archived Analyst",
+      "externalPath": "/job/US-TX-Austin/Archived-Analyst_JR0000001",
+      "locationsText": "US, TX, Austin",
+      "postedOn": "Posted 30+ Days Ago",
+      "bulletFields": [
+        "JR0000001"
+      ]
+    }
+  ],
+  "facets": [
+    {
+      "facetParameter": "jobFamilyGroup"
+    },
+    {
+      "facetParameter": "workerSubType"
+    }
+  ],
+  "userAuthenticated": false
+}

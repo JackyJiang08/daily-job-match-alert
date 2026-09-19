@@ -2,9 +2,7 @@
 
 # Daily Job Match Alert
 
-**A nightly local pipeline that turns fresh job postings into two files per day, an HTML shortlist and an XLSX workbook, with every posting scored against each of the N resume tracks you configure.**
-
-Collect fresh roles from public ATS boards and curated GitHub lists; compare every relevant JD against every resume track you enable (one, two, or N private resumes); wake up to a ranked local report even when a source, the model, or an input file fails overnight.
+**A nightly job-match agent for your Mac: it collects public internship and new-grad postings, scores each one against your resume tracks with the Claude or ChatGPT subscription you already pay for, and drafts one-page cover letters from a local hub. No API keys, no auto-apply.**
 
 [![CI](https://github.com/JackyJiang08/daily-job-match-alert/actions/workflows/ci.yml/badge.svg)](https://github.com/JackyJiang08/daily-job-match-alert/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -12,285 +10,122 @@ Collect fresh roles from public ATS boards and curated GitHub lists; compare eve
 
 </div>
 
-Daily Job Match Alert is a privacy-conscious, non-auto-apply pipeline for internships, new-grad positions, and entry-level full-time roles. It uses an authenticated **Claude Code subscription** for semantic matching—never a pay-as-you-go model API.
+## What it does every night
 
-## Why Daily Job Match Alert
+At 20:00 (America/Chicago by default) a launchd job runs the pipeline once, unattended:
 
-Job boards fragment discovery across ATS pages, curated lists, account alerts, and email. A single generic resume score also hides which of your resumes a role fits best, such as a Data profile, an LLM profile, or an AI-agent profile.
+1. **Collect.** Postings arrive from the SimplifyJobs GitHub lists, from the public job-board APIs of Greenhouse, Lever, Ashby, and Workday tenants that earlier postings pointed at, and from any `.eml` alert files dropped into `intake/eml`. Every board is polled once per night with a named user agent and conditional requests.
+2. **Deduplicate.** URLs are canonicalized (tracking parameters stripped, redirects resolved) and checked against `state/state.json`, so a posting is reported once even when three sources list it.
+3. **Fetch the description.** Board APIs deliver the full text directly; other links are fetched once, with Workday pages read through the tenant's public JSON endpoint. Unreachable pages are retried on later nights, refused or removed ones are closed.
+4. **Hard-filter.** Two facts are enforced in code, whatever the model says: the location must be in the United States (or unverifiable, which is flagged), and the graduation window in the posting must fit `preferences.graduationDate`.
+5. **Score with your subscription.** Every remaining posting is reviewed against each enabled resume track by the Claude Code CLI or the Codex CLI, signed in with a claude.ai or ChatGPT subscription. Each track gets a 0–100 score with reasons and gaps; the best track is recommended.
+6. **Write two files to the Desktop.** `~/Desktop/Daily Job Match Alert/<application date>/` receives a self-contained HTML shortlist (sortable, searchable, dark-mode, complete JD folded into each card) and an XLSX workbook with one score column per track. `warnings.txt` appears beside them only when something degraded.
 
-Daily Job Match Alert provides:
+The evening run writes tomorrow's folder; a morning catch-up after a missed night fills today's. Reruns on the same date merge into that day's report instead of replacing it.
 
-- Multi-resume evaluation: every enabled track in `resumes.tracks` gets its own score, and the best-scoring track is recommended per posting. Tracks can be added or disabled in configuration without code changes.
-- Subscription-only semantic review with structured, auditable output and a recorded scoring model.
-- Public-source ingestion without authenticated scraping; an email-alert channel is planned but not enabled yet.
-- Exact `postedAt` versus first-seen `discoveredAt` semantics.
-- Cross-source URL canonicalization and persistent deduplication.
-- Degrade-don't-die operation: failed collectors, unreachable postings, an unavailable model, or a corrupted input file become report warnings instead of a missing nightly report. `npm run chaos` proves this on every CI run.
-- Exactly two user-facing files per successful application date: a self-contained HTML shortlist (sortable, filterable, offline) with the complete captured JD, and a compact XLSX (one score column per enabled track) with clickable posting links. A `warnings.txt` appears beside them only when the run had something to disclose.
-- Hard safety boundaries: no auto-apply, no screening answers, no mailbox mutation.
+## Local hub
 
-## Architecture
+`npm run hub` serves `http://127.0.0.1:4747/`, loopback only, with no outbound requests of its own:
 
-```mermaid
-flowchart LR
-  ATS[Public ATS / career-ops] --> N[Normalize + deduplicate]
-  GH[SimplifyJobs GitHub lists] --> N
-  EM[Email alerts - planned] -.-> N
-  N --> JD[Resolve final URL + extract JD]
-  JD --> PF[Local relevance prefilter]
-  PF --> LLM[Claude subscription review]
-  LLM --> R[HTML + XLSX only]
-  R --> D[Next-day application folder on Desktop]
-```
+- **Reports** renders every stored day with the same components as the Desktop HTML, grouped by month with a Today shortcut, and links the Desktop copy and workbook.
+- **Resumes** shows one card per resume track and accepts a replacement PDF, which tonight's run scores against; older versions are kept and can be reselected.
+- **Letters** lists every generated cover letter with Open and Download PDF, and each job card offers Generate Cover Letter or, once one exists, Open Letter and Download PDF.
+- **Status** shows the last and next run, the lock, a Sources table (every list and board with its last success, new postings, and a Resume Polling button for boards that went dormant), seven days of warnings, and a Run Now button.
+- **Settings** exposes the match threshold, accepted match levels, the engine and model, the XLSX requirement, the hub port, the CLI connection state, and the private cover-letter material.
 
-The local prefilter removes clearly unrelated roles before subscription review. Final report scores come from the configured subscription CLI; intermediate structured data stays in temporary local storage and is removed after XLSX creation.
+Cover letters are drafted by the same subscription engine from your playbook, up to three of your sample letters, the chosen resume, and the posting, then reviewed once by the engine as an editor, rendered to a one-page PDF (local Chrome, pdfkit fallback), and stored under `private/cover-letters/`. Your name, contact line, playbook, and samples live only under `private/cover-letter/`; the repository, docs, and tests contain placeholder people such as Jane Doe.
 
-## Discovery paths
+## Engines and billing
 
-| Source | Method | Status |
+The only model access is through two local subscription CLIs, chosen by `semanticMatching.engine`:
+
+| Engine | CLI | Sign-in that is accepted |
 |---|---|---|
-| SimplifyJobs Summer Internships | Public GitHub README polling | Enabled by default |
-| SimplifyJobs New Grad | Public GitHub README polling | Enabled by default |
-| Greenhouse and other supported ATS | `career-ops` scan history and final employer links | Optional (`sources.careerOps`) |
-| `.eml` drop folder (`intake/eml`) | Local files parsed nightly | Collector runs, no mail is routed to it yet |
-| Handshake / Simplify / Wellfound / ZipRecruiter / Jobright alerts | Official alert email via a Himalaya mailbox folder | **Planned, not enabled** (`sources.himalaya.enabled: false`) |
+| `claude` (default) | Claude Code 2.1.250+ | `claude auth login --claudeai`; `claude auth status --json` must report a claude.ai subscription (`pro`, `max`, `team`, or `enterprise`) |
+| `codex` | OpenAI Codex CLI | `codex login` with the ChatGPT option; `codex login status` must say "Logged in using ChatGPT" |
 
-Daily Job Match Alert does not sign into or scrape Handshake, Jobright, Simplify, Wellfound, or ZipRecruiter. When the email channel is enabled, alert email is only a discovery mechanism; once a link resolves to a public employer ATS, the employer posting becomes the preferred source.
+Both run as child processes with every `ANTHROPIC_*`, `AWS_*`, and `OPENAI_*` variable, plus the Bedrock, Vertex, and Google credential switches, removed from the environment, so neither can be steered to an API key or a gateway. There is no API client in the project. Console billing, API-key logins, wrong versions, and batch failures degrade to local keyword scores (labelled `unreviewed`) and a warning; they never fall back to an API. Subscription runs count against the plan's own limits. The model that actually scored each batch is read from the CLI output and recorded as `scoringModel`; a mismatch with the configured model is a warning, never a silent substitution.
+
+## Privacy model
+
+Everything personal stays on the Mac and outside Git:
+
+- `config.json`, `resumes/*.md`, `resumes/*.pdf`, `intake/eml/*.eml`, `state/`, `private/`, logs, and generated reports are gitignored. The repository holds `config.example.json` and code only.
+- Resume PDFs are hashed and re-extracted with `pdftotext` when they change; iCloud-evicted files are pulled back with `brctl download` before the run.
+- The hub writes only `config.json` (surgically, under the run lock), `state/ats-boards.json` when you resume a board, and its own `private/` directory.
+- Posting text is treated as untrusted input, including inside the model prompt. The engines are given a temporary read-only workspace and no tools.
+- Nothing is submitted anywhere: no applications, no screening answers, no mailbox changes.
+
+## Sources
+
+| Source | How it is read | Basis | Status |
+|---|---|---|---|
+| SimplifyJobs Summer Internships and New Grad lists | The public README of each GitHub repository, fetched raw once per night | Public repositories maintained for exactly this purpose; postings link to employer sites | Enabled by default |
+| Greenhouse boards | `GET boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true` (full content, `updated_at`, ETag honoured) | Greenhouse's documented public Job Board API; no authentication | Discovered automatically, or listed in `sources.atsBoards.boards` |
+| Lever boards | `GET api.lever.co/v0/postings/{company}?mode=json` (`createdAt`, ETag honoured) | Lever's documented public Postings API; no authentication | Same |
+| Ashby boards | `GET api.ashbyhq.com/posting-api/job-board/{org}` (`publishedAt`) | Ashby's documented public Job Posting API; no authentication | Same |
+| Workday career sites | `POST {tenant}.{wdN}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs`, 20 postings per page, pages walked only while they stay inside the lookback window; descriptions come from the per-posting CXS endpoint | The same unauthenticated JSON the public career page itself loads; read-only, one short walk per night, named user agent | Same |
+| `.eml` files in `intake/eml` | Parsed locally every night | Files you place there yourself | Collector runs; nothing is routed to it yet |
+| Himalaya mailbox folder | `himalaya` envelope list and `--preview` reads | Official alert email you subscribed to; the collector never marks, moves, or sends mail | Implemented, disabled (`sources.himalaya.enabled: false`) |
+| career-ops scan history | A local TSV written by [career-ops](https://github.com/santifer/career-ops) | Your own local file | Optional (`sources.careerOps`) |
+
+**How boards are discovered.** Every night the pipeline looks at the URLs it collected, recognizes Greenhouse, Lever, Ashby, and Workday postings, and records the board they belong to in `state/ats-boards.json` with the date and source that revealed it. You can add a board by hand (`{ "url": "https://job-boards.greenhouse.io/examplecorp" }` or a `greenhouse:` / `lever:` / `ashby:` / `workday:tenant/site` key) or switch one off with `"enabled": false`.
+
+**First poll is a baseline.** The first time a board is polled, everything it lists is recorded as already seen and nothing is scored; the count is disclosed as an info line in `warnings.txt` and under Run Details. From the next night on, only postings posted or updated inside the lookback window are scored. Each board is polled at most once per night, requests share `network.concurrency` and `network.userAgent`, a failing board only produces a warning, and a board that fails seven nights in a row is marked dormant and skipped until you press Resume Polling on the Status page. Postings from boards show their source as `Greenhouse · Example Corp` and so on.
+
+## Reliability
+
+The run is designed to leave a report even when parts of it fail:
+
+- **Degrade, don't die.** A failing collector, board, page fetch, or model call becomes a `[stage / source] message` line in `warnings.txt`; the rest of the run continues. A fatal error before any report writes `ERROR-<date>.html` and a macOS notification.
+- **Catch-up.** `state.lastSuccessfulRun` is recorded only when both the HTML and the XLSX exist. A login or boot start runs the catch-up path, which executes only when the last success is more than 26 hours old.
+- **Lock.** `state/.lock` holds the owner PID; a second start exits cleanly, a stale lock from a dead process is removed.
+- **Same-day accumulation.** `state/report-payload-<date>.json` holds everything reported for one application date; each run merges into it (a semantically reviewed copy beats a local one, a longer description beats a shorter one) and re-renders both files as `Daily update #N`. An incomplete day is rebuilt at the start of the next run.
+- **Chaos suite.** `npm run chaos` runs six scenarios in temporary directories on every CI run: baseline, every collector offline, subscription CLI unavailable, a corrupted `.eml`, an XLSX failure followed by recovery, and an ATS board answering HTTP 500. Each must still leave the dated folder with an HTML report.
 
 ## Quick start
 
-Requirements: macOS or Linux, Node.js 20+, and a subscription-authenticated Claude Code **2.1.250 or newer** (older versions are rejected before any batch is sent). [career-ops](https://github.com/santifer/career-ops) and [Himalaya](https://github.com/pimalaya/himalaya) are optional.
+Requirements: macOS (Linux works for everything but launchd and iCloud recovery), Node.js 20+, `pdftotext`, and one signed-in subscription CLI.
 
 ```bash
 git clone https://github.com/JackyJiang08/daily-job-match-alert.git
 cd daily-job-match-alert
+npm ci
 cp config.example.json config.json
 ```
 
-Define your resume tracks under `resumes.tracks` in `config.json` (the example ships with `data`, `llm`, and `agent`), point each track's `pdf` at your private PDF, edit the preferences, then sign in to Claude Code with your Claude subscription:
+Edit `config.json`: point each entry of `resumes.tracks` at a private PDF (the example ships `data`, `llm`, and `agent`), set `preferences.graduationDate`, and pick the engine. Then:
 
 ```bash
-claude auth login --claudeai
-claude auth status --json
-claude --version
-
-npm run resume:sync
-npm test
-npm run run
+claude auth login --claudeai      # or: codex login (ChatGPT option)
+npm run resume:sync               # extract the resume text
+npm test && npm run demo && npm run chaos
+npm run run                       # one real run; check the Desktop folder
+./scripts/install-launchd.sh 20 0 # nightly schedule (zsh)
+./scripts/install-hub-launchd.sh  # keep the hub running; then open http://127.0.0.1:4747/
 ```
 
-The default engine is `claude_subscription`. Choose the Claude.ai subscription flow—never `--console`, which is the API-billed path. If `claude` is outside the non-interactive system `PATH`, set `semanticMatching.claudeCommand` to its absolute executable path.
-
-### Choosing the scoring engine
-
-`semanticMatching.engine` selects which subscription CLI scores the postings: `claude` (default; Claude Code signed in with a claude.ai subscription) or `codex` (OpenAI Codex CLI signed in with a ChatGPT account). Both run as local child processes with every `ANTHROPIC_*`, `AWS_*`, and `OPENAI_*` variable stripped from the environment, so neither can be steered to an API key or a gateway. Each engine has its own model under `semanticMatching.models` (`{ "claude": "fable", "codex": "gpt-5.6-sol" }`); the legacy single `model` key still applies to Claude. The engine layer lives in `src/engines/` (one interface: `verifyAuth`, `reviewBatch`, `describeModel`), and `src/subscription-match.mjs` only orchestrates batches, retries, supplemental review, and the local fallback on top of it.
-
-Both CLIs are located by `resolveCliCommand` (`src/engines/cli-path.mjs`): the configured `semanticMatching.claudeCommand` / `codexCommand` wins when it exists, then `PATH`, then `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.npm-global/bin`, and every `~/.nvm/versions/node/*/bin`. This matters under launchd, whose jobs start with `PATH=/usr/bin:/bin`; both LaunchAgent templates also set `PATH` to those directories. The hub's Connections card shows the resolved path and offers **Save This Path to Config** when the binary was found outside config.
-
-For Codex, sign in once from a terminal with `codex login` and pick the ChatGPT option; `codex login status` must say "Logged in using ChatGPT". An API-key login (`codex login --with-api-key`) or a logged-out CLI is rejected with a plain message and the run degrades to local scoring exactly as it does for Claude. Batches run as `codex exec --ephemeral --sandbox read-only --output-schema <schema> --output-last-message <file> -m <model>`, so the per-run JSON schema is enforced natively and the final message is parsed strictly. The hub's Settings page shows both connections and lets you switch engine and model.
-
-### Pinning and auditing the scoring model
-
-`semanticMatching.model` is passed to `claude --model`. Use one of the Claude Code aliases—`fable`, `opus`, or `sonnet`, each resolving to the latest model in that family—or a full model name such as `claude-fable-5`. The example configuration pins `fable`.
-
-Every batch response from `claude --print --output-format json` is parsed for the model that actually produced the scores (`modelUsage`, keyed by model id; the entry with the most output tokens is the scoring model). That value is recorded as `scoringModel` on each reviewed job, summarized as `meta.scoringModel`, and shown under **Run Details** at the bottom of the HTML and in the XLSX Run Summary as **Scoring model**. If the output does not identify a model, `scoringModel` is `unknown` and a warning is raised. If a configured model does not match the reported model after alias expansion (for example `fable` configured but `claude-sonnet-5` reported), the scores are still used for that run, but a `MODEL MISMATCH` warning is written to `warnings.txt` and counted in the Run Summary so the configuration can be fixed. Runs without any semantic review show `local_only` or `none`.
-
-## Deterministic eligibility filter
-
-Two constraints are facts, not judgment calls, so they are enforced in code (`src/eligibility.mjs`) inside `isEligible` for every posting, whether it was scored by the subscription model, kept as a local fallback, or run with `engine: local_only`:
-
-- **Location.** A location naming a non-US country, region, or city (`Canada`, `Remote – UK`, `Bengaluru, India`, `Remote - Europe`, …; the list `NON_US_LOCATION_MARKERS` is meant to be extended) excludes the posting. Any US marker (`United States`, `USA`, `US`, a state name, a `, ST` code, or a well-known US city) passes, and it wins over a non-US marker in the same string so multi-location postings reach the semantic review. A location that only says `Remote`, or is empty, passes but carries the gap **Location unverified — confirm US eligibility**, a `Location unverified` badge on the HTML card, and the same text in the XLSX Gaps column.
-- **Graduation window.** `preferences.graduationDate` (`2027-05` in the example) drives a short list of rules, each documented in `GRADUATION_EXCLUSION_RULES`: `Class of 2026`, `graduating by/before/no later than <date before the graduation month>`, `graduation date between … and <earlier date>`, and `must be able to start/work full-time <before the month after graduation>` (skipped for internships). A rule only fires when every date it finds is too early; `Class of 2026 or 2027`, `by 2027`, `December 2026 or later`, and single-date phrases without a bound are left to the semantic review. When `graduationDate` is missing, the rule set is disabled and a warning says so.
-
-Excluded postings are counted, not listed one by one: a single `eligibility / hard filter` warning carries the totals and up to five examples, and both the HTML header and the XLSX Run Summary show **Excluded: location outside US** and **Excluded: graduation window**. Excluded postings are still marked as seen.
-
-## Resume tracks
-
-Resumes are configured as an ordered list of tracks:
-
-```json
-"resumes": {
-  "autoRefresh": true,
-  "pdftotextCommand": "pdftotext",
-  "tracks": [
-    { "id": "data",  "label": "Data",     "pdf": "~/Desktop/Your Data Resume.pdf",     "enabled": true },
-    { "id": "llm",   "label": "LLM",      "pdf": "~/Desktop/Your LLM Resume.pdf",      "enabled": true },
-    { "id": "agent", "label": "AI Agent", "pdf": "~/Desktop/Your AI Agent Resume.pdf", "enabled": true }
-  ]
-}
-```
-
-- `id` is the internal key: it names the extracted profile (`resumes/<id>.md`, override with `profile`), the per-track `scores.<id>` field in the semantic response, and the hash entry in `state/resume-sources.json`. Letters, digits, `_`, and `-` are allowed.
-- `label` is what the reports show: the `<label> Score` column in the XLSX, the score row on each HTML card (`Data 74 · LLM 87 · AI Agent 85`), the **Apply with <label> Resume** tag, and the **Recommended Resume** value. It defaults to the capitalized id.
-- `enabled: false` removes a track from extraction, scoring, the subscription prompt, and both reports; nothing is read from its PDF or profile. Any number of enabled tracks from one upward works. No enabled track at all is a fatal configuration error, the same path as a missing resume.
-- Order matters: score columns and the card score row follow the list order, and a tie in the best score goes to the earlier track.
-- Local (pre-review) scoring uses built-in keyword profiles for the ids `data`, `ai`, `llm`, and `agent`; any other id is triaged against the union of those profiles, and the subscription review supplies the real per-track judgment.
-
-The pre-track layout (`resumes: { data, ai }` plus `resumeSources`) is still read: it is migrated in memory to two tracks named Data and AI, and a one-line notice on stderr asks you to move to `resumes.tracks`.
-
-## Private resume updates
-
-`resumes.autoRefresh` makes resume updates non-fixed. Before every run, the project hashes the PDF of every enabled track and refreshes the gitignored `resumes/<id>.md` whenever that PDF changes. Replacing a PDF at the same path requires no configuration change; if its filename or folder changes, update only your private `config.json`.
-
-If a PDF lives on an iCloud-synced Desktop or Documents folder, macOS may evict the local copy and leave a cloud-only placeholder; the nightly run detects that (errno -11, `EAGAIN`, or an empty read of a non-empty file), asks iCloud to download the file with `brctl download`, and retries for up to a minute before giving up with a plain-language error. A successful recovery is disclosed as an info line in `warnings.txt`, under **Run Details** in the HTML, and in `meta.resumeSync.recovered`.
-
-Real PDFs, extracted resume text, `config.json`, state, email, logs, and generated reports are excluded from Git. The public repository contains examples and extraction code only.
-
-## Subscription-only cost guard
-
-This is an enforced runtime boundary, not just a documentation promise:
-
-- `claude_subscription` is the only model engine (`local_only` skips semantic review). It requires Claude Code 2.1.250+ and checks `claude auth status --json` against an allow-list: `loggedIn` must be true, `authMethod` must be `claude.ai`/`claudeai`/`subscription`, `apiProvider` (when reported) must be `firstParty`, and `subscriptionType` (when reported) must be `pro`, `max`, `team`, or `enterprise`. `console` (Anthropic Console billing), `apiKey`, Bedrock, Vertex, and anything unrecognized are rejected with the observed `authMethod` in the warning, and the run falls back to local scoring.
-- Before the CLI is spawned, every variable that could change its authentication or routing is removed from the subprocess environment: everything prefixed `ANTHROPIC_` (API key, base URL, auth token, model overrides) or `AWS_` (Bedrock credentials, profiles, regions), plus `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, `GOOGLE_APPLICATION_CREDENTIALS`, `GOOGLE_API_KEY`, `CLOUD_ML_REGION`, `CLAUDE_API_KEY`, and `OPENAI_API_KEY`.
-- There is no Anthropic API client in the project, and no other model CLI is wired in.
-- Authentication, version, batch, or parsing failures fall back to local scoring and appear as report warnings; they never fall back to an API.
-
-Subscription runs still count against the applicable Claude plan limits.
-
-## Degraded runs and warnings
-
-A nightly run is designed to finish with a report on the Desktop even when parts of it fail:
-
-| Failure | Behavior | Where it is disclosed |
-|---|---|---|
-| A collector throws or returns garbage | That source contributes nothing; the others continue | Warning `collector / <source name>` |
-| A SimplifyJobs list returns HTTP 200 but zero parsable rows | Treated as a probable upstream format change; the other sources continue | Warning `collector / <source name>` asking for a parser check |
-| A posting cannot be fetched (429, 5xx, timeout, unparsed JSON) | The job is retried on later nights (up to 3 attempts) and then closed | Warning `enrichment / <source>` with the attempt count |
-| The site refuses the fetch (HTTP 403) or the posting is gone (404, 410) | The job is closed on the first attempt; nothing is retried | Warning `enrichment / <source>` naming the job and whether it was `blocked` or `removed` |
-| Two tracked links resolve to the same posting in one run | The first is kept with both source labels; the duplicate is listed under `debug.droppedDuplicateFinalUrls` in the run summary | stderr line per drop |
-| A posting is outside the US or the graduation window | Excluded deterministically, counted in the Run Summary | Warning `eligibility / hard filter` with totals |
-| A malformed or oversized `.eml` | Only that file is skipped; sibling files still yield jobs | Warning `collector / Email files` |
-| A resume PDF sits in an iCloud-synced folder and "Optimize Mac Storage" evicted the local copy (read fails with errno -11 / EAGAIN, or returns no bytes) | `brctl download <pdf>` is issued and the read is retried every 2 s for up to 60 s; the run then continues normally | Info notice `resume / <label> resume` saying the resume was recovered from iCloud. If the download does not finish in time the run fails fatally with a message that names the file and tells you to download it in Finder or move it out of iCloud. Off macOS, or without `brctl`, the original read error is reported unchanged |
-| Subscription CLI missing, wrong version, API-key auth, or a batch fails twice (10 s retry) | Affected jobs keep their local scores and are labeled `unreviewed` | Warning `llm / <engine>`; `[unreviewed]` prefix in the XLSX, `Unreviewed` badge on the HTML card |
-| The model omits job ids | One supplemental review; anything still missing becomes `unreviewed` | Warning `llm / <engine>` |
-| Reported model differs from `semanticMatching.model` | Scores kept for the run | `MODEL MISMATCH` warning |
-| XLSX generation fails | HTML report and seen-state are kept, `XLSX-FAILED.txt` is written beside the HTML, the day's payload stays incomplete in `state/report-payload-<date>.json`, `lastSuccessfulRun` is not updated, the process exits 1 | Warning `report / XLSX`, marker file |
-| A run starts while an earlier day's payload is incomplete | That day's HTML and XLSX are rebuilt from the payload first (no collection, no scoring), the marker is removed, `lastSuccessfulRun` is recorded | Warning `report / report payload` |
-| The same application date is run again | The run merges into the stored day payload and re-renders the whole report; zero new postings reproduce the earlier report as update #N | HTML **Run Details** `Daily update #N`, Run Summary `Update today` |
-| Fatal error before any report | `ERROR-<run date>.html` is written directly under the output directory and a macOS notification is attempted | The error page itself |
-
-Warnings are written to `warnings.txt` in the day's folder (one `[stage / source] message` line each, with a header naming the date and the count; the file is absent when there are none). The HTML **Run Details** block and the XLSX Run Summary show only the count and point at the file. `unreviewed` jobs are included in the report only when they clear the local score threshold, so a model outage yields a locally ranked list rather than an empty page.
-
-`npm run chaos` (`scripts/chaos-check.sh`) exercises four of these paths with isolated temporary configs, state, and output directories—baseline, all collectors offline, subscription CLI unavailable, and a corrupted `.eml`—and asserts that each still produces the dated folder with an HTML report. It never writes to the Desktop or to the real `state/`, and it never calls the subscription CLI.
-
-## career-ops integration
-
-[career-ops](https://github.com/santifer/career-ops) is a strong upstream engine for public ATS discovery, portal health, deduplication, and application pipeline management. Daily Job Match Alert stays separate so career-ops can update normally while this project retains full JD text, N resume tracks, semantic scores, and daily report state.
-
-After onboarding career-ops and configuring `portals.yml`, enable `sources.careerOps` in `config.json` and point `scanHistoryPath` at its `data/scan-history.tsv`. Set `runScanFirst` to `true` only after `node scan.mjs --since 1` succeeds manually.
-
-## Email alert ingestion (planned, not enabled)
-
-The email channel is not part of the current nightly run. What exists today:
-
-- The `.eml` collector (`sources.emailFiles`) parses any files dropped into `intake/eml`. It runs every night, so it is hardened against stray input: files over 5 MB, files without a parseable `Date` header, and bodies that declare base64 but are truncated are skipped individually with a warning.
-- The Himalaya mailbox collector is implemented but disabled (`sources.himalaya.enabled: false`). It only lists envelopes and reads messages with `--preview`; it does not mark, move, delete, reply to, or send mail.
-
-Enabling the channel later means creating a dedicated `job-alerts` mailbox folder, routing official alert messages into it, running `himalaya account configure` with keychain-backed credentials, and flipping `sources.himalaya.enabled` to `true`. Until then, Handshake, Simplify, Wellfound, ZipRecruiter, and Jobright are not ingested.
-
-## Daily macOS schedule
-
-Run the pipeline successfully once before installing the schedule.
-
-```bash
-chmod +x scripts/run-launchd.sh scripts/install-launchd.sh
-./scripts/install-launchd.sh 20 0
-```
-
-`install-launchd.sh` renders `launchd/com.dailyjobmatchalert.daily.plist.template` into `~/Library/LaunchAgents`, reloads it, and enables it. The hour and minute are optional and default to 20:00, the recommended slot in America/Chicago so the report is ready before the next application day. The script is zsh-only; running it with `bash` prints a message asking for zsh instead of failing on a variable expansion. Reinstalling replaces any older agent definition.
-
-How an unattended day works:
-
-- **Trigger.** The agent runs `scripts/run-launchd.sh`, which prepares a dated log and calls `src/launchd-dispatch.mjs`. At or after the scheduled time with no success yet that day, the dispatcher runs the full pipeline (`scheduled`). Any other start—`RunAtLoad` at login or boot, a manual load—runs `catchup`, which only executes when `state.lastSuccessfulRun` is more than 26 hours old.
-- **Application date.** A run through 14:00 local time writes the current calendar date; a run after 14:00 writes the next day. So the normal 20:00 run creates tomorrow's folder, and a morning catch-up after a missed night still fills today's.
-- **Lock.** `state/.lock` holds the owner PID. A second start while the owner is alive exits cleanly; a stale lock from a dead PID is removed automatically.
-- **Workday.** Career sites on `*.myworkdayjobs.com` render job pages in the browser, so the HTML fetch never contains the description. Those postings are read through the tenant's public JSON endpoint (`/wday/cxs/...`) instead and are labeled `workday_cxs`; if that call fails, the ordinary HTML path runs unchanged.
-- **State.** `state/state.json` remembers every canonical URL (original and redirect target) so the same posting is never reported twice; entries older than 90 days since their last attempt are pruned each run. `lastSuccessfulRun` is written only after both the HTML and the XLSX exist on disk, so a run whose workbook failed stays eligible for catch-up.
-- **Day payload.** `state/report-payload-<date>.json` accumulates everything reported for one application date. Each run merges its newly reviewed postings into it by resolved URL (a semantically reviewed copy beats a local one, a longer description beats a shorter one, otherwise the newer copy wins), writes the file before marking postings as seen, renders HTML and XLSX from the merged whole, and flips `complete` to true once both exist. A rerun with nothing new therefore reproduces the earlier report—HTML **Run Details** `Daily update #N`, Run Summary `Update today` / `Last updated at`—instead of overwriting it with an empty page. Incomplete files from earlier dates are rebuilt at the start of the next run; files older than 90 days are pruned with the seen state.
-- **Logs.** `state/logs/daily-YYYY-MM-DD.log`, newest 30 files kept. If the log directory cannot be prepared, output falls back to `/tmp/daily-job-match-alert-<date>.log`.
-- **Fatal errors.** `ERROR-YYYY-MM-DD.html` under the output directory plus a best-effort macOS notification; the catch-up path retries later.
-
-## Reports and freshness
-
-Each successful evening run writes the **next application date** as a folder. For example, the August 27 evening run creates `2026-08-28/`. A successful folder contains only:
-
-- `Daily Job Match Alert - 2026-08-28.html`
-- `Daily Job Match Alert - 2026-08-28.xlsx`
-- `warnings.txt`, only when the run had warnings
-
-No `latest.html`, CSV, JSON, inspection sidecar, or verification directory remains in the Desktop output.
-
-The XLSX `Matches` sheet has five fixed columns (Company, Title, Location, Role Type, Posted At), then one `<label> Score` column per enabled resume track in configured order, then Recommended Resume, Why It Matches, Gaps / Verify, and Posting Link. With the three example tracks that is 12 columns; with a single track, 10. The link cell shows the posting domain and opens the full URL; all score columns share one three-color scale, and Recommended Resume is a formula that picks the label of the highest score (ties go to the earlier track). Rows that kept a local score because semantic review was unavailable start their **Why It Matches** text with `[unreviewed]`. The `Run Summary` sheet lists counts, the enabled resume tracks, the scoring model, and the warning count with a pointer to `warnings.txt`; the `Notes` sheet explains each field.
-
-The HTML report is built for a quick morning decision. The header is two lines: the title, then the readable date and match count. A toolbar (plain inline JavaScript, no external resources, works offline) sorts by best score, company, or posted time, filters by role type and recommended resume, and searches company or title. Each card shows a score ring for the best score, the title, `company · location · role type`, one compact line of per-track scores with an **Apply with <label> Resume** tag, small badges for semantic markers (`Unreviewed`, `Location unverified`, `Fetch blocked`, `Posting removed`, `Login wall`, `Email only`), the first two match reasons and gaps with the rest behind a disclosure, the full captured JD folded, and the posting link (every link opens in a new tab). Postings with several locations show them joined with " · " in both the card and the xlsx Location column. Run metadata (lookback window, scoring model, resume tracks, hard-filter counts and the excluded postings, update number and last update time, status notes) sits in a collapsed **Run Details** block at the bottom. The page respects `prefers-color-scheme` for dark mode and collapses to a single column on phones; the tokens, stylesheet, and script live in `src/report-theme.mjs`, the components in `src/report-components.mjs`, and `src/report.mjs` only assembles data.
-
-- `postedAt` is populated only from employer or structured posting evidence.
-- `discoveredAt` records when Daily Job Match Alert first encountered the canonical URL.
-- GitHub list age is labeled approximate rather than presented as an exact timestamp.
-- Hard-blocked and low-match roles are excluded from both user-facing files.
-- If XLSX generation fails, the HTML report and seen state are preserved, `XLSX-FAILED.txt` is written beside the HTML with the underlying error, and the run exits 1. A later successful rerun removes the marker and writes the xlsx again.
-
-## Local hub
-
-`npm run hub` starts a small web hub on `http://127.0.0.1:4747/` (port from `hub.port` in `config.json`). It is an addition, not a replacement: the nightly run, the Desktop folders, the xlsx, and `warnings.txt` are untouched. The hub reads the pipeline's artifacts and writes only `config.json` and its own gitignored `private/` directory. It binds loopback only, never makes an outbound request, never shows API keys, and never renders resume text, only file metadata.
-
-Four pages, with a left navigation:
-
-- **Reports** lists every `state/report-payload-*.json` date, newest first and grouped by month (the current month is always open; earlier months start collapsed and remember what you opened), with a **Today** shortcut and an **Only days with matches** toggle on one line, and renders the selected day with the same components, toolbar, and dark mode as the Desktop HTML. **Open Desktop Copy** serves the Desktop folder's own HTML through a read-only route (`/desktop/<date>`, with `/desktop/<date>/xlsx` for the workbook); that folder remains the authoritative copy and the hub never modifies it.
-- **Resumes** shows one card per track: label, enabled state, PDF name and path, last upload, the hub's trial text extraction (character count or the pdftotext error), and the nightly profile status. Uploading a replacement, or adding a track with id, label, and PDF, stores the file as `private/resumes/<id>/<ISO time>-<original name>.pdf`, points that track's `pdf` at it in `config.json`, and keeps the newest five versions (an older one can be selected again). Tracks that still point at an external file, such as a PDF on the Desktop, are marked **External file** and keep working unchanged; **Managed by hub** marks uploaded ones. Uploads accept `.pdf` up to 5 MB.
-- **Status** shows the last run (time, trigger, result, matches), the next scheduled time read from the installed LaunchAgent, the lock state, the warning count for the last seven report dates with each day's `warnings.txt` expandable, and any `ERROR-*.html`. **Run Now** asks for confirmation, then runs `node src/index.mjs --config config.json` as a child process with `DAILY_JOB_MATCH_ALERT_TRIGGER=manual`. It honors the pipeline lock (the button is disabled with the reason while a run holds it), polls progress, and shows the last 50 log lines; logs go to `private/hub/logs/`.
-- **Settings** shows the Claude and Codex connection state (checked every minute, read-only; sign in from a terminal) and exposes `minimumMatchScore`, `semanticMatching.acceptedMatchLevels`, the engine (Claude or Codex) with a model dropdown fed by `hub.modelChoices` plus a custom entry, `reports.xlsx.required`, and `hub.port`. Values are validated and written back surgically: every other key in `config.json`, and their order, stay as they were. Writes take the same run lock as the pipeline, so they never race the 20:00 run.
-
-- **Letters** lists every generated cover letter (date, company, role, track, engine, pages) with **Open** and **Download PDF** on each row; the job card in the report gets the same two buttons once a letter exists.
-
-### Cover letters
-
-Each job card in the hub has **Generate Cover Letter**. The panel shows the posting, lets you switch the resume track (the recommended one is preselected) and adjust the company name used in the salutation and file name, then calls the configured engine once (Claude or Codex, the same subscription CLI and auth allow-list as scoring; `local_only` uses a clearly labelled placeholder that writes no real content). The model receives the playbook, up to three sample letters marked as style references only, the chosen resume profile, and the posting (title, company, location, role type, full description, match reasons, gaps), under fixed rules: five or six paragraphs, no bullets, no em or en dash punctuation, a professional first-person voice, only facts and numbers that exist in the resume or the playbook evidence library, the playbook's fast-ramp framework for missing skills, and the playbook's graduation-timeline wording for the role type. The model returns body paragraphs only; the header (name 16pt bold centered, contact line), the date in `config.timeZone` ("September 15, 2026"), "Dear {Company} Recruiting Team,", and "Sincerely," with the signature are added by code.
-
-The letter follows a fixed architecture on top of the playbook: paragraph one names the role and location, the degree and GPA as the resume states them, a timeline sentence chosen by role type (internships: completing the bachelor's in the configured graduation month with a master's starting the next fall; new-grad and entry-level: graduation inside the employer's window), an in-state line for Illinois roles, and a closing hook about the company; three or four middle paragraphs each open with one posting responsibility in its own words, carry numbered evidence, and end on a principle; a candid paragraph opening with "I should be straightforward about" appears only when the scorer found required tools missing from the resume; the close is two sentences. A second call to the same engine then reviews the draft as an editor (structure, verbatim numbers, tone) and its revision is adopted when it raised issues; the notes appear under **Editor notes** in the panel. This editor pass can be switched off under Settings. The draft is normalized (bullets stripped, dashes rewritten) and targets 460–600 words; page fit is decided by the rendered PDF, and a first render that spills triggers one condensing pass before the smaller layouts. Up to ten sample letters can be kept (several can be uploaded at once, and a file with the same name replaces the earlier version); each row has its own track tag that saves at once, and the three closest to the chosen track go into each prompt and are named in the panel. **Save & Render PDF** writes `letter.md`, `letter.json`, and the PDF under `private/cover-letters/<date>/<Company>/`, named by `coverLetter.fileNameTemplate` (default `{FirstLast}_Cover_Letter_{Company}.pdf`). PDFs are printed with a local Chrome or Chromium (`hub.chromeCommand` to pin one; Letter, Times New Roman 11pt, 1 inch margins) and fall back to pdfkit; if the letter spills past one page it is re-rendered on B5, then with 0.8 inch margins, and the panel says so.
-
-Material lives under **Settings → Cover Letters**: your name, phone, email, and signature name, a playbook (`.md` or `.txt` with writing rules and an evidence library), and up to ten sample letters (`.pdf` via pdftotext, or `.txt`). The playbook and every sample share one row layout (name, characters, upload time, **Replace** / **Remove**); a batch of samples can be tagged with a track as it is uploaded (**Track for these files**), and each row's track can be changed in place afterwards. Everything stays in `private/cover-letter/`, which is gitignored; the repository, docs, and tests only ever contain placeholder people such as Jane Doe. Until a playbook and your contact block exist, the Generate button is disabled with a pointer to Settings.
-
-All state-changing requests are POSTs whose `Host` and `Origin` must be `127.0.0.1` or `localhost`; anything else gets 403. Path parameters (dates, track ids, error-report names) are pattern-checked, so no request can reach outside the expected folders.
-
-To keep the hub running across logins, install its own LaunchAgent (separate from the nightly job):
-
-```bash
-./scripts/install-hub-launchd.sh            # KeepAlive + RunAtLoad, logs in state/logs/hub.*.log
-./scripts/install-hub-launchd.sh --remove   # stop and remove it
-npm run hub:restart                         # after updating the code or changing hub.port
-```
-
-After a `git pull`, run `npm run hub:restart` so the installed hub picks up the new code; without the LaunchAgent the script says so and you simply restart `npm run hub`. Every time in the hub is shown in `config.timeZone`, and the sidebar on every page carries the last run and the next run with a live countdown (`Sep 18, 8:00 PM · in 3h 20m`, refreshed every minute); once a scheduled slot has passed without a completed run it reads `overdue` instead. The nightly run now records its trigger (`scheduled`, `catchup`, or `manual`) and its completion time in the day payload, which Status and the report masthead (`Ran Sep 12, 8:00 PM`) display.
-
-## Verifying a deployment
-
-```bash
-npm test        # unit and integration tests
-npm run demo    # local-only run on fixtures -> tests/fixtures/demo-output/
-npm run chaos   # five failure scenarios in temporary directories
-npm run hub     # local hub on http://127.0.0.1:4747/
-```
-
-[VERIFICATION.md](VERIFICATION.md) is the sign-off checklist, including the owner-only steps (a real `npm run run` and a launchd reinstall) that automation must not perform.
-
-## Security and ethics
-
-Real resumes, configuration, alert mail, state, logs, and generated reports are gitignored. Remote posting content is treated as untrusted input, including inside the subscription prompt. The subscription agent receives a temporary read-only workspace and no tools are requested for evaluation.
-
-Daily Job Match Alert never submits applications or answers screening questions. See [SECURITY.md](SECURITY.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+After pulling new code, run `npm run hub:restart`. [VERIFICATION.md](VERIFICATION.md) is the sign-off checklist, [SETUP.zh-CN.md](SETUP.zh-CN.md) the Chinese guide.
+
+## Current limitations
+
+- **No email channel yet.** The Himalaya collector exists but is disabled; nothing routes alert mail into `intake/eml`. Until that is set up, Handshake, Simplify, Wellfound, ZipRecruiter, and Jobright alerts are not ingested.
+- **Login-walled platforms are not scraped.** Handshake, LinkedIn, Jobright, Wellfound, and similar sites forbid automated access in their terms and sit behind logins, MFA, and bot checks; the project only reads public, unauthenticated endpoints. When their alert email arrives one day, it will serve only as a link source, and the employer's public board becomes the posting of record.
+- **Workday is best effort.** The CXS list endpoint is public but undocumented; if a tenant changes it, that board fails, warns, and eventually goes dormant while everything else continues.
+- **Baseline delays a new board by one night.** A freshly discovered board contributes scored postings from its second poll on, by design.
+- **Local scoring is triage only.** When no subscription CLI is available, `unreviewed` postings are ranked by keyword overlap and should be read as a rough list, not a judgment.
+- **macOS first.** The schedule, notifications, iCloud recovery, and the hub's LaunchAgent assume macOS.
 
 ## Documentation
 
-- [Chinese setup and source decision guide](SETUP.zh-CN.md)
+- [Chinese setup and source guide](SETUP.zh-CN.md)
 - [Verification checklist](VERIFICATION.md)
 - [Example configuration](config.example.json)
-- [Contributing](CONTRIBUTING.md)
-- [Security policy](SECURITY.md)
+- [Contributing](CONTRIBUTING.md) and [Security policy](SECURITY.md)
 
 ## Acknowledgements
 
-Daily Job Match Alert is designed as a companion to [santifer/career-ops](https://github.com/santifer/career-ops) and consumes public lists maintained by [SimplifyJobs](https://github.com/SimplifyJobs). Their projects remain independent and retain their respective licenses and trademarks.
+Daily Job Match Alert consumes the public lists maintained by [SimplifyJobs](https://github.com/SimplifyJobs), the public job-board APIs of Greenhouse, Lever, and Ashby, and pairs with [santifer/career-ops](https://github.com/santifer/career-ops). Those projects and companies are independent and keep their own licenses and trademarks.
 
 ## License
 

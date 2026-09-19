@@ -358,6 +358,31 @@ function dayRow(day) {
   return `<details class="day"><summary>${htmlEscape(formatDateLabel(day.date))} · ${count}${day.matchCount != null ? ` <span class="muted">· ${day.matchCount} match${day.matchCount === 1 ? '' : 'es'}</span>` : ''}</summary>${body}</details>`;
 }
 
+// Every source the nightly run can draw on: enabled state, last success, postings added by the last
+// run, and a Dormant badge with a Resume Polling button for boards that failed seven nights running.
+function sourceRow(row, timeZone) {
+  const enabled = row.enabled
+    ? '<span class="badge badge-good" data-badge="enabled">Enabled</span>'
+    : '<span class="badge badge-muted" data-badge="disabled">Disabled</span>';
+  const kind = row.kind === 'builtin' ? '' : ` <span class="muted">${htmlEscape(row.kind)}</span>`;
+  const last = row.lastSuccessAt ? htmlEscape(formatLocalDateTime(row.lastSuccessAt, timeZone)) : '<span class="muted">Never</span>';
+  const fresh = row.newCount == null ? '<span class="muted">—</span>' : `${row.newCount}${row.jobCount != null ? ` <span class="muted">of ${row.jobCount} listed</span>` : ''}`;
+  const notes = [];
+  if (row.dormant) notes.push(`<span class="badge badge-bad" data-badge="dormant" title="${htmlEscape(row.error || '')}">Dormant</span> <form class="inline" method="post" action="/status/sources/resume"><input type="hidden" name="board" value="${htmlEscape(row.key)}"><button class="btn secondary small" type="submit">Resume Polling</button></form>`);
+  else if (row.error) notes.push(`<span class="badge badge-warn" data-badge="failing">Failing${row.consecutiveFailures > 1 ? ` (${row.consecutiveFailures} in a row)` : ''}</span> <span class="muted">${htmlEscape(row.error)}</span>`);
+  else if (row.skipped) notes.push(`<span class="muted">Not polled (${htmlEscape(row.skipped)})</span>`);
+  else if (row.baselineCount != null && row.newCount == null) notes.push(`<span class="muted">Baseline of ${row.baselineCount} recorded</span>`);
+  else if (row.enabled && row.lastSuccessAt) notes.push('<span class="muted">OK</span>');
+  return `<tr data-source="${htmlEscape(row.key)}"><td>${htmlEscape(row.label)}${kind}</td><td>${enabled}</td><td>${last}</td><td>${fresh}</td><td>${notes.join(' ')}</td></tr>`;
+}
+
+function sourcesCard(rows, timeZone) {
+  const body = rows.length
+    ? `<table class="plain" id="sources-table"><tr><th>Source</th><th>Enabled</th><th>Last Success</th><th>New This Run</th><th>Status</th></tr>${rows.map(row => sourceRow(row, timeZone)).join('')}</table>`
+    : '<p class="muted">No sources configured.</p>';
+  return `<article class="card" id="sources-card"><h2>Sources</h2><p class="muted">Built-in lists and every public ATS board discovered from posting URLs. A board that fails seven nights in a row goes dormant until you resume it.</p>${body}</article>`;
+}
+
 export function statusPage({ status, timeZone }) {
   const { lastRun, nextRun, lock, runNow, run } = status;
   const at = value => htmlEscape(formatLocalDateTime(value, timeZone));
@@ -397,6 +422,7 @@ export function statusPage({ status, timeZone }) {
     <pre class="log" id="run-tail">${htmlEscape(run.tail.join('\n'))}</pre>
     </div>
   </article>
+  ${sourcesCard(status.sources || [], timeZone)}
   <article class="card"><h2>Warnings</h2><p class="muted">Last 7 report dates.</p>${status.days.length ? status.days.map(dayRow).join('') : '<p class="muted">No reports yet.</p>'}</article>
   <article class="card"><h2>Error Reports</h2>${errors}</article>`;
 }

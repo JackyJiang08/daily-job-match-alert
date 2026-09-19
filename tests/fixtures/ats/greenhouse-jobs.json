@@ -1,0 +1,107 @@
+{
+  "jobs": [
+    {
+      "absolute_url": "https://job-boards.greenhouse.io/examplecorp/jobs/8556658002",
+      "data_compliance": [
+        {
+          "type": "gdpr",
+          "requires_consent": false,
+          "requires_processing_consent": false,
+          "requires_retention_consent": false,
+          "retention_period": null,
+          "demographic_data_consent_applies": false
+        }
+      ],
+      "internal_job_id": 6417799002,
+      "location": {
+        "name": "Remote, Bangalore"
+      },
+      "metadata": [
+        {
+          "id": 4595831002,
+          "name": "Quota Coverage Type",
+          "value": "n/a",
+          "value_type": "single_select"
+        }
+      ],
+      "id": 8556658002,
+      "updated_at": "2026-09-14T16:01:39-04:00",
+      "requisition_id": "6401",
+      "title": "AI Engineer",
+      "company_name": "Example Corp",
+      "first_published": "2026-05-22T09:16:29-04:00",
+      "language": "en",
+      "application_deadline": null,
+      "content": "&lt;div class=&quot;content-intro&quot;&gt;&lt;p&gt;Example Corp is the intelligent orchestration platform for DevSecOps. Example Corp enables organizations to increase developer productivity, improve operational efficiency, reduce security and compliance risk, and accelerate digital transformation. More than 50 million registered users and more than 50% of the Fortune 100* trust Example Corp to ship better, more secure software faste …",
+      "departments": [
+        {
+          "id": 4069215002,
+          "name": "Enterprise Applications",
+          "child_ids": [],
+          "parent_id": 4118834002
+        }
+      ],
+      "offices": [
+        {
+          "id": 4112140002,
+          "name": "India",
+          "location": null,
+          "child_ids": [],
+          "parent_id": 4019590002
+        }
+      ],
+      "ai_disclaimer": null,
+      "include_ai_disclaimer": null,
+      "ai_opt_out_request_url": null
+    },
+    {
+      "absolute_url": "https://job-boards.greenhouse.io/examplecorp/jobs/8638232002",
+      "data_compliance": [
+        {
+          "type": "gdpr",
+          "requires_consent": false,
+          "requires_processing_consent": false,
+          "requires_retention_consent": false,
+          "retention_period": null,
+          "demographic_data_consent_applies": false
+        }
+      ],
+      "internal_job_id": 6449994002,
+      "location": {
+        "name": "Remote, United States"
+      },
+      "metadata": [
+        {
+          "id": 4595831002,
+          "name": "Quota Coverage Type",
+          "value": "n/a",
+          "value_type": "single_select"
+        }
+      ],
+      "id": 8638232002,
+      "updated_at": "2026-09-14T16:01:39-04:00",
+      "requisition_id": "6682",
+      "title": "AI Transformation Owner, CRO",
+      "company_name": "Example Corp",
+      "first_published": "2026-07-22T13:38:40-04:00",
+      "language": "en",
+      "application_deadline": null,
+      "content": "&lt;div class=&quot;content-intro&quot;&gt;&lt;p&gt;Example Corp is the intelligent orchestration platform for DevSecOps. Example Corp enables organizations to increase developer productivity, improve operational efficiency, reduce security and compliance risk, and accelerate digital transformation. More than 50 million registered users and more than 50% of the Fortune 100* trust Example Corp to ship better, more secure software faste …",
+      "departments": [
+        {
+          "id": 4114891002,
+          "name": "Enablement",
+          "child_ids": [],
+          "parent_id": 4011049002
+        }
+      ],
+      "offices": [],
+      "ai_disclaimer": null,
+      "include_ai_disclaimer": null,
+      "ai_opt_out_request_url": null
+    }
+  ],
+  "meta": {
+    "total": 2
+  }
+}

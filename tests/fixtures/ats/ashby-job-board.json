@@ -1,0 +1,250 @@
+{
+  "apiVersion": "1",
+  "jobs": [
+    {
+      "id": "7458d4e9-da2e-47bd-98cb-adfda43d42b2",
+      "title": "Engineering Manager - EU",
+      "department": "Engineering",
+      "team": "EMEA Engineering",
+      "employmentType": "FullTime",
+      "location": "Remote - European Union",
+      "shouldDisplayCompensationOnJobPostings": true,
+      "secondaryLocations": [
+        {
+          "location": "Spain",
+          "address": {
+            "postalAddress": {
+              "addressRegion": "Spain",
+              "addressCountry": "Spain",
+              "addressLocality": "Spain"
+            }
+          }
+        },
+        {
+          "location": "Italy",
+          "address": {
+            "postalAddress": {
+              "addressRegion": "",
+              "addressCountry": "Italy",
+              "addressLocality": ""
+            }
+          }
+        },
+        {
+          "location": "Germany",
+          "address": {
+            "postalAddress": {
+              "addressCountry": "Germany",
+              "addressLocality": ""
+            }
+          }
+        },
+        {
+          "location": "Switzerland",
+          "address": {
+            "postalAddress": {
+              "addressRegion": "",
+              "addressCountry": "Switzerland",
+              "addressLocality": ""
+            }
+          }
+        },
+        {
+          "location": "Denmark",
+          "address": {
+            "postalAddress": {
+              "addressRegion": "",
+              "addressCountry": "Denmark",
+              "addressLocality": ""
+            }
+          }
+        },
+        {
+          "location": "Norway",
+          "address": {
+            "postalAddress": {
+              "addressRegion": "",
+              "addressCountry": "Norway",
+              "addressLocality": ""
+            }
+          }
+        },
+        {
+          "location": "Croatia",
+          "address": {
+            "postalAddress": {
+              "addressRegion": "",
+              "addressCountry": "Croatia",
+              "addressLocality": ""
+            }
+          }
+        },
+        {
+          "location": "Ireland",
+          "address": {
+            "postalAddress": {
+              "addressRegion": "Ireland",
+              "addressCountry": "Ireland",
+              "addressLocality": "Ireland"
+            }
+          }
+        },
+        {
+          "location": "Stockholm",
+          "address": {
+            "postalAddress": {
+              "addressRegion": "Stockholm",
+              "addressCountry": "Sweden",
+              "addressLocality": "Stockholm"
+            }
+          }
+        },
+        {
+          "location": "Romania",
+          "address": {
+            "postalAddress": {
+              "addressRegion": "",
+              "addressCountry": "Romania",
+              "addressLocality": ""
+            }
+          }
+        },
+        {
+          "location": "Austria",
+          "address": {
+            "postalAddress": {
+              "addressCountry": "Austria"
+            }
+          }
+        },
+        {
+          "location": "Barcelona",
+          "address": {
+            "postalAddress": {
+              "addressRegion": "Catalonia",
+              "addressCountry": "Spain",
+              "addressLocality": "Barcelona"
+            }
+          }
+        },
+        {
+          "location": "Netherlands",
+          "address": {
+            "postalAddress": {
+              "addressRegion": "",
+              "addressCountry": "Netherlands",
+              "addressLocality": "Amsterdam"
+            }
+          }
+        },
+        {
+          "location": "Portugal",
+          "address": {
+            "postalAddress": {
+              "addressCountry": "Portugal"
+            }
+          }
+        },
+        {
+          "location": "France",
+          "address": {
+            "postalAddress": {
+              "addressRegion": "",
+              "addressCountry": "France",
+              "addressLocality": ""
+            }
+          }
+        },
+        {
+          "location": "Berlin",
+          "address": {
+            "postalAddress": {
+              "addressRegion": "",
+              "addressCountry": "Germany",
+              "addressLocality": "Berlin"
+            }
+          }
+        },
+        {
+          "location": "Sweden",
+          "address": {
+            "postalAddress": {
+              "addressRegion": "",
+              "addressCountry": "Sweden",
+              "addressLocality": ""
+            }
+          }
+        },
+        {
+          "location": "Hungary",
+          "address": {
+            "postalAddress": {
+              "addressRegion": "Hungary",
+              "addressCountry": "Hungary",
+              "addressLocality": "Budapest"
+            }
+          }
+        },
+        {
+          "location": "Estonia",
+          "address": {
+            "postalAddress": {
+              "addressRegion": "",
+              "addressCountry": "Estonia",
+              "addressLocality": ""
+            }
+          }
+        }
+      ],
+      "publishedAt": "2024-03-04T14:29:08.532+00:00",
+      "isListed": true,
+      "isRemote": true,
+      "workplaceType": "Remote",
+      "address": {
+        "postalAddress": {
+          "postalCode": "",
+          "addressRegion": "",
+          "addressCountry": "European Union",
+          "addressLocality": ""
+        }
+      },
+      "jobUrl": "https://jobs.ashbyhq.com/examplecorp/7458d4e9-da2e-47bd-98cb-adfda43d42b2",
+      "applyUrl": "https://jobs.ashbyhq.com/examplecorp/7458d4e9-da2e-47bd-98cb-adfda43d42b2/application",
+      "descriptionHtml": "<p style=\"min-height:1.5em\">Hi 👋 I’m <a target=\"_blank\" rel=\"noopener noreferrer nofollow\" href=\"https://example.com/jane-doe\"><u>Jane Doe</u></a>, Director of Engineering, Europe. How do you feel about software engineers writing product specs, making product decisions, and not breaking down  …",
+      "descriptionPlain": "Hi 👋 I’m Jane Doe https://example.com/jane-doe, Director of Engineering, Europe. How do you feel about software engineers writing product specs, making product decisions, and not breaking down projects into individual tickets? If that sounds exciting (even if a bit scary), read on because I’m …",
+      "compensation": {
+        "compensationTierSummary": "€110K – €185K • Offers Equity • Offers Bonus",
+        "scrapeableCompensationSalarySummary": "€110K - €185K"
+      }
+    },
+    {
+      "id": "20155359-0ef1-4d45-9b64-acc9a54f1ceb",
+      "title": "People Operations Coordinator",
+      "department": "People & Talent",
+      "team": "People & Talent",
+      "employmentType": "FullTime",
+      "location": "Remote - US",
+      "shouldDisplayCompensationOnJobPostings": true,
+      "secondaryLocations": [],
+      "publishedAt": "2026-09-18T21:06:56.578+00:00",
+      "isListed": true,
+      "isRemote": true,
+      "workplaceType": "Remote",
+      "address": {
+        "postalAddress": {
+          "addressRegion": "",
+          "addressCountry": "United States",
+          "addressLocality": ""
+        }
+      },
+      "jobUrl": "https://jobs.ashbyhq.com/examplecorp/20155359-0ef1-4d45-9b64-acc9a54f1ceb",
+      "applyUrl": "https://jobs.ashbyhq.com/examplecorp/20155359-0ef1-4d45-9b64-acc9a54f1ceb/application",
+      "descriptionHtml": "<p style=\"min-height:1.5em\">Hi! I’m Hannah and I lead People Operations here at Example Corp. I joined over four years ago as the first People hire and I’m excited that our People Ops team is growing! The People Operations team supports Example Corp employees through the development and implementation of programs …",
+      "descriptionPlain": "Hi! I’m Hannah and I lead People Operations here at Example Corp. I joined over four years ago as the first People hire and I’m excited that our People Ops team is growing! The People Operations team supports Example Corp employees through the development and implementation of programs, policies, and services tha …",
+      "compensation": {
+        "compensationTierSummary": "$55K – $80K • Offers Equity",
+        "scrapeableCompensationSalarySummary": "$55K - $80K"
+      }
+    }
+  ]
+}

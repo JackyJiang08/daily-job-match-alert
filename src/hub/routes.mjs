@@ -8,7 +8,7 @@ import { HubLockedError } from './config-file.mjs';
 import { parseMultipart } from './multipart.mjs';
 import {
   HubInputError, assertDate, buildStatusView, configuredCliCommands, desktopCopyPath, desktopWorkbookPath, listReportSummaries, loadTracksView, readErrorReport,
-  readReportPayload, readSettings, saveCliPath, saveSettings, selectResumeVersion, setTrackEnabled, sidebarSummary, uploadResumePdf,
+  readReportPayload, readSettings, resumeAtsBoard, saveCliPath, saveSettings, selectResumeVersion, setTrackEnabled, sidebarSummary, uploadResumePdf,
 } from './services.mjs';
 import { localDate } from '../time-format.mjs';
 import { LETTER_SCRIPT, SAMPLE_TRACK_SCRIPT, letterPanel, lettersPage, trackLabelOf } from './letter-views.mjs';
@@ -280,6 +280,11 @@ export function createHubHandler(ctx) {
       case '/settings/cover-letter/sample-track': {
         const sample = await ctx.letterStore.setSampleTrack(fields.file, fields.track || null);
         json(response, 200, { file: sample.file, track: sample.track, trackLabel: sample.track ? trackLabelOf(sample.track) : null });
+        return;
+      }
+      case '/status/sources/resume': {
+        const result = await resumeAtsBoard(ctx, fields.board);
+        redirect(response, '/status', `${result.label} will be polled again on the next run`);
         return;
       }
       case '/run': {

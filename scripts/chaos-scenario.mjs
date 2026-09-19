@@ -1,11 +1,12 @@
 // One chaos scenario: build an isolated config under <workRoot>/<scenario>, run src/index.mjs
 // against it, and assert that the Desktop-equivalent output folder still holds a usable report.
 //
-//   node scripts/chaos-scenario.mjs <baseline|offline|llm-down|bad-input|xlsx-recovery> <workRoot>
+//   node scripts/chaos-scenario.mjs <baseline|offline|llm-down|bad-input|xlsx-recovery|ats-500> <workRoot>
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
+import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import ExcelJS from 'exceljs';
@@ -71,6 +72,7 @@ function baseConfig(directory) {
       emailFiles: { enabled: true, directory: path.join(directory, 'intake') },
       himalaya: { enabled: false },
       careerOps: { enabled: false },
+      atsBoards: { enabled: true, boards: [] },
     },
     network: { fetchDescriptions: false, concurrency: 2, timeoutMs: 2000 },
   };
@@ -335,6 +337,47 @@ const scenarios = {
     );
     return `xlsx failure kept ${failed.summary.meta.matchCount} match(es) in the day payload; next run rebuilt HTML + xlsx as update #2 and recorded lastSuccessfulRun`;
   },
+};
+
+// A public ATS board whose API answers 500 every time: the board is warned about and counted as one
+// failure, the email-sourced posting still reaches the report, and nothing goes dormant on night one.
+scenarios['ats-500'] = async function atsFiveHundred() {
+  const directory = await prepareDirectory('ats-500');
+  await addFixtureEmail(directory, 'demo-new-grad-alert.eml');
+  const hits = [];
+  const server = http.createServer((request, response) => {
+    hits.push(request.url);
+    response.writeHead(500, { 'content-type': 'application/json' });
+    response.end('{"error":"upstream exploded"}');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const port = server.address().port;
+    const config = baseConfig(directory);
+    config.sources.atsBoards = { enabled: true, boards: [{ key: 'greenhouse:chaosco', company: 'Chaos Co', apiUrl: `http://127.0.0.1:${port}/v1/boards/chaosco/jobs?content=true` }] };
+    const run = await runPipeline(await writeConfig(directory, config));
+    const artifacts = await assertDesktopArtifacts(config, run);
+    assert.equal(run.exitCode, 0, `ats-500 run exited ${run.exitCode}`);
+    assert.deepEqual(hits, ['/v1/boards/chaosco/jobs?content=true'], 'the board was polled exactly once');
+    const warning = artifacts.warnings.find(item => item.stage === 'collector' && item.source === 'Greenhouse · Chaos Co');
+    assert.ok(warning, `no collector warning for the failing board: ${warningLines(artifacts.warnings).join(' | ')}`);
+    assert.match(warning.message, /HTTP 500 \(failure 1 in a row\); the other sources were not affected/);
+    assert.ok(run.summary.meta.matchCount >= 1, 'the email-sourced posting did not survive the board failure');
+    const registry = JSON.parse(await fs.readFile(path.join(directory, 'state', 'ats-boards.json'), 'utf8'));
+    const board = registry.boards['greenhouse:chaosco'];
+    assert.equal(board.consecutiveFailures, 1);
+    assert.equal(board.dormant, false);
+    assert.equal(board.baselinedAt, null, 'a failed first poll is not a baseline');
+    assert.equal(board.lastError, 'HTTP 500');
+    const stats = run.summary.meta.sourceCounts || [];
+    assert.ok(stats.some(stat => stat.name === 'Greenhouse · Chaos Co' && stat.ok === false), 'the per-source counts do not record the failure');
+    assert.ok(stats.some(stat => stat.name === 'Email files' && stat.ok === true && stat.count >= 1));
+    assert.match(artifacts.html, /Greenhouse · Chaos Co: failed \(HTTP 500\)/, 'Run Details does not list the failed board');
+    assert.match(await readWarningsFile(config, run) || '', /^\[collector \/ Greenhouse · Chaos Co\] HTTP 500/m);
+    return `board failure isolated (1 warning, consecutiveFailures=1, not dormant), ${run.summary.meta.matchCount} match(es) from the healthy email`;
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
 };
 
 const scenario = scenarios[scenarioName];

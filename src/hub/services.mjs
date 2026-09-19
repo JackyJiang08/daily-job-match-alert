@@ -11,6 +11,9 @@ import { OVERDUE_GRACE_MS, localDate } from '../time-format.mjs';
 import { ENGINE_DEFAULT_MODELS, ENGINE_IDS, ENGINE_LABELS, normalizeEngineId, resolveModel } from '../engines/index.mjs';
 import { readConfigFile, updateConfigFile } from './config-file.mjs';
 import { readLockStatus } from './run.mjs';
+import { boardLabel, readRegistry, resumeBoard, writeRegistry } from '../collectors/ats-boards.mjs';
+import { HubLockedError } from './config-file.mjs';
+import { acquireRunLock, releaseRunLock } from '../lock.mjs';
 
 export const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 export const ERROR_FILE_PATTERN = /^ERROR-\d{4}-\d{2}-\d{2}\.html$/;
@@ -399,8 +402,70 @@ export async function buildStatusView(ctx, config) {
     run: ctx.runManager.status(),
     days,
     errors,
+    sources: await sourcesView(ctx, config, latest),
     outputDirectory: config.outputDirectory,
   };
+}
+
+// ---------------------------------------------------------------------------------------------- sources
+
+const BUILTIN_SOURCES = [
+  ['simplifyInternships', 'SimplifyJobs Summer Internships'],
+  ['simplifyNewGrad', 'SimplifyJobs New Grad'],
+  ['emailFiles', 'Email files'],
+  ['himalaya', 'Himalaya job-alert mailbox'],
+  ['careerOps', 'career-ops history'],
+];
+
+export function atsRegistryPath(ctx) {
+  return path.join(ctx.root, 'state', 'ats-boards.json');
+}
+
+// One row per source for the Status page: the built-in collectors from config, then every ATS board in
+// state/ats-boards.json. "New this run" comes from the newest payload's per-source counts.
+export async function sourcesView(ctx, config, latest) {
+  const counts = new Map((latest?.meta?.sourceCounts || []).map(item => [item.name, item]));
+  const ranAt = latest?.meta?.completedAt || latest?.meta?.lastUpdatedAt || null;
+  const rows = [];
+  for (const [id, label] of BUILTIN_SOURCES) {
+    const stat = counts.get(label) || null;
+    rows.push({
+      key: id, label, kind: 'builtin', enabled: config.sources?.[id]?.enabled === true,
+      lastSuccessAt: stat?.ok ? ranAt : null, newCount: stat ? Number(stat.count || 0) : null, jobCount: null,
+      baselineCount: null, dormant: false, error: stat?.ok === false ? stat.error || 'failed' : null, skipped: stat?.skipped || null, consecutiveFailures: 0,
+    });
+  }
+  const registry = await readJson(ctx.io, atsRegistryPath(ctx), null);
+  const boards = Object.values(registry?.boards || {}).filter(board => board && typeof board === 'object');
+  boards.sort((a, b) => boardLabel(a).localeCompare(boardLabel(b)));
+  for (const board of boards) {
+    const label = boardLabel(board);
+    const stat = counts.get(label) || null;
+    rows.push({
+      key: board.key, label, kind: board.kind, enabled: board.enabled !== false,
+      lastSuccessAt: board.lastSuccessAt || null, newCount: stat ? Number(stat.count || 0) : (board.lastNewCount ?? null), jobCount: board.lastJobCount ?? null,
+      baselineCount: board.baselineCount ?? null, baselinedAt: board.baselinedAt || null, dormant: board.dormant === true, dormantSince: board.dormantSince || null,
+      error: board.lastError || null, skipped: stat?.skipped || null, consecutiveFailures: Number(board.consecutiveFailures || 0), boardUrl: board.boardUrl || null, origin: board.origin || null,
+    });
+  }
+  return rows;
+}
+
+// Clears a board's dormant flag and failure count so the next run polls it again. Takes the run lock
+// because the pipeline rewrites the same file while it runs.
+export async function resumeAtsBoard(ctx, key) {
+  const file = atsRegistryPath(ctx);
+  const lock = await acquireRunLock(ctx.runManager.lockPath, { pidAlive: ctx.pidAlive });
+  if (!lock.acquired) throw new HubLockedError(lock.pid);
+  try {
+    const registry = await readRegistry(file, ctx.io);
+    const board = resumeBoard(registry, key);
+    if (!board) throw new HubInputError(`Unknown source "${key}"`);
+    await writeRegistry(file, registry, ctx.io);
+    return { key: board.key, label: boardLabel(board) };
+  } finally {
+    await releaseRunLock(lock);
+  }
 }
 
 export async function readErrorReport(ctx, config, name) {

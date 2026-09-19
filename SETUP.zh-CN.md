@@ -1,174 +1,110 @@
-# Daily Job Match Alert 使用与来源决策
+# Daily Job Match Alert 使用与来源说明
 
-## 最终分工
+一句话：这是一个跑在你 Mac 上的夜间求职匹配 agent。它每晚采集公开的实习与应届岗位，用你已有的 Claude 或 ChatGPT 订阅按简历轨道逐一评分，并在本地中枢里生成一页纸的 cover letter。没有 API key，不会自动投递。
 
-- **career-ops**：负责 Greenhouse、Lever、Ashby、Workday 等公开 ATS 和公司 career board；保留它原有的去重与申请 pipeline。本项目通过 `sources.careerOps` 可选读取它的 scan history。
-- **Daily Job Match Alert**：直接读取两个 SimplifyJobs GitHub 列表（默认启用），保存完整 JD，先本地预筛，再调用 Claude Code 的订阅登录对 Data 与 AI/ML 两版简历分别做语义评分，生成每日文件。
-- **邮件提醒通道（规划中，未启用）**：`intake/eml` 的 `.eml` 解析器每晚都会运行，但目前没有任何邮件被投递进去；Himalaya 邮箱读取已实现但 `sources.himalaya.enabled` 为 `false`。Handshake、Simplify、Wellfound、ZipRecruiter、Jobright 目前都不在采集范围内。
-- **macOS launchd**：负责每天固定时间直接运行本地脚本，不依赖 OpenClaw Gateway 常驻。
+## 它每晚做什么
 
-## 日报时间与文件规则
+默认每天 **20:00 America/Chicago** 由 launchd 触发一次，无人值守：
 
-任务每天 **20:00 America/Chicago** 运行，文件夹和文件名使用第二天的投递日期。例如 2026-08-27 晚上运行后，只生成：
+1. **采集。** 来源包括 SimplifyJobs 的两个 GitHub 榜单、由此前岗位链接自动发现的 Greenhouse / Lever / Ashby / Workday 公开 job board 接口，以及放进 `intake/eml` 的 `.eml` 提醒邮件。每个 board 每晚只轮询一次，带固定 user agent，并使用 ETag / If-Modified-Since 条件请求。
+2. **去重。** URL 规范化（去追踪参数、解析跳转）后与 `state/state.json` 比对，同一岗位即使三个来源都列出也只出现一次。
+3. **抓 JD。** board 接口直接给出完整正文；其他链接只抓取一次，Workday 页面改走租户公开的 JSON 接口。抓不到的岗位后续夜晚重试，被拒绝或已下线的直接关闭。
+4. **硬过滤。** 两条规则由代码强制执行，与模型无关：地点必须在美国（无法判断的会标记 `Location unverified`），岗位要求的毕业窗口必须与 `preferences.graduationDate` 相符。
+5. **订阅引擎评分。** 剩余岗位由 Claude Code CLI 或 Codex CLI（以 claude.ai 或 ChatGPT 订阅登录）逐轨评分，每条简历轨道得到 0–100 分、理由与 gaps，并推荐最合适的轨道。
+6. **写两个文件到桌面。** `~/Desktop/Daily Job Match Alert/<投递日期>/` 下生成一份自包含的 HTML 清单（可排序、搜索、深色模式、每张卡片折叠完整 JD）和一份 XLSX（每条轨道一列分数）。只有当本次运行有降级时才会多出 `warnings.txt`。
 
-```text
-~/Desktop/Daily Job Match Alert/2026-08-28/
-├── Daily Job Match Alert - 2026-08-28.html
-├── Daily Job Match Alert - 2026-08-28.xlsx
-└── warnings.txt            # 仅当本次运行有 warning 时生成
-```
+晚间运行写的是第二天的文件夹；漏跑后的早晨补跑填的是当天。同一投递日期再次运行会合并进当日报告而不是覆盖。
 
-桌面日报目录不保留 `latest.html`、CSV、JSON、检查文件或验证图片。JSON 只在系统临时目录中用于构建 XLSX，完成后自动删除。
+## 本地中枢（hub）
 
-XLSX 的 `Matches` 表列数随启用的简历轨道数变化：前 5 列固定为 Company、Title、Location、Role Type、Posted At，接着每个启用轨道一列 `<label> Score`（按配置顺序），然后是 Recommended Resume、Why It Matches、Gaps / Verify、Posting Link。示例配置的三条轨道（Data、LLM、AI Agent）共 12 列，单轨道为 10 列。Posting Link 显示域名、点击打开完整 URL；所有分数列共用一个三色色阶；Recommended Resume 是公式，取分数最高轨道的 label，并列时取靠前的轨道。因语义评审不可用而保留本地分数的岗位，会在 Why It Matches 开头标注 `[unreviewed]`。完整 JD、薪资、雇佣类型、来源、发现时间和 freshness 依据只保留在 HTML 报告中。`Run Summary` 表列出计数、Resume tracks（启用轨道列表）、Scoring model 和 warning 条数（并注明 see warnings.txt），不再逐条列出；`Notes` 表解释各字段。
+`npm run hub` 在 `http://127.0.0.1:4747/` 提供只绑定本机、自身不发外部请求的中枢：
 
-HTML 报告面向"早上打开就能做决定"：页眉只有两行（标题；可读日期 + 匹配数，如 `September 11, 2026 · 9 matches`）。顶部工具栏为纯内联 JS、无外部依赖、离线可用，支持按 best score / 公司 / 发布时间排序，按 role type 与推荐轨道筛选，以及按公司或标题搜索。每张卡片：左侧色环显示 best score，标题一行，第二行 `公司 · 地点 · role type`，下方一行紧凑的逐轨分数（`Data 74 · LLM 87 · AI Agent 85`）加醒目的 `Apply with LLM Resume` 标签；`Unreviewed`、`Location unverified`、`Fetch blocked`、`Posting removed`、`Login wall`、`Email only` 等语义标记以统一样式的小徽标显示；理由与 gaps 各默认显示前两条、其余点击展开；JD 折叠；投递按钮（所有外链在新标签页打开）。多地点岗位在卡片与 xlsx Location 列中统一以 " · " 连接。回看窗口、评分模型、启用轨道、硬过滤排除计数与被排除岗位清单、本日运行次数与最近更新时间、状态提示等运行元数据全部收进页面底部默认折叠的 **Run Details**。Pipeline warnings 不再出现在 HTML 中，而是写入同目录的 `warnings.txt`（每行一条 `[stage / source] message`，首行注明日期与条数，零 warning 时不生成）。页面支持 `prefers-color-scheme` 深色模式与移动端单列；样式令牌与脚本在 `src/report-theme.mjs`，组件在 `src/report-components.mjs`，`src/report.mjs` 只负责组装数据。
+- **Reports**：用与桌面 HTML 相同的组件渲染每一天的报告，按月分组并带 Today 快捷键，可打开桌面副本与工作簿。
+- **Resumes**：每条简历轨道一张卡，可上传替换 PDF（当晚生效），旧版本保留可回退。
+- **Letters**：已生成 cover letter 的列表，每行有 Open 与 Download PDF；岗位卡上先是 Generate Cover Letter，生成后变成 Open Letter 与 Download PDF。
+- **Status**：上次/下次运行、锁状态、Sources 表（每个榜单与 board 的启用状态、上次成功、本轮新增数，dormant 的 board 可点 Resume Polling 恢复）、最近 7 天 warnings，以及 Run Now。
+- **Settings**：匹配阈值、接受的匹配等级、引擎与模型、XLSX 是否必需、中枢端口、CLI 连接状态，以及私有的 cover letter 素材。
 
-Workday 招聘站（`*.myworkdayjobs.com`）的岗位页由浏览器端渲染，HTML 抓取拿不到 JD。这类岗位改走租户公开的 JSON 接口（`/wday/cxs/...`），enrichment 记为 `workday_cxs`；接口失败时回退到原有 HTML 路径。
+Cover letter 由同一个订阅引擎根据你的 playbook、最多三封样稿、所选简历与岗位生成，再由引擎以编辑身份复核一次，然后渲染成一页 PDF（本机 Chrome，退化为 pdfkit），存在 `private/cover-letters/`。姓名、联系方式、playbook 与样稿只存在 `private/cover-letter/`；仓库、文档与测试里只有 Jane Doe 之类的占位数据。
 
-地点与毕业窗口是确定性资格，由 `src/eligibility.mjs` 在 `isEligible` 中对每个岗位强制执行，与评分引擎无关：地点含明确非美国家/地区/城市标识（列表 `NON_US_LOCATION_MARKERS` 可扩展）即排除，含美国标识即通过（同一字符串中美国标识优先），仅写 `Remote` 或为空则通过但在 Gaps 追加 "Location unverified — confirm US eligibility"，HTML 卡片显示 `Location unverified` 徽标。毕业窗口由 `preferences.graduationDate`（示例 `2027-05`）驱动，规则见 `GRADUATION_EXCLUSION_RULES`，仅在命中的所有日期都过早时才排除；表述有歧义交给语义层。缺少 `graduationDate` 时该规则关闭并给出 warning。
+## 引擎与计费
 
-## 降级语义：任何单点故障，桌面仍有产物
+唯一的模型访问途径是两个本机订阅 CLI，由 `semanticMatching.engine` 选择：
 
-| 故障 | 行为 | 在哪里看到 |
+| 引擎 | CLI | 接受的登录方式 |
 |---|---|---|
-| 某个采集源抛错 | 该源为空，其他源继续 | warning `collector / <源名>` |
-| SimplifyJobs 榜单返回 200 但解析出 0 行 | 视为上游格式可能变更，其他源继续 | warning `collector / <源名>`，提示检查解析器 |
-| 同一轮里两个追踪链接指向同一岗位 | 保留首个并合并来源标签，丢弃项写入运行摘要 `debug.droppedDuplicateFinalUrls` | stderr 每条一行 |
-| 岗位地点在美国之外，或毕业窗口不符 | 本地代码确定性排除（与评分引擎无关），Run Summary 分列计数 | warning `eligibility / hard filter` 汇总一条 |
-| 岗位页面抓不到（429、5xx、超时、JSON 无法解析） | 保留到后续夜晚重试，最多 3 次后关闭 | warning `enrichment / <源>`，含 attempts 计数 |
-| 站点拒绝抓取（HTTP 403）或岗位已下线（404、410） | 首次即关闭，不再重试 | warning `enrichment / <源>`，注明岗位名及 `blocked` / `removed` |
-| `.eml` 文件畸形或超过 5 MB | 只跳过该文件，同目录其他文件照常解析 | warning `collector / Email files` |
-| Claude CLI 缺失 / 版本过低 / API-key 登录 / batch 重试后仍失败 | 相关岗位保留本地分数并标记 `unreviewed` | warning `llm / <engine>`；XLSX 前缀 `[unreviewed]`，HTML 卡片 `Unreviewed` 徽标 |
-| 模型漏答岗位 id | 补审一次，仍缺的标为 `unreviewed` | warning `llm / <engine>` |
-| 实际模型与 `semanticMatching.model` 不一致 | 本次结果照用 | `MODEL MISMATCH` warning |
-| XLSX 生成失败 | 保留 HTML 与去重 state，同目录写入 `XLSX-FAILED.txt`，当日 payload 在 `state/report-payload-<日期>.json` 中保持未完成，不更新 `lastSuccessfulRun`，进程 exit 1 | warning `report / XLSX` + 标记文件 |
-| 启动时发现更早日期的 payload 未完成 | 先用它重建该日期的 HTML 与 XLSX（不采集、不评分），清除标记并记录 `lastSuccessfulRun` | warning `report / report payload` |
-| 同一投递日期再次运行 | 合并进当日 payload 并从全量重新渲染；零新岗位时输出与上次一致，Run Details 显示 `Daily update #N` | HTML Run Details、Run Summary `Update today` |
-| 报告生成前的致命错误 | 输出目录直接写 `ERROR-<运行日期>.html`，并尽力发 macOS 通知 | 错误页本身 |
+| `claude`（默认） | Claude Code 2.1.250+ | `claude auth login --claudeai`；`claude auth status --json` 必须显示 claude.ai 订阅（`pro` / `max` / `team` / `enterprise`） |
+| `codex` | OpenAI Codex CLI | `codex login` 选 ChatGPT；`codex login status` 必须显示 "Logged in using ChatGPT" |
 
-LLM batch 失败会在 10 秒后重试一次。`unreviewed` 岗位只有本地分数达到阈值才会进入报告，因此模型故障当晚得到的是一份本地排序的清单，而不是空页面。修复后再次成功运行，`XLSX-FAILED.txt` 会自动移除。
+两者都以子进程运行，启动前删除全部 `ANTHROPIC_*`、`AWS_*`、`OPENAI_*` 环境变量以及 Bedrock / Vertex / Google 凭据开关，因此不可能走 API key 或网关；项目里没有任何 API 客户端。Console 计费、API key 登录、版本过低或 batch 失败都降级为本地关键词分数（标记 `unreviewed`）并写 warning，绝不回退到 API。订阅用量计入各自计划额度。每个 batch 实际使用的模型会从 CLI 输出中读出并记录为 `scoringModel`，与配置不符时给出 warning。
 
-`npm run chaos`（`scripts/chaos-check.sh`）用独立的临时 config、state 和输出目录依次跑四个场景——基线、全部采集源断网、订阅 CLI 不可用、畸形 `.eml`——并断言每个场景都仍生成当日文件夹和 HTML。它不会写真实桌面或真实 `state/`，也不会调用订阅 CLI；CI 每次都会运行。
+## 隐私模型
 
-## 各来源怎么自动化
+所有个人数据都留在 Mac 上、在 Git 之外：
 
-| 来源 | 推荐方式 | 当前状态 |
-|---|---|---|
-| SimplifyJobs Summer 2027 | 直接读取公开 GitHub README | 默认启用 |
-| SimplifyJobs New Grad | 直接读取公开 GitHub README | 默认启用 |
-| Greenhouse 等公开 ATS | career-ops provider / 官方公开接口 | 可选，`sources.careerOps` |
-| Handshake | 建多个较窄的 daily saved-search alerts，再从专用邮件文件夹读取 | 规划中，未启用 |
-| Simplify 网站 | 设置 Match Preferences 和 daily email | 规划中，未启用 |
-| Wellfound | 设置 saved search 为 daily email | 规划中，未启用 |
-| ZipRecruiter | 设置 job alert email；尽量解析到最终公司 ATS 链接 | 规划中，未启用 |
-| Jobright | 优先使用账户内 alert/email；若只有 App push，则作为补充手动发现源 | 规划中，未启用 |
+- `config.json`、`resumes/*.md`、`resumes/*.pdf`、`intake/eml/*.eml`、`state/`、`private/`、日志与生成的报告全部 gitignore；仓库只有 `config.example.json` 与代码。
+- 简历 PDF 按哈希变化重新用 `pdftotext` 抽取；被 iCloud 云端化的文件会先用 `brctl download` 取回。
+- 中枢只写 `config.json`（在运行锁保护下做最小修改）、你点击恢复 board 时的 `state/ats-boards.json`，以及自己的 `private/` 目录。
+- 岗位文本一律视为不可信输入（包括在模型 prompt 内）；引擎只拿到临时只读工作区，不给任何工具。
+- 不向任何地方提交：不投递、不答筛选题、不改邮箱。
 
-不直接抓登录网站的原因不是技术上完全做不到，而是这些平台的条款通常明确限制机器人、脚本或 scraping。登录态浏览器自动化也容易遇到 MFA、验证码、页面变更和封号风险。邮件通道启用后也只用于"发现链接"；一旦链接落到公开 Greenhouse/Lever/Ashby 等 ATS，后续优先直接监控雇主端。
+## 来源清单
 
-## 简历轨道与更新窗口
+| 来源 | 接入方式 | 合规依据 | 状态 |
+|---|---|---|---|
+| SimplifyJobs Summer Internships 与 New Grad 榜单 | 每晚读取两个公开仓库的 README 原文一次 | 公开仓库，本就为此维护；岗位链接指向雇主站点 | 默认启用 |
+| Greenhouse boards | `GET boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true`（完整正文、`updated_at`，支持 ETag） | Greenhouse 官方公开 Job Board API，无需认证 | 自动发现，或写在 `sources.atsBoards.boards` |
+| Lever boards | `GET api.lever.co/v0/postings/{company}?mode=json`（`createdAt`，支持 ETag） | Lever 官方公开 Postings API，无需认证 | 同上 |
+| Ashby boards | `GET api.ashbyhq.com/posting-api/job-board/{org}`（`publishedAt`） | Ashby 官方公开 Job Posting API，无需认证 | 同上 |
+| Workday 招聘站 | `POST {tenant}.{wdN}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs`，每页 20 条，只翻到回看窗口之外为止；JD 来自单岗位 CXS 接口 | 公开招聘页自身加载的同一份无认证 JSON；只读、每晚一次短翻页、固定 user agent | 同上 |
+| `intake/eml` 的 `.eml` 文件 | 每晚本地解析 | 你自己放进去的文件 | 采集器运行中，但目前没有邮件被投递进去 |
+| Himalaya 邮箱文件夹 | `himalaya` 只列 envelope 与 `--preview` 读取 | 你订阅的官方提醒邮件；不标记、不移动、不发送 | 已实现，未启用（`sources.himalaya.enabled: false`） |
+| career-ops scan history | [career-ops](https://github.com/santifer/career-ops) 写出的本地 TSV | 你自己的本地文件 | 可选（`sources.careerOps`） |
 
-简历在私有 `config.json` 的 `resumes.tracks` 中按顺序配置，数量不限（1..N）：
+**board 如何被发现。** 每晚管道扫描本轮采集到的所有 URL，识别 Greenhouse / Lever / Ashby / Workday 岗位，并把对应 board 记入 `state/ats-boards.json`（含首次发现日期、揭示它的来源、最近一次成功轮询与岗位数）。也可以手动追加（`{ "url": "https://job-boards.greenhouse.io/examplecorp" }`，或 `greenhouse:` / `lever:` / `ashby:` / `workday:tenant/site` 形式的 key），或用 `"enabled": false` 禁用。
 
-```json
-"resumes": {
-  "autoRefresh": true,
-  "pdftotextCommand": "pdftotext",
-  "tracks": [
-    { "id": "data",  "label": "Data",     "pdf": "~/Desktop/Your Data Resume.pdf",     "enabled": true },
-    { "id": "llm",   "label": "LLM",      "pdf": "~/Desktop/Your LLM Resume.pdf",      "enabled": true },
-    { "id": "agent", "label": "AI Agent", "pdf": "~/Desktop/Your AI Agent Resume.pdf", "enabled": true }
-  ]
-}
-```
+**首次轮询只做基线。** 某 board 第一次被轮询时，它列出的全部岗位只写入 seen、不进评分；数量以 info 级别写进 `warnings.txt` 与 Run Details。从下一晚起只处理 posted / updated 落在回看窗口内的新岗位。每 board 每晚最多一次，并发受 `network.concurrency` 约束，请求头沿用 `network.userAgent`；单个 board 失败只记 warning；连续 7 晚失败的 board 标为 dormant 并停止轮询，直到在 Status 页点 Resume Polling。来自 board 的岗位在报告卡片上显示为 `Greenhouse · Example Corp` 等。
 
-`id` 是内部键：决定提取文本的文件名 `resumes/<id>.md`（可用 `profile` 覆盖）、语义评审结果里的 `scores.<id>` 字段，以及 `state/resume-sources.json` 中的哈希记录。`label` 用于展示：XLSX 的 `<label> Score` 列、HTML 卡片上的分数 chip 和 Recommended Resume 的取值。`enabled: false` 的轨道完全不参与抽取、打分、prompt 和报告，连它的 PDF 和 profile 都不会被读取；全部轨道都停用或列表为空会按简历缺失处理（fatal）。轨道顺序决定列顺序，最高分并列时取靠前的轨道。本地（评审前）打分对 `data`、`ai`、`llm`、`agent` 四个 id 有内置关键词画像，其他 id 使用四者的并集做粗筛，真正的逐轨判断由订阅评审给出。
+## 可靠性设计
 
-旧版布局（`resumes: { data, ai }` + `resumeSources`）仍可读取：程序会在内存中迁移为 Data、AI 两条轨道，并在 stderr 打印一行升级提示。
+- **降级不中断。** 采集源、board、页面抓取或模型调用失败都变成 `warnings.txt` 里一行 `[stage / source] message`，其余照常；报告生成前的致命错误写 `ERROR-<日期>.html` 并发 macOS 通知。
+- **补跑。** 只有 HTML 与 XLSX 都落盘才记录 `state.lastSuccessfulRun`；登录或开机触发的补跑路径仅在上次成功超过 26 小时时执行。
+- **锁。** `state/.lock` 保存持有者 PID；第二个实例直接退出，PID 已死的陈旧锁自动清除。
+- **同日累积。** `state/report-payload-<日期>.json` 保存该投递日期的全部结果；每次运行合并进去（语义评审过的版本优先、更长的 JD 优先）并以 `Daily update #N` 重新渲染；未完成的日期在下一次运行开始时先重建。
+- **chaos 套件。** `npm run chaos` 在临时目录跑六个场景，CI 每次执行：基线、全部采集源断网、订阅 CLI 不可用、畸形 `.eml`、XLSX 失败后恢复、某 ATS 接口返回 500。每个场景都必须仍留下当日文件夹与 HTML。
 
-每次任务运行前都会比较每个启用轨道 PDF 的 SHA-256；覆盖同一路径的 PDF 后，下一次运行会自动更新 gitignored 的文本简历。如果文件名或目录改变，只需修改私有配置。PDF、提取文本、配置、邮件、日志、状态和报告都不会被 Git 跟踪。
+## 快速开始
 
-简历 PDF 放在 iCloud 同步目录（桌面、文稿）时，macOS 的"优化储存空间"可能把本地副本回收为仅云端占位符，读取会报 `Unknown system error -11`/`EAGAIN` 或读到空内容。夜间运行遇到这种情况会自动执行 `brctl download <路径>`，然后每 2 秒重试读取，最长等待 60 秒；取回成功后照常继续，并在 `warnings.txt` 与 HTML 的 Run Details 里留下一条 info 级提示"<轨道> 简历曾被 iCloud 云端化，已自动取回"。60 秒内仍未取回则按现有 fatal 路径失败，错误信息会给出具体路径并提示在 Finder 中右键该文件选择"立即下载"，或把简历移出 iCloud 同步目录。非 macOS 环境或没有 `brctl` 时该机制静默跳过，行为与以前一致。
-
-## 费用保护
-
-默认 `semanticMatching.engine` 是 `claude_subscription`，要求 Claude Code **2.1.250 或更新版本**（更旧版本在发送任何 batch 之前就会被拒绝并降级为本地评分）。先运行 `claude auth login --claudeai`，不要选择 `--console`（后者是 API 计费入口）。程序运行前检查 Claude 订阅登录，并在启动子进程前移除所有可能改变认证或路由的环境变量：`ANTHROPIC_` 与 `AWS_` 前缀全部，以及 `CLAUDE_CODE_USE_BEDROCK`、`CLAUDE_CODE_USE_VERTEX`、`GOOGLE_APPLICATION_CREDENTIALS`、`GOOGLE_API_KEY`、`CLOUD_ML_REGION`、`CLAUDE_API_KEY`、`OPENAI_API_KEY`。认证方式不符时相关岗位降级为 `unreviewed` 并记录 warning，不会自动切换为按量 API。
-
-订阅校验采用白名单：`claude auth status --json` 必须 `loggedIn: true`，`authMethod` 属于 `claude.ai`/`claudeai`/`subscription`，若返回 `apiProvider` 必须是 `firstParty`，若返回 `subscriptionType` 必须属于 pro/max/team/enterprise；`console`（Console 计费）、`apiKey`、Bedrock、Vertex 一律拒绝并降级为本地评分，warning 中写明实际 `authMethod`。`local_only` 之外只有 `claude_subscription` 一个引擎。订阅 CLI 的运行会消耗对应计划额度，但不会产生 Anthropic API 按量账单。
-
-## 评分引擎：Claude 或 Codex
-
-`semanticMatching.engine` 选择评分用的订阅 CLI：`claude`（默认，Claude Code 以 claude.ai 订阅登录）或 `codex`（OpenAI Codex CLI 以 ChatGPT 账号登录）。两者都以本机子进程运行，启动前统一删除 `ANTHROPIC_*`、`AWS_*`、`OPENAI_*` 环境变量，因此都不可能走 API key 或网关。各引擎的模型写在 `semanticMatching.models`（`{ "claude": "fable", "codex": "gpt-5.6-sol" }`），旧的单个 `model` 键仍对 Claude 生效。引擎抽象在 `src/engines/`（统一接口 `verifyAuth` / `reviewBatch` / `describeModel`），`src/subscription-match.mjs` 只负责分批、重试、补审与本地降级。
-
-两个 CLI 都由 `resolveCliCommand`（`src/engines/cli-path.mjs`）定位：config 里的 `semanticMatching.claudeCommand` / `codexCommand`（存在时）优先，其次是 `PATH`，再是 `~/.local/bin`、`/opt/homebrew/bin`、`/usr/local/bin`、`~/.npm-global/bin` 与 `~/.nvm/versions/node/*/bin`。launchd 任务默认 `PATH=/usr/bin:/bin`，因此两个 LaunchAgent 模板也把这些目录写进了 `PATH`。中枢 Connections 卡显示实际解析到的路径；在扩展目录找到但 config 未配置时提供 "Save This Path to Config" 一键写入。
-
-使用 Codex 前在终端执行一次 `codex login` 并选择 ChatGPT 账号；`codex login status` 必须显示 "Logged in using ChatGPT"。API key 登录（`codex login --with-api-key`）或未登录会被拒绝并给出人话提示，运行按现有方式降级为本地评分。批次通过 `codex exec --ephemeral --sandbox read-only --output-schema <schema> --output-last-message <file> -m <model>` 执行，JSON schema 由 CLI 原生约束，最终消息严格解析。中枢 Settings 页显示两个连接状态，并可切换引擎与模型。
-
-## 模型固定与审计
-
-`semanticMatching.model` 会传给 `claude --model`。可填 Claude Code 别名 `fable`、`opus`、`sonnet`（各自解析为该系列最新模型），或完整模型名如 `claude-fable-5`；示例配置固定为 `fable`。每个 batch 的 `claude --print --output-format json` 返回都会解析实际使用的模型（`modelUsage` 中输出 token 最多的条目），记录为每个岗位的 `scoringModel`，并显示在 HTML 底部 Run Details 和 XLSX Run Summary 的 Scoring model 行。无法解析时记为 `unknown` 并给出 warning；若配置的模型与实际模型在别名展开后前缀不一致（例如配置 `fable` 但实际是 `claude-sonnet-5`），当批结果照常使用，但会在 `warnings.txt` 中记录 `MODEL MISMATCH`。没有任何语义评审的运行显示 `local_only` 或 `none`。
-
-## 邮件通道（规划中）
-
-目前不需要做任何邮箱配置。将来启用时：在邮箱里建立 `job-alerts` label/folder，把各平台的提醒规则自动移入该目录，运行 `himalaya account configure`，再把 `config.json` 的 `sources.himalaya.enabled` 改为 `true`。Himalaya collector 只执行 envelope list 和 `message read --preview`，不会标已读、移动、删除或发送邮件。不要把邮箱密码写进 `config.json`；使用 OAuth、App Password 搭配 macOS Keychain，或安全的 password command。
-
-## 本机中枢（hub）
-
-`npm run hub` 在 `http://127.0.0.1:4747/` 启动一个只运行在本机的 Web 中枢（端口来自 `config.json` 的 `hub.port`）。它是加法：夜间管道、桌面输出、xlsx、`warnings.txt` 全部不变；中枢只读管道产物，只写 `config.json` 与仓库内 gitignored 的 `private/` 目录。只绑定 127.0.0.1，不发起任何外部网络请求，不显示 API key，不渲染简历正文（只显示文件元数据）。左侧导航四个页面：
-
-- **Reports**：按日期倒序、按月分组列出 `state/report-payload-*.json`（当前月始终展开，更早的月份默认折叠并记住你的展开状态），"Today" 快捷链接与 "Only days with matches" 开关同在一行；选中后用与桌面 HTML 相同的组件、工具栏与深色模式渲染；右上角 "Open Desktop Copy" 通过只读路由 `/desktop/<日期>` 在新标签打开桌面文件夹里的 HTML（`/desktop/<日期>/xlsx` 下载工作簿）；桌面副本始终是权威副本，中枢不会修改它。
-- **Resumes**：每条轨道一张卡：label、启用状态、PDF 文件名与路径、最近上传时间、中枢试抽取结果（字符数或 pdftotext 报错）、夜间 profile 状态。上传替换 PDF 或新增轨道（id/label/PDF）时，文件存到 `private/resumes/<id>/<ISO时间>-<原文件名>.pdf`，并把 `config.json` 里该轨道的 `pdf` 改为新文件，保留最近 5 个版本可回退。仍指向桌面等外部路径的轨道标为 "External file"，原样工作、不强制迁移；上传过的标为 "Managed by hub"。只接受 .pdf，上限 5 MB。
-- **Status**：上次运行（时间、trigger、结果、匹配数）、从已安装 LaunchAgent 读取的下次计划时间、锁状态、最近 7 个报告日期的 warnings 计数并可展开当日 `warnings.txt`、`ERROR-*.html` 列表。**Run Now** 弹出确认后以子进程执行 `node src/index.mjs --config config.json`，环境变量 `DAILY_JOB_MATCH_ALERT_TRIGGER=manual`，严格遵守现有锁文件（锁被占用时按钮禁用并显示原因），页面轮询显示进度与日志尾部 50 行；日志在 `private/hub/logs/`。
-- **Settings**：顶部 Connections 卡显示 Claude 与 Codex 的连接状态（每分钟检查一次、只读，登录请在终端完成）；表单暴露 `minimumMatchScore`、`semanticMatching.acceptedMatchLevels`、引擎单选（Claude / Codex）与随引擎切换的模型下拉（选项来自 `hub.modelChoices`，末尾 Custom… 可手填）、`reports.xlsx.required`、`hub.port`，校验后写回 `config.json`，其他键与顺序原样保留；写入时使用与管道相同的锁，避免与 20:00 运行并发。
-
-- **Letters**：已生成 cover letter 的历史列表（日期、公司、岗位、轨道、引擎、页数），每行有 Open 与 Download PDF；报告里已生成信件的岗位卡同样显示这两个按钮。
-
-### Cover letter
-
-中枢里每张岗位卡都有 "Generate Cover Letter"。面板顶部显示岗位摘要与推荐轨道（可切换）和公司名（用于称呼与文件名），点 Generate 后单次调用配置的引擎（Claude 或 Codex，与评分相同的订阅 CLI、认证白名单与环境清理；`local_only` 用明确标注的占位引擎，不写真实内容）。模型收到：playbook 全文、最多 3 封样稿（标注"仅作风格参考，不得复用其中的公司特定内容"）、所选轨道的简历 profile、岗位的 title / company / location / role type / 完整 JD / 匹配理由与 gaps，并受固定规则约束：5–6 段、无 bullet、不用破折号作标点、专业人声、只使用简历与 playbook 证据库中真实存在的事实与数字、缺失技能按 playbook 的 fast-ramp 框架处理、按岗位类型选用 playbook 中的毕业时间线表述。模型只输出正文段落；抬头（姓名 16pt 加粗居中 + 联系方式行）、日期（config.timeZone，"September 15, 2026"）、"Dear {Company} Recruiting Team,"、"Sincerely," + 签名全部由代码生成。
-
-信件在 playbook 之外遵守固定架构：P1 写岗位与地点、简历中的学位/GPA、按岗位类型选择的时间线句（实习：在配置的毕业月完成本科并计划次年秋季开始硕士；new grad / entry level：毕业时间落在对方窗口内）、伊利诺伊州岗位加 in state 表述、末句是关于该公司的具体判断；中间 3–4 段每段首句用 JD 词汇点名一条职责、给出带数字的证据、段尾以原则收束；仅当评分发现 JD 明确要求的工具不在简历中时才出现以 "I should be straightforward about" 开头的坦白段；结尾两句。随后同一引擎再以编辑身份复核一次（结构、数字逐字一致、语气），有 issue 时采用其修订并在面板的 Editor notes 中展示；该复核可在 Settings 关闭。正文自动规范化（去 bullet、破折号改逗号），目标 460–600 词；是否一页由渲染后的页数判定，首次渲染超页时先让引擎精简 15% 再尝试更小版式。样稿最多 10 封，可一次多选上传，同名文件替换旧版；每封一行、行内改轨道即时保存；每次按推荐轨道挑最接近的 3 封进 prompt 并在面板显示。"Save & Render PDF" 把 `letter.md`、`letter.json` 与 PDF 写到 `private/cover-letters/<日期>/<Company>/`，文件名由 `coverLetter.fileNameTemplate` 决定（默认 `{FirstLast}_Cover_Letter_{Company}.pdf`）。PDF 首选本机 Chrome/Chromium headless 打印（可用 `hub.chromeCommand` 指定；Letter、Times New Roman 11pt、1 英寸页边距），不可用时回退 pdfkit；超过一页时先按 B5 重试，仍超则缩小页边距到 0.8 英寸并在面板提示。
-
-素材在 **Settings → Cover Letters** 维护：姓名、电话、邮箱、签名名，playbook（.md/.txt，写作规则与证据库），最多 10 封样稿（.pdf 经 pdftotext 抽文本，或 .txt）。playbook 与每封样稿共用同一种行样式（文件名 · 字符数 · 上传时间 · Replace / Remove）；批量上传时可用 "Track for these files" 给这一批统一标注 Data / LLM / AI Agent，之后仍可在行内单独修改。全部存于已 gitignore 的 `private/cover-letter/`；仓库、文档与测试里只出现 Jane Doe 之类的占位数据。缺少 playbook 或联系方式时，Generate 按钮禁用并提示先去 Settings。
-
-所有写操作都是 POST，且 `Host`/`Origin` 必须是 127.0.0.1 或 localhost，否则 403；日期、轨道 id、错误报告文件名等路径参数都做严格白名单校验。
-
-常驻安装（与夜间任务是两个独立的 LaunchAgent）：
+需要 macOS（Linux 可运行除 launchd 与 iCloud 取回外的一切）、Node.js 20+、`pdftotext`，以及一个已登录的订阅 CLI。
 
 ```bash
-./scripts/install-hub-launchd.sh            # KeepAlive + RunAtLoad，日志在 state/logs/hub.*.log
-./scripts/install-hub-launchd.sh --remove   # 停止并移除
-npm run hub:restart                         # 更新代码或修改 hub.port 后重启常驻中枢
-```
-
-`git pull` 更新代码后运行 `npm run hub:restart`（未安装 LaunchAgent 时会给出提示，直接重新 `npm run hub` 即可）。中枢内所有时间都按 `config.timeZone` 显示，侧栏底部常驻显示上次运行时间与结果、下次运行时间及相对倒计时（`Sep 18, 8:00 PM · in 3h 20m`，每分钟刷新；定时已过而没有完成的运行时显示 `overdue`）；夜间运行会把 trigger（scheduled / catchup / manual）与完成时间写进当日 payload，Status 页与报告页眉（`Ran Sep 12, 8:00 PM`）直接读取。
-
-## 第一次启用
-
-```bash
+git clone https://github.com/JackyJiang08/daily-job-match-alert.git
+cd daily-job-match-alert
+npm ci
 cp config.example.json config.json
-claude auth login --claudeai
-claude --version            # 需要 2.1.250+
-# 编辑 config.json 中的 PDF 路径与偏好
-npm run resume:sync
-npm test
-npm run demo
-npm run chaos
-npm run run
-chmod +x scripts/run-launchd.sh scripts/install-launchd.sh
-./scripts/install-launchd.sh 20 0
 ```
 
-先手动成功运行一次，以确认网络、Desktop 文件夹权限都正常，再安装定时任务。完整的验收清单见 [VERIFICATION.md](VERIFICATION.md)。
+编辑 `config.json`：把 `resumes.tracks` 的每一项指向你的私有 PDF（示例带 `data`、`llm`、`agent` 三条轨道），设置 `preferences.graduationDate`，选择引擎。然后：
 
-## 无人值守的一天
+```bash
+claude auth login --claudeai      # 或 codex login（选 ChatGPT）
+npm run resume:sync               # 抽取简历文本
+npm test && npm run demo && npm run chaos
+npm run run                       # 真实跑一次，检查桌面文件夹
+./scripts/install-launchd.sh 20 0 # 安装每晚定时（zsh）
+./scripts/install-hub-launchd.sh  # 常驻中枢；然后打开 http://127.0.0.1:4747/
+```
 
-- **触发**：LaunchAgent 执行 `scripts/run-launchd.sh` → `src/launchd-dispatch.mjs`。到达计划时间且当天尚未成功时执行完整运行（`scheduled`）；其他启动（开机/登录时的 `RunAtLoad`、手动 load）走 `catchup`，只有 `state.lastSuccessfulRun` 距今超过 26 小时才补跑。`install-launchd.sh` 的小时和分钟可省略，默认 20:00；脚本只能用 zsh 运行，误用 bash 会直接提示"请用 zsh 运行"。
-- **投递日期**：00:00–14:00（含）运行使用当天日期，14:00 之后生成次日目录。因此正常的 20:00 运行产生明天的文件夹，漏跑后的早晨补跑仍能填上今天的。
-- **锁**：`state/.lock` 保存持有者 PID。持有者存活时第二个实例直接退出；PID 已死的陈旧锁自动清除。
-- **State**：`state/state.json` 记录每个规范化 URL（原始与跳转目标），同一岗位不会重复出现；每次运行修剪距最近一次尝试超过 90 天的条目。
-- **日志**：`state/logs/daily-YYYY-MM-DD.log`，仅保留最近 30 个；日志目录不可用时回落到 `/tmp/daily-job-match-alert-<日期>.log`。
-- **致命错误**：输出目录写 `ERROR-YYYY-MM-DD.html`，并尽力发 macOS 通知；补跑路径稍后重试。
+拉取新代码后运行 `npm run hub:restart`。完整验收清单见 [VERIFICATION.md](VERIFICATION.md)。
+
+## 当前限制
+
+- **邮件通道尚未启用。** Himalaya 采集器已实现但关闭，也没有任何规则把提醒邮件投递到 `intake/eml`；在此之前 Handshake、Simplify、Wellfound、ZipRecruiter、Jobright 的提醒不会被采集。
+- **不抓登录站点。** Handshake、LinkedIn、Jobright、Wellfound 等平台的条款禁止自动访问，且有登录、MFA 与机器人检测；本项目只读公开、无认证的接口。将来其提醒邮件接入后也只作为链接来源，雇主公开 board 上的岗位才是记录依据。
+- **Workday 尽力而为。** CXS 列表接口公开但无官方文档；租户改动后该 board 会失败、警告并最终 dormant，其他一切照常。
+- **新 board 延迟一晚。** 新发现的 board 从第二次轮询起才贡献评分岗位，这是有意为之。
+- **本地评分只是粗筛。** 订阅 CLI 不可用时，`unreviewed` 岗位按关键词重合度排序，只能当作粗略清单。
+- **以 macOS 为先。** 定时、通知、iCloud 取回与中枢的 LaunchAgent 都假定 macOS。
 
 ## 参考链接
 
@@ -176,6 +112,5 @@ chmod +x scripts/run-launchd.sh scripts/install-launchd.sh
 - SimplifyJobs internships: https://github.com/SimplifyJobs/Summer2027-Internships
 - SimplifyJobs New Grad: https://github.com/SimplifyJobs/New-Grad-Positions
 - Greenhouse Job Board API: https://developers.greenhouse.io/job-board.html
-- Handshake saved searches: https://support.joinhandshake.com/hc/en-us/articles/218693388-Saving-Job-Searches-and-Receiving-Job-Alerts
-- Simplify match preferences: https://help.simplify.jobs/articles/7272801-setting-your-job-match-preferences
-- Wellfound saved searches: https://help.wellfound.com/article/782-saved-searches
+- Lever Postings API: https://github.com/lever/postings-api
+- Ashby Job Posting API: https://developers.ashbyhq.com/reference/jobpostingapi

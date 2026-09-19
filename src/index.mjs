@@ -9,6 +9,7 @@ import { collectSimplifyList } from './collectors/simplify-github.mjs';
 import { collectEmailFiles } from './collectors/email-files.mjs';
 import { collectHimalaya } from './collectors/himalaya.mjs';
 import { collectCareerOps } from './collectors/career-ops.mjs';
+import { applyConfigBoards, collectAtsBoards, discoverBoards, readRegistry, registerBoards, registryPath, writeRegistry } from './collectors/ats-boards.mjs';
 import { enrichJob, enrichmentWarningMessage } from './enrich.mjs';
 import { evaluateJob, isEligible } from './match.mjs';
 import { annotateEligibility, summarizeExclusions } from './eligibility.mjs';
@@ -70,8 +71,11 @@ async function optionallyRunCareerOps(config, runner = execFileAsync) {
   });
 }
 
+// Collects every enabled built-in source. When `options.sourceStats` is an array, one entry per source
+// ({ name, kind, ok, count, error }) is pushed so the report can count postings by source.
 export async function collectEnabledSources(config, cutoff, options = {}) {
   const warnings = options.warnings || [];
+  const sourceStats = Array.isArray(options.sourceStats) ? options.sourceStats : null;
   const collectors = {
     simplify: collectSimplifyList,
     emailFiles: collectEmailFiles,
@@ -118,13 +122,38 @@ export async function collectEnabledSources(config, cutoff, options = {}) {
     try {
       const jobs = await source.collect();
       if (!Array.isArray(jobs)) throw new Error('collector returned a non-array result');
+      sourceStats?.push({ name: source.name, kind: 'builtin', ok: true, count: jobs.length, error: null });
       return jobs;
     } catch (error) {
       warnings.push(createWarning('collector', source.name, errorSummary(error)));
+      sourceStats?.push({ name: source.name, kind: 'builtin', ok: false, count: 0, error: errorSummary(error) });
       return [];
     }
   }));
   return batches.flat();
+}
+
+// Public ATS boards: discover new boards from this run's posting URLs, apply the manual entries from
+// config.sources.atsBoards, poll every active board once, and record the first poll of a board as a
+// baseline (its postings are marked seen, never scored). Returns the postings to score plus one stat row
+// per board; the registry is persisted before anything is scored.
+export async function collectAtsBoardSources(config, state, collectedJobs, { now, warnings, sourceStats, fetchImpl } = {}) {
+  const settings = config.sources.atsBoards || {};
+  if (settings.enabled === false) return { jobs: [], results: [], registry: null };
+  const file = registryPath(config);
+  const registry = await readRegistry(file);
+  registerBoards(registry, discoverBoards(collectedJobs), { now, origin: 'discovered' });
+  applyConfigBoards(registry, settings.boards, { now });
+  const polled = await collectAtsBoards({
+    registry, settings, network: config.network, now, lookbackHours: config.lookbackHours, warnings,
+    isSeen: job => isJobSeen(state, job), ...(fetchImpl ? { fetchImpl } : {}),
+  });
+  for (const job of polled.baseline) markJobSeen(state, { ...job, enrichment: 'ats_baseline' }, now.toISOString());
+  await writeRegistry(file, registry);
+  for (const result of polled.results) {
+    sourceStats?.push({ name: result.label, kind: 'ats', key: result.key, ok: result.ok, count: result.baseline ? 0 : result.newCount, jobCount: result.jobCount, baseline: result.baseline, skipped: result.skipped, notModified: result.notModified, dormant: result.dormant, error: result.error });
+  }
+  return { jobs: polled.jobs, results: polled.results, registry };
 }
 
 function dedupe(jobs) {
@@ -135,9 +164,11 @@ function dedupe(jobs) {
     if (!url) continue;
     const key = sha256(url);
     const existing = found.get(key);
+    // A second copy of the same posting only adds what it knows; blank fields never erase filled ones.
+    const filled = Object.fromEntries(Object.entries(job).filter(([, value]) => value != null && value !== ''));
     found.set(key, existing ? {
       ...existing,
-      ...job,
+      ...filled,
       source: [...new Set(`${existing.source}|${job.source}`.split('|'))].join(' | '),
       company: job.company || existing.company,
       description: String(job.description || '').length > String(existing.description || '').length ? job.description : existing.description,
@@ -346,7 +377,13 @@ async function runPipeline(config, clock) {
     warnings.push(createWarning('eligibility', 'graduation window', 'preferences.graduationDate is not set, so the graduation-window hard filter is disabled and only the semantic review checks cohort wording'));
   }
 
-  const collected = dedupe(await collectEnabledSources(config, cutoff, { warnings })).filter(job => {
+  const sourceStats = [];
+  const collectedRaw = await collectEnabledSources(config, cutoff, { warnings, sourceStats });
+  const atsSources = await collectAtsBoardSources(config, state, collectedRaw, { now, warnings, sourceStats });
+  // A baseline is only safe once the seen marks are on disk; otherwise a crash before the final state
+  // write would let the next run score a board's whole backlog.
+  if (atsSources.registry) await writeState(statePath, state);
+  const collected = dedupe([...collectedRaw, ...atsSources.jobs]).filter(job => {
     if (job.sourceAgeDays != null && job.sourceAgeDays > Math.ceil(config.lookbackHours / 24)) return false;
     const timestamp = job.postedAt || job.discoveredAt;
     return !timestamp || new Date(timestamp) >= cutoff;
@@ -361,6 +398,8 @@ async function runPipeline(config, clock) {
     stamped,
     Number(config.network.concurrency || 3),
     async job => {
+      // A posting whose description came straight from a board API needs no page fetch.
+      if (job.enrichment === 'ats_api') return job;
       try {
         return await enrichJob(job, config.network);
       } catch (error) {
@@ -425,6 +464,7 @@ async function runPipeline(config, clock) {
   const meta = {
     generatedAt: now.toISOString(), date, applicationDate: date, runDate, timeZone, lookbackHours: config.lookbackHours,
     minimumMatchScore: config.minimumMatchScore, resumeSync, resumeTracks, collectedCount: collected.length,
+    sourceCounts: sourceStats,
     newCount: reviewed.length, newThisRun: enriched.length, reviewedCount: reviewed.length, matchCount: matches.length,
     warnings: finalWarnings,
     runsToday, firstGeneratedAt: previous?.meta?.firstGeneratedAt || now.toISOString(), lastUpdatedAt: now.toISOString(),

@@ -87,6 +87,15 @@
       "projectDirectory": "../../work/career-ops",
       "scanHistoryPath": "../../work/career-ops/data/scan-history.tsv",
       "runScanFirst": false
+    },
+    "atsBoards": {
+      "enabled": true,
+      "minimumPollIntervalHours": 20,
+      "maximumWorkdayPages": 10,
+      "boardsNote": "Boards are discovered from posting URLs automatically and kept in state/ats-boards.json; list one here to add it by hand or to switch it off. key forms: greenhouse:<token>, lever:<company>, ashby:<org>, workday:<tenant>/<site>@<tenant>.wd5.myworkdayjobs.com; url accepts a board front page or any posting on it.",
+      "boards": [
+        { "url": "https://job-boards.greenhouse.io/examplecorp", "company": "Example Corp", "enabled": false }
+      ]
     }
   },
   "network": {

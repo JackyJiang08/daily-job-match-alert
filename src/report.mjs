@@ -114,6 +114,31 @@ export function cardView(job, tracks, timeZone = null, decorate = null) {
   };
 }
 
+// One line per source for Run Details: "Greenhouse · Acme: 3 new (216 listed)", "SimplifyJobs New Grad: failed …".
+export function sourceLine(stat) {
+  const name = String(stat?.name || 'unknown source');
+  if (stat?.skipped) return `${name}: not polled (${stat.skipped})`;
+  if (stat?.ok === false) return `${name}: failed (${stat.error || 'unknown error'})`;
+  if (stat?.baseline) return `${name}: first poll, ${Number(stat.jobCount || 0)} existing posting(s) recorded as seen (baseline)`;
+  const count = Number(stat?.count || 0);
+  const parts = [stat?.kind === 'ats' ? `${count} new` : `${count} collected`];
+  if (stat?.notModified) parts.push('unchanged since the last poll');
+  else if (stat?.kind === 'ats' && stat.jobCount != null) parts.push(`${Number(stat.jobCount)} listed`);
+  return `${name}: ${parts.join(', ')}`;
+}
+
+function sourcesSummary(stats) {
+  const polled = stats.filter(stat => !stat.skipped);
+  const failed = polled.filter(stat => stat.ok === false).length;
+  const collected = polled.reduce((sum, stat) => sum + Number(stat.count || 0), 0);
+  const baselined = polled.filter(stat => stat.baseline).length;
+  const parts = [`${polled.length} polled`, `${collected} posting(s) collected`];
+  if (failed) parts.push(`${failed} failed`);
+  if (baselined) parts.push(`${baselined} baselined`);
+  if (stats.length > polled.length) parts.push(`${stats.length - polled.length} not polled`);
+  return parts.join(' · ');
+}
+
 // Everything that used to sit in the page header or the warnings panel, folded into one list.
 export function runDetailsView(jobs, meta, tracks) {
   const rows = [];
@@ -130,6 +155,9 @@ export function runDetailsView(jobs, meta, tracks) {
     if (meta.reviewedCount != null) counts.push(`${meta.reviewedCount} reviewed`);
     counts.push(`${jobs.length} matched`);
     rows.push({ term: 'Postings', detail: counts.join(' · ') });
+  }
+  if (Array.isArray(meta.sourceCounts) && meta.sourceCounts.length) {
+    rows.push({ term: 'Sources', detail: sourcesSummary(meta.sourceCounts), items: meta.sourceCounts.map(sourceLine) });
   }
   if (exclusions) {
     const total = Number(exclusions.location || 0) + Number(exclusions.graduation || 0);

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Private, subscription-only AI job discovery for internships and new-grad roles, scored against any number of resume tracks",
+  "description": "Nightly job-match agent: collects public internship and new-grad postings, scores them against your resume tracks with your Claude or ChatGPT subscription, and drafts one-page cover letters from a local hub. No API keys, no auto-apply.",
   "author": "Yuqing (Jacky) Jiang",
   "license": "MIT",
   "repository": {
@@ -12,13 +12,17 @@
   },
   "keywords": [
     "job-search",
-    "career",
     "automation",
+    "agent",
     "claude-code",
-    "data-science",
-    "machine-learning",
-    "new-grad",
-    "internships"
+    "codex",
+    "node",
+    "launchd",
+    "resume-matching",
+    "cover-letter",
+    "greenhouse",
+    "workday",
+    "macos"
   ],
   "scripts": {
     "run": "node src/index.mjs --config config.json",
