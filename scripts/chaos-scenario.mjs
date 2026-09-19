@@ -67,6 +67,7 @@ function baseConfig(directory) {
       excludeTitleTerms: ['senior', 'staff', 'principal', 'manager', 'director', 'lead'],
     },
     sources: {
+      githubLists: { enabled: false }, hackerNewsHiring: { enabled: false }, remoteOk: { enabled: false }, 
       simplifyInternships: { enabled: false },
       simplifyNewGrad: { enabled: false },
       emailFiles: { enabled: true, directory: path.join(directory, 'intake') },

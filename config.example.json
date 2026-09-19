@@ -72,6 +72,31 @@
       "enabled": true,
       "url": "https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/dev/README.md"
     },
+    "githubLists": {
+      "enabled": true,
+      "listsNote": "Community posting lists read from each repository's raw README (public repositories, no token). Switch one off with enabled: false; url overrides the README location.",
+      "lists": {
+        "jobrightDataAnalysisInternship": { "enabled": true },
+        "jobrightDataAnalysisNewGrad": { "enabled": true },
+        "jobrightSoftwareEngineerInternship": { "enabled": true },
+        "jobrightSoftwareEngineerNewGrad": { "enabled": true },
+        "vanshInternships": { "enabled": true },
+        "vanshNewGrad": { "enabled": true },
+        "zapplyInternships": { "enabled": true },
+        "zapplyNewGrad": { "enabled": true },
+        "zapplyMlInternships": { "enabled": true },
+        "zapplyNewGradDataScience": { "enabled": true },
+        "zshahTechInternships": { "enabled": true }
+      }
+    },
+    "hackerNewsHiring": {
+      "enabled": true,
+      "note": "The monthly Ask HN: Who is hiring? thread through the public Algolia HN Search API; only posts that mention intern, new grad, entry level, or junior are kept."
+    },
+    "remoteOk": {
+      "enabled": true,
+      "note": "RemoteOK's public JSON feed; only remote postings open to the United States with an early-career title or tag are kept, and each card links back to the posting on remoteok.com as its terms ask."
+    },
     "emailFiles": {
       "enabled": true,
       "directory": "./intake/eml"

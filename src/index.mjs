@@ -9,6 +9,10 @@ import { collectSimplifyList } from './collectors/simplify-github.mjs';
 import { collectEmailFiles } from './collectors/email-files.mjs';
 import { collectHimalaya } from './collectors/himalaya.mjs';
 import { collectCareerOps } from './collectors/career-ops.mjs';
+import { collectGithubList } from './collectors/github-lists.mjs';
+import { collectHackerNewsHiring } from './collectors/hn-hiring.mjs';
+import { collectRemoteOk } from './collectors/remoteok.mjs';
+import { HACKER_NEWS_SOURCE, REMOTEOK_SOURCE, githubLists } from './collectors/catalog.mjs';
 import { applyConfigBoards, collectAtsBoards, discoverBoards, readRegistry, registerBoards, registryPath, writeRegistry } from './collectors/ats-boards.mjs';
 import { enrichJob, enrichmentWarningMessage } from './enrich.mjs';
 import { evaluateJob, isEligible } from './match.mjs';
@@ -72,15 +76,22 @@ async function optionallyRunCareerOps(config, runner = execFileAsync) {
 }
 
 // Collects every enabled built-in source. When `options.sourceStats` is an array, one entry per source
-// ({ name, kind, ok, count, error }) is pushed so the report can count postings by source.
+// ({ name, kind, ok, count, error }) is pushed so the report can count postings by source. With
+// `options.baseline = { state, now }`, a source flagged `baseline` that has never been collected before
+// only marks its postings as seen (recorded under state.sourceBaselines) instead of returning them, so
+// a newly enabled list does not flood one report with its whole backlog.
 export async function collectEnabledSources(config, cutoff, options = {}) {
   const warnings = options.warnings || [];
   const sourceStats = Array.isArray(options.sourceStats) ? options.sourceStats : null;
+  const userAgent = config.network?.userAgent || 'DailyJobMatchAlert/0.1';
   const collectors = {
     simplify: collectSimplifyList,
     emailFiles: collectEmailFiles,
     himalaya: collectHimalaya,
     careerOps: collectCareerOps,
+    githubList: collectGithubList,
+    hackerNewsHiring: collectHackerNewsHiring,
+    remoteOk: collectRemoteOk,
     ...options.collectors,
   };
   const sources = [];
@@ -95,6 +106,18 @@ export async function collectEnabledSources(config, cutoff, options = {}) {
     collect: () => collectors.simplify({
       ...config.sources.simplifyNewGrad, source: 'SimplifyJobs New Grad', roleType: 'new_grad', warnings,
     }),
+  });
+  for (const list of githubLists(config)) {
+    if (!list.enabled) continue;
+    sources.push({ name: list.name, baseline: true, collect: () => collectors.githubList({ url: list.url, source: list.name, roleType: list.roleType, format: list.format, warnings, userAgent }) });
+  }
+  if (config.sources.hackerNewsHiring?.enabled !== false) sources.push({
+    name: HACKER_NEWS_SOURCE, baseline: true,
+    collect: () => collectors.hackerNewsHiring({ warnings, userAgent, now: options.baseline?.now }),
+  });
+  if (config.sources.remoteOk?.enabled !== false) sources.push({
+    name: REMOTEOK_SOURCE, baseline: true,
+    collect: () => collectors.remoteOk({ warnings, userAgent }),
   });
   if (config.sources.emailFiles?.enabled) sources.push({
     name: 'Email files',
@@ -122,6 +145,15 @@ export async function collectEnabledSources(config, cutoff, options = {}) {
     try {
       const jobs = await source.collect();
       if (!Array.isArray(jobs)) throw new Error('collector returned a non-array result');
+      if (source.baseline && options.baseline?.state && !options.baseline.state.sourceBaselines?.[source.name]) {
+        const { state, now } = options.baseline;
+        const at = (now || new Date()).toISOString();
+        for (const job of jobs) markJobSeen(state, { ...job, enrichment: 'source_baseline' }, at);
+        state.sourceBaselines = { ...(state.sourceBaselines || {}), [source.name]: { baselinedAt: at, count: jobs.length } };
+        warnings.push(createWarning('collector', source.name, `First collection recorded ${jobs.length} existing posting(s) as already seen (baseline); new postings are scored from the next run on`, 'info'));
+        sourceStats?.push({ name: source.name, kind: 'builtin', ok: true, count: 0, jobCount: jobs.length, baseline: true, error: null });
+        return [];
+      }
       sourceStats?.push({ name: source.name, kind: 'builtin', ok: true, count: jobs.length, error: null });
       return jobs;
     } catch (error) {
@@ -378,11 +410,11 @@ async function runPipeline(config, clock) {
   }
 
   const sourceStats = [];
-  const collectedRaw = await collectEnabledSources(config, cutoff, { warnings, sourceStats });
+  const collectedRaw = await collectEnabledSources(config, cutoff, { warnings, sourceStats, baseline: { state, now } });
   const atsSources = await collectAtsBoardSources(config, state, collectedRaw, { now, warnings, sourceStats });
   // A baseline is only safe once the seen marks are on disk; otherwise a crash before the final state
-  // write would let the next run score a board's whole backlog.
-  if (atsSources.registry) await writeState(statePath, state);
+  // write would let the next run score a source's whole backlog.
+  await writeState(statePath, state);
   const collected = dedupe([...collectedRaw, ...atsSources.jobs]).filter(job => {
     if (job.sourceAgeDays != null && job.sourceAgeDays > Math.ceil(config.lookbackHours / 24)) return false;
     const timestamp = job.postedAt || job.discoveredAt;
@@ -398,8 +430,8 @@ async function runPipeline(config, clock) {
     stamped,
     Number(config.network.concurrency || 3),
     async job => {
-      // A posting whose description came straight from a board API needs no page fetch.
-      if (job.enrichment === 'ats_api') return job;
+      // A posting whose description came straight from a board or feed API needs no page fetch.
+      if (job.enrichment === 'ats_api' || job.enrichment === 'source_api') return job;
       try {
         return await enrichJob(job, config.network);
       } catch (error) {

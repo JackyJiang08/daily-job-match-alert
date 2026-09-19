@@ -6,7 +6,7 @@
 
 默认每天 **20:00 America/Chicago** 由 launchd 触发一次，无人值守：
 
-1. **采集。** 来源包括 SimplifyJobs 的两个 GitHub 榜单、由此前岗位链接自动发现的 Greenhouse / Lever / Ashby / Workday 公开 job board 接口，以及放进 `intake/eml` 的 `.eml` 提醒邮件。每个 board 每晚只轮询一次，带固定 user agent，并使用 ETag / If-Modified-Since 条件请求。
+1. **采集。** 来源包括公开 GitHub 榜单（SimplifyJobs、Jobright、vanshb03、Zapply、zshah101）、当月的 Hacker News "Who is hiring" 帖、RemoteOK feed、由此前岗位链接自动发现的 Greenhouse / Lever / Ashby / Workday 公开 job board 接口，以及放进 `intake/eml` 的 `.eml` 提醒邮件。每个 board 每晚只轮询一次，带固定 user agent，并使用 ETag / If-Modified-Since 条件请求。
 2. **去重。** URL 规范化（去追踪参数、解析跳转）后与 `state/state.json` 比对，同一岗位即使三个来源都列出也只出现一次。
 3. **抓 JD。** board 接口直接给出完整正文；其他链接只抓取一次，Workday 页面改走租户公开的 JSON 接口。抓不到的岗位后续夜晚重试，被拒绝或已下线的直接关闭。
 4. **硬过滤。** 两条规则由代码强制执行，与模型无关：地点必须在美国（无法判断的会标记 `Location unverified`），岗位要求的毕业窗口必须与 `preferences.graduationDate` 相符。
@@ -53,6 +53,12 @@ Cover letter 由同一个订阅引擎根据你的 playbook、最多三封样稿�
 | 来源 | 接入方式 | 合规依据 | 状态 |
 |---|---|---|---|
 | SimplifyJobs Summer Internships 与 New Grad 榜单 | 每晚读取两个公开仓库的 README 原文一次 | 公开仓库，本就为此维护；岗位链接指向雇主站点 | 默认启用 |
+| Jobright 榜单（Data Analysis 与 Software Engineer 的 Internship / New Grad） | 读取 `jobright-ai/2026-*` 仓库的 README 原文（该组织按毕业年份命名当前周期，没有 ML & AI 榜） | 公开仓库、每日更新；每行链接到带结构化 JobPosting 数据的岗位页 | 默认启用（`sources.githubLists.lists.jobright*`） |
+| vanshb03 Summer 2027 Internships 与 New Grad 2027 | README 原文，`dev` 分支 | 公开仓库，截至 2026-09-18 在 30 天内有提交；行内链接直达雇主 ATS | 默认启用（`sources.githubLists.lists.vansh*`） |
+| Zapply Internships 2027 / New Grad Jobs 2027 / ML Internships 2027 / New Grad Data Science 2027 | README 原文；Apply 链接是 `zapply.jobs` 跳转，抓 JD 时跟随到雇主页 | 公开仓库、每小时更新 | 默认启用（`sources.githubLists.lists.zapply*`） |
+| zshah101 Tech Internships 2027（Summer 2027 与 Fall 2026 两张表） | README 原文 | 公开仓库、每日更新；行内链接直达雇主 ATS | 默认启用（`sources.githubLists.lists.zshahTechInternships`） |
+| Hacker News "Ask HN: Who is hiring?" | Algolia HN Search 公开 API：取 `whoishiring` 最新一帖及其顶层评论，只保留提到 intern / new grad / entry level / junior 的帖子，卡片链接指向该评论 | Algolia 官方公开 API、无需 key；帖子本就公开且为求被找到而发 | 默认启用（`sources.hackerNewsHiring`） |
+| RemoteOK | 每晚带配置的 user agent 请求一次 `remoteok.com/api`；只保留 US 可工作的远程岗且标题或 tag 属于早期职业 | RemoteOK 公开 feed 及其条款（user agent、follow 链接回岗位页、注明 RemoteOK 来源）；`robots.txt` 允许 `/`，crawl-delay 1 秒 | 默认启用（`sources.remoteOk`） |
 | Greenhouse boards | `GET boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true`（完整正文、`updated_at`，支持 ETag） | Greenhouse 官方公开 Job Board API，无需认证 | 自动发现，或写在 `sources.atsBoards.boards` |
 | Lever boards | `GET api.lever.co/v0/postings/{company}?mode=json`（`createdAt`，支持 ETag） | Lever 官方公开 Postings API，无需认证 | 同上 |
 | Ashby boards | `GET api.ashbyhq.com/posting-api/job-board/{org}`（`publishedAt`） | Ashby 官方公开 Job Posting API，无需认证 | 同上 |
@@ -61,9 +67,21 @@ Cover letter 由同一个订阅引擎根据你的 playbook、最多三封样稿�
 | Himalaya 邮箱文件夹 | `himalaya` 只列 envelope 与 `--preview` 读取 | 你订阅的官方提醒邮件；不标记、不移动、不发送 | 已实现，未启用（`sources.himalaya.enabled: false`） |
 | career-ops scan history | [career-ops](https://github.com/santifer/career-ops) 写出的本地 TSV | 你自己的本地文件 | 可选（`sources.careerOps`） |
 
+每个来源在 `sources` 下都有独立的 `enabled` 开关；每个新榜单或 feed 首次接入都先走基线：第一次采集把它列出的岗位全部记为已见、不评分，因此开启一个来源不会让某天的报告被灌满。榜单返回 200 但解析出 0 行会触发格式变更 warning；单个来源失败只记 warning，其余照常；Run Details 与 Status 页的 Sources 表各有一行。多榜单同一岗位只出现一次，来源字段记录全部命中的榜单。
+
 **board 如何被发现。** 每晚管道扫描本轮采集到的所有 URL，识别 Greenhouse / Lever / Ashby / Workday 岗位，并把对应 board 记入 `state/ats-boards.json`（含首次发现日期、揭示它的来源、最近一次成功轮询与岗位数）。也可以手动追加（`{ "url": "https://job-boards.greenhouse.io/examplecorp" }`，或 `greenhouse:` / `lever:` / `ashby:` / `workday:tenant/site` 形式的 key），或用 `"enabled": false` 禁用。
 
 **首次轮询只做基线。** 某 board 第一次被轮询时，它列出的全部岗位只写入 seen、不进评分；数量以 info 级别写进 `warnings.txt` 与 Run Details。从下一晚起只处理 posted / updated 落在回看窗口内的新岗位。每 board 每晚最多一次，并发受 `network.concurrency` 约束，请求头沿用 `network.userAgent`；单个 board 失败只记 warning；连续 7 晚失败的 board 标为 dormant 并停止轮询，直到在 Status 页点 Resume Polling。来自 board 的岗位在报告卡片上显示为 `Greenhouse · Example Corp` 等。
+
+### 明确不接入的平台及原因
+
+| 平台 | 原因 |
+|---|---|
+| LinkedIn、Indeed、Glassdoor、Handshake | 条款禁止自动化访问与抓取；有登录、限流与机器人检测，且没有公开的无认证 feed |
+| Wellfound、Work at a Startup | 岗位在登录墙之后，读取需要账号会话，本项目从不持有 |
+| Adzuna、USAJOBS | API 需要注册申请 key，本项目不使用任何 key |
+
+若其中某个平台将来提供公开、无认证、合规的 feed，可按同样的采集器模式接入；在此之前，来自它们的提醒邮件是唯一规划中的途径，且只作为链接来源。
 
 ## 可靠性设计
 

@@ -12,6 +12,7 @@ import { ENGINE_DEFAULT_MODELS, ENGINE_IDS, ENGINE_LABELS, normalizeEngineId, re
 import { readConfigFile, updateConfigFile } from './config-file.mjs';
 import { readLockStatus } from './run.mjs';
 import { boardLabel, readRegistry, resumeBoard, writeRegistry } from '../collectors/ats-boards.mjs';
+import { builtinSources } from '../collectors/catalog.mjs';
 import { HubLockedError } from './config-file.mjs';
 import { acquireRunLock, releaseRunLock } from '../lock.mjs';
 
@@ -409,14 +410,6 @@ export async function buildStatusView(ctx, config) {
 
 // ---------------------------------------------------------------------------------------------- sources
 
-const BUILTIN_SOURCES = [
-  ['simplifyInternships', 'SimplifyJobs Summer Internships'],
-  ['simplifyNewGrad', 'SimplifyJobs New Grad'],
-  ['emailFiles', 'Email files'],
-  ['himalaya', 'Himalaya job-alert mailbox'],
-  ['careerOps', 'career-ops history'],
-];
-
 export function atsRegistryPath(ctx) {
   return path.join(ctx.root, 'state', 'ats-boards.json');
 }
@@ -427,12 +420,12 @@ export async function sourcesView(ctx, config, latest) {
   const counts = new Map((latest?.meta?.sourceCounts || []).map(item => [item.name, item]));
   const ranAt = latest?.meta?.completedAt || latest?.meta?.lastUpdatedAt || null;
   const rows = [];
-  for (const [id, label] of BUILTIN_SOURCES) {
+  for (const { id, name: label, enabled } of builtinSources(config)) {
     const stat = counts.get(label) || null;
     rows.push({
-      key: id, label, kind: 'builtin', enabled: config.sources?.[id]?.enabled === true,
+      key: id, label, kind: 'builtin', enabled,
       lastSuccessAt: stat?.ok ? ranAt : null, newCount: stat ? Number(stat.count || 0) : null, jobCount: null,
-      baselineCount: null, dormant: false, error: stat?.ok === false ? stat.error || 'failed' : null, skipped: stat?.skipped || null, consecutiveFailures: 0,
+      baselineCount: stat?.baseline ? Number(stat.jobCount || 0) : null, dormant: false, error: stat?.ok === false ? stat.error || 'failed' : null, skipped: stat?.skipped || null, consecutiveFailures: 0,
     });
   }
   const registry = await readJson(ctx.io, atsRegistryPath(ctx), null);

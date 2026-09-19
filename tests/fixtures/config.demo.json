@@ -24,6 +24,9 @@
   "sources": {
     "simplifyInternships": { "enabled": false },
     "simplifyNewGrad": { "enabled": false },
+    "githubLists": { "enabled": false },
+    "hackerNewsHiring": { "enabled": false },
+    "remoteOk": { "enabled": false },
     "emailFiles": { "enabled": true, "directory": "." },
     "careerOps": { "enabled": false }
   },

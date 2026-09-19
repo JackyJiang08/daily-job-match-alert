@@ -14,7 +14,7 @@
 
 At 20:00 (America/Chicago by default) a launchd job runs the pipeline once, unattended:
 
-1. **Collect.** Postings arrive from the SimplifyJobs GitHub lists, from the public job-board APIs of Greenhouse, Lever, Ashby, and Workday tenants that earlier postings pointed at, and from any `.eml` alert files dropped into `intake/eml`. Every board is polled once per night with a named user agent and conditional requests.
+1. **Collect.** Postings arrive from public GitHub lists (SimplifyJobs, Jobright, vanshb03, Zapply, zshah101), the month's Hacker News "Who is hiring" thread, the RemoteOK feed, the public job-board APIs of Greenhouse, Lever, Ashby, and Workday tenants that earlier postings pointed at, and any `.eml` alert files dropped into `intake/eml`. Every board is polled once per night with a named user agent and conditional requests.
 2. **Deduplicate.** URLs are canonicalized (tracking parameters stripped, redirects resolved) and checked against `state/state.json`, so a posting is reported once even when three sources list it.
 3. **Fetch the description.** Board APIs deliver the full text directly; other links are fetched once, with Workday pages read through the tenant's public JSON endpoint. Unreachable pages are retried on later nights, refused or removed ones are closed.
 4. **Hard-filter.** Two facts are enforced in code, whatever the model says: the location must be in the United States (or unverifiable, which is flagged), and the graduation window in the posting must fit `preferences.graduationDate`.
@@ -61,6 +61,12 @@ Everything personal stays on the Mac and outside Git:
 | Source | How it is read | Basis | Status |
 |---|---|---|---|
 | SimplifyJobs Summer Internships and New Grad lists | The public README of each GitHub repository, fetched raw once per night | Public repositories maintained for exactly this purpose; postings link to employer sites | Enabled by default |
+| Jobright lists (Data Analysis and Software Engineer, internship and new grad) | Raw README of the `jobright-ai/2026-*` repositories (the organization names its current cycle by graduation year; there is no ML & AI list) | Public repositories updated daily; each row links to a posting page with structured JobPosting data | Enabled by default (`sources.githubLists.lists.jobright*`) |
+| vanshb03 Summer 2027 Internships and New Grad 2027 | Raw README, `dev` branch | Public repositories, last pushed within 30 days of 2026-09-18; rows link straight to employer ATS pages | Enabled by default (`sources.githubLists.lists.vansh*`) |
+| Zapply Internships 2027, New Grad Jobs 2027, ML Internships 2027, New Grad Data Science 2027 | Raw README; each Apply link is a `zapply.jobs` redirect that the description fetch follows to the employer | Public repositories updated hourly | Enabled by default (`sources.githubLists.lists.zapply*`) |
+| zshah101 Tech Internships 2027 (Summer 2027 and Fall 2026 tables) | Raw README | Public repository updated daily; rows link straight to employer ATS pages | Enabled by default (`sources.githubLists.lists.zshahTechInternships`) |
+| Hacker News "Ask HN: Who is hiring?" | The public Algolia HN Search API: the newest thread by `whoishiring`, then its top-level posts; only posts mentioning intern, new grad, entry level, or junior are kept, and each card links to the post itself | Algolia's documented public API, no key; posts are public and written to be found | Enabled by default (`sources.hackerNewsHiring`) |
+| RemoteOK | `GET remoteok.com/api` once per night with the configured user agent; only remote postings open to the United States with an early-career title or tag are kept | RemoteOK's published feed and its terms (user agent, follow link back to the posting, RemoteOK named as the source); `robots.txt` allows `/` with a one-second crawl delay | Enabled by default (`sources.remoteOk`) |
 | Greenhouse boards | `GET boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true` (full content, `updated_at`, ETag honoured) | Greenhouse's documented public Job Board API; no authentication | Discovered automatically, or listed in `sources.atsBoards.boards` |
 | Lever boards | `GET api.lever.co/v0/postings/{company}?mode=json` (`createdAt`, ETag honoured) | Lever's documented public Postings API; no authentication | Same |
 | Ashby boards | `GET api.ashbyhq.com/posting-api/job-board/{org}` (`publishedAt`) | Ashby's documented public Job Posting API; no authentication | Same |
@@ -69,9 +75,21 @@ Everything personal stays on the Mac and outside Git:
 | Himalaya mailbox folder | `himalaya` envelope list and `--preview` reads | Official alert email you subscribed to; the collector never marks, moves, or sends mail | Implemented, disabled (`sources.himalaya.enabled: false`) |
 | career-ops scan history | A local TSV written by [career-ops](https://github.com/santifer/career-ops) | Your own local file | Optional (`sources.careerOps`) |
 
+Every source has its own `enabled` switch under `sources`, and every new list or feed starts with a baseline night: the first collection marks what it lists as already seen and scores nothing, so switching one on never floods a report. A list that answers 200 with no parsable rows raises a format-change warning; a failing source only produces a warning while the others continue; each source has a row under Run Details and on the Status page. A posting that several lists carry is reported once with every list named in its source line.
+
 **How boards are discovered.** Every night the pipeline looks at the URLs it collected, recognizes Greenhouse, Lever, Ashby, and Workday postings, and records the board they belong to in `state/ats-boards.json` with the date and source that revealed it. You can add a board by hand (`{ "url": "https://job-boards.greenhouse.io/examplecorp" }` or a `greenhouse:` / `lever:` / `ashby:` / `workday:tenant/site` key) or switch one off with `"enabled": false`.
 
 **First poll is a baseline.** The first time a board is polled, everything it lists is recorded as already seen and nothing is scored; the count is disclosed as an info line in `warnings.txt` and under Run Details. From the next night on, only postings posted or updated inside the lookback window are scored. Each board is polled at most once per night, requests share `network.concurrency` and `network.userAgent`, a failing board only produces a warning, and a board that fails seven nights in a row is marked dormant and skipped until you press Resume Polling on the Status page. Postings from boards show their source as `Greenhouse · Example Corp` and so on.
+
+### Not integrated, and why
+
+| Platform | Reason |
+|---|---|
+| LinkedIn, Indeed, Glassdoor, Handshake | Their terms of service prohibit automated access and scraping; they sit behind logins, rate limits, and bot detection, and offer no public unauthenticated feed |
+| Wellfound, Work at a Startup | Postings are behind a login wall; reading them would require an account session, which the project never holds |
+| Adzuna, USAJOBS | Their APIs require registering for an application key; the project runs with no keys of any kind |
+
+If one of these ever offers a public, unauthenticated, terms-compliant feed, it fits the same collector pattern; until then, alert email from them is the only planned path, and only as a source of links.
 
 ## Reliability
 

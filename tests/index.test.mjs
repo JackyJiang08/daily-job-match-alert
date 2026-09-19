@@ -6,6 +6,7 @@ test('collector failures become warnings while other sources still return jobs',
   const warnings = [];
   const config = {
     sources: {
+      githubLists: { enabled: false }, hackerNewsHiring: { enabled: false }, remoteOk: { enabled: false }, 
       simplifyInternships: { enabled: true, url: 'internships' },
       simplifyNewGrad: { enabled: true, url: 'new-grad' },
       emailFiles: { enabled: true, directory: '/mail' },
