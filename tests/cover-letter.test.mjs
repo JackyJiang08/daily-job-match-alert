@@ -426,11 +426,14 @@ test('the panel disables Generate until the material exists, and Settings collec
   const jobId = sha256('https://example.com/jobs/1').slice(0, 16);
   try {
     const report = await hub.request('GET', '/reports/2026-09-15');
-    assert.match(report.text, new RegExp(`<a class="btn secondary small" href="/letters/new\\?date=2026-09-15&amp;job=${jobId}">Generate Cover Letter</a>`));
-    assert.doesNotMatch(report.text, /Letter ready/);
+    assert.match(report.text, new RegExp(`<button type="button" class="btn secondary small" data-oneclick="1" data-date="2026-09-15" data-job="${jobId}">Generate Cover Letter</button>`), 'a card without a letter carries the one-click button');
+    assert.match(report.text, /\/letters\/oneclick\.json/, 'the Reports page ships the one-click script');
+    assert.doesNotMatch(report.text.split('<script>')[0], /data-badge="letter-ready"/, 'no badge in the markup (the page script mentions it)');
     const panel = await hub.request('GET', `/letters/new?date=2026-09-15&job=${jobId}`);
     assert.equal(panel.status, 200);
-    assert.match(panel.text, /<button class="btn" id="generate-button" type="button" disabled>Generate<\/button>/);
+    assert.match(panel.text, /<button class="btn" id="generate-button" type="button" disabled>Regenerate<\/button>/);
+    assert.match(panel.text, /<article class="card" id="letter-editor" data-state="empty">/, 'the editor is always shown; nothing is hidden behind a first step');
+    assert.match(panel.text, /<p class="muted" id="letter-empty">No draft yet\./);
     assert.match(panel.text, /missing: playbook, name, contact/);
     assert.match(panel.text, /data-ready="no"/);
     assert.match(panel.text, /<option value="data" selected>Data \(recommended\)<\/option><option value="llm">LLM<\/option>/);
@@ -497,7 +500,7 @@ test('the panel disables Generate until the material exists, and Settings collec
     assert.doesNotMatch(after.text, /Real evidence line/, 'material text is never rendered');
     const profile = JSON.parse(await fs.readFile(path.join(root, 'private', 'cover-letter', 'profile.json'), 'utf8'));
     assert.equal(profile.email, 'jane.doe@example.com');
-    assert.equal((await hub.request('GET', `/letters/new?date=2026-09-15&job=${jobId}`)).text.includes('id="generate-button" type="button">Generate<'), true);
+    assert.equal((await hub.request('GET', `/letters/new?date=2026-09-15&job=${jobId}`)).text.includes('id="generate-button" type="button">Regenerate<'), true);
     const removed = await hub.form('/settings/cover-letter/remove-sample', { file: profile.samples[0].file });
     assert.equal(removed.status, 303);
     assert.equal(JSON.parse(await fs.readFile(path.join(root, 'private', 'cover-letter', 'profile.json'), 'utf8')).samples.length, 9, 'one of the ten samples was removed');
@@ -582,10 +585,12 @@ test('generate → edit → save renders a PDF, records the letter, marks the ca
     assert.match(reopened, /I edited this paragraph by hand before rendering\./);
     assert.match(reopened, /<details class="notes" id="editor-notes"><summary>Editor Notes<\/summary><ul class="issues" id="editor-notes-list"><li>Paragraph 1 lacks the GPA<\/li><\/ul><\/details>/);
     assert.match(reopened, /<p class="letter-foot" id="letter-foot">Samples used: sample\.txt · Engine: claude · claude-fable-5 · PDF via pdfkit<\/p>/);
-    assert.match(reopened, /<p class="letter-counts" id="letter-counts">\d+ words · 5 paragraphs · 1 page<\/p>\s*<div id="paragraphs"><div class="para-row"><span class="num">1<\/span><textarea class="para" name="paragraph" data-index="0">/);
+    assert.match(reopened, /<p class="letter-counts" id="letter-counts">\d+ words · 5 paragraphs · 1 page<\/p>\s*<p class="muted" id="letter-empty" hidden>[^<]*<\/p>\s*<div id="paragraphs"><div class="para-row"><span class="num">1<\/span><textarea class="para" name="paragraph" data-index="0">/);
     assert.match(reopened, /<span>Resume Track<\/span><select id="letter-track" class="control-input">/);
     assert.match(reopened, /<span>Company Name<\/span>/);
     assert.match(reopened, /id="generate-button" type="button">Regenerate<\/button>/);
+    assert.match(reopened, /<article class="card" id="letter-editor" data-state="editing">/, 'an existing letter opens straight into the editor');
+    assert.match(reopened, /<p class="muted" id="letter-empty" hidden>/);
     assert.doesNotMatch(reopened, /private\/|config\.json|\{FirstLast\}/);
     const toggled = await hub.form('/settings', { minimumMatchScore: '70', acceptedMatchLevels: 'high', engine: 'claude', model_claude: 'fable', hubPort: '4747', editorReviewPresent: '1' });
     assert.equal(toggled.status, 303);
@@ -597,15 +602,15 @@ test('generate → edit → save renders a PDF, records the letter, marks the ca
     assert.equal(again.reviewed, false);
 
     const list = await hub.request('GET', '/letters');
-    assert.match(list.text, /<tr><th>Date<\/th><th>Company<\/th><th>Role<\/th><th>Track<\/th><th>Engine<\/th><th>Pages<\/th><th>Actions<\/th><\/tr>/);
-    assert.match(list.text, /<td>2026-09-15<\/td>\s*<td><a href="\/letters\/2026-09-15\/AcmeInc">Acme, Inc\.<\/a><\/td>\s*<td>Data Analyst<\/td>\s*<td><span class="badge" data-track-badge="llm">LLM<\/span><\/td>\s*<td>claude · claude-fable-5<\/td>\s*<td>1<\/td>/);
+    assert.match(list.text, /<tr><th>Date<\/th><th>Company<\/th><th>Role<\/th><th>Track<\/th><th>Engine<\/th><th>Pages<\/th><th>Generated<\/th><th>Notes<\/th><th>Actions<\/th><\/tr>/);
+    assert.match(list.text, /<td>2026-09-15<\/td>\s*<td><a href="\/letters\/2026-09-15\/AcmeInc">Acme, Inc\.<\/a><\/td>\s*<td>Data Analyst<\/td>\s*<td><span class="badge" data-track-badge="llm">LLM<\/span><\/td>\s*<td>claude · claude-fable-5<\/td>\s*<td>1<\/td>\s*<td>Sep 15, 2026, 10:00 AM<\/td>\s*<td>1<\/td>/, 'generation time and editor-note count columns');
     assert.match(list.text, /Letters you generate are kept on this Mac\. Reopen one to edit or download it again\./);
     assert.doesNotMatch(list.text, /private\/cover-letters/);
     assert.match(list.text, /href="\/letters\/2026-09-15\/AcmeInc\/JaneDoe_Cover_Letter_AcmeInc\.pdf">Download PDF<\/a>/);
     const report = await hub.request('GET', '/reports/2026-09-15');
     assert.match(report.text, /<span class="badge badge-good" data-badge="letter-ready"[^>]*>Letter ready<\/span>/);
     assert.match(report.text, /<a class="btn secondary small" href="\/letters\/2026-09-15\/AcmeInc">Open Letter<\/a><a class="btn secondary small" href="\/letters\/2026-09-15\/AcmeInc\/JaneDoe_Cover_Letter_AcmeInc\.pdf">Download PDF<\/a>/, 'a saved letter gives the card both buttons');
-    assert.doesNotMatch(report.text, /Generate Cover Letter/);
+    assert.doesNotMatch(report.text.split('<script>')[0], /Generate Cover Letter/, 'no one-click button once a letter exists (the page script mentions the label)');
     assert.match(list.text, /<a class="btn secondary small" href="\/letters\/2026-09-15\/AcmeInc">Open<\/a> <a class="btn secondary small" href="\/letters\/2026-09-15\/AcmeInc\/JaneDoe_Cover_Letter_AcmeInc\.pdf">Download PDF<\/a>/, 'the Letters row has the same two actions');
 
     const evil = await hub.form('/letters/generate', { date: '2026-09-15', job: jobId }, { origin: 'http://evil.example' });
@@ -614,6 +619,96 @@ test('generate → edit → save renders a PDF, records the letter, marks the ca
     assert.equal(calls.length, 2, 'no extra engine calls from rejected requests (draft plus editor pass only)');
     assert.equal((await hub.form('/letters/generate', { date: '2026-09-15', job: 'zzzz' })).status, 400);
     assert.equal((await hub.form('/letters/generate', { date: '2026-09-15', job: jobId, track: 'agent' })).status, 400, 'a disabled track is refused');
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('one click on a card generates in the background: generating → ready with a downloadable PDF, one at a time, and failures restore the button', async () => {
+  const root = await prepareProject();
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  let calls = 0;
+  let failNext = false;
+  const engine = {
+    id: 'claude', label: 'Claude subscription', model: 'fable',
+    async generateText(prompt) {
+      calls += 1;
+      await gate;
+      if (failNext) throw new Error('engine exploded');
+      if (prompt.startsWith('EDITOR REVIEW')) return { output: { issues: [], revised_paragraphs: [] }, scoringModel: 'claude-fable-5' };
+      return { output: { paragraphs: fiveParagraphs(100) }, scoringModel: 'claude-fable-5' };
+    },
+  };
+  const hub = await startHub(root, { letterEngine: engine });
+  const jobId = sha256('https://example.com/jobs/1').slice(0, 16);
+  try {
+    assert.deepEqual(JSON.parse((await hub.request('GET', '/letters/oneclick.json')).text), { state: 'idle', busy: false, id: null });
+    const notReady = await hub.form('/letters/oneclick', { date: '2026-09-15', job: jobId });
+    assert.equal(notReady.status, 400);
+    assert.match(JSON.parse(notReady.text).error, /material is incomplete/);
+    await hub.upload('/settings/cover-letter', PROFILE, [{ field: 'playbook', name: 'playbook.md', data: Buffer.from(`# Playbook\n${'Real evidence line. '.repeat(10)}`) }]);
+    assert.equal((await hub.form('/letters/oneclick', { date: '2026-09-15', job: 'zzzz' })).status, 400, 'an unknown job is refused before anything starts');
+
+    const started = await hub.form('/letters/oneclick', { date: '2026-09-15', job: jobId });
+    assert.equal(started.status, 202);
+    const startedJob = JSON.parse(started.text);
+    assert.equal(startedJob.state, 'generating');
+    assert.equal(startedJob.busy, true);
+    assert.equal(startedJob.jobId, jobId);
+    assert.equal(startedJob.company, 'Acme, Inc.');
+    assert.match(startedJob.id, new RegExp(`^2026-09-15:${jobId}:1$`));
+    const busy = await hub.form('/letters/oneclick', { date: '2026-09-15', job: jobId });
+    assert.equal(busy.status, 409, 'only one letter generates at a time');
+    assert.match(JSON.parse(busy.text).error, /Another cover letter is generating \(Acme, Inc\.\)/);
+    assert.equal(JSON.parse(busy.text).job.id, startedJob.id);
+    assert.equal(JSON.parse((await hub.request('GET', '/letters/oneclick.json')).text).state, 'generating');
+
+    release();
+    const ready = await hub.ctx.letterJobs.settle();
+    assert.equal(ready.state, 'ready');
+    assert.equal(ready.busy, false);
+    assert.equal(calls, 2, 'draft plus editor pass');
+    assert.equal(ready.result.downloadUrl, '/letters/2026-09-15/AcmeInc/JaneDoe_Cover_Letter_AcmeInc.pdf');
+    assert.equal(ready.result.openUrl, '/letters/2026-09-15/AcmeInc');
+    assert.equal(ready.result.track.id, 'data', 'the recommended track');
+    assert.equal(ready.result.company, 'Acme, Inc.');
+    assert.equal(ready.result.pdf.pages, 1);
+    assert.deepEqual(JSON.parse((await hub.request('GET', '/letters/oneclick.json')).text).state, 'ready');
+    const pdf = await hub.request('GET', ready.result.downloadUrl);
+    assert.equal(pdf.status, 200);
+    assert.equal(pdf.headers['content-type'], 'application/pdf');
+    assert.equal(pdf.headers['content-disposition'], 'attachment; filename="JaneDoe_Cover_Letter_AcmeInc.pdf"', 'the browser downloads it under the templated name');
+    assert.equal(pdf.buffer.slice(0, 5).toString('latin1'), '%PDF-');
+    const report = await hub.request('GET', '/reports/2026-09-15');
+    assert.match(report.text, /<a class="btn secondary small" href="\/letters\/2026-09-15\/AcmeInc">Open Letter<\/a><a class="btn secondary small" href="\/letters\/2026-09-15\/AcmeInc\/JaneDoe_Cover_Letter_AcmeInc\.pdf">Download PDF<\/a>/);
+    assert.doesNotMatch(report.text.split('<script>')[0], /data-oneclick/);
+    const opened = await hub.request('GET', '/letters/2026-09-15/AcmeInc');
+    assert.match(opened.text, /<article class="card" id="letter-editor" data-state="editing">/);
+    assert.match(opened.text, /<textarea class="para" name="paragraph" data-index="0">Paragraph 1 /);
+    assert.match(opened.text, /id="generate-button" type="button">Regenerate<\/button>/);
+
+    // A second job can start once the first has finished; a failure is reported and leaves the state free.
+    failNext = true;
+    const payloadPath = path.join(root, 'state', 'report-payload-2026-09-15.json');
+    const payload = JSON.parse(await fs.readFile(payloadPath, 'utf8'));
+    payload.matches.push(job({ url: 'https://example.com/jobs/2', company: 'Beta' }));
+    payload.reviewed.push(job({ url: 'https://example.com/jobs/2', company: 'Beta' }));
+    await fs.writeFile(payloadPath, JSON.stringify(payload));
+    const secondId = sha256('https://example.com/jobs/2').slice(0, 16);
+    const again = await hub.form('/letters/oneclick', { date: '2026-09-15', job: secondId });
+    assert.equal(again.status, 202);
+    const failed = await hub.ctx.letterJobs.settle();
+    assert.equal(failed.state, 'failed');
+    assert.equal(failed.busy, false);
+    assert.match(failed.error, /engine exploded/);
+    assert.equal(failed.result, null);
+    assert.match((await hub.request('GET', '/reports/2026-09-15')).text, new RegExp(`data-job="${secondId}">Generate Cover Letter</button>`), 'no letter was saved, so the card keeps its button');
+    failNext = false;
+    assert.equal((await hub.form('/letters/oneclick', { date: '2026-09-15', job: secondId })).status, 202, 'a failed job does not hold the lock');
+    assert.equal((await hub.ctx.letterJobs.settle()).state, 'ready');
+    assert.equal((await hub.form('/letters/oneclick', { date: '2026-09-15', job: jobId }, { origin: 'http://evil.example' })).status, 403);
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });

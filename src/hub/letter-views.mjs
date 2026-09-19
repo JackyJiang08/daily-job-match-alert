@@ -156,16 +156,18 @@ export const SAMPLE_TRACK_SCRIPT = `
 
 // ---------------------------------------------------------------------------------------------- letters list
 
-export function lettersPage({ letters }) {
+export function lettersPage({ letters, timeZone = 'America/Chicago' }) {
   const sorted = [...letters].sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.savedAt || '').localeCompare(String(a.savedAt || '')));
   const rows = sorted.length
-    ? `<table class="plain"><tr><th>Date</th><th>Company</th><th>Role</th><th>Track</th><th>Engine</th><th>Pages</th><th>Actions</th></tr>${sorted.map(letter => `<tr>
+    ? `<table class="plain"><tr><th>Date</th><th>Company</th><th>Role</th><th>Track</th><th>Engine</th><th>Pages</th><th>Generated</th><th>Notes</th><th>Actions</th></tr>${sorted.map(letter => `<tr>
       <td>${htmlEscape(letter.date)}</td>
       <td><a href="/letters/${letter.date}/${letter.slug}">${htmlEscape(letter.company)}</a></td>
       <td>${htmlEscape(letter.jobTitle || '')}</td>
       <td>${trackBadge(letter.track) || htmlEscape(letter.trackLabel || '')}</td>
       <td>${htmlEscape(letter.engine || '')}${letter.model ? ` · ${htmlEscape(letter.model)}` : ''}</td>
       <td>${letter.pdf ? `${letter.pdf.pages}${letter.pdf.layout && letter.pdf.layout !== 'letter-1in' ? ' <span class="badge badge-warn" data-badge="layout">reduced layout</span>' : ''}` : '—'}</td>
+      <td>${readable(letter.createdAt || letter.savedAt, timeZone)}</td>
+      <td>${Array.isArray(letter.editorNotes) ? letter.editorNotes.length : 0}</td>
       <td><a class="btn secondary small" href="/letters/${letter.date}/${letter.slug}">Open</a> ${letter.pdfFileName && letter.pdf ? `<a class="btn secondary small" href="/letters/${letter.date}/${letter.slug}/${encodeURIComponent(letter.pdfFileName)}">Download PDF</a>` : ''}</td>
     </tr>`).join('')}</table>`
     : '<p class="muted">No cover letters yet. Open a report and use Generate Cover Letter on a job card.</p>';
@@ -214,17 +216,18 @@ export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, 
       <label class="field"><span>Resume Track</span><select id="letter-track" class="control-input">${trackOptions}</select></label>
       <label class="field"><span>Company Name</span><input type="text" id="letter-company" class="control-input" value="${htmlEscape(company)}" required></label>
       <div class="row">
-        <button class="btn" id="generate-button" type="button"${readiness.ready ? '' : ' disabled'}>${paragraphs.length ? 'Regenerate' : 'Generate'}</button>
+        <button class="btn" id="generate-button" type="button"${readiness.ready ? '' : ' disabled'}>Regenerate</button>
         <button class="btn secondary" id="save-button" type="button"${paragraphs.length ? '' : ' hidden'}>Save &amp; Render PDF</button>
         ${download}
       </div>
       <p class="letter-status" id="letter-status"></p>
     </div>
   </article>
-  <article class="card" id="letter-editor"${paragraphs.length ? '' : ' hidden'}>
+  <article class="card" id="letter-editor" data-state="${paragraphs.length ? 'editing' : 'empty'}">
     <h2>Body</h2>
-    <p class="muted">The header, date, greeting, and sign-off are added for you; edit the paragraphs here before rendering.</p>
+    <p class="muted">The header, date, greeting, and sign-off are added for you; edit the paragraphs here, switch the track and Regenerate, or render the PDF again.</p>
     <p class="letter-counts" id="letter-counts">${htmlEscape(countsLine(record))}</p>
+    <p class="muted" id="letter-empty"${paragraphs.length ? ' hidden' : ''}>No draft yet. Regenerate writes one with the selected track and company name.</p>
     <div id="paragraphs">${paragraphEditor(paragraphs)}</div>
     <ul class="issues" id="letter-issues">${issues}</ul>
     <details class="notes" id="editor-notes"${notes ? '' : ' hidden'}><summary>Editor Notes</summary><ul class="issues" id="editor-notes-list">${notes}</ul></details>
@@ -247,6 +250,7 @@ export const LETTER_SCRIPT = `
   var counts = document.getElementById('letter-counts');
   var foot = document.getElementById('letter-foot');
   var notesBox = document.getElementById('editor-notes');
+  var emptyHint = document.getElementById('letter-empty');
   var notesList = document.getElementById('editor-notes-list');
   var state = { engine: null, model: null, issues: [], editorNotes: [], samplesUsed: [], pages: null };
   function say(text, error) { status.textContent = text || ''; status.className = 'letter-status' + (error ? ' error' : ''); }
@@ -279,7 +283,7 @@ export const LETTER_SCRIPT = `
     state.engine = result.engine; state.model = result.model; state.issues = result.issues || []; state.editorNotes = result.editorNotes || []; state.samplesUsed = result.samplesUsed || []; state.pages = null;
     showCounts(result.paragraphs, null);
     showFoot(result);
-    editor.hidden = false; save.hidden = false; download.hidden = true; generate.textContent = 'Regenerate';
+    editor.dataset.state = 'editing'; if (emptyHint) emptyHint.hidden = true; save.hidden = false; download.hidden = true; generate.textContent = 'Regenerate';
   }
   box.addEventListener('input', function () { showCounts(paragraphs(), state.pages); });
   generate.addEventListener('click', function () {
@@ -303,5 +307,88 @@ export const LETTER_SCRIPT = `
       .catch(function (error) { say(error.message, true); })
       .then(function () { save.disabled = false; });
   });
+})();
+`;
+
+// Drives the one-click buttons on job cards: start a background generation, poll its state, download
+// the PDF when it is ready, and swap the button for Open Letter and Download PDF. One letter at a time:
+// every other button is disabled while one is generating, on this page or another.
+export const ONECLICK_SCRIPT = `
+(function () {
+  var buttons = Array.prototype.slice.call(document.querySelectorAll('button[data-oneclick]'));
+  if (!buttons.length) return;
+  var BUSY_TITLE = 'Another cover letter is generating; wait for it to finish';
+  var active = null;
+  function post(url, fields) {
+    var params = new URLSearchParams(); Object.keys(fields).forEach(function (key) { params.append(key, fields[key]); });
+    return fetch(url, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: params.toString() }).then(function (r) { return r.json().then(function (data) { data.httpStatus = r.status; return data; }); });
+  }
+  function cardOf(button) { return button.closest('.job'); }
+  function noteOn(button, text) {
+    var actions = button.closest('.actions');
+    var note = actions && actions.querySelector('.letter-note');
+    if (!note && actions) { note = document.createElement('span'); note.className = 'meta letter-note'; note.setAttribute('data-letter-note', ''); actions.appendChild(note); }
+    if (note) { note.textContent = text || ''; note.hidden = !text; }
+  }
+  function setBusy(busy, job) {
+    buttons.forEach(function (button) {
+      if (button.dataset.state === 'generating' || button.dataset.state === 'ready') return;
+      button.disabled = busy;
+      button.title = busy ? BUSY_TITLE : '';
+    });
+  }
+  function matching(job) {
+    return buttons.find(function (button) { return job && button.dataset.date === job.date && button.dataset.job === job.jobId; }) || null;
+  }
+  function markGenerating(button) {
+    button.dataset.state = 'generating'; button.disabled = true; button.textContent = 'Generating…'; button.title = '';
+    noteOn(button, '');
+  }
+  function markReady(button, result) {
+    button.dataset.state = 'ready';
+    var open = document.createElement('a'); open.className = 'btn secondary small'; open.href = result.openUrl; open.textContent = 'Open Letter';
+    var download = document.createElement('a'); download.className = 'btn secondary small'; download.href = result.downloadUrl; download.textContent = 'Download PDF';
+    button.replaceWith(open, download);
+    buttons = buttons.filter(function (item) { return item !== button; });
+    var card = open.closest('.job');
+    var badges = card && card.querySelector('.badges');
+    if (card && !badges) { badges = document.createElement('div'); badges.className = 'badges'; card.querySelector('.scores').insertAdjacentElement('afterend', badges); }
+    if (badges && !badges.querySelector('[data-badge="letter-ready"]')) { var badge = document.createElement('span'); badge.className = 'badge badge-good'; badge.setAttribute('data-badge', 'letter-ready'); badge.textContent = 'Letter ready'; badges.appendChild(badge); }
+    var anchor = document.createElement('a'); anchor.href = result.downloadUrl; anchor.download = ''; anchor.hidden = true; document.body.appendChild(anchor); anchor.click(); anchor.remove();
+  }
+  function markFailed(button, message) {
+    button.dataset.state = ''; button.disabled = false; button.textContent = 'Generate Cover Letter'; button.title = '';
+    noteOn(button, 'Could not generate: ' + (message || 'unknown error'));
+  }
+  function poll() {
+    fetch('/letters/oneclick.json', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (job) {
+      var button = matching(job);
+      if (job.state === 'generating') {
+        if (button && button.dataset.state !== 'generating') markGenerating(button);
+        setBusy(true, job);
+        setTimeout(poll, 1500);
+        return;
+      }
+      if (button && button.dataset.state === 'generating') {
+        if (job.state === 'ready' && job.result) markReady(button, job.result);
+        else markFailed(button, job.error);
+      }
+      active = null;
+      setBusy(false, null);
+    }).catch(function () { setTimeout(poll, 3000); });
+  }
+  buttons.forEach(function (button) {
+    button.addEventListener('click', function () {
+      if (button.disabled) return;
+      markGenerating(button);
+      setBusy(true, null);
+      post('/letters/oneclick', { date: button.dataset.date, job: button.dataset.job }).then(function (data) {
+        if (data.httpStatus !== 202) { markFailed(button, data.error); if (data.httpStatus === 409) { setBusy(true, data.job); setTimeout(poll, 1500); } else { setBusy(false, null); } return; }
+        active = data.id;
+        setTimeout(poll, 1000);
+      }).catch(function (error) { markFailed(button, error.message); setBusy(false, null); });
+    });
+  });
+  poll();
 })();
 `;

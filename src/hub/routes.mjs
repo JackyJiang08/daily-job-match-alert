@@ -11,9 +11,10 @@ import {
   readReportPayload, readSettings, resumeAtsBoard, saveCliPath, saveSettings, selectResumeVersion, setTrackEnabled, sidebarSummary, uploadResumePdf,
 } from './services.mjs';
 import { localDate } from '../time-format.mjs';
-import { LETTER_SCRIPT, SAMPLE_TRACK_SCRIPT, letterPanel, lettersPage, trackLabelOf } from './letter-views.mjs';
+import { LETTER_SCRIPT, ONECLICK_SCRIPT, SAMPLE_TRACK_SCRIPT, letterPanel, lettersPage, trackLabelOf } from './letter-views.mjs';
 import { todayTarget } from './views.mjs';
-import { findLetterJob, generateLetter, jobIdOf, letterEngineFor, saveLetter } from './letters.mjs';
+import { findLetterJob, generateLetter, jobIdOf, letterEngineFor, oneClickLetter, saveLetter } from './letters.mjs';
+import { LetterBusyError } from './letter-jobs.mjs';
 import { LetterInputError } from '../cover-letter/store.mjs';
 import { displayCompanyName } from '../posting-fields.mjs';
 import { REPORTS_SCRIPT, SETTINGS_SCRIPT, STATUS_SCRIPT, renderHubPage, reportsPage, resumesPage, settingsPage, statusPage } from './views.mjs';
@@ -116,18 +117,19 @@ export function createHubHandler(ctx) {
         const id = jobIdOf(job);
         const letter = lettersByJob.get(id);
         // A saved letter gets Open Letter plus a direct PDF download; the PDF link exists only once rendered.
+        // Without one the card carries a one-click button that the page script drives (see ONECLICK_SCRIPT).
         const download = letter?.pdf && letter.pdfFileName ? [{ href: `/letters/${letter.date}/${letter.slug}/${encodeURIComponent(letter.pdfFileName)}`, label: 'Download PDF' }] : [];
         return {
           actions: letter
             ? [{ href: `/letters/${letter.date}/${letter.slug}`, label: 'Open Letter' }, ...download]
-            : [{ href: `/letters/new?date=${selected}&job=${id}`, label: 'Generate Cover Letter' }],
+            : [{ button: true, label: 'Generate Cover Letter', data: { oneclick: '1', date: selected, job: id } }],
           badges: letter ? [{ key: 'letter-ready', label: 'Letter ready', tone: 'good', title: `Cover letter saved ${letter.savedAt || ''}` }] : [],
         };
       };
       reportBody = renderReportBody(buildReportView(payload.matches, { timeZone, ...payload.meta }, { embedded: true, decorate }));
       desktopPath = desktopCopyPath(config, selected);
     }
-    await page(response, 200, { active: 'reports', title: selected ? `Report ${selected}` : 'Reports', content: reportsPage({ dates, selected, reportBody, desktopPath, today }), script: REPORTS_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
+    await page(response, 200, { active: 'reports', title: selected ? `Report ${selected}` : 'Reports', content: reportsPage({ dates, selected, reportBody, desktopPath, today }), script: REPORTS_SCRIPT + ONECLICK_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
   }
 
   async function getResumes(url, response) {
@@ -177,7 +179,7 @@ export function createHubHandler(ctx) {
   async function getLetters(url, response) {
     const config = await ctx.loadConfig();
     const letters = await ctx.letterStore.listLetters();
-    await page(response, 200, { active: 'letters', title: 'Letters', content: lettersPage({ letters }), notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
+    await page(response, 200, { active: 'letters', title: 'Letters', content: lettersPage({ letters, timeZone: config.timeZone || 'America/Chicago' }), notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
   }
 
   async function getLetterPanel(url, response, { date, jobId, existing = null }) {
@@ -243,6 +245,15 @@ export function createHubHandler(ctx) {
       }
       case '/letters/generate': {
         json(response, 200, await generateLetter(ctx, { date: assertDate(fields.date), jobId: fields.job, trackId: fields.track || null, company: fields.company }));
+        return;
+      }
+      case '/letters/oneclick': {
+        const date = assertDate(fields.date);
+        const readiness = await ctx.letterStore.readiness();
+        if (!readiness.ready) throw new HubInputError(`Cover-letter material is incomplete (${readiness.missing.join(', ')}); upload it under Settings first`);
+        const { job, id } = await findLetterJob(ctx, date, fields.job);
+        const started = ctx.letterJobs.start({ date, jobId: id, company: displayCompanyName(job) || job.company || null, run: () => oneClickLetter(ctx, { date, jobId: id }) });
+        json(response, 202, started);
         return;
       }
       case '/letters/save': {
@@ -326,6 +337,7 @@ export function createHubHandler(ctx) {
         if (desktopMatch) return await getDesktop(assertDate(desktopMatch[1]), desktopMatch[2] ? 'xlsx' : 'html', response);
         if (url.pathname === '/settings') return await getSettings(url, response);
         if (url.pathname === '/letters') return await getLetters(url, response);
+        if (url.pathname === '/letters/oneclick.json') return json(response, 200, ctx.letterJobs.status());
         if (url.pathname === '/letters/new') return await getLetterPanel(url, response, { date: assertDate(url.searchParams.get('date')), jobId: url.searchParams.get('job') });
         const letterOpen = /^\/letters\/(\d{4}-\d{2}-\d{2})\/([A-Za-z0-9]{1,80})$/.exec(url.pathname);
         if (letterOpen) {
@@ -341,11 +353,11 @@ export function createHubHandler(ctx) {
       if (request.method === 'POST') return await handlePost(url, request, response);
       return send(response, 405, 'Method not allowed', 'text/plain; charset=utf-8');
     } catch (error) {
-      const wantsJson = url.pathname === '/run' || url.pathname === '/letters/generate' || url.pathname === '/letters/save' || url.pathname === '/settings/cover-letter/sample-track' || url.pathname.endsWith('.json');
-      const status = error instanceof HubInputError || error instanceof LetterInputError ? 400 : error instanceof HubLockedError ? 409 : Number(error?.status) || 500;
+      const wantsJson = url.pathname === '/run' || url.pathname === '/letters/generate' || url.pathname === '/letters/save' || url.pathname === '/letters/oneclick' || url.pathname === '/settings/cover-letter/sample-track' || url.pathname.endsWith('.json');
+      const status = error instanceof HubInputError || error instanceof LetterInputError ? 400 : error instanceof HubLockedError || error instanceof LetterBusyError ? 409 : Number(error?.status) || 500;
       const message = status === 500 ? `Hub error: ${error?.message || error}` : String(error.message || error);
       if (status === 500) console.error(error?.stack || error);
-      if (wantsJson) return json(response, status, { error: message });
+      if (wantsJson) return json(response, status, { error: message, ...(error instanceof LetterBusyError ? { job: error.job } : {}) });
       const back = url.pathname.startsWith('/resumes') ? '/resumes' : url.pathname.startsWith('/settings/cover-letter') ? '/settings#cover-letters' : url.pathname.startsWith('/settings') ? '/settings' : url.pathname.startsWith('/status') ? '/status' : url.pathname.startsWith('/letters') ? '/letters' : '/reports';
       if (request.method === 'POST' && status !== 403) return redirect(response, back, message, 'error');
       return await page(response, status, { active: '', title: 'Error', content: '<h1 class="hub-title">Error</h1>', error: message });

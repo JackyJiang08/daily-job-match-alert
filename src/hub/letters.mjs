@@ -67,6 +67,17 @@ export async function generateLetter(ctx, { date, jobId, trackId, company }) {
   };
 }
 
+// One click from a job card: draft with the recommended track and the cleaned company name (editor pass
+// included), then save and render at once. Returns what the card needs to offer both buttons.
+export async function oneClickLetter(ctx, { date, jobId }) {
+  const draft = await generateLetter(ctx, { date, jobId, trackId: null, company: null });
+  const saved = await saveLetter(ctx, {
+    date, jobId, trackId: draft.track.id, company: draft.company, paragraphs: draft.paragraphs,
+    engine: draft.engine, model: draft.model, issues: draft.issues || [], editorNotes: draft.editorNotes || [], samplesUsed: draft.samplesUsed || [],
+  });
+  return { downloadUrl: saved.downloadUrl, openUrl: `/letters/${date}/${saved.slug}`, pdf: saved.pdf, company: draft.company, track: draft.track, wordCount: saved.wordCount };
+}
+
 // Persists edited paragraphs, renders the PDF, and records everything needed to reopen or re-download.
 export async function saveLetter(ctx, { date, jobId, trackId, company, paragraphs, engine, model, issues = [], editorNotes = [], samplesUsed = [] }) {
   const config = await ctx.loadConfig();

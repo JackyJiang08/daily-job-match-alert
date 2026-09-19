@@ -21,7 +21,7 @@
 
 - **Reports**：用与桌面 HTML 相同的组件渲染每一天的报告，按月分组并带 Today 快捷键，可打开桌面副本与工作簿。
 - **Resumes**：每条简历轨道一张卡，可上传替换 PDF（当晚生效），旧版本保留可回退。
-- **Letters**：已生成 cover letter 的列表，每行有 Open 与 Download PDF；岗位卡上先是 Generate Cover Letter，生成后变成 Open Letter 与 Download PDF。
+- **Letters**：已生成 cover letter 的列表（含生成时间与 Editor notes 数量），每行有 Open 与 Download PDF。岗位卡上的 Generate Cover Letter 是一键式：以推荐轨道与清洗后的公司名在后台生成（含 Editor pass）、渲染并由浏览器自动下载，全程不离开 Reports 页；按钮随后变为 Open Letter 与 Download PDF。同一时间只生成一封，其他卡片的按钮等待；失败时原因显示在卡片内。Open Letter 打开面板，用于修改正文、切换轨道后 Regenerate、重新下载。
 - **Status**：上次/下次运行、锁状态、Sources 表（每个榜单与 board 的启用状态、上次成功、本轮新增数，dormant 的 board 可点 Resume Polling 恢复）、最近 7 天 warnings，以及 Run Now。
 - **Settings**：匹配阈值、接受的匹配等级、引擎与模型、XLSX 是否必需、中枢端口、CLI 连接状态，以及私有的 cover letter 素材。
 

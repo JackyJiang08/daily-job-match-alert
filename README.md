@@ -29,7 +29,7 @@ The evening run writes tomorrow's folder; a morning catch-up after a missed nigh
 
 - **Reports** renders every stored day with the same components as the Desktop HTML, grouped by month with a Today shortcut, and links the Desktop copy and workbook.
 - **Resumes** shows one card per resume track and accepts a replacement PDF, which tonight's run scores against; older versions are kept and can be reselected.
-- **Letters** lists every generated cover letter with Open and Download PDF, and each job card offers Generate Cover Letter or, once one exists, Open Letter and Download PDF.
+- **Letters** lists every generated cover letter (with its generation time and editor-note count) with Open and Download PDF. Each job card offers a one-click Generate Cover Letter: the letter is drafted with the recommended track and the cleaned company name, reviewed by the editor pass, rendered, and downloaded by the browser without leaving the page; the button then becomes Open Letter and Download PDF. One letter generates at a time, so the other cards' buttons wait, and a failure shows its reason on the card. Open Letter leads to the panel for editing the paragraphs, switching the track and regenerating, or rendering again.
 - **Status** shows the last and next run, the lock, a Sources table (every list and board with its last success, new postings, and a Resume Polling button for boards that went dormant), seven days of warnings, and a Run Now button.
 - **Settings** exposes the match threshold, accepted match levels, the engine and model, the XLSX requirement, the hub port, the CLI connection state, and the private cover-letter material.
 

@@ -12,6 +12,7 @@ import { createRunManager } from './run.mjs';
 import { createConnectionsProbe } from './connections.mjs';
 import { describeConnections } from '../engines/index.mjs';
 import { createLetterStore } from '../cover-letter/store.mjs';
+import { createLetterJobs } from './letter-jobs.mjs';
 
 export const DEFAULT_HUB_PORT = 4747;
 export const HUB_HOST = '127.0.0.1';
@@ -43,6 +44,7 @@ export function createHubContext(options) {
     extractText: async file => ctx.extractText(file, { pdftotextCommand: (await ctx.loadConfig().catch(() => ({}))).resumes?.pdftotextCommand || 'pdftotext', minimumCharacters: 50 }),
   });
   ctx.letterEngine = options.letterEngine || null;
+  ctx.letterJobs = options.letterJobs || createLetterJobs({ now });
   ctx.renderPdf = options.renderPdf || null;
   ctx.chromeCommand = options.chromeCommand;
   ctx.connections = options.connections || createConnectionsProbe({ now, runner: options.cliRunner, describe: options.describeConnections || (commands => describeConnections({ runner: options.cliRunner, homedir: ctx.homedir, env: process.env, ...commands })) });

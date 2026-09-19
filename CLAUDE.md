@@ -104,6 +104,11 @@ disabled; do not expand them unless a task says so.
   condensing pass once when the first render spills, then tries B5 and
   0.8in margins. Samples: up to 10, tagged data/llm/agent, three closest to
   the chosen track go into the prompt.
+- One-click generation from a job card: POST /letters/oneclick starts a
+  background job in src/hub/letter-jobs.mjs (one at a time; 409 while busy),
+  GET /letters/oneclick.json is polled by ONECLICK_SCRIPT on the Reports page,
+  and the browser downloads the PDF from the whitelisted letter route. The
+  panel (/letters/new, /letters/<date>/<Company>) always opens in the editor.
 - Personal details (name, phone, email, signature, playbook, sample letters)
   live ONLY under private/cover-letter/; generated letters under
   private/cover-letters/<date>/<Company>/. Never put a real person's data in

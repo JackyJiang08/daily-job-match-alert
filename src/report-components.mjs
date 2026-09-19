@@ -54,6 +54,16 @@ export function renderScores(card) {
   return `<div class="scores">${parts.join('<span class="sep">·</span>')}<span class="recommend">${htmlEscape(card.recommendation)}</span></div>`;
 }
 
+// Card actions are links, or buttons carrying data attributes for a page script to drive.
+function renderAction(action) {
+  const className = htmlEscape(action.className || 'btn secondary small');
+  if (action.button) {
+    const data = Object.entries(action.data || {}).map(([key, value]) => ` data-${htmlEscape(key)}="${htmlEscape(value)}"`).join('');
+    return `<button type="button" class="${className}"${data}>${htmlEscape(action.label)}</button>`;
+  }
+  return `<a class="${className}" href="${htmlEscape(action.href)}"${action.newTab ? ` ${EXTERNAL_LINK}` : ''}>${htmlEscape(action.label)}</a>`;
+}
+
 export function renderJobCard(card) {
   const attributes = [
     `data-score="${card.sort.score}"`,
@@ -77,7 +87,7 @@ export function renderJobCard(card) {
       ${renderFacts('Why It Matches', card.reasons, 'reasons')}
       ${renderFacts('Gaps / Verify', card.gaps, 'gaps')}
       ${description}
-      <div class="actions"><a class="apply" ${EXTERNAL_LINK} href="${htmlEscape(card.url)}">Open Posting</a>${(card.actions || []).map(action => `<a class="${htmlEscape(action.className || 'btn secondary small')}" href="${htmlEscape(action.href)}"${action.newTab ? ` ${EXTERNAL_LINK}` : ''}>${htmlEscape(action.label)}</a>`).join('')}<span class="meta"${card.footnoteTitle ? ` title="${htmlEscape(card.footnoteTitle)}"` : ''}>${htmlEscape(card.footnote)}</span></div>
+      <div class="actions"><a class="apply" ${EXTERNAL_LINK} href="${htmlEscape(card.url)}">Open Posting</a>${(card.actions || []).map(renderAction).join('')}<span class="meta"${card.footnoteTitle ? ` title="${htmlEscape(card.footnoteTitle)}"` : ''}>${htmlEscape(card.footnote)}</span></div>
     </div>
   </article>`;
 }
