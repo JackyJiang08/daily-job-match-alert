@@ -125,6 +125,7 @@ function rowJob(cells, at, format, source, roleType, now, previousCompany) {
     if (!postedAt) return { company, job: null };
     job.postedAt = postedAt;
     job.freshnessBasis = 'source_list_date_posted';
+    job.postedAtPrecision = 'date';
   }
   if (workModel) job.workModel = workModel;
   return { company, job };

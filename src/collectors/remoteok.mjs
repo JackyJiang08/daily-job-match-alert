@@ -58,6 +58,7 @@ export function parseRemoteOkJobs(payload) {
       roleType,
       postedAt: isoDate(item.date) || null,
       freshnessBasis: 'remoteok_date',
+      postedAtPrecision: 'datetime',
       salary: salary(item),
       tags: Array.isArray(item.tags) ? item.tags.map(String) : [],
       description: cleanText(item.description || '').slice(0, 50000),

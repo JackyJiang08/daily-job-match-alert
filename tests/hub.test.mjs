@@ -15,6 +15,7 @@ import { nextScheduledRun, previousScheduledRun, validateSettings } from '../src
 import { hostIsLocal, originIsLocal } from '../src/hub/routes.mjs';
 import { formatDateLabel, formatLocalDateTime, formatLocalShort, formatRelativeTime, localDate } from '../src/time-format.mjs';
 import { createConnectionsProbe } from '../src/hub/connections.mjs';
+import { sha256 } from '../src/utils.mjs';
 
 const NOW = '2026-08-27T12:00:00Z';
 const fixtures = new URL('./fixtures/', import.meta.url);
@@ -598,6 +599,34 @@ test('Status lists every source with its last success and new-posting count, and
     hub.alivePids.add(9001);
     await fs.writeFile(path.join(root, 'state', '.lock'), '9001\n');
     assert.match(decodeURIComponent((await hub.form('/status/sources/resume', { board: 'lever:broken' })).headers.location), /error=The pipeline is running \(PID 9001\)/);
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a persisted Workday company name is cleaned when rendered in the report and the letter panel, without rewriting the payload file', async () => {
+  const root = await prepareProject();
+  const payloadPath = path.join(root, 'state', 'report-payload-2026-08-27.json');
+  const payload = JSON.parse(await fs.readFile(payloadPath, 'utf8'));
+  const workday = job({ url: 'https://motorola.wd5.myworkdayjobs.com/Careers/job/Chicago-IL/Data-Analyst-Intern_R1', company: '100000 Motorola Solutions, Inc.', title: 'Data Analyst Intern', enrichment: 'workday_cxs', postedAt: '2026-08-27T01:00:00.000Z', freshnessBasis: 'workday_posted_on' });
+  payload.matches = [workday];
+  payload.reviewed = [workday];
+  await fs.writeFile(payloadPath, JSON.stringify(payload));
+  const before = await fs.readFile(payloadPath, 'utf8');
+  const hub = await startHub(root);
+  try {
+    const report = await hub.request('GET', '/reports/2026-08-27');
+    assert.match(report.text, /<p class="job-meta">Motorola Solutions · Remote - US · New Grad<\/p>/, 'the card shows the cleaned name');
+    assert.match(report.text, /data-company="motorola solutions"/);
+    assert.match(report.text, /<span class="meta" title="Date only: the source reports no time of day">Posted Aug 26 · fixture<\/span>/, 'a Workday day is shown as the local calendar day, date only');
+    assert.doesNotMatch(report.text, /100000 Motorola/);
+    const jobId = sha256(workday.url).slice(0, 16);
+    const panel = await hub.request('GET', `/letters/new?date=2026-08-27&job=${jobId}`);
+    assert.equal(panel.status, 200);
+    assert.match(panel.text, /<dt>Company<\/dt><dd>Motorola Solutions<\/dd>/);
+    assert.match(panel.text, /id="letter-company" class="control-input" value="Motorola Solutions"/, 'the Company input defaults to the cleaned name');
+    assert.equal(await fs.readFile(payloadPath, 'utf8'), before, 'the payload file is untouched');
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });

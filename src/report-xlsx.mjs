@@ -3,6 +3,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import ExcelJS from 'exceljs';
 import { reportTracks, scoreHeader, trackScore } from './resume-tracks.mjs';
+import { displayCompanyName, postedAtPrecision } from './posting-fields.mjs';
+import { localDate } from './time-format.mjs';
 
 const [jsonPath, outputPath, verifyFlag] = process.argv.slice(2);
 if (!jsonPath || !outputPath) {
@@ -221,12 +223,23 @@ for (let row = 1; row <= roleTypeEndRow; row++) {
 
 for (const column of ['C', 'D', 'E', 'F']) summary.getColumn(column).width = 12;
 
+// Day-level posting dates are written as the calendar day in the report's time zone (no 00:00 time);
+// precise timestamps keep their time of day.
+function postedAtCell(job, timeZone) {
+  if (!job.postedAt) return '';
+  if (postedAtPrecision(job) === 'datetime') return asDate(job.postedAt);
+  const parsed = new Date(job.postedAt);
+  if (Number.isNaN(parsed.getTime())) return String(job.postedAt);
+  const [year, month, day] = localDate(parsed, timeZone).split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
 const rows = jobs.map(job => [
-  job.company,
+  displayCompanyName(job) || job.company,
   job.title,
   job.location,
   job.roleType,
-  asDate(job.postedAt),
+  postedAtCell(job, payload.meta?.timeZone),
   ...tracks.map(track => trackScore(job, track.id)),
   null,
   whyItMatches(job),
@@ -280,7 +293,7 @@ for (let index = 0; index < jobs.length; index++) {
   MATCH_COLUMNS.forEach((column, columnIndex) => {
     matches.getCell(rowNumber, columnIndex + 1).alignment = { vertical: 'top', wrapText: Boolean(column.wrap) };
   });
-  matches.getCell(rowNumber, COLUMN['Posted At']).numFmt = 'yyyy-mm-dd hh:mm';
+  matches.getCell(rowNumber, COLUMN['Posted At']).numFmt = postedAtPrecision(jobs[index]) === 'datetime' ? 'yyyy-mm-dd hh:mm' : 'yyyy-mm-dd';
   for (const column of SCORE_COLUMNS) matches.getCell(rowNumber, column.index).numFmt = '0';
   const link = matches.getCell(rowNumber, COLUMN['Posting Link']);
   if (link.value && typeof link.value === 'object') link.font = { color: { argb: COLORS.link }, underline: true };
@@ -314,6 +327,7 @@ const noteRows = [
   ['Gaps / Verify', 'Skills or eligibility details that were not found in the selected resume or need manual confirmation. "Location unverified" means the posting only says Remote or gives no location; confirm it permits work from the United States.'],
   ['Update today', 'How many runs have contributed to this application date. Every run merges its findings into the day\'s stored payload and re-renders the whole report, so a later run never shrinks it.'],
   ['Excluded rows', 'Postings removed by the deterministic eligibility rules before scoring mattered: a location outside the United States, or cohort wording (class of, graduate by, full-time start) that is incompatible with the configured graduation date. They never appear in Matches.'],
+  ['Posted At', 'When the source says the posting was published. A value with a time of day comes from a board API or structured posting data; a bare date is date only, because the source (a curated list, a Workday "Posted N Days Ago") reports no time of day.'],
   ['Posting Link', 'Clickable link to the original or final resolved posting; the cell shows the domain and the hyperlink carries the full URL.'],
   ['HTML report', 'The full captured JD, salary, employment type, source, discovery time, and freshness basis stay in the companion HTML file.'],
   ['Safety', 'This workbook never submits an application.'],

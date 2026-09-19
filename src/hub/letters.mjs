@@ -10,6 +10,7 @@ import { renderLetterPdf } from '../cover-letter/pdf.mjs';
 import { LetterInputError } from '../cover-letter/store.mjs';
 import { sha256 } from '../utils.mjs';
 import { HubInputError, readReportPayload } from './services.mjs';
+import { displayCompanyName } from '../posting-fields.mjs';
 
 export function jobIdOf(job) {
   return job.semanticId || sha256(job.url || '').slice(0, 16);
@@ -59,10 +60,10 @@ export async function generateLetter(ctx, { date, jobId, trackId, company }) {
     ...result,
     jobId: id,
     date,
-    company: String(company || job.company || '').trim() || 'Company',
+    company: String(company || displayCompanyName(job) || '').trim() || 'Company',
     track,
     tracks,
-    job: { title: job.title, company: job.company, location: job.location, roleType: job.roleType },
+    job: { title: job.title, company: displayCompanyName(job), location: job.location, roleType: job.roleType },
   };
 }
 
@@ -75,7 +76,7 @@ export async function saveLetter(ctx, { date, jobId, trackId, company, paragraph
   const track = tracks.find(item => item.id === trackId) || tracks.find(item => item.id === job.recommendedTrack) || tracks[0] || { id: 'unknown', label: 'Unknown' };
   const body = (Array.isArray(paragraphs) ? paragraphs : []).map(item => String(item || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
   if (!body.length) throw new HubInputError('The letter body is empty');
-  const companyName = String(company || job.company || '').trim() || 'Company';
+  const companyName = String(company || displayCompanyName(job) || '').trim() || 'Company';
   const now = ctx.now();
   const timeZone = config.timeZone || 'America/Chicago';
   const letter = assembleLetter({ profile, company: companyName, paragraphs: body, now, timeZone });

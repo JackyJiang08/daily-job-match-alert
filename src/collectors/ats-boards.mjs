@@ -252,6 +252,7 @@ function atsJob(board, fields) {
     url: fields.url,
     postedAt: fields.postedAt || null,
     freshnessBasis: fields.postedAt ? fields.freshnessBasis : null,
+    postedAtPrecision: fields.postedAt ? (board.kind === 'workday' ? 'date' : 'datetime') : null,
     employmentType: fields.employmentType || '',
     salary: fields.salary || '',
     externalId: fields.externalId || null,

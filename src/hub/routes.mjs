@@ -15,6 +15,7 @@ import { LETTER_SCRIPT, SAMPLE_TRACK_SCRIPT, letterPanel, lettersPage, trackLabe
 import { todayTarget } from './views.mjs';
 import { findLetterJob, generateLetter, jobIdOf, letterEngineFor, saveLetter } from './letters.mjs';
 import { LetterInputError } from '../cover-letter/store.mjs';
+import { displayCompanyName } from '../posting-fields.mjs';
 import { REPORTS_SCRIPT, SETTINGS_SCRIPT, STATUS_SCRIPT, renderHubPage, reportsPage, resumesPage, settingsPage, statusPage } from './views.mjs';
 
 const MAXIMUM_BODY_BYTES = 6 * 1024 * 1024;
@@ -185,7 +186,8 @@ export function createHubHandler(ctx) {
     const { job, id, tracks } = await findLetterJob(ctx, date, jobId);
     const selectedTrack = url.searchParams.get('track') || existing?.record?.track || job.recommendedTrack || tracks[0]?.id || '';
     const engine = letterEngineFor(ctx, config);
-    const content = letterPanel({ date, jobId: id, job, tracks, selectedTrack, company: existing?.record?.company || job.company || '', readiness, existing, engineLabel: `${engine.label} · ${engine.model}` });
+    const shownJob = { ...job, company: displayCompanyName(job) };
+    const content = letterPanel({ date, jobId: id, job: shownJob, tracks, selectedTrack, company: existing?.record?.company || shownJob.company || '', readiness, existing, engineLabel: `${engine.label} · ${engine.model}` });
     await page(response, 200, { active: 'letters', title: `Cover letter · ${job.company || job.title}`, content, script: LETTER_SCRIPT, error: url.searchParams.get('error') || '' });
   }
 

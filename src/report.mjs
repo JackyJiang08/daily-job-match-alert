@@ -9,6 +9,7 @@ import { renderReportPage } from './report-components.mjs';
 import { warningText } from './warnings.mjs';
 import { formatLocalDateTime, formatLocalDay, formatLocalShort } from './time-format.mjs';
 import { normalizeLocation, sha256 } from './utils.mjs';
+import { displayCompanyName, postedAtPrecision } from './posting-fields.mjs';
 
 export const REPORT_TITLE = 'Daily Job Match Alert';
 export const WARNINGS_FILE_NAME = 'warnings.txt';
@@ -69,12 +70,23 @@ function postedEpoch(job) {
   return Number.isNaN(stamp.getTime()) ? '' : String(stamp.getTime());
 }
 
+// "Posted Sep 18 · source" for day-level dates (hover says the source gives no time of day) and
+// "Posted Sep 18, 8:00 PM · source" when the posting time is precise.
 function footnote(job, timeZone) {
   const parts = [];
-  if (job.postedAt) parts.push(`Posted ${formatLocalDay(job.postedAt, timeZone)}`);
-  else if (job.discoveredAt) parts.push(`Found ${formatLocalDay(job.discoveredAt, timeZone)}`);
+  let title = '';
+  if (job.postedAt) {
+    const precision = postedAtPrecision(job);
+    if (precision === 'datetime') {
+      parts.push(`Posted ${formatLocalShort(job.postedAt, timeZone)}`);
+      title = `Posted ${formatLocalDateTime(job.postedAt, timeZone)}`;
+    } else {
+      parts.push(`Posted ${formatLocalDay(job.postedAt, timeZone)}`);
+      title = 'Date only: the source reports no time of day';
+    }
+  } else if (job.discoveredAt) parts.push(`Found ${formatLocalDay(job.discoveredAt, timeZone)}`);
   if (job.source) parts.push(String(job.source));
-  return parts.join(' · ');
+  return { text: parts.join(' · '), title };
 }
 
 export function cardView(job, tracks, timeZone = null, decorate = null) {
@@ -85,8 +97,9 @@ export function cardView(job, tracks, timeZone = null, decorate = null) {
   }
   const recommendedTrack = job.recommendedTrack || scores.find(score => score.best)?.id || '';
   const recommendedLabel = job.recommendedResume || scores.find(score => score.best)?.label || '';
-  const company = job.company || 'Company not resolved';
+  const company = displayCompanyName(job) || 'Company not resolved';
   const extra = typeof decorate === 'function' ? decorate(job) || {} : {};
+  const note = footnote(job, timeZone);
   return {
     id: job.semanticId || sha256(job.url || '').slice(0, 16),
     actions: Array.isArray(extra.actions) ? extra.actions : [],
@@ -104,7 +117,8 @@ export function cardView(job, tracks, timeZone = null, decorate = null) {
     reasons: (job.reasons || []).map(String),
     gaps: (job.gaps || []).map(String),
     description: String(job.description || '').trim(),
-    footnote: footnote(job, timeZone),
+    footnote: note.text,
+    footnoteTitle: note.title,
     sort: {
       score: Number(job.bestScore) || 0,
       company: company.toLowerCase(),
@@ -155,6 +169,9 @@ export function runDetailsView(jobs, meta, tracks) {
     if (meta.reviewedCount != null) counts.push(`${meta.reviewedCount} reviewed`);
     counts.push(`${jobs.length} matched`);
     rows.push({ term: 'Postings', detail: counts.join(' · ') });
+  }
+  if (meta.droppedAfterPreciseTimestamps != null) {
+    rows.push({ term: 'Freshness check', detail: `dropped ${Number(meta.droppedAfterPreciseTimestamps)} postings after precise timestamps` });
   }
   if (meta.candidateCount != null) {
     const limit = Number(meta.maxReviewedPerRun || 0);

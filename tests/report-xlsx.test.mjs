@@ -132,6 +132,30 @@ test('writes and re-reads the ExcelJS workbook with one score column per enabled
   }
 });
 
+test('Posted At keeps the time for precise sources and writes a bare local calendar day for day-level ones', async () => {
+  const meta = { date: '2026-08-27', applicationDate: '2026-08-27', generatedAt: '2026-08-27T01:00:00.000Z', timeZone: 'America/Chicago', resumeTracks: [{ id: 'data', label: 'Data' }], warnings: [], scoringModel: 'local_only' };
+  const base = { title: 'Analyst', location: 'Remote', roleType: 'new_grad', scores: { data: 80 }, bestScore: 80, recommendedTrack: 'data', reasons: ['x'], gaps: [], url: 'https://example.com/1' };
+  const payload = { meta, matches: [
+    { ...base, company: 'Acme', postedAt: '2026-08-27T01:15:00.000Z', freshnessBasis: 'greenhouse_updated_at' },
+    { ...base, company: '100000 Motorola Solutions, Inc.', url: 'https://motorola.wd5.myworkdayjobs.com/Careers/job/x', enrichment: 'workday_cxs', postedAt: '2026-08-27T01:00:00.000Z', freshnessBasis: 'workday_posted_on' },
+  ], reviewed: [] };
+  const { workbook, directory } = await buildWorkbook(payload, 'posted-at');
+  try {
+    const sheet = workbook.getWorksheet('Matches');
+    const postedColumn = 5;
+    assert.equal(sheet.getCell(2, postedColumn).numFmt, 'yyyy-mm-dd hh:mm');
+    assert.equal(sheet.getCell(2, postedColumn).value.toISOString(), '2026-08-27T01:15:00.000Z');
+    assert.equal(sheet.getCell(3, postedColumn).numFmt, 'yyyy-mm-dd', 'a day-level source shows no 00:00');
+    assert.equal(sheet.getCell(3, postedColumn).value.toISOString(), '2026-08-26T00:00:00.000Z', 'the local calendar day in America/Chicago, as a bare date');
+    assert.equal(sheet.getCell(3, 1).value, 'Motorola Solutions', 'the Workday entity name is cleaned in the workbook too');
+    let note = '';
+    workbook.getWorksheet('Notes').eachRow(row => { if (String(row.getCell(1).value) === 'Posted At') note = String(row.getCell(2).value); });
+    assert.match(note, /date only/);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('a single enabled track yields a 10-column sheet and a disabled track never appears', async () => {
   const payload = {
     meta: {

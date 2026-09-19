@@ -8,7 +8,7 @@
 
 1. **采集。** 来源包括公开 GitHub 榜单（SimplifyJobs、Jobright、vanshb03、Zapply、zshah101）、当月的 Hacker News "Who is hiring" 帖、RemoteOK feed、由此前岗位链接自动发现的 Greenhouse / Lever / Ashby / Workday 公开 job board 接口，以及放进 `intake/eml` 的 `.eml` 提醒邮件。每个 board 每晚只轮询一次，带固定 user agent，并使用 ETag / If-Modified-Since 条件请求。
 2. **去重。** URL 规范化（去追踪参数、解析跳转）后与 `state/state.json` 比对，同一岗位即使三个来源都列出也只出现一次。
-3. **抓 JD。** board 接口直接给出完整正文；其他链接只抓取一次，Workday 页面改走租户公开的 JSON 接口。抓不到的岗位后续夜晚重试，被拒绝或已下线的直接关闭。
+3. **抓 JD。** board 接口直接给出完整正文；其他链接只抓取一次，Workday 页面改走租户公开的 JSON 接口。抓不到的岗位后续夜晚重试，被拒绝或已下线的直接关闭。抓取后若拿到精确到分钟的发布时间（board 接口、带时分秒的 JSON-LD `datePosted`），会重新严格套用回看窗口，超出者不评分、不写 seen；天级来源（榜单的 "1d"、Workday 的 "Posted Yesterday"）维持宽松规则。Workday 的实体名（如 `100000 Motorola Solutions, Inc.`）优先换成榜单或注册表里的公司标签，没有时做清洗；旧报告在渲染时同样清洗。报告卡片与 xlsx 的 Posted At 只在来源给出时间时显示时间，天级来源只显示日期并在悬停/Notes 注明 date only。
 4. **硬过滤。** 两条规则由代码强制执行，与模型无关：地点必须在美国（无法判断的会标记 `Location unverified`），岗位要求的毕业窗口必须与 `preferences.graduationDate` 相符。
 5. **订阅引擎评分。** 剩余岗位由 Claude Code CLI 或 Codex CLI（以 claude.ai 或 ChatGPT 订阅登录）逐轨评分，每条简历轨道得到 0–100 分、理由与 gaps，并推荐最合适的轨道。
 6. **写两个文件到桌面。** `~/Desktop/Daily Job Match Alert/<投递日期>/` 下生成一份自包含的 HTML 清单（可排序、搜索、深色模式、每张卡片折叠完整 JD）和一份 XLSX（每条轨道一列分数）。只有当本次运行有降级时才会多出 `warnings.txt`。

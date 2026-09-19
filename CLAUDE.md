@@ -62,6 +62,12 @@ disabled; do not expand them unless a task says so.
   inside the window, postings without a date count as old, and a URL another
   source collected this run is never swallowed by a baseline. Baseline
   entries less than 48 h old are released once at startup (info warning).
+- Freshness re-check: after enrichment, a posting with a minute-precise publish
+  time (board APIs, JSON-LD datePosted with a clock time; src/posting-fields.mjs
+  `holdsToExactWindow`) must sit inside lookbackHours or it is dropped, not seen
+  (meta.droppedAfterPreciseTimestamps). Day-level sources stay lenient. Workday
+  company names prefer the list/registry label, else `cleanWorkdayCompany`;
+  `displayCompanyName` is applied at render time (cards, xlsx, letter panel).
 - Review budget: config.semanticMatching.maxReviewedPerRun (default 120,
   0 = no limit) caps the local candidates sent to the engine per run; the
   rest are deferred in state.deferred (not seen), come back next run whatever

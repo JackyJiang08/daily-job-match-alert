@@ -1,4 +1,5 @@
 import { LOCATION_SEPARATOR, normalizeLocation, canonicalUrl, cleanText, isoDate } from './utils.mjs';
+import { cleanWorkdayCompany, hasClockTime } from './posting-fields.mjs';
 
 function meta(html, key) {
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -135,7 +136,9 @@ function workdayEnrichment(originalJob, posting, finalUrl) {
   const postedOn = startDate ? null : workdayPostedOn(info.postedOn);
   return {
     ...originalJob,
-    company: company || originalJob.company,
+    // A company name the list or board registry already supplied beats the tenant's internal entity
+    // name ("100000 Motorola Solutions, Inc."); when there is none, the entity name is cleaned.
+    company: originalJob.company || cleanWorkdayCompany(company),
     title: cleanText(info.title || originalJob.title),
     location: workdayLocation(info) || originalJob.location,
     employmentType: cleanText(info.timeType || '') || originalJob.employmentType || '',
@@ -143,6 +146,7 @@ function workdayEnrichment(originalJob, posting, finalUrl) {
     description: (cleanText(info.jobDescription) || originalJob.description || '').slice(0, 50000),
     postedAt: startDate || postedOn || originalJob.postedAt,
     freshnessBasis: startDate ? 'workday_start_date' : postedOn ? 'workday_posted_on' : originalJob.freshnessBasis,
+    postedAtPrecision: startDate || postedOn ? 'date' : originalJob.postedAtPrecision,
     finalUrl,
     url: finalUrl,
     enrichment: 'workday_cxs',
@@ -208,6 +212,7 @@ export async function enrichJob(job, network = {}, fetchImpl = fetch) {
           description: cleanText(payload.content || originalJob.description),
           postedAt: isoDate(payload.updated_at) || originalJob.postedAt,
           freshnessBasis: payload.updated_at ? 'greenhouse_updated_at' : originalJob.freshnessBasis,
+          postedAtPrecision: payload.updated_at ? 'datetime' : originalJob.postedAtPrecision,
           finalUrl: originalJob.url,
           enrichment: 'greenhouse_api',
         };
@@ -246,6 +251,8 @@ export async function enrichJob(job, network = {}, fetchImpl = fetch) {
       finalUrl,
       url: finalUrl,
       freshnessBasis: posting?.datePosted ? 'jobposting_date_posted' : originalJob.freshnessBasis,
+      // JSON-LD datePosted is sometimes a bare date; only a value with a clock time is precise.
+      postedAtPrecision: isoDate(posting?.datePosted) ? (hasClockTime(posting.datePosted) ? 'datetime' : 'date') : originalJob.postedAtPrecision,
       enrichment: posting ? 'json_ld_jobposting' : 'html_metadata',
     };
   } catch (error) {

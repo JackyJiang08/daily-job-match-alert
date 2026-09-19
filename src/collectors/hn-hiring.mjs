@@ -63,6 +63,7 @@ export function parseHiringComments(story, { now = new Date() } = {}) {
       roleType: roleTypeFromText(`${header.title} ${text}`),
       postedAt: isoDate(comment.created_at) || now.toISOString(),
       freshnessBasis: 'hn_comment_created_at',
+      postedAtPrecision: 'datetime',
       description: text.slice(0, 50000),
       hnCommentId: id,
       hnStoryTitle: story.title || '',

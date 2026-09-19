@@ -25,6 +25,7 @@ import { acquireRunLock, releaseRunLock } from './lock.mjs';
 import { canonicalUrl, dateWithOffset, htmlEscape, mapLimit, resolveFrom, sha256 } from './utils.mjs';
 import { createWarning, errorSummary } from './warnings.mjs';
 import { formatLocalDateTime } from './time-format.mjs';
+import { holdsToExactWindow } from './posting-fields.mjs';
 
 const execFileAsync = promisify(execFile);
 const REPORT_PAYLOAD_PREFIX = 'report-payload-';
@@ -425,6 +426,21 @@ export async function recoverIncompleteReports(config, state, options = {}) {
   return recovered;
 }
 
+// Second freshness check, after enrichment: a posting whose own publish time is known to the minute
+// (board APIs, JSON-LD datePosted with a clock time) must fall inside the lookback window; day-level
+// sources keep the lenient rule. Dropped postings are not marked seen, so a still-old posting is dropped
+// again next run and a deferred one is never dropped.
+export function applyFreshnessRecheck(jobs, cutoff, isDeferred = () => false) {
+  const kept = [];
+  const dropped = [];
+  for (const job of jobs) {
+    const precise = holdsToExactWindow(job) && !isDeferred(job);
+    if (precise && new Date(job.postedAt) < cutoff) dropped.push(job);
+    else kept.push(job);
+  }
+  return { jobs: kept, dropped };
+}
+
 // Keeps the best `limit` local candidates for the engine (0 or a non-number means no limit). Ranking:
 // postings already deferred twice go first, then local best score with a small bonus per deferral.
 // Non-candidates (no role relevance or a hard blocker) never reach the engine and pass through as-is.
@@ -518,7 +534,11 @@ async function runPipeline(config, clock) {
     warnings.push(createWarning('enrichment', job.source || 'job posting', enrichmentWarningMessage(job, status)));
     return { ...job, enrichmentAttempts: status.attempts, enrichmentTerminal: status.completed };
   });
-  const locallyEvaluated = enriched.map(job => evaluateJob(job, resumes, prefs));
+  const freshness = applyFreshnessRecheck(enriched, cutoff, job => deferredStatus(state, job).deferred);
+  if (freshness.dropped.length) {
+    warnings.push(createWarning('collector', 'freshness', `dropped ${freshness.dropped.length} postings after precise timestamps put them outside the ${config.lookbackHours}-hour window`, 'info'));
+  }
+  const locallyEvaluated = freshness.jobs.map(job => evaluateJob(job, resumes, prefs));
   // Review budget: only the best maxReviewedPerRun local candidates go to the engine tonight. The rest
   // are deferred (not marked seen) and come back next run with priority once deferred twice.
   const budget = applyReviewBudget(locallyEvaluated, state, config.semanticMatching?.maxReviewedPerRun, now);
@@ -568,6 +588,7 @@ async function runPipeline(config, clock) {
     sourceCounts: sourceStats,
     newCount: reviewed.length, newThisRun: enriched.length, reviewedCount: reviewed.length, matchCount: matches.length,
     candidateCount: budget.candidateCount, reviewedThisRun: budget.reviewedCount, deferredCount: budget.deferred.length, maxReviewedPerRun: budget.limit,
+    droppedAfterPreciseTimestamps: freshness.dropped.length,
     warnings: finalWarnings,
     runsToday, firstGeneratedAt: previous?.meta?.firstGeneratedAt || now.toISOString(), lastUpdatedAt: now.toISOString(),
     trigger, completedAt: now.toISOString(), completedAtLocal: formatLocalDateTime(now, timeZone),
