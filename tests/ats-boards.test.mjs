@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
-  ATS_SOURCE_KIND, DORMANT_AFTER_FAILURES, applyConfigBoards, boardFromKey, boardLabel, collectAtsBoards, discoverBoards, identifyBoard,
+  ATS_SOURCE_KIND, DORMANT_AFTER_FAILURES, applyConfigBoards, boardFromKey, boardLabel, collectAtsBoards, discoverBoards, identifyBoard, isQuietBoard,
   normalizeRegistry, parseAshbyJobs, parseGreenhouseJobs, parseLeverPostings, parseWorkdayPostings, pollBoard, readRegistry, registerBoards, resumeBoard, writeRegistry,
 } from '../src/collectors/ats-boards.mjs';
 import { collectAtsBoardSources } from '../src/index.mjs';
@@ -190,51 +190,83 @@ async function temporaryRoot() {
   return fs.mkdtemp(path.join(os.tmpdir(), 'ats-boards-test-'));
 }
 
-test('the first poll of a board is a baseline that is never scored; later polls return only new postings inside the window', async () => {
+test('the first poll of a board baselines only postings older than the window: 3 old go to seen, 2 new are scored, and a posting another source listed is never swallowed', async () => {
   const registry = normalizeRegistry(null);
   registerBoards(registry, discoverBoards([{ url: 'https://job-boards.greenhouse.io/examplecorp/jobs/1', company: 'Example Corp', source: 'SimplifyJobs New Grad' }]), { now: NOW });
   const record = registry.boards['greenhouse:examplecorp'];
   assert.equal(record.origin, 'discovered');
-  assert.equal(record.discoveredAt, NOW.toISOString());
   assert.equal(record.company, 'Example Corp');
-  const payload = await fixture('greenhouse-jobs.json');
+  const template = (await fixture('greenhouse-jobs.json')).jobs[0];
+  const job = (id, title, updatedAt) => ({ ...template, id, absolute_url: `https://job-boards.greenhouse.io/examplecorp/jobs/${id}`, title, updated_at: updatedAt });
+  const payload = { jobs: [
+    job(1, 'Old Listed Elsewhere', '2026-09-01T08:00:00Z'),
+    job(2, 'Old Two', '2026-09-10T08:00:00Z'),
+    job(3, 'Old Three', '2026-09-16T08:00:00Z'),
+    job(4, 'Undated Four', null),
+    job(5, 'New Five', '2026-09-18T08:00:00Z'),
+    job(6, 'New Six', '2026-09-17T13:00:00Z'),
+  ] };
   const warnings = [];
-  const first = await collectAtsBoards({ registry, now: NOW, warnings, fetchImpl: async () => jsonResponse(payload, { headers: { etag: 'W/"v1"' } }) });
-  assert.deepEqual(first.jobs, [], 'nothing is scored on the baseline run');
-  assert.equal(first.baseline.length, 2);
-  assert.equal(first.results[0].baseline, true);
+  const first = await collectAtsBoards({ registry, now: NOW, warnings, excludeUrls: new Set(['https://job-boards.greenhouse.io/examplecorp/jobs/1']), fetchImpl: async () => jsonResponse(payload, { headers: { etag: 'W/"v1"' } }) });
+  assert.deepEqual(first.jobs.map(item => item.title), ['New Five', 'New Six'], 'postings inside the 24-hour window go through the normal flow at once');
+  assert.deepEqual(first.baseline.map(item => item.title), ['Old Two', 'Old Three', 'Undated Four'], 'old and undated postings are baselined; the one Simplify also listed is left to the normal flow');
   assert.equal(record.baselinedAt, NOW.toISOString());
-  assert.equal(record.baselineCount, 2);
-  assert.equal(record.lastJobCount, 2);
-  assert.equal(record.lastSuccessAt, NOW.toISOString());
+  assert.equal(record.baselineCount, 3);
+  assert.equal(record.lastJobCount, 6);
+  assert.equal(record.lastNewCount, 2);
+  assert.equal(record.lastNewAt, NOW.toISOString());
+  assert.equal(record.quiet, false);
   assert.equal(record.etag, 'W/"v1"');
+  assert.deepEqual([first.results[0].baseline, first.results[0].baselineCount, first.results[0].newCount], [true, 3, 2]);
   assert.equal(warnings.length, 1);
   assert.equal(warnings[0].level, 'info');
-  assert.equal(warnings[0].source, 'Greenhouse · Example Corp');
-  assert.match(warnings[0].message, /First poll recorded 2 existing posting\(s\) as already seen \(baseline\)/);
+  assert.match(warnings[0].message, /First poll recorded 3 posting\(s\) older than the 24-hour window as already seen \(baseline\); 2 inside the window go through the normal flow/);
 
-  // Next night: one posting updated inside the window, one old, one already seen.
+  // Next night: one posting updated inside the window, one old, one already seen, one deferred old one.
   const later = new Date('2026-09-19T12:00:00Z');
-  const seen = new Set(payload.jobs.map(job => job.absolute_url));
-  const nextPayload = { jobs: [
-    { ...payload.jobs[0], id: 1, absolute_url: 'https://job-boards.greenhouse.io/examplecorp/jobs/1', title: 'New Grad Analyst', updated_at: '2026-09-19T08:00:00Z' },
-    { ...payload.jobs[0], id: 2, absolute_url: 'https://job-boards.greenhouse.io/examplecorp/jobs/2', title: 'Old Posting', updated_at: '2026-09-01T08:00:00Z' },
-    { ...payload.jobs[0], title: 'Seen Yesterday', updated_at: '2026-09-19T09:00:00Z' },
-  ] };
-  const second = await collectAtsBoards({ registry, now: later, warnings, isSeen: job => seen.has(job.url), fetchImpl: async () => jsonResponse(nextPayload) });
-  assert.deepEqual(second.jobs.map(job => job.title), ['New Grad Analyst'], 'only the unseen posting inside the lookback window is returned');
+  const seen = new Set(['https://job-boards.greenhouse.io/examplecorp/jobs/5']);
+  const nextPayload = { jobs: [job(5, 'Seen Yesterday', '2026-09-19T09:00:00Z'), job(7, 'New Seven', '2026-09-19T08:00:00Z'), job(2, 'Old Two', '2026-09-10T08:00:00Z'), job(8, 'Deferred Eight', '2026-09-01T08:00:00Z')] };
+  const second = await collectAtsBoards({ registry, now: later, warnings, isSeen: item => seen.has(item.url), isDeferred: item => item.url.endsWith('/jobs/8'), fetchImpl: async () => jsonResponse(nextPayload) });
+  assert.deepEqual(second.jobs.map(item => item.title), ['New Seven', 'Deferred Eight'], 'unseen postings inside the window, plus a deferred one whatever its age');
   assert.equal(second.baseline.length, 0);
-  assert.equal(record.lastNewCount, 1);
-  assert.equal(record.lastJobCount, 3);
-  assert.equal(second.results[0].newCount, 1);
+  assert.equal(record.lastNewCount, 2);
+  assert.equal(record.lastJobCount, 4);
   assert.equal(warnings.length, 1, 'no baseline notice the second time');
   assert.equal(sourceLine({ name: 'Greenhouse · Example Corp', kind: 'ats', ok: true, count: 1, jobCount: 3 }), 'Greenhouse · Example Corp: 1 new, 3 listed');
-  assert.equal(sourceLine({ name: 'Greenhouse · Example Corp', kind: 'ats', ok: true, baseline: true, jobCount: 2 }), 'Greenhouse · Example Corp: first poll, 2 existing posting(s) recorded as seen (baseline)');
+  assert.equal(sourceLine({ name: 'Greenhouse · Example Corp', kind: 'ats', ok: true, baseline: true, baselineCount: 3, count: 2, jobCount: 6 }), 'Greenhouse · Example Corp: first poll, 3 older posting(s) recorded as seen (baseline), 2 new');
 
   // A same-day rerun leaves the board alone.
   const rerun = await collectAtsBoards({ registry, now: new Date('2026-09-19T15:00:00Z'), warnings, fetchImpl: async () => { throw new Error('must not be called'); } });
   assert.equal(rerun.results[0].skipped, 'polled recently');
   assert.equal(sourceLine({ name: 'Greenhouse · Example Corp', kind: 'ats', skipped: 'polled recently' }), 'Greenhouse · Example Corp: not polled (polled recently)');
+});
+
+test('a board with no new posting for 30 days turns quiet and is polled weekly until something new appears', async () => {
+  const registry = normalizeRegistry(null);
+  registerBoards(registry, [board('https://jobs.lever.co/sleepy', { company: 'Sleepy Co' })], { now: new Date('2026-07-01T12:00:00Z') });
+  const record = registry.boards['lever:sleepy'];
+  record.baselinedAt = '2026-07-01T12:00:00.000Z';
+  record.lastNewAt = '2026-08-01T12:00:00.000Z';
+  record.lastPolledAt = '2026-09-16T12:00:00.000Z';
+  assert.equal(isQuietBoard(record, NOW), true, '48 days without a new posting');
+  const calls = [];
+  const skipped = await collectAtsBoards({ registry, now: NOW, fetchImpl: async () => { calls.push(1); return jsonResponse([]); } });
+  assert.equal(skipped.results[0].skipped, 'quiet (weekly poll)');
+  assert.equal(skipped.results[0].quiet, true);
+  assert.equal(record.quiet, true);
+  assert.deepEqual(calls, [], 'a quiet board polled two days ago is left alone');
+  record.lastPolledAt = '2026-09-10T12:00:00.000Z';
+  const weekly = await collectAtsBoards({ registry, now: NOW, fetchImpl: async () => { calls.push(1); return jsonResponse([]); } });
+  assert.equal(weekly.results[0].skipped, null, 'after a week the quiet board is polled again');
+  assert.equal(record.quiet, true, 'still nothing new');
+  const template = (await fixture('lever-postings.json'))[0];
+  const woke = await collectAtsBoards({ registry, now: new Date('2026-09-26T12:00:00Z'), fetchImpl: async () => jsonResponse([{ ...template, createdAt: new Date('2026-09-26T08:00:00Z').getTime() }]) });
+  assert.equal(woke.jobs.length, 1);
+  assert.equal(record.quiet, false, 'a new posting wakes the board up');
+  assert.equal(record.lastNewAt, '2026-09-26T12:00:00.000Z');
+  assert.equal(woke.results[0].quiet, false);
+  assert.equal(isQuietBoard({ discoveredAt: NOW.toISOString() }, NOW), false, 'a fresh discovery is not quiet');
+  assert.equal(isQuietBoard({ discoveredAt: '2026-08-01T00:00:00Z' }, NOW), true, 'a board that never had a new posting counts from its discovery');
 });
 
 test('one failing board only warns; the others still deliver, and the seventh consecutive failure makes a board dormant until resumed', async () => {
@@ -244,7 +276,7 @@ test('one failing board only warns; the others still deliver, and the seventh co
   const fetchImpl = async url => (url.includes('lever') ? jsonResponse({}, { status: 500 }) : jsonResponse(healthy));
   const warnings = [];
   const first = await collectAtsBoards({ registry, now: NOW, warnings, fetchImpl });
-  assert.equal(first.baseline.length, 2, 'the healthy board baselined normally');
+  assert.equal(first.baseline.length + first.jobs.length, 2, 'the healthy board was polled normally');
   const broken = registry.boards['lever:broken'];
   assert.equal(broken.consecutiveFailures, 1);
   assert.equal(broken.lastError, 'HTTP 500');

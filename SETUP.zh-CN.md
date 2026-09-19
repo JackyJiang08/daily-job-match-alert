@@ -67,11 +67,11 @@ Cover letter 由同一个订阅引擎根据你的 playbook、最多三封样稿�
 | Himalaya 邮箱文件夹 | `himalaya` 只列 envelope 与 `--preview` 读取 | 你订阅的官方提醒邮件；不标记、不移动、不发送 | 已实现，未启用（`sources.himalaya.enabled: false`） |
 | career-ops scan history | [career-ops](https://github.com/santifer/career-ops) 写出的本地 TSV | 你自己的本地文件 | 可选（`sources.careerOps`） |
 
-每个来源在 `sources` 下都有独立的 `enabled` 开关；每个新榜单或 feed 首次接入都先走基线：第一次采集把它列出的岗位全部记为已见、不评分，因此开启一个来源不会让某天的报告被灌满。榜单返回 200 但解析出 0 行会触发格式变更 warning；单个来源失败只记 warning，其余照常；Run Details 与 Status 页的 Sources 表各有一行。多榜单同一岗位只出现一次，来源字段记录全部命中的榜单。
+每个来源在 `sources` 下都有独立的 `enabled` 开关；每个新榜单、feed 或 board 首次接入都先走基线：第一次采集只把发布时间早于回看窗口（以及没有发布时间）的岗位记为已见，窗口内的岗位立即按正常流程去重、评分；同一晚被其他来源列出的岗位绝不会被基线吞掉。因此开启一个来源既不会灌满报告，也不会漏掉真正的新岗位。榜单返回 200 但解析出 0 行会触发格式变更 warning；单个来源失败只记 warning，其余照常；Run Details 与 Status 页的 Sources 表各有一行。多榜单同一岗位只出现一次，来源字段记录全部命中的榜单。
 
 **board 如何被发现。** 每晚管道扫描本轮采集到的所有 URL，识别 Greenhouse / Lever / Ashby / Workday 岗位，并把对应 board 记入 `state/ats-boards.json`（含首次发现日期、揭示它的来源、最近一次成功轮询与岗位数）。也可以手动追加（`{ "url": "https://job-boards.greenhouse.io/examplecorp" }`，或 `greenhouse:` / `lever:` / `ashby:` / `workday:tenant/site` 形式的 key），或用 `"enabled": false` 禁用。
 
-**首次轮询只做基线。** 某 board 第一次被轮询时，它列出的全部岗位只写入 seen、不进评分；数量以 info 级别写进 `warnings.txt` 与 Run Details。从下一晚起只处理 posted / updated 落在回看窗口内的新岗位。每 board 每晚最多一次，并发受 `network.concurrency` 约束，请求头沿用 `network.userAgent`；单个 board 失败只记 warning；连续 7 晚失败的 board 标为 dormant 并停止轮询，直到在 Status 页点 Resume Polling。来自 board 的岗位在报告卡片上显示为 `Greenhouse · Example Corp` 等。
+**首次轮询只做基线。** 某 board 第一次被轮询时，早于回看窗口的岗位写入 seen，窗口内的岗位直接评分；数量以 info 级别写进 `warnings.txt` 与 Run Details。此后每晚只处理 posted / updated 落在回看窗口内的岗位。每 board 每晚最多一次，并发受 `network.concurrency` 约束，请求头沿用 `network.userAgent`；单个 board 失败只记 warning；30 天没有新岗位的 board 标为 quiet、改为每周轮询一次，出现新岗位后自动恢复每晚；连续 7 晚失败的 board 标为 dormant 并停止轮询，直到在 Status 页点 Resume Polling。来自 board 的岗位在报告卡片上显示为 `Greenhouse · Example Corp` 等。
 
 ### 明确不接入的平台及原因
 
@@ -89,7 +89,8 @@ Cover letter 由同一个订阅引擎根据你的 playbook、最多三封样稿�
 - **补跑。** 只有 HTML 与 XLSX 都落盘才记录 `state.lastSuccessfulRun`；登录或开机触发的补跑路径仅在上次成功超过 26 小时时执行。
 - **锁。** `state/.lock` 保存持有者 PID；第二个实例直接退出，PID 已死的陈旧锁自动清除。
 - **同日累积。** `state/report-payload-<日期>.json` 保存该投递日期的全部结果；每次运行合并进去（语义评审过的版本优先、更长的 JD 优先）并以 `Daily update #N` 重新渲染；未完成的日期在下一次运行开始时先重建。
-- **chaos 套件。** `npm run chaos` 在临时目录跑六个场景，CI 每次执行：基线、全部采集源断网、订阅 CLI 不可用、畸形 `.eml`、XLSX 失败后恢复、某 ATS 接口返回 500。每个场景都必须仍留下当日文件夹与 HTML。
+- **评分配额。** `semanticMatching.maxReviewedPerRun`（默认 120，`0` 为不限）限制每晚送引擎评审的本地候选数：本地分数高的先评，超出的岗位顺延到下一轮且不写 seen，次晚无论多旧都会回来，连续两轮被顺延的岗位第三轮优先。Run Details 与 Status 显示候选数 / 评审数 / 顺延数，Settings 可改上限。
+- **chaos 套件。** `npm run chaos` 在临时目录跑七个场景，CI 每次执行：基线、全部采集源断网、订阅 CLI 不可用、畸形 `.eml`、XLSX 失败后恢复、某 ATS 接口返回 500、候选超出评审上限。每个场景都必须仍留下当日文件夹与 HTML。
 
 ## 快速开始
 

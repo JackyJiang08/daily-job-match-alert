@@ -38,15 +38,36 @@ disabled; do not expand them unless a task says so.
   lock, warnings.txt per day, ERROR-*.html, Run Now = child
   `node src/index.mjs` with DAILY_JOB_MATCH_ALERT_TRIGGER=manual under the
   run lock), Settings (five keys, surgical config.json edit under the lock).
-- The hub only reads pipeline artifacts; it writes config.json and private/
-  (gitignored). POSTs require a loopback Host/Origin; uploads are .pdf ≤ 5 MB;
-  path params are pattern-checked. Never render resume text in the hub.
+- The hub only reads pipeline artifacts; it writes config.json, private/
+  (gitignored), and state/ats-boards.json (the ATS board registry, when a
+  dormant board is resumed from Status). Status's Sources card reads that
+  registry plus the source catalog (src/collectors/catalog.mjs) and the
+  latest payload's per-source counts. POSTs require a loopback Host/Origin;
+  uploads are .pdf ≤ 5 MB; path params are pattern-checked. Never render
+  resume text in the hub.
 - Its LaunchAgent (launchd/com.dailyjobmatchalert.hub.plist.template,
   scripts/install-hub-launchd.sh) is separate from the nightly one.
 - All hub and report timestamps render in config.timeZone via src/time-format.mjs
   ("Sep 13, 2026, 8:00 PM"); never show UTC. The pipeline writes meta.trigger and
   meta.completedAt into each day payload; Status reads those, not the logs.
   After pulling new code run `npm run hub:restart` (launchctl kickstart).
+## Sources, baselines, and the review budget
+- Built-in sources live in src/collectors/ (SimplifyJobs, community GitHub
+  lists via catalog.mjs, Hacker News hiring, RemoteOK, email files) and ATS
+  boards discovered from posting URLs (ats-boards.mjs, registry in
+  state/ats-boards.json; quiet after 30 days without new postings → weekly
+  polls; dormant after 7 consecutive failures).
+- Baseline rule: the first poll of a board or list marks only postings older
+  than lookbackHours as seen (`baseline: true`, postedAt stored); postings
+  inside the window, postings without a date count as old, and a URL another
+  source collected this run is never swallowed by a baseline. Baseline
+  entries less than 48 h old are released once at startup (info warning).
+- Review budget: config.semanticMatching.maxReviewedPerRun (default 120,
+  0 = no limit) caps the local candidates sent to the engine per run; the
+  rest are deferred in state.deferred (not seen), come back next run whatever
+  their age, and jump the queue once deferred twice. Run Details and Status
+  show candidates / reviewed / deferred.
+
 ## Scoring engines (src/engines/)
 - One interface per engine: verifyAuth(), reviewBatch(prompt, schema,
   { tempDirectory }), describeModel(), modelMatches(actual),

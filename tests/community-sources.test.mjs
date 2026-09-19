@@ -10,6 +10,7 @@ import { collectHackerNewsHiring, parseHiringComments, parseHiringHeader } from 
 import { collectRemoteOk, parseRemoteOkJobs, remoteOkLocation } from '../src/collectors/remoteok.mjs';
 import { collectEnabledSources } from '../src/index.mjs';
 import { isJobSeen } from '../src/state.mjs';
+import { sha256 } from '../src/utils.mjs';
 
 const fixtures = new URL('./fixtures/lists/', import.meta.url);
 const NOW = new Date('2026-09-19T01:00:00Z');
@@ -215,27 +216,46 @@ test('one failing community source only warns while the others deliver, and ever
   assert.deepEqual(sourceStats.map(stat => [stat.name, stat.ok, stat.count]), [['vanshb03 Summer 2027 Internships', true, 2], [HACKER_NEWS_SOURCE, false, 0], [REMOTEOK_SOURCE, true, 1]]);
 });
 
-test('the first collection of a new community source is a baseline: postings are marked seen and not returned; the next collection returns them', async () => {
+test('the first collection of a new community source baselines only old postings, keeps in-window ones, and never swallows a posting another source listed', async () => {
   const state = { seen: {} };
+  const config = sourcesConfig();
+  config.sources.simplifyNewGrad = { enabled: true, url: 'new-grad' };
   const collectors = {
-    githubList: async () => [{ url: 'https://example.com/list/1', title: 'Data Intern', company: 'A', description: '' }],
-    hackerNewsHiring: async () => [{ url: 'https://news.ycombinator.com/item?id=1', title: 'Junior Analyst', company: 'B', description: 'x' }],
-    remoteOk: async () => [{ url: 'https://remoteok.com/remote-jobs/x', title: 'Intern', company: 'C', description: 'd' }],
+    simplify: async () => [{ url: 'https://example.com/list/shared', title: 'Shared Intern', company: 'S', description: '', sourceAgeDays: 1 }],
+    githubList: async () => [
+      { url: 'https://example.com/list/old', title: 'Old Intern', company: 'A', description: '', postedAt: '2026-09-01T12:00:00Z' },
+      { url: 'https://example.com/list/shared', title: 'Shared Intern', company: 'A', description: '', postedAt: '2026-09-01T12:00:00Z' },
+      { url: 'https://example.com/list/undated', title: 'Undated Intern', company: 'A', description: '' },
+      { url: 'https://example.com/list/fresh', title: 'Fresh Intern', company: 'A', description: '', sourceAgeDays: 0.5 },
+    ],
+    hackerNewsHiring: async () => [{ url: 'https://news.ycombinator.com/item?id=1', title: 'Junior Analyst', company: 'B', description: 'x', postedAt: '2026-09-18T20:00:00Z' }],
+    remoteOk: async () => [{ url: 'https://remoteok.com/remote-jobs/x', title: 'Intern', company: 'C', description: 'd', postedAt: '2026-08-01T00:00:00Z' }],
   };
   const warnings = [];
   const sourceStats = [];
-  const first = await collectEnabledSources(sourcesConfig(), NOW, { warnings, sourceStats, collectors, baseline: { state, now: NOW } });
-  assert.deepEqual(first, [], 'nothing is scored on the first night');
+  const cutoff = new Date(NOW.getTime() - 24 * 3600 * 1000);
+  const first = await collectEnabledSources(config, cutoff, { warnings, sourceStats, collectors, baseline: { state, now: NOW, lookbackHours: 24 } });
+  assert.deepEqual(first.map(job => job.title).sort(), ['Fresh Intern', 'Junior Analyst', 'Shared Intern'], 'in-window postings and the Simplify listing go through; old and undated ones do not');
   assert.deepEqual(Object.keys(state.sourceBaselines).sort(), [HACKER_NEWS_SOURCE, REMOTEOK_SOURCE, 'vanshb03 Summer 2027 Internships']);
-  assert.deepEqual(state.sourceBaselines[REMOTEOK_SOURCE], { baselinedAt: NOW.toISOString(), count: 1 });
-  for (const url of ['https://example.com/list/1', 'https://news.ycombinator.com/item?id=1', 'https://remoteok.com/remote-jobs/x']) assert.equal(isJobSeen(state, { url }), true, `${url} is seen`);
-  assert.equal(Object.values(state.seen)[0].lastEnrichment, 'source_baseline');
+  assert.deepEqual(state.sourceBaselines['vanshb03 Summer 2027 Internships'], { baselinedAt: NOW.toISOString(), count: 2 });
+  assert.deepEqual(state.sourceBaselines[HACKER_NEWS_SOURCE], { baselinedAt: NOW.toISOString(), count: 0 });
+  for (const url of ['https://example.com/list/old', 'https://example.com/list/undated', 'https://remoteok.com/remote-jobs/x']) assert.equal(isJobSeen(state, { url }), true, `${url} is baselined`);
+  for (const url of ['https://example.com/list/shared', 'https://example.com/list/fresh', 'https://news.ycombinator.com/item?id=1']) assert.equal(isJobSeen(state, { url }), false, `${url} is not swallowed`);
+  const oldEntry = Object.values(state.seen).find(entry => entry.url === 'https://example.com/list/old');
+  assert.equal(oldEntry.lastEnrichment, 'source_baseline');
+  assert.equal(oldEntry.baseline, true);
+  assert.equal(oldEntry.postedAt, '2026-09-01T12:00:00Z', 'the posting date is kept so a later release can judge it');
   assert.equal(warnings.length, 3);
-  assert.ok(warnings.every(warning => warning.level === 'info' && /First collection recorded 1 existing posting\(s\) as already seen \(baseline\)/.test(warning.message)));
-  assert.deepEqual(sourceStats.map(stat => [stat.name, stat.baseline, stat.count, stat.jobCount]), [['vanshb03 Summer 2027 Internships', true, 0, 1], [HACKER_NEWS_SOURCE, true, 0, 1], [REMOTEOK_SOURCE, true, 0, 1]]);
+  assert.ok(warnings.every(warning => warning.level === 'info' && /older than the 24-hour window as already seen \(baseline\)/.test(warning.message)));
+  assert.match(warnings.find(warning => warning.source === 'vanshb03 Summer 2027 Internships').message, /recorded 2 posting\(s\).*; 1 inside the window go through the normal flow/, 'the shared posting is neither baselined nor counted as this list\'s own in-window posting');
+  assert.deepEqual(sourceStats.map(stat => [stat.name, stat.baseline, stat.count, stat.jobCount, stat.baselineCount]), [['SimplifyJobs New Grad', undefined, 1, undefined, undefined], ['vanshb03 Summer 2027 Internships', true, 1, 4, 2], [HACKER_NEWS_SOURCE, true, 1, 1, 0], [REMOTEOK_SOURCE, true, 0, 1, 1]]);
 
-  const second = await collectEnabledSources(sourcesConfig(), NOW, { warnings: [], sourceStats: [], collectors, baseline: { state, now: new Date('2026-09-20T01:00:00Z') } });
-  assert.equal(second.length, 3, 'from the second night on the postings flow through (the seen check downstream drops the old ones)');
-  const without = await collectEnabledSources(sourcesConfig(), NOW, { collectors });
-  assert.equal(without.length, 3, 'without a baseline context the collectors behave as before');
+  const second = await collectEnabledSources(config, cutoff, { warnings: [], sourceStats: [], collectors, baseline: { state, now: new Date('2026-09-20T01:00:00Z'), lookbackHours: 24 } });
+  assert.equal(second.length, 7, 'from the second night on every posting flows through (the seen check downstream drops the old ones)');
+  const deferredState = { seen: {}, sourceBaselines: {}, deferred: { [sha256('https://example.com/list/old')]: { deferredCount: 1 } } };
+  const withDeferred = await collectEnabledSources({ ...config, sources: { ...config.sources, simplifyNewGrad: { enabled: false } } }, cutoff, { collectors, baseline: { state: deferredState, now: NOW, lookbackHours: 24 } });
+  assert.ok(withDeferred.some(job => job.title === 'Old Intern'), 'a deferred posting is returned whatever its age');
+  assert.equal(isJobSeen(deferredState, { url: 'https://example.com/list/old' }), false);
+  const without = await collectEnabledSources(sourcesConfig(), cutoff, { collectors });
+  assert.equal(without.length, 6, 'without a baseline context the collectors behave as before');
 });

@@ -1,7 +1,7 @@
 // One chaos scenario: build an isolated config under <workRoot>/<scenario>, run src/index.mjs
 // against it, and assert that the Desktop-equivalent output folder still holds a usable report.
 //
-//   node scripts/chaos-scenario.mjs <baseline|offline|llm-down|bad-input|xlsx-recovery|ats-500> <workRoot>
+//   node scripts/chaos-scenario.mjs <baseline|offline|llm-down|bad-input|xlsx-recovery|ats-500|review-cap> <workRoot>
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -379,6 +379,41 @@ scenarios['ats-500'] = async function atsFiveHundred() {
   } finally {
     await new Promise(resolve => server.close(resolve));
   }
+};
+
+// More local candidates than semanticMatching.maxReviewedPerRun allows: the surplus is deferred (not
+// seen), disclosed as an info line, and reviewed first on the next run.
+scenarios['review-cap'] = async function reviewCap() {
+  const directory = await prepareDirectory('review-cap');
+  await addFixtureEmail(directory, 'demo-new-grad-alert.eml');
+  await addFixtureEmail(directory, 'sample.eml');
+  const config = baseConfig(directory);
+  config.semanticMatching = { engine: 'local_only', maxReviewedPerRun: 1 };
+  const configPath = await writeConfig(directory, config);
+  const first = await runPipeline(configPath);
+  const artifacts = await assertDesktopArtifacts(config, first);
+  assert.equal(first.exitCode, 0, `review-cap run exited ${first.exitCode}`);
+  assert.equal(first.summary.meta.maxReviewedPerRun, 1);
+  assert.ok(first.summary.meta.candidateCount >= 2, `expected at least two local candidates, got ${first.summary.meta.candidateCount}`);
+  assert.equal(first.summary.meta.reviewedThisRun, 1);
+  assert.equal(first.summary.meta.deferredCount, first.summary.meta.candidateCount - 1);
+  const deferral = artifacts.warnings.find(item => item.source === 'review budget');
+  assert.ok(deferral, `no review budget warning: ${warningLines(artifacts.warnings).join(' | ')}`);
+  assert.equal(deferral.level, 'info');
+  assert.match(deferral.message, /^deferred \d+ postings to the next run \(review limit 1 per run\)/);
+  assert.match(artifacts.html, /Review budget<\/dt><dd>\d+ candidates · 1 reviewed · \d+ deferred \(limit 1 per run\)/);
+  const state = JSON.parse(await fs.readFile(path.join(directory, 'state', 'state.json'), 'utf8'));
+  const deferredUrls = Object.values(state.deferred || {}).map(entry => entry.url);
+  assert.equal(deferredUrls.length, first.summary.meta.deferredCount, 'every deferred posting is recorded');
+  for (const url of deferredUrls) assert.ok(!Object.values(state.seen).some(entry => entry.url === url), `${url} was deferred but marked seen`);
+
+  const second = await runPipeline(configPath, '2026-08-27T13:00:00Z');
+  assert.equal(second.exitCode, 0, `second review-cap run exited ${second.exitCode}`);
+  assert.equal(second.summary.meta.reviewedThisRun, 1, 'the deferred posting is reviewed on the next run');
+  assert.equal(second.summary.meta.candidateCount, first.summary.meta.deferredCount, 'only the deferred posting(s) come back; the reviewed one is seen');
+  const later = JSON.parse(await fs.readFile(path.join(directory, 'state', 'state.json'), 'utf8'));
+  assert.equal(Object.keys(later.deferred || {}).length, Math.max(0, first.summary.meta.deferredCount - 1));
+  return `${first.summary.meta.candidateCount} candidates, 1 reviewed, ${first.summary.meta.deferredCount} deferred (not seen); next run reviewed the deferred posting first`;
 };
 
 const scenario = scenarios[scenarioName];

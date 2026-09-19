@@ -363,6 +363,10 @@ export async function buildStatusView(ctx, config) {
     engine: latest?.meta?.engine || null,
     scoringModel: latest?.meta?.scoringModel || null,
     matchCount: latest?.meta?.matchCount ?? latest?.matches?.length ?? null,
+    candidateCount: latest?.meta?.candidateCount ?? null,
+    reviewedThisRun: latest?.meta?.reviewedThisRun ?? null,
+    deferredCount: latest?.meta?.deferredCount ?? null,
+    maxReviewedPerRun: latest?.meta?.maxReviewedPerRun ?? null,
     runsToday: latest?.meta?.runsToday ?? null,
     complete: latest?.complete === true,
     lastSuccessfulRun: state.lastSuccessfulRun || null,
@@ -437,7 +441,7 @@ export async function sourcesView(ctx, config, latest) {
     rows.push({
       key: board.key, label, kind: board.kind, enabled: board.enabled !== false,
       lastSuccessAt: board.lastSuccessAt || null, newCount: stat ? Number(stat.count || 0) : (board.lastNewCount ?? null), jobCount: board.lastJobCount ?? null,
-      baselineCount: board.baselineCount ?? null, baselinedAt: board.baselinedAt || null, dormant: board.dormant === true, dormantSince: board.dormantSince || null,
+      baselineCount: board.baselineCount ?? null, baselinedAt: board.baselinedAt || null, dormant: board.dormant === true, dormantSince: board.dormantSince || null, quiet: board.quiet === true, lastNewAt: board.lastNewAt || null,
       error: board.lastError || null, skipped: stat?.skipped || null, consecutiveFailures: Number(board.consecutiveFailures || 0), boardUrl: board.boardUrl || null, origin: board.origin || null,
     });
   }
@@ -488,6 +492,7 @@ export async function readSettings(ctx) {
   for (const id of ENGINE_IDS) models[id] = resolveModel(semantic, id) || ENGINE_DEFAULT_MODELS[id];
   return {
     minimumMatchScore: config.minimumMatchScore ?? 60,
+    maxReviewedPerRun: semantic.maxReviewedPerRun == null ? 120 : Number(semantic.maxReviewedPerRun),
     acceptedMatchLevels: Array.isArray(semantic.acceptedMatchLevels) ? semantic.acceptedMatchLevels : ['high'],
     engine,
     engines: ENGINE_IDS.map(id => ({ id, label: ENGINE_LABELS[id] })),
@@ -518,11 +523,15 @@ export function validateSettings(form) {
   if (!MODEL_PATTERN.test(model)) errors.push(engine === 'codex' ? 'Model must be a Codex model name such as gpt-5.6-sol' : 'Model must be a Claude Code alias (fable, opus, sonnet, haiku) or a full model name such as claude-fable-5');
   const hubPort = Number(form.hubPort);
   if (!Number.isInteger(hubPort) || hubPort < 1024 || hubPort > 65535) errors.push('Hub port must be a whole number from 1024 to 65535');
+  // Optional: a form without the field leaves semanticMatching.maxReviewedPerRun untouched; 0 means no limit.
+  const budgetGiven = form.maxReviewedPerRun != null && String(form.maxReviewedPerRun).trim() !== '';
+  const maxReviewedPerRun = budgetGiven ? Number(form.maxReviewedPerRun) : null;
+  if (budgetGiven && (!Number.isInteger(maxReviewedPerRun) || maxReviewedPerRun < 0 || maxReviewedPerRun > 5000)) errors.push('Max reviewed per run must be a whole number from 0 (no limit) to 5000');
   const xlsxRequired = form.xlsxRequired === 'on' || form.xlsxRequired === 'true' || form.xlsxRequired === true;
   // Only the settings form carries the flag; a form without it (older callers) leaves the config value alone.
   const editorReview = form.editorReviewPresent != null ? (form.editorReview === 'on' || form.editorReview === 'true' || form.editorReview === true) : null;
   if (errors.length) throw new HubInputError(errors.join('; '));
-  return { minimumMatchScore, acceptedMatchLevels: MATCH_LEVELS.filter(level => levels.includes(level)), engine, model, xlsxRequired, editorReview, hubPort };
+  return { minimumMatchScore, acceptedMatchLevels: MATCH_LEVELS.filter(level => levels.includes(level)), engine, model, xlsxRequired, editorReview, hubPort, maxReviewedPerRun };
 }
 
 // "Save this path to config": pins the resolved binary as semanticMatching.<engine>Command.
@@ -556,6 +565,7 @@ export async function saveSettings(ctx, form) {
     config.minimumMatchScore = settings.minimumMatchScore;
     config.semanticMatching = config.semanticMatching && typeof config.semanticMatching === 'object' ? config.semanticMatching : {};
     config.semanticMatching.acceptedMatchLevels = settings.acceptedMatchLevels;
+    if (settings.maxReviewedPerRun != null) config.semanticMatching.maxReviewedPerRun = settings.maxReviewedPerRun;
     if (settings.engine) config.semanticMatching.engine = settings.engine;
     config.semanticMatching.model = settings.model;
     const activeEngine = settings.engine || normalizeEngineId(config.semanticMatching.engine);

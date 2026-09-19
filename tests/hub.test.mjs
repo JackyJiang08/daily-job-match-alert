@@ -428,6 +428,7 @@ test('Settings groups the fields, writes only its keys, preserves the rest and t
     assert.match(page.text, /<legend>Hub<\/legend>[\s\S]*?<span>Port/);
     assert.match(page.text, /<p class="form-foot">Changes apply to the next run\.<\/p>/);
     assert.match(page.text, /name="minimumMatchScore"[^>]*value="70"/);
+    assert.match(page.text, /<span>Max Reviewed Per Run \(0 = no limit\)<\/span><input type="number" name="maxReviewedPerRun" class="control-input" min="0" max="5000" step="1" value="120" required>/, 'the default budget is shown when config has none');
     const saved = await hub.form('/settings', { minimumMatchScore: '75', acceptedMatchLevels: 'high', model: 'claude-fable-5', xlsxRequired: 'on', hubPort: '5000' });
     assert.equal(saved.status, 303);
     assert.match(saved.headers.location, /notice=/);
@@ -455,6 +456,15 @@ test('Settings groups the fields, writes only its keys, preserves the rest and t
     assert.match(message, /error=.*0 to 100.*high, medium, low.*Model must be.*1024 to 65535/);
     assert.equal((await readConfig(root)).minimumMatchScore, 60, 'nothing written on validation failure');
     assert.throws(() => validateSettings({ minimumMatchScore: '70', acceptedMatchLevels: 'high', model: 'fable', hubPort: 'abc' }), /Hub port/);
+    assert.throws(() => validateSettings({ minimumMatchScore: '70', acceptedMatchLevels: 'high', model: 'fable', hubPort: '4747', maxReviewedPerRun: '-1' }), /Max reviewed per run/);
+    assert.equal(validateSettings({ minimumMatchScore: '70', acceptedMatchLevels: 'high', model: 'fable', hubPort: '4747' }).maxReviewedPerRun, null, 'absent: config untouched');
+    const budgeted = await hub.form('/settings', { minimumMatchScore: '60', acceptedMatchLevels: 'high', model: 'fable', hubPort: '4747', maxReviewedPerRun: '40' });
+    assert.equal(budgeted.status, 303);
+    assert.equal((await readConfig(root)).semanticMatching.maxReviewedPerRun, 40);
+    assert.match((await hub.request('GET', '/settings')).text, /name="maxReviewedPerRun"[^>]*value="40"/);
+    const unlimited = await hub.form('/settings', { minimumMatchScore: '60', acceptedMatchLevels: 'high', model: 'fable', hubPort: '4747', maxReviewedPerRun: '0' });
+    assert.equal(unlimited.status, 303);
+    assert.equal((await readConfig(root)).semanticMatching.maxReviewedPerRun, 0);
 
     hub.alivePids.add(9001);
     await fs.writeFile(path.join(root, 'state', '.lock'), '9001\n');
@@ -542,10 +552,12 @@ test('Status lists every source with its last success and new-posting count, and
   const registry = { version: 1, boards: {
     'greenhouse:examplecorp': { key: 'greenhouse:examplecorp', kind: 'greenhouse', token: 'examplecorp', company: 'Example Corp', boardUrl: 'https://job-boards.greenhouse.io/examplecorp', apiUrl: 'https://boards-api.greenhouse.io/v1/boards/examplecorp/jobs?content=true', origin: 'discovered', discoveredAt: '2026-08-20T01:00:00.000Z', enabled: true, lastPolledAt: '2026-08-27T01:00:00.000Z', lastSuccessAt: '2026-08-27T01:00:00.000Z', lastJobCount: 40, lastNewCount: 3, baselinedAt: '2026-08-20T01:00:00.000Z', baselineCount: 38, consecutiveFailures: 0, lastError: null, dormant: false, dormantSince: null },
     'lever:broken': { key: 'lever:broken', kind: 'lever', slug: 'broken', company: 'Broken Co', boardUrl: 'https://jobs.lever.co/broken', apiUrl: 'https://api.lever.co/v0/postings/broken?mode=json', origin: 'config', discoveredAt: '2026-08-10T01:00:00.000Z', enabled: true, lastPolledAt: '2026-08-27T01:00:00.000Z', lastSuccessAt: '2026-08-19T01:00:00.000Z', lastJobCount: 12, lastNewCount: 0, baselinedAt: '2026-08-10T01:00:00.000Z', baselineCount: 12, consecutiveFailures: 7, lastError: 'HTTP 500', dormant: true, dormantSince: '2026-08-27T01:00:00.000Z' },
+    'ashby:sleepy': { key: 'ashby:sleepy', kind: 'ashby', slug: 'sleepy', company: 'Sleepy Co', boardUrl: 'https://jobs.ashbyhq.com/sleepy', apiUrl: 'https://api.ashbyhq.com/posting-api/job-board/sleepy', origin: 'discovered', discoveredAt: '2026-07-01T01:00:00.000Z', enabled: true, lastPolledAt: '2026-08-26T01:00:00.000Z', lastSuccessAt: '2026-08-26T01:00:00.000Z', lastJobCount: 3, lastNewCount: 0, lastNewAt: '2026-07-10T01:00:00.000Z', quiet: true, baselinedAt: '2026-07-01T01:00:00.000Z', baselineCount: 3, consecutiveFailures: 0, lastError: null, dormant: false, dormantSince: null },
   } };
   await fs.writeFile(path.join(root, 'state', 'ats-boards.json'), JSON.stringify(registry));
   const payloadPath = path.join(root, 'state', 'report-payload-2026-08-27.json');
   const payload = JSON.parse(await fs.readFile(payloadPath, 'utf8'));
+  Object.assign(payload.meta, { candidateCount: 150, reviewedThisRun: 120, deferredCount: 30, maxReviewedPerRun: 120 });
   payload.meta.sourceCounts = [
     { name: 'SimplifyJobs New Grad', kind: 'builtin', ok: true, count: 120, error: null },
     { name: 'Email files', kind: 'builtin', ok: false, count: 0, error: 'ENOENT' },
@@ -563,8 +575,12 @@ test('Status lists every source with its last success and new-posting count, and
     assert.match(page.text, /<tr data-source="greenhouse:examplecorp"><td>Greenhouse · Example Corp <span class="muted">greenhouse<\/span><\/td><td><span class="badge badge-good" data-badge="enabled">Enabled<\/span><\/td><td>Aug 26, 2026, 8:00 PM<\/td><td>3 <span class="muted">of 40 listed<\/span><\/td><td><span class="muted">OK<\/span><\/td>/);
     assert.match(page.text, /<tr data-source="lever:broken"><td>Lever · Broken Co <span class="muted">lever<\/span><\/td><td><span class="badge badge-good" data-badge="enabled">Enabled<\/span><\/td><td>Aug 18, 2026, 8:00 PM<\/td><td>0 <span class="muted">of 12 listed<\/span><\/td><td><span class="badge badge-bad" data-badge="dormant" title="HTTP 500">Dormant<\/span> <form class="inline" method="post" action="\/status\/sources\/resume"><input type="hidden" name="board" value="lever:broken"><button class="btn secondary small" type="submit">Resume Polling<\/button><\/form><\/td>/);
     assert.doesNotMatch(page.text, /\bUTC\b/);
+    assert.match(page.text, /<p class="muted" id="sources-summary">3 ATS boards · 1 quiet \(polled weekly\) · 1 dormant · 0 disabled<\/p>/);
+    assert.match(page.text, /<tr data-source="ashby:sleepy">[\s\S]*?<span class="badge badge-muted" data-badge="quiet"[^>]*>Quiet<\/span>/);
+    assert.match(page.text, /<dt>Review budget<\/dt><dd>150 candidates · 120 reviewed · 30 deferred · limit 120 per run<\/dd>/);
 
     const report = await hub.request('GET', '/reports/2026-08-27');
+    assert.match(report.text, /<dt>Review budget<\/dt><dd>150 candidates · 120 reviewed · 30 deferred \(limit 120 per run\)<\/dd>/);
     assert.match(report.text, /<dt>Sources<\/dt><dd>4 polled · 123 posting\(s\) collected · 2 failed<ul><li>SimplifyJobs New Grad: 120 collected<\/li><li>Email files: failed \(ENOENT\)<\/li><li>Greenhouse · Example Corp: 3 new, 40 listed<\/li><li>Lever · Broken Co: failed \(HTTP 500\)<\/li><\/ul><\/dd>/, 'Run Details carries one line per source');
 
     const resumed = await hub.form('/status/sources/resume', { board: 'lever:broken' });

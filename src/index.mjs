@@ -13,14 +13,14 @@ import { collectGithubList } from './collectors/github-lists.mjs';
 import { collectHackerNewsHiring } from './collectors/hn-hiring.mjs';
 import { collectRemoteOk } from './collectors/remoteok.mjs';
 import { HACKER_NEWS_SOURCE, REMOTEOK_SOURCE, githubLists } from './collectors/catalog.mjs';
-import { applyConfigBoards, collectAtsBoards, discoverBoards, readRegistry, registerBoards, registryPath, writeRegistry } from './collectors/ats-boards.mjs';
+import { applyConfigBoards, collectAtsBoards, discoverBoards, readRegistry, registerBoards, registryPath, withinWindow, writeRegistry } from './collectors/ats-boards.mjs';
 import { enrichJob, enrichmentWarningMessage } from './enrich.mjs';
 import { evaluateJob, isEligible } from './match.mjs';
 import { annotateEligibility, summarizeExclusions } from './eligibility.mjs';
-import { applySubscriptionMatching, localFallbackJob, summarizeScoringModel } from './subscription-match.mjs';
+import { applySubscriptionMatching, isSemanticCandidate, localFallbackJob, summarizeScoringModel } from './subscription-match.mjs';
 import { normalizeEngineId } from './engines/index.mjs';
 import { buildHtml, writeReports, writeWarningsFile } from './report.mjs';
-import { isJobSeen, markJobSeen, normalizeState, pruneSeen } from './state.mjs';
+import { clearDeferred, deferredStatus, isJobSeen, markDeferred, markJobSeen, normalizeState, pruneDeferred, pruneSeen, releaseRecentBaselines } from './state.mjs';
 import { acquireRunLock, releaseRunLock } from './lock.mjs';
 import { canonicalUrl, dateWithOffset, htmlEscape, mapLimit, resolveFrom, sha256 } from './utils.mjs';
 import { createWarning, errorSummary } from './warnings.mjs';
@@ -29,6 +29,8 @@ import { formatLocalDateTime } from './time-format.mjs';
 const execFileAsync = promisify(execFile);
 const REPORT_PAYLOAD_PREFIX = 'report-payload-';
 const REPORT_PAYLOAD_PATTERN = /^report-payload-(\d{4}-\d{2}-\d{2})\.json$/;
+export const DEFAULT_MAX_REVIEWED_PER_RUN = 120;
+const BASELINE_RELEASE_HOURS = 48;
 
 function arg(argv, name, fallback = null) {
   const index = argv.indexOf(name);
@@ -75,11 +77,21 @@ async function optionallyRunCareerOps(config, runner = execFileAsync) {
   });
 }
 
+// A posting is inside the lookback window when its source dates it (postedAt, or an approximate age)
+// at or after the cutoff; a posting without any date counts as old.
+export function insideLookbackWindow(job, cutoff, lookbackHours) {
+  if (job?.postedAt) return new Date(job.postedAt) >= cutoff;
+  if (job?.sourceAgeDays != null) return Number(job.sourceAgeDays) * 24 <= Number(lookbackHours);
+  return false;
+}
+
 // Collects every enabled built-in source. When `options.sourceStats` is an array, one entry per source
 // ({ name, kind, ok, count, error }) is pushed so the report can count postings by source. With
-// `options.baseline = { state, now }`, a source flagged `baseline` that has never been collected before
-// only marks its postings as seen (recorded under state.sourceBaselines) instead of returning them, so
-// a newly enabled list does not flood one report with its whole backlog.
+// `options.baseline = { state, now, lookbackHours }`, a source flagged `baseline` that has never been
+// collected before marks the postings older than the lookback window as seen (recorded under
+// state.sourceBaselines) and returns only the ones inside the window, so a newly enabled list does not
+// flood one report with its backlog while its genuinely new postings still go through. A posting that
+// another source collected this run is never swallowed by a baseline.
 export async function collectEnabledSources(config, cutoff, options = {}) {
   const warnings = options.warnings || [];
   const sourceStats = Array.isArray(options.sourceStats) ? options.sourceStats : null;
@@ -145,24 +157,47 @@ export async function collectEnabledSources(config, cutoff, options = {}) {
     try {
       const jobs = await source.collect();
       if (!Array.isArray(jobs)) throw new Error('collector returned a non-array result');
-      if (source.baseline && options.baseline?.state && !options.baseline.state.sourceBaselines?.[source.name]) {
-        const { state, now } = options.baseline;
-        const at = (now || new Date()).toISOString();
-        for (const job of jobs) markJobSeen(state, { ...job, enrichment: 'source_baseline' }, at);
-        state.sourceBaselines = { ...(state.sourceBaselines || {}), [source.name]: { baselinedAt: at, count: jobs.length } };
-        warnings.push(createWarning('collector', source.name, `First collection recorded ${jobs.length} existing posting(s) as already seen (baseline); new postings are scored from the next run on`, 'info'));
-        sourceStats?.push({ name: source.name, kind: 'builtin', ok: true, count: 0, jobCount: jobs.length, baseline: true, error: null });
-        return [];
-      }
-      sourceStats?.push({ name: source.name, kind: 'builtin', ok: true, count: jobs.length, error: null });
-      return jobs;
+      return { source, jobs };
     } catch (error) {
       warnings.push(createWarning('collector', source.name, errorSummary(error)));
-      sourceStats?.push({ name: source.name, kind: 'builtin', ok: false, count: 0, error: errorSummary(error) });
-      return [];
+      return { source, jobs: [], error: errorSummary(error) };
     }
   }));
-  return batches.flat();
+  const state = options.baseline?.state || null;
+  const lookbackHours = Number(options.baseline?.lookbackHours ?? config.lookbackHours ?? 24);
+  const isDeferred = job => Boolean(state) && deferredStatus(state, job).deferred;
+  const needsBaseline = ({ source }) => source.baseline && state && !state.sourceBaselines?.[source.name];
+  // Everything that reaches the normal flow this run: postings of established sources, plus the
+  // in-window postings of sources that baseline tonight. A baseline may not mark any of these URLs.
+  const normalUrls = new Set();
+  for (const batch of batches) {
+    for (const job of batch.jobs) {
+      const url = canonicalUrl(job.url);
+      if (url && (!needsBaseline(batch) || insideLookbackWindow(job, cutoff, lookbackHours) || isDeferred(job))) normalUrls.add(url);
+    }
+  }
+  const collected = [];
+  for (const batch of batches) {
+    const { source, jobs } = batch;
+    if (batch.error) {
+      sourceStats?.push({ name: source.name, kind: 'builtin', ok: false, count: 0, error: batch.error });
+      continue;
+    }
+    if (!needsBaseline(batch)) {
+      sourceStats?.push({ name: source.name, kind: 'builtin', ok: true, count: jobs.length, error: null });
+      collected.push(...jobs);
+      continue;
+    }
+    const at = (options.baseline.now || new Date()).toISOString();
+    const fresh = jobs.filter(job => insideLookbackWindow(job, cutoff, lookbackHours) || isDeferred(job));
+    const old = jobs.filter(job => !fresh.includes(job) && !normalUrls.has(canonicalUrl(job.url)));
+    for (const job of old) markJobSeen(state, { ...job, enrichment: 'source_baseline' }, at);
+    state.sourceBaselines = { ...(state.sourceBaselines || {}), [source.name]: { baselinedAt: at, count: old.length } };
+    warnings.push(createWarning('collector', source.name, `First collection recorded ${old.length} posting(s) older than the ${lookbackHours}-hour window as already seen (baseline); ${fresh.length} inside the window go through the normal flow`, 'info'));
+    sourceStats?.push({ name: source.name, kind: 'builtin', ok: true, count: fresh.length, jobCount: jobs.length, baselineCount: old.length, baseline: true, error: null });
+    collected.push(...fresh);
+  }
+  return collected;
 }
 
 // Public ATS boards: discover new boards from this run's posting URLs, apply the manual entries from
@@ -178,12 +213,15 @@ export async function collectAtsBoardSources(config, state, collectedJobs, { now
   applyConfigBoards(registry, settings.boards, { now });
   const polled = await collectAtsBoards({
     registry, settings, network: config.network, now, lookbackHours: config.lookbackHours, warnings,
-    isSeen: job => isJobSeen(state, job), ...(fetchImpl ? { fetchImpl } : {}),
+    isSeen: job => isJobSeen(state, job),
+    isDeferred: job => deferredStatus(state, job).deferred,
+    excludeUrls: new Set(collectedJobs.map(job => canonicalUrl(job.url)).filter(Boolean)),
+    ...(fetchImpl ? { fetchImpl } : {}),
   });
   for (const job of polled.baseline) markJobSeen(state, { ...job, enrichment: 'ats_baseline' }, now.toISOString());
   await writeRegistry(file, registry);
   for (const result of polled.results) {
-    sourceStats?.push({ name: result.label, kind: 'ats', key: result.key, ok: result.ok, count: result.baseline ? 0 : result.newCount, jobCount: result.jobCount, baseline: result.baseline, skipped: result.skipped, notModified: result.notModified, dormant: result.dormant, error: result.error });
+    sourceStats?.push({ name: result.label, kind: 'ats', key: result.key, ok: result.ok, count: result.newCount, jobCount: result.jobCount, baseline: result.baseline, baselineCount: result.baselineCount, skipped: result.skipped, notModified: result.notModified, dormant: result.dormant, quiet: result.quiet, error: result.error });
   }
   return { jobs: polled.jobs, results: polled.results, registry };
 }
@@ -387,6 +425,25 @@ export async function recoverIncompleteReports(config, state, options = {}) {
   return recovered;
 }
 
+// Keeps the best `limit` local candidates for the engine (0 or a non-number means no limit). Ranking:
+// postings already deferred twice go first, then local best score with a small bonus per deferral.
+// Non-candidates (no role relevance or a hard blocker) never reach the engine and pass through as-is.
+export function applyReviewBudget(jobs, state, configuredLimit, now = new Date()) {
+  const limit = configuredLimit == null || configuredLimit === '' ? DEFAULT_MAX_REVIEWED_PER_RUN : Math.max(0, Math.floor(Number(configuredLimit)) || 0);
+  const candidates = jobs.filter(isSemanticCandidate);
+  const others = jobs.filter(job => !isSemanticCandidate(job));
+  const ranked = candidates
+    .map(job => ({ job, deferredCount: deferredStatus(state, job).deferredCount }))
+    .sort((a, b) => (Number(b.deferredCount >= 2) - Number(a.deferredCount >= 2))
+      || ((Number(b.job.bestScore) || 0) + 10 * b.deferredCount) - ((Number(a.job.bestScore) || 0) + 10 * a.deferredCount));
+  const kept = limit > 0 ? ranked.slice(0, limit) : ranked;
+  const deferred = limit > 0 ? ranked.slice(limit) : [];
+  const at = now.toISOString();
+  for (const entry of kept) clearDeferred(state, entry.job);
+  for (const entry of deferred) markDeferred(state, entry.job, at);
+  return { jobs: [...others, ...kept.map(entry => entry.job)], deferred: deferred.map(entry => entry.job), candidateCount: candidates.length, reviewedCount: kept.length, limit };
+}
+
 async function runPipeline(config, clock) {
   const { now, runDate, applicationDate: date } = clock;
   const warnings = [];
@@ -405,17 +462,23 @@ async function runPipeline(config, clock) {
 
   const recoveredReports = await recoverIncompleteReports(config, state, { warnings, currentDate: date });
   if (recoveredReports.length) debug.recoveredReports = recoveredReports;
+  // Baselines taken before in-window postings were exempt swallowed genuinely new postings; let them
+  // through once. Idempotent: released entries are gone, so a later run finds nothing to release.
+  const releasedBaselines = releaseRecentBaselines(state, now, BASELINE_RELEASE_HOURS);
+  if (releasedBaselines) warnings.push(createWarning('collector', 'baseline', `released ${releasedBaselines} baseline postings for review`, 'info'));
   if (!prefs.graduationDate) {
     warnings.push(createWarning('eligibility', 'graduation window', 'preferences.graduationDate is not set, so the graduation-window hard filter is disabled and only the semantic review checks cohort wording'));
   }
 
   const sourceStats = [];
-  const collectedRaw = await collectEnabledSources(config, cutoff, { warnings, sourceStats, baseline: { state, now } });
+  const collectedRaw = await collectEnabledSources(config, cutoff, { warnings, sourceStats, baseline: { state, now, lookbackHours: config.lookbackHours } });
   const atsSources = await collectAtsBoardSources(config, state, collectedRaw, { now, warnings, sourceStats });
   // A baseline is only safe once the seen marks are on disk; otherwise a crash before the final state
   // write would let the next run score a source's whole backlog.
   await writeState(statePath, state);
   const collected = dedupe([...collectedRaw, ...atsSources.jobs]).filter(job => {
+    // A posting deferred by the review budget is due whatever its age.
+    if (deferredStatus(state, job).deferred) return true;
     if (job.sourceAgeDays != null && job.sourceAgeDays > Math.ceil(config.lookbackHours / 24)) return false;
     const timestamp = job.postedAt || job.discoveredAt;
     return !timestamp || new Date(timestamp) >= cutoff;
@@ -456,15 +519,21 @@ async function runPipeline(config, clock) {
     return { ...job, enrichmentAttempts: status.attempts, enrichmentTerminal: status.completed };
   });
   const locallyEvaluated = enriched.map(job => evaluateJob(job, resumes, prefs));
+  // Review budget: only the best maxReviewedPerRun local candidates go to the engine tonight. The rest
+  // are deferred (not marked seen) and come back next run with priority once deferred twice.
+  const budget = applyReviewBudget(locallyEvaluated, state, config.semanticMatching?.maxReviewedPerRun, now);
+  if (budget.deferred.length) {
+    warnings.push(createWarning('llm', 'review budget', `deferred ${budget.deferred.length} postings to the next run (review limit ${budget.limit} per run); they are not marked as seen`, 'info'));
+  }
   let evaluated;
   try {
-    evaluated = await applySubscriptionMatching(locallyEvaluated, resumes, prefs, {
+    evaluated = await applySubscriptionMatching(budget.jobs, resumes, prefs, {
       ...(config.semanticMatching || {}),
       warnings,
     });
   } catch (error) {
     warnings.push(createWarning('llm', config.semanticMatching?.engine || 'subscription', `Semantic matching failed; all jobs used local fallback: ${errorSummary(error)}`));
-    evaluated = locallyEvaluated.map(localFallbackJob);
+    evaluated = budget.jobs.map(localFallbackJob);
   }
   // Deterministic eligibility is applied after semantic review so the location gap survives the merge.
   evaluated = evaluated.map(job => annotateEligibility(job, prefs));
@@ -498,6 +567,7 @@ async function runPipeline(config, clock) {
     minimumMatchScore: config.minimumMatchScore, resumeSync, resumeTracks, collectedCount: collected.length,
     sourceCounts: sourceStats,
     newCount: reviewed.length, newThisRun: enriched.length, reviewedCount: reviewed.length, matchCount: matches.length,
+    candidateCount: budget.candidateCount, reviewedThisRun: budget.reviewedCount, deferredCount: budget.deferred.length, maxReviewedPerRun: budget.limit,
     warnings: finalWarnings,
     runsToday, firstGeneratedAt: previous?.meta?.firstGeneratedAt || now.toISOString(), lastUpdatedAt: now.toISOString(),
     trigger, completedAt: now.toISOString(), completedAtLocal: formatLocalDateTime(now, timeZone),
@@ -515,6 +585,7 @@ async function runPipeline(config, clock) {
     if (job.enrichment !== 'failed') markJobSeen(state, job, now.toISOString());
   }
   pruneSeen(state, now, 90);
+  pruneDeferred(state, now, 7);
   await pruneReportPayloads(config, now, 90);
   await writeState(statePath, state);
 

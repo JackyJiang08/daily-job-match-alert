@@ -15,6 +15,7 @@
     "batchSize": 6,
     "maximumDescriptionCharacters": 7000,
     "acceptedMatchLevels": ["high"],
+    "maxReviewedPerRun": 120,
     "timeoutMs": 600000
   },
   "reports": {

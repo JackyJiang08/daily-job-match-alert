@@ -368,6 +368,7 @@ function sourceRow(row, timeZone) {
   const last = row.lastSuccessAt ? htmlEscape(formatLocalDateTime(row.lastSuccessAt, timeZone)) : '<span class="muted">Never</span>';
   const fresh = row.newCount == null ? '<span class="muted">—</span>' : `${row.newCount}${row.jobCount != null ? ` <span class="muted">of ${row.jobCount} listed</span>` : ''}`;
   const notes = [];
+  if (row.quiet && !row.dormant) notes.push('<span class="badge badge-muted" data-badge="quiet" title="No new posting for 30 days; polled weekly">Quiet</span>');
   if (row.dormant) notes.push(`<span class="badge badge-bad" data-badge="dormant" title="${htmlEscape(row.error || '')}">Dormant</span> <form class="inline" method="post" action="/status/sources/resume"><input type="hidden" name="board" value="${htmlEscape(row.key)}"><button class="btn secondary small" type="submit">Resume Polling</button></form>`);
   else if (row.error) notes.push(`<span class="badge badge-warn" data-badge="failing">Failing${row.consecutiveFailures > 1 ? ` (${row.consecutiveFailures} in a row)` : ''}</span> <span class="muted">${htmlEscape(row.error)}</span>`);
   else if (row.skipped) notes.push(`<span class="muted">Not polled (${htmlEscape(row.skipped)})</span>`);
@@ -380,7 +381,11 @@ function sourcesCard(rows, timeZone) {
   const body = rows.length
     ? `<table class="plain" id="sources-table"><tr><th>Source</th><th>Enabled</th><th>Last Success</th><th>New This Run</th><th>Status</th></tr>${rows.map(row => sourceRow(row, timeZone)).join('')}</table>`
     : '<p class="muted">No sources configured.</p>';
-  return `<article class="card" id="sources-card"><h2>Sources</h2><p class="muted">Built-in lists and every public ATS board discovered from posting URLs. A board that fails seven nights in a row goes dormant until you resume it.</p>${body}</article>`;
+  const boards = rows.filter(row => row.kind !== 'builtin');
+  const summary = boards.length
+    ? `<p class="muted" id="sources-summary">${boards.length} ATS board${boards.length === 1 ? '' : 's'} · ${boards.filter(row => row.quiet && !row.dormant).length} quiet (polled weekly) · ${boards.filter(row => row.dormant).length} dormant · ${boards.filter(row => !row.enabled).length} disabled</p>`
+    : '';
+  return `<article class="card" id="sources-card"><h2>Sources</h2><p class="muted">Built-in lists and every public ATS board discovered from posting URLs. A board with no new posting for 30 days is polled weekly; one that fails seven nights in a row goes dormant until you resume it.</p>${summary}${body}</article>`;
 }
 
 export function statusPage({ status, timeZone }) {
@@ -403,6 +408,7 @@ export function statusPage({ status, timeZone }) {
   <article class="card"><h2>Runs</h2><dl class="kv">
     <dt>Last run</dt><dd>${lastRunLine}</dd>
     <dt>Engine</dt><dd>${lastRun.engine ? `${htmlEscape(lastRun.engine)}${lastRun.scoringModel ? ` · ${htmlEscape(lastRun.scoringModel)}` : ''}` : (lastRun.scoringModel ? htmlEscape(lastRun.scoringModel) : '—')}</dd>
+    ${lastRun.candidateCount != null ? `<dt>Review budget</dt><dd>${Number(lastRun.candidateCount)} candidates · ${Number(lastRun.reviewedThisRun || 0)} reviewed · ${Number(lastRun.deferredCount || 0)} deferred${Number(lastRun.maxReviewedPerRun) > 0 ? ` · limit ${Number(lastRun.maxReviewedPerRun)} per run` : ' · no limit'}</dd>` : ''}
     <dt>Next run</dt><dd>${nextRunLine}</dd>
     <dt>Lock</dt><dd id="lock-line">${lockLine}</dd>
   </dl></article>
@@ -515,6 +521,7 @@ export function settingsPage({ settings, connections = null, timeZone, coverLett
     <fieldset class="group"><legend>Matching</legend>
       <label class="field"><span>Minimum Match Score (0–100)</span><input type="number" name="minimumMatchScore" class="control-input" min="0" max="100" step="1" value="${Number(settings.minimumMatchScore)}" required></label>
       <div class="field"><span>Accepted Match Levels</span>${levels}</div>
+      <label class="field"><span>Max Reviewed Per Run (0 = no limit)</span><input type="number" name="maxReviewedPerRun" class="control-input" min="0" max="5000" step="1" value="${Number(settings.maxReviewedPerRun ?? 120)}" required></label>
       <div class="field"><span>Engine</span><div class="radio-row">${engines}</div><p class="engine-warning" id="engine-warning" hidden>This engine is not connected on this Mac; the nightly run will keep local scores (unreviewed) until it is signed in. You can still save.</p></div>
       ${settings.engines.map(engine => modelSelect(engine.id, settings)).join('')}
     </fieldset>

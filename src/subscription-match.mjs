@@ -182,6 +182,11 @@ export function summarizeScoringModel(jobs, engine = 'claude') {
   return engine === 'local_only' ? 'local_only' : 'none';
 }
 
+// The local prefilter: only postings with some role relevance and no hard blocker are sent to the engine.
+export function isSemanticCandidate(job) {
+  return Math.max(0, ...Object.values(job.scoreDetails || {}).map(detail => Number(detail?.roleRelevance) || 0)) >= 14 && !(job.blockers || []).length;
+}
+
 export async function applySubscriptionMatching(jobs, resumes, preferences, options = {}) {
   const engineId = normalizeEngineId(options.engine || 'claude');
   if (engineId === 'local_only') return jobs.map(job => ({ ...job, scoringEngine: 'local_only' }));
@@ -193,10 +198,7 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
 
   const tracks = resumeTrackList(resumes);
   if (!tracks.length) throw new Error('applySubscriptionMatching needs at least one enabled resume track');
-  const candidates = jobs.filter(job =>
-    Math.max(0, ...Object.values(job.scoreDetails || {}).map(detail => Number(detail?.roleRelevance) || 0)) >= 14 &&
-    !(job.blockers || []).length,
-  ).map(job => ({ ...job, semanticId: sha256(job.url).slice(0, 16) }));
+  const candidates = jobs.filter(isSemanticCandidate).map(job => ({ ...job, semanticId: sha256(job.url).slice(0, 16) }));
   if (!candidates.length) return jobs;
   const schema = buildResultSchema(tracks);
 

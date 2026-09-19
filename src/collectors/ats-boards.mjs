@@ -38,6 +38,9 @@ export const ATS_SOURCE_KIND = 'public_ats_board';
 export const DORMANT_AFTER_FAILURES = 7;
 // One poll per board per night: a same-day rerun leaves a board alone if it was polled this recently.
 export const DEFAULT_MINIMUM_POLL_HOURS = 20;
+// A board with no new posting for this long is "quiet" and polled weekly instead of nightly.
+export const QUIET_AFTER_DAYS = 30;
+export const QUIET_POLL_DAYS = 7;
 export const REGISTRY_VERSION = 1;
 const WORKDAY_PAGE_SIZE = 20;
 const DEFAULT_MAXIMUM_WORKDAY_PAGES = 10;
@@ -161,7 +164,7 @@ function newBoardRecord(board, now, origin) {
     company: board.company || null, boardUrl: board.boardUrl, apiUrl: board.apiUrl,
     origin, discoveredAt: now.toISOString(), discoveredFrom: board.discoveredFrom || null, discoveredUrl: board.discoveredUrl || null,
     enabled: true,
-    lastPolledAt: null, lastSuccessAt: null, lastJobCount: null, lastNewCount: null,
+    lastPolledAt: null, lastSuccessAt: null, lastJobCount: null, lastNewCount: null, lastNewAt: null, quiet: false,
     baselinedAt: null, baselineCount: null,
     consecutiveFailures: 0, lastError: null, lastFailureAt: null, dormant: false, dormantSince: null,
     etag: null, lastModified: null,
@@ -426,15 +429,27 @@ export async function pollBoard(board, options = {}) {
   return { notModified: false, jobs: parse(payload, board, now), etag: response.headers.get('etag') || null, lastModified: response.headers.get('last-modified') || null, status: response.status };
 }
 
-function withinWindow(job, cutoff) {
-  return !job.postedAt || new Date(job.postedAt) >= cutoff;
+// Inside the lookback window means posted or updated at or after the cutoff. A posting whose date the
+// source could not supply counts as old, never as new.
+export function withinWindow(job, cutoff) {
+  return Boolean(job.postedAt) && new Date(job.postedAt) >= cutoff;
 }
 
-// Polls every enabled, non-dormant board once per night. The first poll of a board records everything
-// it lists as already seen (`baseline`) so a newly discovered board does not flood one report with its
-// backlog; later polls return only postings posted or updated inside the lookback window. Failures are
-// isolated per board; the seventh consecutive failure marks the board dormant.
-export async function collectAtsBoards({ registry, settings = {}, network = {}, now = new Date(), lookbackHours = 24, warnings = [], isSeen = () => false, fetchImpl = fetch }) {
+// A board is quiet once nothing new has appeared for QUIET_AFTER_DAYS (counted from its last new
+// posting, or from its discovery when it never had one); quiet boards are polled weekly.
+export function isQuietBoard(board, now = new Date()) {
+  const basis = board.lastNewAt || board.baselinedAt || board.discoveredAt;
+  if (!basis) return false;
+  return now.getTime() - new Date(basis).getTime() >= QUIET_AFTER_DAYS * 24 * 60 * 60 * 1000;
+}
+
+// Polls every enabled, non-dormant board once per night (weekly when quiet). The first poll of a board
+// records the postings older than the lookback window as already seen (`baseline`) so a newly discovered
+// board does not flood one report with its backlog, while postings inside the window go through the
+// normal flow at once. Baseline marks skip URLs in `excludeUrls` (postings another source collected this
+// run) so a listing elsewhere is never swallowed. Failures are isolated per board; the seventh
+// consecutive failure marks the board dormant.
+export async function collectAtsBoards({ registry, settings = {}, network = {}, now = new Date(), lookbackHours = 24, warnings = [], isSeen = () => false, isDeferred = () => false, excludeUrls = new Set(), fetchImpl = fetch }) {
   const cutoff = new Date(now.getTime() - Number(lookbackHours) * 60 * 60 * 1000);
   const minimumHours = Number(settings.minimumPollIntervalHours ?? DEFAULT_MINIMUM_POLL_HOURS);
   const headers = { 'user-agent': network.userAgent || 'DailyJobMatchAlert/0.1' };
@@ -442,13 +457,17 @@ export async function collectAtsBoards({ registry, settings = {}, network = {}, 
   const baseline = [];
   const results = [];
   const boards = Object.values(registry.boards);
+  const wanted = job => (withinWindow(job, cutoff) || isDeferred(job)) && !isSeen(job);
   await mapLimit(boards, Number(network.concurrency || 3), async board => {
     const label = boardLabel(board);
-    const result = { key: board.key, label, kind: board.kind, ok: true, skipped: null, baseline: false, jobCount: null, newCount: 0, notModified: false, error: null, dormant: board.dormant === true };
+    board.quiet = board.enabled !== false && !board.dormant && isQuietBoard(board, now);
+    const result = { key: board.key, label, kind: board.kind, ok: true, skipped: null, baseline: false, jobCount: null, newCount: 0, baselineCount: 0, notModified: false, error: null, dormant: board.dormant === true, quiet: board.quiet };
     results.push(result);
     if (board.enabled === false) { result.skipped = 'disabled'; return; }
     if (board.dormant) { result.skipped = 'dormant'; return; }
-    if (board.lastPolledAt && now.getTime() - new Date(board.lastPolledAt).getTime() < minimumHours * 60 * 60 * 1000) { result.skipped = 'polled recently'; return; }
+    const sinceLastPoll = board.lastPolledAt ? now.getTime() - new Date(board.lastPolledAt).getTime() : Infinity;
+    if (sinceLastPoll < minimumHours * 60 * 60 * 1000) { result.skipped = 'polled recently'; return; }
+    if (board.quiet && sinceLastPoll < QUIET_POLL_DAYS * 24 * 60 * 60 * 1000) { result.skipped = 'quiet (weekly poll)'; return; }
     board.lastPolledAt = now.toISOString();
     try {
       const polled = await pollBoard(board, { fetchImpl, headers, timeoutMs: network.timeoutMs, now, cutoff, lookbackHours, maximumWorkdayPages: settings.maximumWorkdayPages });
@@ -464,17 +483,18 @@ export async function collectAtsBoards({ registry, settings = {}, network = {}, 
         const named = polled.jobs.find(job => job.company && job.company !== titleCase(board.token || board.slug || board.tenant || ''));
         if (named) board.company = named.company;
       }
+      const fresh = polled.jobs.filter(wanted);
       if (!board.baselinedAt) {
+        const old = polled.jobs.filter(job => !withinWindow(job, cutoff) && !excludeUrls.has(job.url) && !isDeferred(job));
         board.baselinedAt = now.toISOString();
-        board.baselineCount = polled.jobs.length;
-        board.lastNewCount = 0;
-        baseline.push(...polled.jobs);
+        board.baselineCount = old.length;
+        baseline.push(...old);
         result.baseline = true;
-        warnings.push(createWarning('collector', boardLabel(board), `First poll recorded ${polled.jobs.length} existing posting(s) as already seen (baseline); new postings are scored from the next run on`, 'info'));
-        return;
+        result.baselineCount = old.length;
+        warnings.push(createWarning('collector', boardLabel(board), `First poll recorded ${old.length} posting(s) older than the ${lookbackHours}-hour window as already seen (baseline); ${fresh.length} inside the window go through the normal flow`, 'info'));
       }
-      const fresh = polled.jobs.filter(job => withinWindow(job, cutoff) && !isSeen(job));
       board.lastNewCount = fresh.length;
+      if (fresh.length) { board.lastNewAt = now.toISOString(); board.quiet = false; result.quiet = false; }
       result.newCount = fresh.length;
       jobs.push(...fresh);
     } catch (error) {

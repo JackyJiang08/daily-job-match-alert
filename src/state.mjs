@@ -32,6 +32,12 @@ export function isJobSeen(state, job) {
   return jobSeenStatus(state, job).completed;
 }
 
+// A seen entry written by a source baseline (first poll of a board or list) carries `baseline: true`
+// and the posting date the source reported, so a later migration can tell old postings from new ones.
+export function isBaselineEnrichment(value) {
+  return /_baseline$/.test(String(value || ''));
+}
+
 export function markJobSeen(state, job, seenAt) {
   const normalized = normalizeState(state);
   state.seen = normalized.seen;
@@ -42,6 +48,7 @@ export function markJobSeen(state, job, seenAt) {
   const attempts = previous.completed ? previous.attempts : previous.attempts + 1;
   const unrecoverable = enrichmentFailed && job.enrichmentRetryable === false;
   const completed = previous.completed || !enrichmentFailed || unrecoverable || attempts >= 3;
+  const baseline = isBaselineEnrichment(job.enrichment);
   for (const url of unique([originalUrl, finalUrl])) {
     const key = sha256(url);
     state.seen[key] = {
@@ -55,9 +62,69 @@ export function markJobSeen(state, job, seenAt) {
       completed,
       lastEnrichment: job.enrichment || state.seen[key]?.lastEnrichment || 'not_requested',
       lastError: job.enrichmentError || null,
+      ...(job.postedAt ? { postedAt: job.postedAt } : {}),
+      ...(baseline ? { baseline: true } : {}),
     };
   }
   return { attempts, completed };
+}
+
+// One-time, idempotent repair for baselines recorded before postings inside the lookback window were
+// exempt from them: baseline entries whose posting date (or, for entries written before the date was
+// stored, whose baseline time) falls inside the last `hours` are forgotten so the next run treats them
+// as new. Returns the number of entries released.
+export function releaseRecentBaselines(state, now = new Date(), hours = 48) {
+  const normalized = normalizeState(state);
+  state.seen = normalized.seen;
+  const cutoff = (now instanceof Date ? now : new Date(now)).getTime() - Number(hours) * 60 * 60 * 1000;
+  let released = 0;
+  for (const [key, entry] of Object.entries(state.seen)) {
+    if (!entry || typeof entry !== 'object') continue;
+    if (!(entry.baseline === true || isBaselineEnrichment(entry.lastEnrichment))) continue;
+    const basis = entry.postedAt || entry.firstSeen;
+    const stamp = basis ? new Date(basis).getTime() : Number.NaN;
+    if (!Number.isFinite(stamp) || stamp < cutoff) continue;
+    delete state.seen[key];
+    released += 1;
+  }
+  return released;
+}
+
+// ---- deferrals: candidates that missed the per-run review budget wait for the next run without
+// being marked seen; each miss raises deferredCount so a twice-deferred posting is reviewed first.
+
+function deferredKey(job) {
+  return sha256(canonicalUrl(job.finalUrl || job.url) || job.url);
+}
+
+export function deferredStatus(state, job) {
+  const entry = state?.deferred?.[deferredKey(job)];
+  return { deferred: Boolean(entry), deferredCount: Number(entry?.deferredCount || 0) };
+}
+
+export function markDeferred(state, job, deferredAt) {
+  state.deferred = state.deferred && typeof state.deferred === 'object' ? state.deferred : {};
+  const key = deferredKey(job);
+  const previous = state.deferred[key];
+  state.deferred[key] = { url: canonicalUrl(job.finalUrl || job.url) || job.url, deferredCount: Number(previous?.deferredCount || 0) + 1, firstDeferredAt: previous?.firstDeferredAt || deferredAt, lastDeferredAt: deferredAt, postedAt: job.postedAt || previous?.postedAt || null };
+  return state.deferred[key];
+}
+
+export function clearDeferred(state, job) {
+  if (state?.deferred) delete state.deferred[deferredKey(job)];
+}
+
+export function pruneDeferred(state, now = new Date(), retentionDays = 7) {
+  if (!state?.deferred || typeof state.deferred !== 'object') return 0;
+  const cutoff = (now instanceof Date ? now : new Date(now)).getTime() - Number(retentionDays) * 24 * 60 * 60 * 1000;
+  let removed = 0;
+  for (const [key, entry] of Object.entries(state.deferred)) {
+    const stamp = entry?.lastDeferredAt ? new Date(entry.lastDeferredAt).getTime() : Number.NaN;
+    if (Number.isFinite(stamp) && stamp >= cutoff) continue;
+    delete state.deferred[key];
+    removed += 1;
+  }
+  return removed;
 }
 
 export function pruneSeen(state, now = new Date(), retentionDays = 90) {

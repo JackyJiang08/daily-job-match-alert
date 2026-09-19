@@ -119,7 +119,7 @@ export function sourceLine(stat) {
   const name = String(stat?.name || 'unknown source');
   if (stat?.skipped) return `${name}: not polled (${stat.skipped})`;
   if (stat?.ok === false) return `${name}: failed (${stat.error || 'unknown error'})`;
-  if (stat?.baseline) return `${name}: first poll, ${Number(stat.jobCount || 0)} existing posting(s) recorded as seen (baseline)`;
+  if (stat?.baseline) return `${name}: first poll, ${Number(stat.baselineCount ?? stat.jobCount ?? 0)} older posting(s) recorded as seen (baseline), ${Number(stat.count || 0)} new`;
   const count = Number(stat?.count || 0);
   const parts = [stat?.kind === 'ats' ? `${count} new` : `${count} collected`];
   if (stat?.notModified) parts.push('unchanged since the last poll');
@@ -155,6 +155,10 @@ export function runDetailsView(jobs, meta, tracks) {
     if (meta.reviewedCount != null) counts.push(`${meta.reviewedCount} reviewed`);
     counts.push(`${jobs.length} matched`);
     rows.push({ term: 'Postings', detail: counts.join(' · ') });
+  }
+  if (meta.candidateCount != null) {
+    const limit = Number(meta.maxReviewedPerRun || 0);
+    rows.push({ term: 'Review budget', detail: `${Number(meta.candidateCount)} candidates · ${Number(meta.reviewedThisRun || 0)} reviewed · ${Number(meta.deferredCount || 0)} deferred${limit > 0 ? ` (limit ${limit} per run)` : ' (no limit)'}` });
   }
   if (Array.isArray(meta.sourceCounts) && meta.sourceCounts.length) {
     rows.push({ term: 'Sources', detail: sourcesSummary(meta.sourceCounts), items: meta.sourceCounts.map(sourceLine) });

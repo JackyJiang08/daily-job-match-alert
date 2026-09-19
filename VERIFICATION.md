@@ -47,13 +47,15 @@ Record the date and commit next to each item when it passes.
   with an upgrade notice), and an all-disabled list (fatal before any report is written).
   `tests/config.test.mjs` covers the normalization rules.
 
-- [ ] **Chaos check passes all six scenarios**
+- [ ] **Chaos check passes all seven scenarios**
   ```bash
   npm run chaos
   ```
-  Expected summary: `6 passed, 0 failed` for `baseline`, `offline`, `llm-down`, `bad-input`,
-  `xlsx-recovery`, and `ats-500` (a public ATS board whose API answers HTTP 500 is warned about
-  and counted as one failure while the email-sourced posting still reaches the report).
+  Expected summary: `7 passed, 0 failed` for `baseline`, `offline`, `llm-down`, `bad-input`,
+  `xlsx-recovery`, `ats-500` (a public ATS board whose API answers HTTP 500 is warned about
+  and counted as one failure while the email-sourced posting still reaches the report), and
+  `review-cap` (more local candidates than `maxReviewedPerRun`: the surplus is deferred without
+  being marked seen and reviewed first on the next run).
   Every scenario runs against a temporary config, state, and output directory;
   nothing is written to the Desktop or to the real `state/`, and no subscription call is made.
   Use `npm run chaos -- --keep` to inspect the generated reports.
