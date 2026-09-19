@@ -780,7 +780,8 @@ test('a quota refusal reaches the panel and the card as a plain sentence with a 
     const ready = await hub.ctx.letterJobs.settle();
     assert.equal(ready.state, 'ready');
     assert.equal(ready.result.engine, 'codex');
-    const panel = await hub.request('GET', '/letters/2026-09-15/Acme');
+    const panel = await hub.request('GET', '/letters/2026-09-15/AcmeInc');
+    assert.equal(panel.status, 200, 'the one-click letter was saved under the fixture company slug');
     assert.match(panel.text, /<button class="btn secondary" id="codex-button" type="button" hidden>Generate with Codex<\/button>/);
     assert.match(panel.text, /Generate with Codex/);
   } finally {
