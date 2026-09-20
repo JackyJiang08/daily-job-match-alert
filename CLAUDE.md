@@ -134,7 +134,7 @@ disabled; do not expand them unless a task says so.
   letters (the panel asks first), and blocks Save & Render; the editor pass
   flags "salutation says X, body says Y". Letters are named
   {Prefix}_Cover_Letter_{Company}.pdf (prefix from Settings, default derived
-  from the signature, e.g. "Yuqing (Jacky) Jiang" → JackyJiang); Rename
+  from the signature, e.g. "Mary (Molly) Doe" → MollyDoe); Rename
   Company & Re-render (POST /letters/rename) moves the directory and file
   without calling the model.
 - Personal details (name, phone, email, signature, playbook, sample letters)

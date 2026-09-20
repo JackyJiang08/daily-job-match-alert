@@ -792,13 +792,13 @@ test('a quota refusal reaches the panel and the card as a plain sentence with a 
 });
 
 test('file-name prefixes derive from the signature in three name formats, and the fixed template cleans the company', () => {
-  assert.equal(deriveFileNamePrefix('Yuqing (Jacky) Jiang'), 'JackyJiang', 'the everyday name in parentheses plus the surname');
+  assert.equal(deriveFileNamePrefix('Mary (Molly) Doe'), 'MollyDoe', 'the everyday name in parentheses plus the surname');
   assert.equal(deriveFileNamePrefix('Jane Doe'), 'JaneDoe');
   assert.equal(deriveFileNamePrefix('Jane Marie Doe'), 'JaneDoe', 'first and last name only');
   assert.equal(deriveFileNamePrefix('Doe, Jane'), 'JaneDoe', 'surname-first input');
   assert.equal(deriveFileNamePrefix('', 'Jane Doe'), 'JaneDoe', 'falls back to the contact name');
   assert.equal(deriveFileNamePrefix(''), '');
-  assert.equal(letterFileName(null, { name: 'Jane Doe', company: 'LexisNexis Legal', prefix: 'JackyJiang' }), 'JackyJiang_Cover_Letter_LexisNexisLegal.pdf');
+  assert.equal(letterFileName(null, { name: 'Jane Doe', company: 'LexisNexis Legal', prefix: 'MollyDoe' }), 'MollyDoe_Cover_Letter_LexisNexisLegal.pdf');
   assert.equal(letterFileName(null, { name: 'Jane Doe', company: 'Acme, Inc.' }), 'JaneDoe_Cover_Letter_AcmeInc.pdf', 'without a prefix the name is used');
   assert.equal(letterFileName('{FirstLast}_Cover_Letter_{Company}.pdf', { name: 'Jane Doe', company: 'Acme', prefix: 'JD' }), 'JD_Cover_Letter_Acme.pdf', 'the legacy placeholder is the prefix');
 });
@@ -817,9 +817,9 @@ test('an uncertain company blocks one-click generation and Save & Render, sends 
   const vagueId = sha256(vague.url).slice(0, 16);
   const jobId = sha256('https://example.com/jobs/1').slice(0, 16);
   try {
-    await hub.upload('/settings/cover-letter', { ...PROFILE, signatureName: 'Yuqing (Jacky) Jiang' }, [{ field: 'playbook', name: 'playbook.md', data: Buffer.from(`# Playbook\n${'Real evidence line. '.repeat(10)}`) }]);
+    await hub.upload('/settings/cover-letter', { ...PROFILE, signatureName: 'Mary (Molly) Doe' }, [{ field: 'playbook', name: 'playbook.md', data: Buffer.from(`# Playbook\n${'Real evidence line. '.repeat(10)}`) }]);
     const settings = await hub.request('GET', '/settings');
-    assert.match(settings.text, /<span>File Name Prefix \(letters are saved as Prefix_Cover_Letter_Company\.pdf\)<\/span><input type="text" name="fileNamePrefix" class="control-input" value="JackyJiang"/, 'the prefix defaults to the everyday name plus surname');
+    assert.match(settings.text, /<span>File Name Prefix \(letters are saved as Prefix_Cover_Letter_Company\.pdf\)<\/span><input type="text" name="fileNamePrefix" class="control-input" value="MollyDoe"/, 'the prefix defaults to the everyday name plus surname');
 
     const report = await hub.request('GET', '/reports/2026-09-15');
     assert.match(report.text, /data-badge="company-uncertain"[^>]*>Company name uncertain<\/span>/, 'the card flags the unusable name');
@@ -845,7 +845,7 @@ test('an uncertain company blocks one-click generation and Save & Render, sends 
     const drafted = JSON.parse((await hub.form('/letters/generate', { date: '2026-09-15', job: vagueId, track: 'data', company: 'Guidehouse' })).text);
     assert.equal(drafted.company, 'Guidehouse');
     const saved = JSON.parse((await hub.form('/letters/save', { date: '2026-09-15', job: vagueId, track: 'data', company: 'Guidehouse', paragraph: drafted.paragraphs, engine: drafted.engine, model: drafted.model })).text);
-    assert.equal(saved.downloadUrl, '/letters/2026-09-15/Guidehouse/JackyJiang_Cover_Letter_Guidehouse.pdf', 'prefix from the signature, company cleaned');
+    assert.equal(saved.downloadUrl, '/letters/2026-09-15/Guidehouse/MollyDoe_Cover_Letter_Guidehouse.pdf', 'prefix from the signature, company cleaned');
     assert.match(await fs.readFile(path.join(root, 'private', 'cover-letters', '2026-09-15', 'Guidehouse', 'letter.md'), 'utf8'), /\nDear Guidehouse Recruiting Team,\n/);
     const callsBefore = engineCalls;
     const renamed = await hub.form('/letters/rename', { date: '2026-09-15', slug: 'Guidehouse', company: 'Guidehouse Federal' });
@@ -853,14 +853,14 @@ test('an uncertain company blocks one-click generation and Save & Render, sends 
     const result = JSON.parse(renamed.text);
     assert.equal(engineCalls, callsBefore, 'renaming never calls the model');
     assert.equal(result.slug, 'GuidehouseFederal');
-    assert.equal(result.pdfFileName, 'JackyJiang_Cover_Letter_GuidehouseFederal.pdf');
-    assert.equal(result.downloadUrl, '/letters/2026-09-15/GuidehouseFederal/JackyJiang_Cover_Letter_GuidehouseFederal.pdf');
+    assert.equal(result.pdfFileName, 'MollyDoe_Cover_Letter_GuidehouseFederal.pdf');
+    assert.equal(result.downloadUrl, '/letters/2026-09-15/GuidehouseFederal/MollyDoe_Cover_Letter_GuidehouseFederal.pdf');
     assert.equal(result.record.company, 'Guidehouse Federal');
     assert.equal(result.record.renamedFrom, 'Guidehouse');
     assert.equal(result.record.pdf.pages, 1);
     await assert.rejects(fs.access(path.join(root, 'private', 'cover-letters', '2026-09-15', 'Guidehouse')), 'the old directory is gone');
     const files = await fs.readdir(path.join(root, 'private', 'cover-letters', '2026-09-15', 'GuidehouseFederal'));
-    assert.deepEqual(files.sort(), ['JackyJiang_Cover_Letter_GuidehouseFederal.pdf', 'letter.json', 'letter.md'], 'no stale PDF remains');
+    assert.deepEqual(files.sort(), ['MollyDoe_Cover_Letter_GuidehouseFederal.pdf', 'letter.json', 'letter.md'], 'no stale PDF remains');
     assert.match(await fs.readFile(path.join(root, 'private', 'cover-letters', '2026-09-15', 'GuidehouseFederal', 'letter.md'), 'utf8'), /\nDear Guidehouse Federal Recruiting Team,\n/);
     assert.equal((await hub.request('GET', result.downloadUrl)).status, 200);
     assert.equal((await hub.request('GET', '/letters/2026-09-15/Guidehouse')).status, 404);
@@ -877,10 +877,10 @@ test('an uncertain company blocks one-click generation and Save & Render, sends 
     const list = await hub.request('GET', '/letters');
     assert.match(list.text, /<a href="\/letters\/2026-09-15\/US101">US101<\/a> <span class="badge badge-warn" data-badge="company-suspect"[^>]*>Check company name<\/span>/);
     assert.match(list.text, /<a href="\/letters\/2026-09-15\/GuidehouseFederal">Guidehouse Federal<\/a><\/td>/, 'a valid name carries no badge');
-    assert.match(list.text, /<td><span class="mono">JackyJiang_Cover_Letter_GuidehouseFederal\.pdf<\/span><\/td>/);
+    assert.match(list.text, /<td><span class="mono">MollyDoe_Cover_Letter_GuidehouseFederal\.pdf<\/span><\/td>/);
 
     // Changing the prefix under Settings changes the next file name.
-    await hub.upload('/settings/cover-letter', { ...PROFILE, signatureName: 'Yuqing (Jacky) Jiang', fileNamePrefix: 'YJiang' }, []);
+    await hub.upload('/settings/cover-letter', { ...PROFILE, signatureName: 'Mary (Molly) Doe', fileNamePrefix: 'YJiang' }, []);
     const again = await hub.form('/letters/rename', { date: '2026-09-15', slug: 'GuidehouseFederal', company: 'Guidehouse Federal' });
     assert.equal(JSON.parse(again.text).pdfFileName, 'YJiang_Cover_Letter_GuidehouseFederal.pdf');
     assert.deepEqual((await fs.readdir(path.join(root, 'private', 'cover-letters', '2026-09-15', 'GuidehouseFederal'))).filter(name => name.endsWith('.pdf')), ['YJiang_Cover_Letter_GuidehouseFederal.pdf'], 'the old PDF is removed when the prefix changes');

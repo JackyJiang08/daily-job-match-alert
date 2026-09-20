@@ -181,7 +181,7 @@ export function sanitizeName(value) {
   return String(value || '').normalize('NFKD').replace(/[^A-Za-z0-9]+/g, '');
 }
 
-// "Yuqing (Jacky) Jiang" → "JackyJiang" (the everyday name in parentheses plus the surname);
+// "Mary (Molly) Doe" → "MollyDoe" (the everyday name in parentheses plus the surname);
 // "Jane Doe" → "JaneDoe"; "Jane Marie Doe" → "JaneDoe"; "Doe, Jane" → "JaneDoe".
 export function deriveFileNamePrefix(signatureName, fallbackName = '') {
   const source = String(signatureName || fallbackName || '').trim();
