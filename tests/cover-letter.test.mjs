@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
-import { MAX_WORDS, MIN_WORDS, assembleLetter, buildCondensePrompt, buildCoverLetterPrompt, buildReviewPrompt, graduationTerms, letterDate, letterFileName, letterRules, missingRequirements, sanitizeCompany, selectSamples, validateParagraphs } from '../src/cover-letter/compose.mjs';
+import { MAX_WORDS, MIN_WORDS, assembleLetter, buildCondensePrompt, buildCoverLetterPrompt, buildReviewPrompt, deriveFileNamePrefix, graduationTerms, letterDate, letterFileName, letterRules, missingRequirements, sanitizeCompany, selectSamples, validateParagraphs } from '../src/cover-letter/compose.mjs';
 import { condenseCoverLetter, generateCoverLetter, reviewCoverLetter } from '../src/cover-letter/generate.mjs';
 import { countPdfPages, letterHtml, renderLetterPdf } from '../src/cover-letter/pdf.mjs';
 import { createLetterStore } from '../src/cover-letter/store.mjs';
@@ -606,7 +606,8 @@ test('generate → edit → save renders a PDF, records the letter, marks the ca
     assert.equal(again.reviewed, false);
 
     const list = await hub.request('GET', '/letters');
-    assert.match(list.text, /<tr><th>Date<\/th><th>Company<\/th><th>Role<\/th><th>Track<\/th><th>Engine<\/th><th>Pages<\/th><th>Generated<\/th><th>Notes<\/th><th>Actions<\/th><\/tr>/);
+    assert.match(list.text, /<tr><th>Date<\/th><th>Company<\/th><th>Role<\/th><th>Track<\/th><th>Engine<\/th><th>Pages<\/th><th>Generated<\/th><th>Notes<\/th><th>File<\/th><th>Actions<\/th><\/tr>/);
+    assert.match(list.text, /<td><span class="mono">JaneDoe_Cover_Letter_AcmeInc\.pdf<\/span><\/td>/, 'the current file name is shown');
     assert.match(list.text, /<td>2026-09-15<\/td>\s*<td><a href="\/letters\/2026-09-15\/AcmeInc">Acme, Inc\.<\/a><\/td>\s*<td>Data Analyst<\/td>\s*<td><span class="badge" data-track-badge="llm">LLM<\/span><\/td>\s*<td>claude · claude-fable-5<\/td>\s*<td>1<\/td>\s*<td>Sep 15, 2026, 10:00 AM<\/td>\s*<td>1<\/td>/, 'generation time and editor-note count columns');
     assert.match(list.text, /Letters you generate are kept on this Mac\. Reopen one to edit or download it again\./);
     assert.doesNotMatch(list.text, /private\/cover-letters/);
@@ -784,6 +785,105 @@ test('a quota refusal reaches the panel and the card as a plain sentence with a 
     assert.equal(panel.status, 200, 'the one-click letter was saved under the fixture company slug');
     assert.match(panel.text, /<button class="btn secondary" id="codex-button" type="button" hidden>Generate with Codex<\/button>/);
     assert.match(panel.text, /Generate with Codex/);
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('file-name prefixes derive from the signature in three name formats, and the fixed template cleans the company', () => {
+  assert.equal(deriveFileNamePrefix('Yuqing (Jacky) Jiang'), 'JackyJiang', 'the everyday name in parentheses plus the surname');
+  assert.equal(deriveFileNamePrefix('Jane Doe'), 'JaneDoe');
+  assert.equal(deriveFileNamePrefix('Jane Marie Doe'), 'JaneDoe', 'first and last name only');
+  assert.equal(deriveFileNamePrefix('Doe, Jane'), 'JaneDoe', 'surname-first input');
+  assert.equal(deriveFileNamePrefix('', 'Jane Doe'), 'JaneDoe', 'falls back to the contact name');
+  assert.equal(deriveFileNamePrefix(''), '');
+  assert.equal(letterFileName(null, { name: 'Jane Doe', company: 'LexisNexis Legal', prefix: 'JackyJiang' }), 'JackyJiang_Cover_Letter_LexisNexisLegal.pdf');
+  assert.equal(letterFileName(null, { name: 'Jane Doe', company: 'Acme, Inc.' }), 'JaneDoe_Cover_Letter_AcmeInc.pdf', 'without a prefix the name is used');
+  assert.equal(letterFileName('{FirstLast}_Cover_Letter_{Company}.pdf', { name: 'Jane Doe', company: 'Acme', prefix: 'JD' }), 'JD_Cover_Letter_Acme.pdf', 'the legacy placeholder is the prefix');
+});
+
+test('an uncertain company blocks one-click generation and Save & Render, sends the card to the panel, and Rename Company & Re-render moves the letter without calling the model', async () => {
+  const root = await prepareProject();
+  const payloadPath = path.join(root, 'state', 'report-payload-2026-09-15.json');
+  const payload = JSON.parse(await fs.readFile(payloadPath, 'utf8'));
+  const vague = job({ url: 'https://us101.wd5.myworkdayjobs.com/External/job/Austin-TX/Analyst_R1', company: 'US101', atsCompany: 'US101', enrichment: 'workday_cxs' });
+  payload.matches.push(vague);
+  payload.reviewed.push(vague);
+  await fs.writeFile(payloadPath, JSON.stringify(payload));
+  let engineCalls = 0;
+  const engine = { id: 'claude', label: 'Claude subscription', model: 'fable', async generateText(prompt) { engineCalls += 1; if (prompt.startsWith('EDITOR REVIEW')) return { output: { issues: [], revised_paragraphs: [] }, scoringModel: 'claude-fable-5' }; return { output: { paragraphs: fiveParagraphs(100) }, scoringModel: 'claude-fable-5' }; } };
+  const hub = await startHub(root, { letterEngine: engine });
+  const vagueId = sha256(vague.url).slice(0, 16);
+  const jobId = sha256('https://example.com/jobs/1').slice(0, 16);
+  try {
+    await hub.upload('/settings/cover-letter', { ...PROFILE, signatureName: 'Yuqing (Jacky) Jiang' }, [{ field: 'playbook', name: 'playbook.md', data: Buffer.from(`# Playbook\n${'Real evidence line. '.repeat(10)}`) }]);
+    const settings = await hub.request('GET', '/settings');
+    assert.match(settings.text, /<span>File Name Prefix \(letters are saved as Prefix_Cover_Letter_Company\.pdf\)<\/span><input type="text" name="fileNamePrefix" class="control-input" value="JackyJiang"/, 'the prefix defaults to the everyday name plus surname');
+
+    const report = await hub.request('GET', '/reports/2026-09-15');
+    assert.match(report.text, /data-badge="company-uncertain"[^>]*>Company name uncertain<\/span>/, 'the card flags the unusable name');
+    const gated = await hub.form('/letters/oneclick', { date: '2026-09-15', job: vagueId });
+    assert.equal(gated.status, 200);
+    const gate = JSON.parse(gated.text);
+    assert.equal(gate.state, 'confirm');
+    assert.equal(gate.panelUrl, `/letters/new?date=2026-09-15&job=${vagueId}&confirm=1`);
+    assert.match(gate.reason, /company name for this posting is uncertain/);
+    assert.equal(engineCalls, 0, 'nothing was generated');
+    assert.equal(JSON.parse((await hub.request('GET', '/letters/oneclick.json')).text).state, 'idle');
+    const panel = await hub.request('GET', gate.panelUrl);
+    assert.match(panel.text, /<div class="flash notice">Confirm the company name \(best guess: US101\), then Regenerate<\/div>/);
+    assert.match(panel.text, /id="letter-company" class="control-input" value="US101"/);
+    assert.match(panel.text, /<p class="letter-status" id="company-hint" data-company-uncertain="yes">No source gave a usable employer name/);
+    assert.match(panel.text, /data-company-uncertain="yes"/);
+    const refusedSave = await hub.form('/letters/save', { date: '2026-09-15', job: vagueId, track: 'data', company: 'US101', paragraph: fiveParagraphs(100), engine: 'claude', model: 'x' });
+    assert.equal(refusedSave.status, 400);
+    assert.match(JSON.parse(refusedSave.text).error, /not a usable company name/);
+    assert.equal((await hub.form('/letters/save', { date: '2026-09-15', job: vagueId, track: 'data', company: 'Inc. Company', paragraph: fiveParagraphs(100), engine: 'claude', model: 'x' })).status, 400);
+
+    // A confirmed name goes through, is used in the salutation and the file name, and can be renamed later.
+    const drafted = JSON.parse((await hub.form('/letters/generate', { date: '2026-09-15', job: vagueId, track: 'data', company: 'Guidehouse' })).text);
+    assert.equal(drafted.company, 'Guidehouse');
+    const saved = JSON.parse((await hub.form('/letters/save', { date: '2026-09-15', job: vagueId, track: 'data', company: 'Guidehouse', paragraph: drafted.paragraphs, engine: drafted.engine, model: drafted.model })).text);
+    assert.equal(saved.downloadUrl, '/letters/2026-09-15/Guidehouse/JackyJiang_Cover_Letter_Guidehouse.pdf', 'prefix from the signature, company cleaned');
+    assert.match(await fs.readFile(path.join(root, 'private', 'cover-letters', '2026-09-15', 'Guidehouse', 'letter.md'), 'utf8'), /\nDear Guidehouse Recruiting Team,\n/);
+    const callsBefore = engineCalls;
+    const renamed = await hub.form('/letters/rename', { date: '2026-09-15', slug: 'Guidehouse', company: 'Guidehouse Federal' });
+    assert.equal(renamed.status, 200);
+    const result = JSON.parse(renamed.text);
+    assert.equal(engineCalls, callsBefore, 'renaming never calls the model');
+    assert.equal(result.slug, 'GuidehouseFederal');
+    assert.equal(result.pdfFileName, 'JackyJiang_Cover_Letter_GuidehouseFederal.pdf');
+    assert.equal(result.downloadUrl, '/letters/2026-09-15/GuidehouseFederal/JackyJiang_Cover_Letter_GuidehouseFederal.pdf');
+    assert.equal(result.record.company, 'Guidehouse Federal');
+    assert.equal(result.record.renamedFrom, 'Guidehouse');
+    assert.equal(result.record.pdf.pages, 1);
+    await assert.rejects(fs.access(path.join(root, 'private', 'cover-letters', '2026-09-15', 'Guidehouse')), 'the old directory is gone');
+    const files = await fs.readdir(path.join(root, 'private', 'cover-letters', '2026-09-15', 'GuidehouseFederal'));
+    assert.deepEqual(files.sort(), ['JackyJiang_Cover_Letter_GuidehouseFederal.pdf', 'letter.json', 'letter.md'], 'no stale PDF remains');
+    assert.match(await fs.readFile(path.join(root, 'private', 'cover-letters', '2026-09-15', 'GuidehouseFederal', 'letter.md'), 'utf8'), /\nDear Guidehouse Federal Recruiting Team,\n/);
+    assert.equal((await hub.request('GET', result.downloadUrl)).status, 200);
+    assert.equal((await hub.request('GET', '/letters/2026-09-15/Guidehouse')).status, 404);
+    assert.equal((await hub.form('/letters/rename', { date: '2026-09-15', slug: 'GuidehouseFederal', company: 'LLC' })).status, 400, 'a renamed company must be valid too');
+    const opened = await hub.request('GET', '/letters/2026-09-15/GuidehouseFederal');
+    assert.match(opened.text, /data-slug="GuidehouseFederal"/);
+    assert.match(opened.text, /<button class="btn secondary" id="rename-button" type="button" title="[^"]*">Rename Company &amp; Re-render<\/button>/);
+
+    // The Letters page flags a stored letter whose salutation is not a usable name and shows every file name.
+    const badDirectory = path.join(root, 'private', 'cover-letters', '2026-09-15', 'US101');
+    await fs.mkdir(badDirectory, { recursive: true });
+    await fs.writeFile(path.join(badDirectory, 'letter.json'), JSON.stringify({ jobId, company: 'US101', track: 'data', trackLabel: 'Data', engine: 'claude', model: 'x', paragraphs: ['a'], pdfFileName: 'JaneDoe_Cover_Letter_US101.pdf', pdf: { pages: 1 }, createdAt: '2026-09-15T15:00:00Z', savedAt: '2026-09-15T15:00:00Z' }));
+    await fs.writeFile(path.join(badDirectory, 'letter.md'), '# x');
+    const list = await hub.request('GET', '/letters');
+    assert.match(list.text, /<a href="\/letters\/2026-09-15\/US101">US101<\/a> <span class="badge badge-warn" data-badge="company-suspect"[^>]*>Check company name<\/span>/);
+    assert.match(list.text, /<a href="\/letters\/2026-09-15\/GuidehouseFederal">Guidehouse Federal<\/a><\/td>/, 'a valid name carries no badge');
+    assert.match(list.text, /<td><span class="mono">JackyJiang_Cover_Letter_GuidehouseFederal\.pdf<\/span><\/td>/);
+
+    // Changing the prefix under Settings changes the next file name.
+    await hub.upload('/settings/cover-letter', { ...PROFILE, signatureName: 'Yuqing (Jacky) Jiang', fileNamePrefix: 'YJiang' }, []);
+    const again = await hub.form('/letters/rename', { date: '2026-09-15', slug: 'GuidehouseFederal', company: 'Guidehouse Federal' });
+    assert.equal(JSON.parse(again.text).pdfFileName, 'YJiang_Cover_Letter_GuidehouseFederal.pdf');
+    assert.deepEqual((await fs.readdir(path.join(root, 'private', 'cover-letters', '2026-09-15', 'GuidehouseFederal'))).filter(name => name.endsWith('.pdf')), ['YJiang_Cover_Letter_GuidehouseFederal.pdf'], 'the old PDF is removed when the prefix changes');
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });

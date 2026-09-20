@@ -12,9 +12,19 @@ import { sha256 } from '../utils.mjs';
 import { HubInputError, readReportPayload } from './services.mjs';
 import { displayCompanyName } from '../posting-fields.mjs';
 import { QuotaError, classifyQuotaError, describeQuota, nextLadderModel, normalizeQuotaPolicy } from '../engines/quota.mjs';
+import { isValidCompanyName, resolveCompanyName } from '../posting-fields.mjs';
+import { renderLetterPdf as renderPdfDefault } from '../cover-letter/pdf.mjs';
 
 export function jobIdOf(job) {
   return job.semanticId || sha256(job.url || '').slice(0, 16);
+}
+
+// The company a letter should address: the settled name when the pipeline validated one, otherwise
+// the candidate chain over the stored job; `uncertain` means no candidate passed validation.
+export function letterCompanyFor(job) {
+  const resolved = resolveCompanyName(job);
+  if (job?.companySource && !job.companyUncertain && isValidCompanyName(job.company)) return { name: job.company, uncertain: false, source: job.companySource };
+  return { name: resolved.name, uncertain: resolved.uncertain || !isValidCompanyName(resolved.name), source: resolved.source };
 }
 
 export async function findLetterJob(ctx, date, jobId) {
@@ -86,23 +96,27 @@ export async function generateLetter(ctx, { date, jobId, trackId, company, engin
   const review = config.coverLetter?.editorReview !== false;
   const engineId = engineChoice ? (normalizeEngineId(engineChoice) || null) : null;
   if (engineChoice && !engineId) throw new HubInputError('Engine must be claude or codex');
-  const generated = await withQuotaPolicy(ctx, config, engineId ? { engine: engineId } : {}, engine => generateCoverLetter({ engine, inputs: { playbook, samples, track, resumeText: text, job, graduation }, review, io: ctx.io }));
+  const salutationCompany = String(company || '').trim() || letterCompanyFor(job).name;
+  const generated = await withQuotaPolicy(ctx, config, engineId ? { engine: engineId } : {}, engine => generateCoverLetter({ engine, inputs: { playbook, samples, track, resumeText: text, job, graduation, company: salutationCompany }, review, io: ctx.io }));
   const result = generated.downgradeNote ? { ...generated.result, editorNotes: [generated.downgradeNote, ...(generated.result.editorNotes || [])], downgradeNote: generated.downgradeNote } : generated.result;
   return {
     ...result,
     jobId: id,
     date,
-    company: String(company || displayCompanyName(job) || '').trim() || 'Company',
+    company: salutationCompany || 'Company',
     track,
     tracks,
-    job: { title: job.title, company: displayCompanyName(job), location: job.location, roleType: job.roleType },
+    job: { title: job.title, company: letterCompanyFor(job).name, location: job.location, roleType: job.roleType },
   };
 }
 
 // One click from a job card: draft with the recommended track and the cleaned company name (editor pass
 // included), then save and render at once. Returns what the card needs to offer both buttons.
 export async function oneClickLetter(ctx, { date, jobId, engine = null }) {
-  const draft = await generateLetter(ctx, { date, jobId, trackId: null, company: null, engine });
+  const { job } = await findLetterJob(ctx, date, jobId);
+  const company = letterCompanyFor(job);
+  if (company.uncertain) throw new HubInputError(`The company name for this posting is uncertain (${company.name || 'no candidate'}); confirm it in the panel before generating`);
+  const draft = await generateLetter(ctx, { date, jobId, trackId: null, company: company.name, engine });
   const saved = await saveLetter(ctx, {
     date, jobId, trackId: draft.track.id, company: draft.company, paragraphs: draft.paragraphs,
     engine: draft.engine, model: draft.model, issues: draft.issues || [], editorNotes: draft.editorNotes || [], samplesUsed: draft.samplesUsed || [],
@@ -119,11 +133,12 @@ export async function saveLetter(ctx, { date, jobId, trackId, company, paragraph
   const track = tracks.find(item => item.id === trackId) || tracks.find(item => item.id === job.recommendedTrack) || tracks[0] || { id: 'unknown', label: 'Unknown' };
   const body = (Array.isArray(paragraphs) ? paragraphs : []).map(item => String(item || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
   if (!body.length) throw new HubInputError('The letter body is empty');
-  const companyName = String(company || displayCompanyName(job) || '').trim() || 'Company';
+  const companyName = String(company || letterCompanyFor(job).name || '').trim();
+  if (!isValidCompanyName(companyName)) throw new HubInputError(`"${companyName || 'Company'}" is not a usable company name; confirm the company before rendering`);
   const now = ctx.now();
   const timeZone = config.timeZone || 'America/Chicago';
   const letter = assembleLetter({ profile, company: companyName, paragraphs: body, now, timeZone });
-  const pdfFileName = ctx.letterStore.fileNameFor(config.coverLetter?.fileNameTemplate, profile, companyName);
+  const pdfFileName = ctx.letterStore.fileNameFor(profile, companyName);
   let saved;
   try {
     saved = await ctx.letterStore.saveLetter({ date, company: companyName, markdown: letter.markdown, meta: {
@@ -155,4 +170,25 @@ export async function saveLetter(ctx, { date, jobId, trackId, company, paragraph
     paragraphs: finalParagraphs,
     wordCount: saved.record.wordCount,
   };
+}
+
+// Rename Company & Re-render: a new salutation and file name for a saved letter, rendered again from the
+// stored paragraphs. No engine call; the model's text is untouched.
+export async function renameLetter(ctx, { date, slug, company }) {
+  const config = await ctx.loadConfig();
+  const companyName = String(company || '').trim();
+  if (!isValidCompanyName(companyName)) throw new HubInputError(`"${companyName || ''}" is not a usable company name`);
+  const existing = await ctx.letterStore.loadLetter(date, slug);
+  if (!existing) throw new HubInputError('Letter not found');
+  const { profile } = await ctx.letterStore.readiness();
+  const timeZone = existing.record.timeZone || config.timeZone || 'America/Chicago';
+  const createdAt = existing.record.createdAt ? new Date(existing.record.createdAt) : ctx.now();
+  const letter = assembleLetter({ profile, company: companyName, paragraphs: existing.record.paragraphs || [], now: createdAt, timeZone });
+  const pdfFileName = ctx.letterStore.fileNameFor(profile, companyName);
+  const renamed = await ctx.letterStore.renameLetter(date, slug, { company: companyName, markdown: letter.markdown, pdfFileName, meta: { renamedFrom: existing.record.company !== companyName ? existing.record.company : existing.record.renamedFrom || null, renamedAt: ctx.now().toISOString() } });
+  const pdfPath = path.join(renamed.directory, pdfFileName);
+  const pdf = await (ctx.renderPdf || renderPdfDefault)(letter, pdfPath, { chromeCommand: ctx.chromeCommand ?? (config.hub?.chromeCommand || null), io: ctx.io });
+  renamed.record.pdf = { pages: pdf.pages, layout: pdf.layout, renderer: pdf.renderer, note: pdf.note, condensed: existing.record.pdf?.condensed === true };
+  await ctx.letterStore.saveLetter({ date, company: companyName, markdown: letter.markdown, meta: renamed.record });
+  return { record: renamed.record, slug: renamed.slug, openUrl: `/letters/${date}/${renamed.slug}`, downloadUrl: `/letters/${date}/${renamed.slug}/${encodeURIComponent(pdfFileName)}`, pdf: renamed.record.pdf, pdfFileName };
 }

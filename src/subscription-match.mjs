@@ -35,12 +35,13 @@ export function buildResultSchema(resumes) {
               required: tracks.map(track => track.id),
             },
             recommendedTrack: { type: 'string', enum: tracks.map(track => track.id) },
+            employerName: { type: 'string' },
             matchLevel: { type: 'string', enum: ['high', 'medium', 'low', 'reject'] },
             reasons: { type: 'array', maxItems: 5, items: { type: 'string' } },
             gaps: { type: 'array', maxItems: 8, items: { type: 'string' } },
             blockers: { type: 'array', maxItems: 5, items: { type: 'string' } },
           },
-          required: ['id', 'roleType', 'scores', 'recommendedTrack', 'matchLevel', 'reasons', 'gaps', 'blockers'],
+          required: ['id', 'roleType', 'scores', 'recommendedTrack', 'employerName', 'matchLevel', 'reasons', 'gaps', 'blockers'],
         },
       },
     },
@@ -77,6 +78,7 @@ Set "recommendedTrack" to the key of the best-fitting resume. Scores are evidenc
 - Use "reject" for senior/manager roles, experience above the stated maximum, or explicit work-authorization conflict.
 - Treat the configured location policy as a hard filter. Reject postings explicitly outside it; a remote role must permit work from the allowed country.
 - Do not infer a skill merely from adjacent experience. Name concise matched evidence and missing requirements.
+- Set "employerName" to the employer's public brand name exactly as the posting text presents it (not a legal entity code, not the job board); use an empty string when the posting does not name it.
 
 Candidate preferences:
 ${JSON.stringify(preferences, null, 2)}
@@ -171,6 +173,7 @@ export function mergeSemanticResults(jobs, results, engine, resumes = null) {
       gaps: item.gaps,
       blockers: unique([...(job.blockers || []), ...item.blockers]),
       semanticReviewed: true,
+      employerNameFromJd: typeof item.employerName === 'string' && item.employerName.trim() ? item.employerName.trim() : (job.employerNameFromJd || null),
       scoringEngine: item.scoringEngine || engine,
       scoringModel: item.scoringModel || 'unknown',
     };

@@ -1,7 +1,9 @@
 // Workday company-name cleaning, posting-date precision, and the post-enrichment freshness re-check.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { cleanWorkdayCompany, displayCompanyName, hasClockTime, holdsToExactWindow, postedAtPrecision } from '../src/posting-fields.mjs';
+import { cleanWorkdayCompany, companyFromUrl, companyIsUncertain, displayCompanyName, hasClockTime, holdsToExactWindow, isValidCompanyName, postedAtPrecision, resolveCompanyName } from '../src/posting-fields.mjs';
+import { finalizeCompany } from '../src/index.mjs';
+import { buildResultSchema, buildSemanticPrompt, mergeSemanticResults } from '../src/subscription-match.mjs';
 import { applyFreshnessRecheck } from '../src/index.mjs';
 import { enrichJob } from '../src/enrich.mjs';
 import { buildReportView, runDetailsView } from '../src/report.mjs';
@@ -103,4 +105,72 @@ test('cards show day-level dates without a time and say so on hover; precise one
   assert.equal(workdayCard.footnote, 'Posted Sep 18 · fixture', 'a Workday day-level date is shown as the local calendar day');
   assert.match(renderJobCard(dayCard), /<span class="meta" title="Date only: the source reports no time of day">Posted Sep 18 · fixture<\/span>/);
   assert.match(renderJobCard(preciseCard), /<span class="meta" title="Posted Sep 18, 2026, 8:15 PM">Posted Sep 18, 8:15 PM · fixture<\/span>/);
+});
+
+test('company validation: legal words alone, codes, numbers, and generic words fail; real names pass', () => {
+  for (const [name, expected] of [
+    ['Inc. Company', false], ['LLC', false], ['US101', false], ['Us101', false], ['1007 Clarios, LLC', false], ['R-123456', false], ['100000', false],
+    ['Company', false], ['External', false], ['Hiring', false], ['a', false], ['', false], [null, false],
+    ['The Boeing Company', true], ['Clarios', true], ['IBM', true], ['Motorola Solutions', true], ['LexisNexis Legal', true], ['Acme, Inc.', true], ['GD Information Technology, Inc.', true],
+  ]) assert.equal(isValidCompanyName(name), expected, String(name));
+});
+
+test('the URL is the last candidate: Workday site names become words, board slugs are title-cased', () => {
+  assert.equal(companyFromUrl('https://relx.wd3.myworkdayjobs.com/LexisNexisLegal/job/x'), 'LexisNexis Legal');
+  assert.equal(companyFromUrl('https://nvidia.wd5.myworkdayjobs.com/en-US/NVIDIAExternalCareerSite/job/x'), 'NVIDIA');
+  assert.equal(companyFromUrl('https://x.wd5.myworkdayjobs.com/External/job/y'), 'X', 'a generic site name falls back to the tenant');
+  assert.equal(companyFromUrl('https://job-boards.greenhouse.io/acme-inc/jobs/1'), 'Acme Inc');
+  assert.equal(companyFromUrl('https://jobs.lever.co/zoox/abc'), 'Zoox');
+  assert.equal(companyFromUrl('https://jobs.ashbyhq.com/examplecorp/1'), 'Examplecorp');
+  assert.equal(companyFromUrl('https://www.example.com/careers/1'), '');
+  assert.equal(companyFromUrl('nope'), '');
+});
+
+test('the candidate chain takes the first valid name in order and marks the job uncertain when none passes', () => {
+  const url = 'https://relx.wd3.myworkdayjobs.com/LexisNexisLegal/job/Analyst_R1';
+  assert.deepEqual(resolveCompanyName({ companyFromSource: 'RELX', boardCompany: 'LexisNexis', employerNameFromJd: 'LexisNexis Risk', atsCompany: '1000 RELX Inc.', url }).name, 'RELX');
+  assert.equal(resolveCompanyName({ companyFromSource: 'US101', boardCompany: 'LexisNexis', employerNameFromJd: 'LexisNexis Risk', atsCompany: '1000 RELX Inc.', url }).source, 'registry', 'an invalid source name falls through');
+  assert.equal(resolveCompanyName({ companyFromSource: '', employerNameFromJd: 'LexisNexis Risk', atsCompany: '1000 RELX Inc.', url }).source, 'employerName', 'the scorer\'s employer name is third');
+  const ats = resolveCompanyName({ companyFromSource: '', atsCompany: '1000 RELX Inc.', url });
+  assert.deepEqual([ats.name, ats.source], ['RELX', 'ats'], 'the ATS entity is cleaned before it is judged');
+  const fromUrl = resolveCompanyName({ companyFromSource: '', atsCompany: 'US101', url });
+  assert.deepEqual([fromUrl.name, fromUrl.source, fromUrl.uncertain], ['LexisNexis Legal', 'url', false]);
+  const nothing = resolveCompanyName({ company: 'US101', atsCompany: 'US101', url: 'https://x.wd5.myworkdayjobs.com/External/job/y' });
+  assert.deepEqual([nothing.name, nothing.uncertain], ['US101', true], 'the most name-like candidate is kept but flagged');
+  assert.equal(resolveCompanyName({ company: '1007 Clarios, LLC', enrichment: 'workday_cxs', url: 'https://clarios.wd5.myworkdayjobs.com/External/job/x' }).name, 'Clarios', 'an older payload with only the raw Workday entity still cleans it');
+  assert.equal(resolveCompanyName({ company: 'Acme, Inc.', url: 'https://example.com/jobs/1' }).name, 'Acme, Inc.', 'a non-Workday stored name is the source name');
+  const finalized = finalizeCompany({ company: 'US101', atsCompany: 'US101', url: 'https://x.wd5.myworkdayjobs.com/External/job/y' });
+  assert.deepEqual([finalized.company, finalized.companySource, finalized.companyUncertain], ['US101', 'ats', true]);
+  assert.equal(companyIsUncertain(finalized), true);
+  const settled = finalizeCompany({ companyFromSource: 'Guidehouse', atsCompany: 'US101 Guidehouse Inc.', url });
+  assert.deepEqual([settled.company, settled.companySource, settled.companyUncertain], ['Guidehouse', 'source', false]);
+  assert.equal(displayCompanyName(settled), 'Guidehouse');
+  assert.equal(companyIsUncertain(settled), false);
+});
+
+test('enrichment keeps a valid list name over the ATS entity and stores the entity as a candidate', async () => {
+  const workday = { hiringOrganization: { name: '100000 Motorola Solutions, Inc.' }, jobPostingInfo: { title: 'Data Analyst Intern', jobDescription: '<p>' + 'x'.repeat(300) + '</p>', location: 'Chicago, Illinois', postedOn: 'Posted Yesterday' } };
+  const fetchWorkday = async () => new Response(JSON.stringify(workday), { status: 200, headers: { 'content-type': 'application/json' } });
+  const url = 'https://motorola.wd5.myworkdayjobs.com/Careers/job/Chicago-IL/Data-Analyst-Intern_R1';
+  const kept = await enrichJob({ url, company: 'Motorola', title: 'x' }, {}, fetchWorkday);
+  assert.deepEqual([kept.company, kept.companyFromSource, kept.atsCompany], ['Motorola', 'Motorola', '100000 Motorola Solutions, Inc.']);
+  const codeOnly = await enrichJob({ url, company: 'US101', title: 'x' }, {}, fetchWorkday);
+  assert.deepEqual([codeOnly.company, codeOnly.companyFromSource, codeOnly.atsCompany], ['Motorola Solutions', 'US101', '100000 Motorola Solutions, Inc.'], 'an invalid list name is replaced by the cleaned entity');
+  const greenhouse = { title: 'Analyst', company_name: 'Acme Holdings LLC', location: { name: 'Remote' }, content: 'x'.repeat(300), updated_at: '2026-09-18T10:00:00Z' };
+  const fromBoard = await enrichJob({ url: 'https://job-boards.greenhouse.io/acme/jobs/1', company: 'Acme', title: 'x' }, {}, async () => new Response(JSON.stringify(greenhouse), { status: 200, headers: { 'content-type': 'application/json' } }));
+  assert.deepEqual([fromBoard.company, fromBoard.atsCompany], ['Acme', 'Acme Holdings LLC']);
+});
+
+test('the scoring schema requires employerName and the merge keeps it beside, never over, the settled company', () => {
+  const schema = buildResultSchema([{ id: 'data', label: 'Data' }]);
+  assert.ok(schema.properties.results.items.required.includes('employerName'));
+  assert.deepEqual(schema.properties.results.items.properties.employerName, { type: 'string' });
+  assert.match(buildSemanticPrompt([{ semanticId: 'a', title: 't', company: 'c', description: 'd' }], [{ id: 'data', label: 'Data', text: 'r' }], {}), /Set "employerName" to the employer's public brand name/);
+  const merged = mergeSemanticResults([{ semanticId: 'abc', url: 'https://x/1', company: 'Acme', scores: { data: 10 }, bestScore: 10 }], [{ id: 'abc', roleType: 'new_grad', scores: { data: 80 }, recommendedTrack: 'data', employerName: 'Acme Robotics', matchLevel: 'high', reasons: [], gaps: [], blockers: [] }], 'claude', [{ id: 'data', label: 'Data', text: 'r' }]);
+  assert.equal(merged[0].company, 'Acme', 'the existing valid name is not overwritten');
+  assert.equal(merged[0].employerNameFromJd, 'Acme Robotics');
+  const blank = mergeSemanticResults([{ semanticId: 'abc', url: 'https://x/1', company: 'Acme', scores: { data: 10 }, bestScore: 10 }], [{ id: 'abc', roleType: 'new_grad', scores: { data: 80 }, recommendedTrack: 'data', employerName: '   ', matchLevel: 'high', reasons: [], gaps: [], blockers: [] }], 'claude', [{ id: 'data', label: 'Data', text: 'r' }]);
+  assert.equal(blank[0].employerNameFromJd, null);
+  const resolved = finalizeCompany({ companyFromSource: 'US101', employerNameFromJd: 'Acme Robotics', atsCompany: 'US101', url: 'https://x.wd5.myworkdayjobs.com/External/job/y' });
+  assert.deepEqual([resolved.company, resolved.companySource], ['Acme Robotics', 'employerName'], 'the employer name from the posting is the third candidate');
 });

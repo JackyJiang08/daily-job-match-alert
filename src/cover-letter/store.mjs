@@ -6,7 +6,7 @@
 // Nothing in this module carries personal data; every value comes from the owner's uploads.
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { DEFAULT_FILE_NAME_TEMPLATE, SAMPLE_TRACKS, letterFileName, sanitizeCompany } from './compose.mjs';
+import { SAMPLE_TRACKS, deriveFileNamePrefix, letterFileName, sanitizeCompany } from './compose.mjs';
 
 export const MAX_SAMPLES = 10;
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
@@ -31,9 +31,13 @@ export function createLetterStore({ root, io = fs, now = () => new Date(), extra
     await io.writeFile(file, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
   }
 
+  // fileNamePrefix defaults to the everyday name plus surname derived from the signature (or the name)
+  // until the owner sets one under Settings.
   async function readProfile() {
     const stored = await readJson(profilePath, {});
-    return { name: '', phone: '', email: '', signatureName: '', playbook: null, samples: [], ...stored };
+    const profile = { name: '', phone: '', email: '', signatureName: '', fileNamePrefix: '', playbook: null, samples: [], ...stored };
+    if (!String(profile.fileNamePrefix || '').trim()) profile.fileNamePrefix = deriveFileNamePrefix(profile.signatureName, profile.name);
+    return profile;
   }
 
   // Is there enough on file to generate? Missing pieces are listed for the panel and the Settings page.
@@ -48,7 +52,7 @@ export function createLetterStore({ root, io = fs, now = () => new Date(), extra
 
   async function saveProfileFields(fields) {
     const profile = await readProfile();
-    for (const key of ['name', 'phone', 'email', 'signatureName']) {
+    for (const key of ['name', 'phone', 'email', 'signatureName', 'fileNamePrefix']) {
       if (fields[key] != null) profile[key] = String(fields[key]).trim().slice(0, 200);
     }
     await writeJson(profilePath, profile);
@@ -188,6 +192,26 @@ export function createLetterStore({ root, io = fs, now = () => new Date(), extra
     return { directory, slug, record };
   }
 
+  // Renames a saved letter's company: the salutation line in the Markdown, the directory (company slug),
+  // and the PDF file name. Files are moved, not copied, so nothing of the old name remains.
+  async function renameLetter(date, slug, { company, markdown, pdfFileName, meta }) {
+    const from = letterDirectory(date, slug);
+    const to = letterDirectory(date, company);
+    const existing = await readJson(path.join(from.directory, 'letter.json'), null);
+    if (!existing) throw new LetterInputError('Letter not found');
+    if (to.slug !== from.slug) {
+      await io.mkdir(path.dirname(to.directory), { recursive: true });
+      await io.rm(to.directory, { recursive: true, force: true });
+      await io.rename(from.directory, to.directory);
+    }
+    const stalePdf = existing.pdfFileName && existing.pdfFileName !== pdfFileName ? path.join(to.directory, existing.pdfFileName) : null;
+    if (stalePdf) await io.rm(stalePdf, { force: true }).catch(() => {});
+    const record = { ...existing, ...meta, company, companySlug: to.slug, pdfFileName, savedAt: now().toISOString() };
+    await writeJson(path.join(to.directory, 'letter.json'), record);
+    await io.writeFile(path.join(to.directory, 'letter.md'), markdown, { mode: 0o600 });
+    return { directory: to.directory, slug: to.slug, record };
+  }
+
   async function loadLetter(date, company) {
     const { directory, slug } = letterDirectory(date, company);
     const record = await readJson(path.join(directory, 'letter.json'), null);
@@ -233,7 +257,7 @@ export function createLetterStore({ root, io = fs, now = () => new Date(), extra
   return {
     materialDirectory, lettersDirectory, profilePath,
     readProfile, readiness, saveProfileFields, savePlaybook, removePlaybook, saveSample, setSampleTrack, removeSample, loadMaterial,
-    saveLetter, loadLetter, listLetters, resolveDownload, lettersByJob,
-    fileNameFor: (template, profile, company) => letterFileName(template || DEFAULT_FILE_NAME_TEMPLATE, { name: profile.name, company }),
+    saveLetter, renameLetter, loadLetter, listLetters, resolveDownload, lettersByJob,
+    fileNameFor: (profile, company) => letterFileName(null, { name: profile.name, company, prefix: profile.fileNamePrefix || deriveFileNamePrefix(profile.signatureName, profile.name) }),
   };
 }

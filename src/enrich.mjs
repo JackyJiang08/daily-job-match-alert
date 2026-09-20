@@ -1,5 +1,5 @@
 import { LOCATION_SEPARATOR, normalizeLocation, canonicalUrl, cleanText, isoDate } from './utils.mjs';
-import { cleanWorkdayCompany, hasClockTime } from './posting-fields.mjs';
+import { cleanWorkdayCompany, hasClockTime, isValidCompanyName } from './posting-fields.mjs';
 
 function meta(html, key) {
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -136,9 +136,11 @@ function workdayEnrichment(originalJob, posting, finalUrl) {
   const postedOn = startDate ? null : workdayPostedOn(info.postedOn);
   return {
     ...originalJob,
-    // A company name the list or board registry already supplied beats the tenant's internal entity
-    // name ("100000 Motorola Solutions, Inc."); when there is none, the entity name is cleaned.
-    company: originalJob.company || cleanWorkdayCompany(company),
+    // A valid company name the list or board registry supplied is never overwritten by the tenant's
+    // internal entity name ("100000 Motorola Solutions, Inc."); the raw entity is kept as a candidate.
+    company: isValidCompanyName(originalJob.company) ? originalJob.company : (cleanWorkdayCompany(company) || originalJob.company),
+    companyFromSource: originalJob.companyFromSource ?? (originalJob.company || null),
+    atsCompany: company || originalJob.atsCompany || null,
     title: cleanText(info.title || originalJob.title),
     location: workdayLocation(info) || originalJob.location,
     employmentType: cleanText(info.timeType || '') || originalJob.employmentType || '',
@@ -206,7 +208,9 @@ export async function enrichJob(job, network = {}, fetchImpl = fetch) {
         const payload = await response.json();
         return {
           ...originalJob,
-          company: originalJob.company || payload.company_name || '',
+          company: isValidCompanyName(originalJob.company) ? originalJob.company : (payload.company_name || originalJob.company || ''),
+          companyFromSource: originalJob.companyFromSource ?? (originalJob.company || null),
+          atsCompany: payload.company_name || originalJob.atsCompany || null,
           title: payload.title || originalJob.title,
           location: normalizeLocation(payload.location?.name || '') || originalJob.location,
           description: cleanText(payload.content || originalJob.description),
@@ -241,7 +245,9 @@ export async function enrichJob(job, network = {}, fetchImpl = fetch) {
     const postingDescription = posting?.description ? cleanText(posting.description) : '';
     return {
       ...originalJob,
-      company: posting?.hiringOrganization?.name || originalJob.company,
+      company: isValidCompanyName(originalJob.company) ? originalJob.company : (posting?.hiringOrganization?.name || originalJob.company),
+      companyFromSource: originalJob.companyFromSource ?? (originalJob.company || null),
+      ...(posting?.hiringOrganization?.name ? { atsCompany: posting.hiringOrganization.name } : {}),
       title: cleanText(posting?.title || htmlTitle || originalJob.title),
       location: locationFromPosting(posting || {}) || originalJob.location,
       employmentType: employmentTypeFromPosting(posting || {}) || originalJob.employmentType || '',

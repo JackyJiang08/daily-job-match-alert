@@ -22,6 +22,7 @@
 - **Reports**：用与桌面 HTML 相同的组件渲染每一天的报告，按月分组并带 Today 快捷键，可打开桌面副本与工作簿。
 - **Resumes**：每条简历轨道一张卡，可上传替换 PDF（当晚生效），旧版本保留可回退。
 - **Letters**：已生成 cover letter 的列表（含生成时间与 Editor notes 数量），每行有 Open 与 Download PDF。岗位卡上的 Generate Cover Letter 是一键式：以推荐轨道与清洗后的公司名在后台生成（含 Editor pass）、渲染并由浏览器自动下载，全程不离开 Reports 页；按钮随后变为 Open Letter 与 Download PDF。同一时间只生成一封，其他卡片的按钮等待；失败时原因显示在卡片内。Open Letter 打开面板，用于修改正文、切换轨道后 Regenerate、重新下载。
+  公司名走同一条候选链（榜单给出的名 → board 注册表标签 → 评分时模型读出的 employerName → 清洗后的 ATS 实体名 → URL 推导），每个候选都要通过校验，因此只有法人词、`US101` 这类租户代码或通用词都不会进入称呼。没有可用名字的岗位显示 "Company name uncertain" 徽标，其一键按钮改为打开面板先确认公司名，Save & Render 拒绝无效名字；Editor pass 会标出 "salutation says X, body says Y"。文件名固定为 `Prefix_Cover_Letter_Company.pdf`，前缀在 Settings 设置（默认由签名推导："Yuqing (Jacky) Jiang" → `JackyJiang`）；"Rename Company & Re-render" 只替换称呼与文件名并重新渲染，不调用模型。
 - **Status**：上次/下次运行、锁状态、Sources 表（每个榜单与 board 的启用状态、上次成功、本轮新增数，dormant 的 board 可点 Resume Polling 恢复）、最近 7 天 warnings，以及 Run Now。
 - **Settings**：匹配阈值、接受的匹配等级、引擎与模型、XLSX 是否必需、中枢端口、CLI 连接状态，以及私有的 cover letter 素材。
 

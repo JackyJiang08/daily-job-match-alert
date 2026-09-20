@@ -25,7 +25,7 @@ import { acquireRunLock, releaseRunLock } from './lock.mjs';
 import { canonicalUrl, dateWithOffset, htmlEscape, mapLimit, resolveFrom, sha256 } from './utils.mjs';
 import { createWarning, errorSummary } from './warnings.mjs';
 import { formatLocalDateTime } from './time-format.mjs';
-import { holdsToExactWindow } from './posting-fields.mjs';
+import { holdsToExactWindow, resolveCompanyName } from './posting-fields.mjs';
 import { describeConnections } from './engines/index.mjs';
 import { describeQuota, normalizeQuotaPolicy } from './engines/quota.mjs';
 
@@ -480,6 +480,11 @@ function bannerFor(events, deferredCount, timeZone) {
   return parts.join('; ');
 }
 
+export function finalizeCompany(job) {
+  const resolved = resolveCompanyName(job);
+  return { ...job, company: resolved.name || job.company || '', companySource: resolved.source, companyUncertain: resolved.uncertain, companyCandidates: resolved.candidates };
+}
+
 // Keeps the best `limit` local candidates for the engine (0 or a non-number means no limit). Ranking:
 // postings already deferred twice go first, then local best score with a small bonus per deferral.
 // Non-candidates (no role relevance or a hard blocker) never reach the engine and pass through as-is.
@@ -607,6 +612,9 @@ async function runPipeline(config, clock) {
   const quota = summarizeQuota(quotaEvents, quotaPolicy, config, quotaDeferred.length);
   // Deterministic eligibility is applied after semantic review so the location gap survives the merge.
   evaluated = evaluated.map(job => annotateEligibility(job, prefs));
+  // The company name is settled last: list name → board label → the scorer's employerName → cleaned
+  // ATS entity → URL; nothing valid leaves the job marked uncertain for the card and the letter panel.
+  evaluated = evaluated.map(job => finalizeCompany(job));
 
   // Fold this run into whatever the day already holds; the report is rendered from the merged whole.
   let previous = null;

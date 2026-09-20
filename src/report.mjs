@@ -9,7 +9,7 @@ import { renderReportPage } from './report-components.mjs';
 import { warningText } from './warnings.mjs';
 import { formatLocalDateTime, formatLocalDay, formatLocalShort } from './time-format.mjs';
 import { normalizeLocation, sha256 } from './utils.mjs';
-import { displayCompanyName, postedAtPrecision } from './posting-fields.mjs';
+import { companyIsUncertain, displayCompanyName, postedAtPrecision } from './posting-fields.mjs';
 import { describeQuota } from './engines/quota.mjs';
 
 export const REPORT_TITLE = 'Daily Job Match Alert';
@@ -53,6 +53,9 @@ export function jobBadges(job) {
   }
   if (job.eligibility?.location?.verdict === 'unverified') {
     badges.push({ key: 'location-unverified', label: 'Location unverified', tone: 'note', title: 'The posting only says Remote or gives no location; confirm it permits work from the United States' });
+  }
+  if (companyIsUncertain(job)) {
+    badges.push({ key: 'company-uncertain', label: 'Company name uncertain', tone: 'warn', title: 'No source gave a usable employer name; confirm it before applying or generating a letter' });
   }
   if (job.enrichment === 'failed') {
     badges.push(ENRICHMENT_BADGES[job.enrichmentReason] || { key: 'jd-not-fetched', label: 'JD not fetched', tone: 'warn', title: job.enrichmentError || 'The posting could not be fetched; only the alert text was scored' });

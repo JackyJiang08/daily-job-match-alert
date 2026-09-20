@@ -123,6 +123,20 @@ disabled; do not expand them unless a task says so.
   GET /letters/oneclick.json is polled by ONECLICK_SCRIPT on the Reports page,
   and the browser downloads the PDF from the whitelisted letter route. The
   panel (/letters/new, /letters/<date>/<Company>) always opens in the editor.
+- Company names (src/posting-fields.mjs): `resolveCompanyName` runs the
+  candidate chain list/source name → board registry label → the scorer's
+  employerName (schema field, kept as job.employerNameFromJd) → cleaned ATS
+  entity → URL (Workday site / board slug); `isValidCompanyName` rejects legal
+  words alone, codes ("US101", "1007 Clarios, LLC"), and generic words. The
+  pipeline settles job.company/companySource/companyUncertain after scoring
+  (`finalizeCompany`); enrichment never overwrites a valid source name. An
+  uncertain company shows a "Company name uncertain" badge, blocks one-click
+  letters (the panel asks first), and blocks Save & Render; the editor pass
+  flags "salutation says X, body says Y". Letters are named
+  {Prefix}_Cover_Letter_{Company}.pdf (prefix from Settings, default derived
+  from the signature, e.g. "Yuqing (Jacky) Jiang" → JackyJiang); Rename
+  Company & Re-render (POST /letters/rename) moves the directory and file
+  without calling the model.
 - Personal details (name, phone, email, signature, playbook, sample letters)
   live ONLY under private/cover-letter/; generated letters under
   private/cover-letters/<date>/<Company>/. Never put a real person's data in

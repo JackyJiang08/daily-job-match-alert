@@ -13,7 +13,7 @@ import {
 import { localDate } from '../time-format.mjs';
 import { LETTER_SCRIPT, ONECLICK_SCRIPT, SAMPLE_TRACK_SCRIPT, letterPanel, lettersPage, trackLabelOf } from './letter-views.mjs';
 import { todayTarget } from './views.mjs';
-import { findLetterJob, generateLetter, jobIdOf, letterEngineFor, oneClickLetter, saveLetter } from './letters.mjs';
+import { findLetterJob, generateLetter, jobIdOf, letterCompanyFor, letterEngineFor, oneClickLetter, renameLetter, saveLetter } from './letters.mjs';
 import { LetterBusyError } from './letter-jobs.mjs';
 import { QuotaError, describeQuota } from '../engines/quota.mjs';
 import { LetterInputError } from '../cover-letter/store.mjs';
@@ -198,9 +198,11 @@ export function createHubHandler(ctx) {
     const { job, id, tracks } = await findLetterJob(ctx, date, jobId);
     const selectedTrack = url.searchParams.get('track') || existing?.record?.track || job.recommendedTrack || tracks[0]?.id || '';
     const engine = letterEngineFor(ctx, config);
-    const shownJob = { ...job, company: displayCompanyName(job) };
-    const content = letterPanel({ date, jobId: id, job: shownJob, tracks, selectedTrack, company: existing?.record?.company || shownJob.company || '', readiness, existing, engineLabel: `${engine.label} · ${engine.model}` });
-    await page(response, 200, { active: 'letters', title: `Cover letter · ${job.company || job.title}`, content, script: LETTER_SCRIPT, error: url.searchParams.get('error') || '' });
+    const companyGuess = letterCompanyFor(job);
+    const shownJob = { ...job, company: companyGuess.name };
+    const confirm = url.searchParams.get('confirm') === '1' || (!existing && companyGuess.uncertain);
+    const content = letterPanel({ date, jobId: id, job: shownJob, tracks, selectedTrack, company: existing?.record?.company || companyGuess.name || '', readiness, existing, engineLabel: `${engine.label} · ${engine.model}`, confirmCompany: confirm, companyUncertain: companyGuess.uncertain });
+    await page(response, 200, { active: 'letters', title: `Cover letter · ${companyGuess.name || job.title}`, content, script: LETTER_SCRIPT, error: url.searchParams.get('error') || '', notice: confirm ? `Confirm the company name${companyGuess.name ? ` (best guess: ${companyGuess.name})` : ''}, then Regenerate` : (url.searchParams.get('notice') || '') });
   }
 
   async function getLetterDownload(date, slug, fileName, response) {
@@ -263,8 +265,20 @@ export function createHubHandler(ctx) {
         if (!readiness.ready) throw new HubInputError(`Cover-letter material is incomplete (${readiness.missing.join(', ')}); upload it under Settings first`);
         const { job, id } = await findLetterJob(ctx, date, fields.job);
         const engineChoice = fields.engine ? String(fields.engine).toLowerCase() : null;
+        // An uncertain company name never becomes a salutation on its own: the panel asks for it first.
+        const company = letterCompanyFor(job);
+        if (company.uncertain) {
+          json(response, 200, { state: 'confirm', reason: `The company name for this posting is uncertain${company.name ? ` (best guess: ${company.name})` : ''}; confirm it before generating`, company: company.name || '', panelUrl: `/letters/new?date=${date}&job=${id}&confirm=1` });
+          return;
+        }
         const started = ctx.letterJobs.start({ date, jobId: id, company: displayCompanyName(job) || job.company || null, run: () => oneClickLetter(ctx, { date, jobId: id, engine: engineChoice }) });
         json(response, 202, started);
+        return;
+      }
+      case '/letters/rename': {
+        const letterSlug = String(fields.slug || '');
+        if (!/^[A-Za-z0-9]{1,80}$/.test(letterSlug)) throw new HubInputError('Invalid letter');
+        json(response, 200, await renameLetter(ctx, { date: assertDate(fields.date), slug: letterSlug, company: fields.company }));
         return;
       }
       case '/letters/save': {
@@ -367,7 +381,7 @@ export function createHubHandler(ctx) {
       if (request.method === 'POST') return await handlePost(url, request, response);
       return send(response, 405, 'Method not allowed', 'text/plain; charset=utf-8');
     } catch (error) {
-      const wantsJson = url.pathname === '/run' || url.pathname === '/letters/generate' || url.pathname === '/letters/save' || url.pathname === '/letters/oneclick' || url.pathname === '/settings/cover-letter/sample-track' || url.pathname.endsWith('.json');
+      const wantsJson = url.pathname === '/run' || url.pathname === '/letters/generate' || url.pathname === '/letters/save' || url.pathname === '/letters/rename' || url.pathname === '/letters/oneclick' || url.pathname === '/settings/cover-letter/sample-track' || url.pathname.endsWith('.json');
       const status = error instanceof HubInputError || error instanceof LetterInputError ? 400 : error instanceof HubLockedError || error instanceof LetterBusyError ? 409 : error instanceof QuotaError ? 429 : Number(error?.status) || 500;
       const message = status === 500 ? `Hub error: ${error?.message || error}` : String(error.message || error);
       if (status === 500) console.error(error?.stack || error);

@@ -4,6 +4,7 @@
 import { formatLocalDateTime } from '../time-format.mjs';
 import { roleLabel } from '../report.mjs';
 import { htmlEscape } from '../utils.mjs';
+import { isValidCompanyName } from '../posting-fields.mjs';
 
 export const TRACK_LABELS = { data: 'Data', llm: 'LLM', agent: 'AI Agent' };
 export const MAX_SAMPLE_COUNT = 10;
@@ -112,6 +113,7 @@ export function coverLetterSettingsSection({ profile, readiness, timeZone }) {
         <label class="field"><span>Phone</span><input type="text" name="phone" class="control-input" value="${htmlEscape(profile.phone || '')}" placeholder="555-0100"></label>
         <label class="field"><span>Email</span><input type="text" name="email" class="control-input" value="${htmlEscape(profile.email || '')}" placeholder="jane@example.com"></label>
         <label class="field"><span>Signature Name</span><input type="text" name="signatureName" class="control-input" value="${htmlEscape(profile.signatureName || '')}" placeholder="Jane Doe"></label>
+        <label class="field"><span>File Name Prefix (letters are saved as Prefix_Cover_Letter_Company.pdf)</span><input type="text" name="fileNamePrefix" class="control-input" value="${htmlEscape(profile.fileNamePrefix || '')}" placeholder="JaneDoe" pattern="[A-Za-z0-9]{1,60}" title="Letters and digits only"></label>
       </div>
     </fieldset>
     <fieldset class="group"><legend>Playbook</legend>
@@ -159,15 +161,16 @@ export const SAMPLE_TRACK_SCRIPT = `
 export function lettersPage({ letters, timeZone = 'America/Chicago' }) {
   const sorted = [...letters].sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.savedAt || '').localeCompare(String(a.savedAt || '')));
   const rows = sorted.length
-    ? `<table class="plain"><tr><th>Date</th><th>Company</th><th>Role</th><th>Track</th><th>Engine</th><th>Pages</th><th>Generated</th><th>Notes</th><th>Actions</th></tr>${sorted.map(letter => `<tr>
+    ? `<table class="plain"><tr><th>Date</th><th>Company</th><th>Role</th><th>Track</th><th>Engine</th><th>Pages</th><th>Generated</th><th>Notes</th><th>File</th><th>Actions</th></tr>${sorted.map(letter => `<tr>
       <td>${htmlEscape(letter.date)}</td>
-      <td><a href="/letters/${letter.date}/${letter.slug}">${htmlEscape(letter.company)}</a></td>
+      <td><a href="/letters/${letter.date}/${letter.slug}">${htmlEscape(letter.company)}</a>${isValidCompanyName(letter.company) ? '' : ' <span class="badge badge-warn" data-badge="company-suspect" title="The salutation may not name the employer; open the letter and use Rename Company">Check company name</span>'}</td>
       <td>${htmlEscape(letter.jobTitle || '')}</td>
       <td>${trackBadge(letter.track) || htmlEscape(letter.trackLabel || '')}</td>
       <td>${htmlEscape(letter.engine || '')}${letter.model ? ` · ${htmlEscape(letter.model)}` : ''}</td>
       <td>${letter.pdf ? `${letter.pdf.pages}${letter.pdf.layout && letter.pdf.layout !== 'letter-1in' ? ' <span class="badge badge-warn" data-badge="layout">reduced layout</span>' : ''}` : '—'}</td>
       <td>${readable(letter.createdAt || letter.savedAt, timeZone)}</td>
       <td>${Array.isArray(letter.editorNotes) ? letter.editorNotes.length : 0}</td>
+      <td><span class="mono">${htmlEscape(letter.pdfFileName || '')}</span></td>
       <td><a class="btn secondary small" href="/letters/${letter.date}/${letter.slug}">Open</a> ${letter.pdfFileName && letter.pdf ? `<a class="btn secondary small" href="/letters/${letter.date}/${letter.slug}/${encodeURIComponent(letter.pdfFileName)}">Download PDF</a>` : ''}</td>
     </tr>`).join('')}</table>`
     : '<p class="muted">No cover letters yet. Open a report and use Generate Cover Letter on a job card.</p>';
@@ -193,7 +196,7 @@ function footLine(record, engineLabel) {
   return `${samples ? `Samples used: ${samples} · ` : 'No samples used · '}Engine: ${record.engine}${record.model ? ` · ${record.model}` : ''}${record.pdf ? ` · PDF via ${record.pdf.renderer}` : ''}`;
 }
 
-export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, readiness, existing, engineLabel }) {
+export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, readiness, existing, engineLabel, confirmCompany = false, companyUncertain = false }) {
   const trackOptions = tracks.map(track => `<option value="${htmlEscape(track.id)}"${track.id === selectedTrack ? ' selected' : ''}>${htmlEscape(track.label)}${track.id === job.recommendedTrack ? ' (recommended)' : ''}</option>`).join('');
   const notReady = readiness.ready ? '' : `<div class="flash error">Add your contact block and a playbook under <a href="/settings#cover-letters">Settings → Cover Letters</a> first (missing: ${htmlEscape(readiness.missing.join(', '))}).</div>`;
   const record = existing?.record || null;
@@ -203,9 +206,12 @@ export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, 
   const download = record?.pdfFileName && record.pdf
     ? `<a class="btn" id="download-link" href="/letters/${date}/${existing.slug}/${encodeURIComponent(record.pdfFileName)}">Download PDF</a>`
     : '<a class="btn" id="download-link" hidden href="#">Download PDF</a>';
+  const companyHint = companyUncertain || confirmCompany
+    ? `<p class="letter-status" id="company-hint" data-company-uncertain="${companyUncertain ? 'yes' : 'no'}">${companyUncertain ? 'No source gave a usable employer name; type the company as it should appear in the salutation, then Regenerate.' : 'Confirm the company name before generating.'}</p>`
+    : '';
   return `<h1 class="hub-title">Cover Letter</h1>
   ${notReady}
-  <article class="card letter-head" id="letter-panel" data-date="${htmlEscape(date)}" data-job="${htmlEscape(jobId)}" data-ready="${readiness.ready ? 'yes' : 'no'}">
+  <article class="card letter-head" id="letter-panel" data-date="${htmlEscape(date)}" data-job="${htmlEscape(jobId)}" data-ready="${readiness.ready ? 'yes' : 'no'}" data-slug="${htmlEscape(existing?.slug || '')}" data-company-uncertain="${companyUncertain ? 'yes' : 'no'}">
     <dl class="kv">
       <dt>Role</dt><dd>${htmlEscape(job.title || '')}</dd>
       <dt>Company</dt><dd>${htmlEscape(job.company || 'Company not resolved')}</dd>
@@ -215,9 +221,11 @@ export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, 
     <div class="letter-controls">
       <label class="field"><span>Resume Track</span><select id="letter-track" class="control-input">${trackOptions}</select></label>
       <label class="field"><span>Company Name</span><input type="text" id="letter-company" class="control-input" value="${htmlEscape(company)}" required></label>
+      ${companyHint}
       <div class="row">
         <button class="btn" id="generate-button" type="button"${readiness.ready ? '' : ' disabled'}>Regenerate</button>
         <button class="btn secondary" id="save-button" type="button"${paragraphs.length ? '' : ' hidden'}>Save &amp; Render PDF</button>
+        <button class="btn secondary" id="rename-button" type="button"${existing?.slug ? '' : ' hidden'} title="Replace the salutation and the file name and render the PDF again; the model is not called">Rename Company &amp; Re-render</button>
         <button class="btn secondary" id="codex-button" type="button" hidden>Generate with Codex</button>
         ${download}
       </div>
@@ -310,12 +318,27 @@ export const LETTER_SCRIPT = `
       .then(function () { generate.disabled = false; });
   }
   generate.addEventListener('click', function () { runGenerate(null); });
+  var rename = document.getElementById('rename-button');
+  if (rename) rename.addEventListener('click', function () {
+    if (!panel.dataset.slug) return;
+    rename.disabled = true; say('Renaming and rendering…');
+    post('/letters/rename', { date: panel.dataset.date, slug: panel.dataset.slug, company: document.getElementById('letter-company').value })
+      .then(function (result) {
+        panel.dataset.slug = result.slug;
+        download.href = result.downloadUrl; download.hidden = false;
+        if (window.history && window.history.replaceState) window.history.replaceState(null, '', result.openUrl);
+        say('Renamed. The salutation and the file name now use ' + result.record.company + ' (' + result.pdfFileName + ').');
+      })
+      .catch(function (error) { say(error.message, true); })
+      .then(function () { rename.disabled = false; });
+  });
   if (codexButton) codexButton.addEventListener('click', function () { runGenerate('codex'); });
   save.addEventListener('click', function () {
     save.disabled = true; say('Rendering PDF…');
     post('/letters/save', { date: panel.dataset.date, job: panel.dataset.job, track: document.getElementById('letter-track').value, company: document.getElementById('letter-company').value, paragraph: paragraphs(), engine: state.engine || '', model: state.model || '', issues: JSON.stringify(state.issues), editorNotes: JSON.stringify(state.editorNotes), samplesUsed: JSON.stringify(state.samplesUsed) })
       .then(function (result) {
         download.href = result.downloadUrl; download.hidden = false;
+        panel.dataset.slug = result.slug; var renameButton = document.getElementById('rename-button'); if (renameButton) renameButton.hidden = false;
         if (result.pdf.condensed && result.paragraphs) fill(result.paragraphs);
         state.pages = result.pdf.pages;
         showCounts(result.paragraphs || paragraphs(), result.pdf.pages);
@@ -410,6 +433,7 @@ export const ONECLICK_SCRIPT = `
     var fields = { date: button.dataset.date, job: button.dataset.job };
     if (engine) fields.engine = engine;
     post('/letters/oneclick', fields).then(function (data) {
+      if (data.state === 'confirm' && data.panelUrl) { window.location.href = data.panelUrl; return; }
       if (data.httpStatus !== 202) { markFailed(button, data.error, data.quota || null); if (data.httpStatus === 409) { setBusy(true, data.job); setTimeout(poll, 1500); } else { setBusy(false, null); } return; }
       active = data.id;
       setTimeout(poll, 1000);

@@ -35,7 +35,7 @@ async function withTempDirectory(io, tempRoot, work) {
 
 // Editor pass: adopt the revised body only when the editor raised issues and returned a usable body.
 export async function reviewCoverLetter({ engine, paragraphs, inputs, tempDirectory }) {
-  const prompt = buildReviewPrompt({ paragraphs, job: inputs.job, resumeText: inputs.resumeText, playbook: inputs.playbook, graduation: inputs.graduation });
+  const prompt = buildReviewPrompt({ paragraphs, job: inputs.job, resumeText: inputs.resumeText, playbook: inputs.playbook, graduation: inputs.graduation, company: inputs.company || null });
   const response = await engine.generateText(prompt, { schema: REVIEW_SCHEMA, tempDirectory });
   const notes = issuesFrom(response.output);
   const revised = validateParagraphs(paragraphsFrom(response.output, 'revised_paragraphs'));
