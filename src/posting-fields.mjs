@@ -42,21 +42,49 @@ const GENERIC_NAMES = new Set(['company', 'companies', 'employer', 'hiring', 'ca
 // Tenant codes in front of a name ("1007 ", "US101 ", "CP1367-") mean the raw entity, not a name.
 const LEADING_CODE = /^(?:[A-Z]{0,3}\d{1,7}[A-Z]?)[\s\-–_:]+\S/;
 
-// A usable company name keeps at least two letters once legal words are gone, is not a bare code or
-// number, and is not a generic placeholder. "Inc. Company", "LLC", "US101", "1007" all fail.
-export function isValidCompanyName(raw) {
+// Two levels of trust. A name that a curated list or a feed printed as the employer (Simplify, Zapply,
+// jobright, vanshb03, zshah101, Hacker News, RemoteOK) or that the owner typed is taken at its word unless
+// it is empty, made only of legal words, or shorter than two characters: "3M", "7-Eleven", "Q2",
+// "A2 Hosting", "S&P Global" pass. A name recovered from an ATS entity or a URL also faces the strict
+// rules: no leading tenant code, no bare code or number, no generic placeholder. "Inc. Company", "LLC",
+// "US101", "1007 Clarios, LLC" fail both.
+export function isTrustedSourceName(raw) {
   const name = cleanText(raw || '');
-  if (!name) return false;
+  if (name.length < 2) return false;
   if (GENERIC_NAMES.has(name.toLowerCase())) return false;
+  const stripped = name.replace(LEGAL_WORDS, ' ').replace(/[^\p{L}\p{N}&]+/gu, ' ').trim();
+  return stripped.length >= 2;
+}
+
+export function isValidCompanyName(raw) {
+  if (!isTrustedSourceName(raw)) return false;
+  const name = cleanText(raw || '');
   if (LEADING_CODE.test(name)) return false;
   const stripped = name.replace(LEGAL_WORDS, ' ').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
-  if (!stripped) return false;
-  if (GENERIC_NAMES.has(stripped.toLowerCase())) return false;
+  if (!stripped || GENERIC_NAMES.has(stripped.toLowerCase())) return false;
   const letters = (stripped.match(/\p{L}/gu) || []).length;
   if (letters < 2) return false;
   // A code: a single token that mixes digits with at most three letters ("US101", "Us101", "R-123456").
   if (!/\s/.test(stripped) && /\d/.test(stripped) && letters <= 3) return false;
   return true;
+}
+
+// Advisory only (the Letters page badge): a stored salutation that is legal-only, or that looks like a raw
+// ATS entity (a leading tenant code, or one token carrying three or more digits with at most three
+// letters, "US101", "R-123456"). Short brands such as "3M" or "Q2" are left alone.
+export function looksLikeEntityCode(raw) {
+  const name = cleanText(raw || '');
+  if (!isTrustedSourceName(name)) return true;
+  // A leading code of three or more characters ("1007 ", "US101 ", "CP1367-"); "7-Eleven" is a brand.
+  if (/^(?:[A-Z]{0,3}\d{1,7}[A-Z]?)[\s\-–_:]+\S/.test(name) && /^[A-Z0-9]{3,}/.test(name)) return true;
+  const digits = (name.match(/\p{N}/gu) || []).length;
+  const letters = (name.match(/\p{L}/gu) || []).length;
+  return !/\s/.test(name) && digits >= 3 && letters <= 3;
+}
+
+// Validation per candidate origin: source and registry names get the lenient check, the rest the strict one.
+export function isAcceptableCompanyName(raw, source) {
+  return source === 'source' || source === 'registry' ? isTrustedSourceName(raw) : isValidCompanyName(raw);
 }
 
 // Splits a CamelCase site name into words, gluing a short leading segment to the next one so brand
@@ -111,7 +139,7 @@ export function resolveCompanyName(job, { boardCompany = null } = {}) {
     ['url', companyFromUrl(job?.finalUrl || job?.url)],
   ];
   const candidates = raw.map(([source, value]) => [source, cleanText(value || '')]).filter(([, value]) => value);
-  const valid = candidates.find(([, value]) => isValidCompanyName(value));
+  const valid = candidates.find(([source, value]) => isAcceptableCompanyName(value, source));
   if (valid) return { name: valid[1], source: valid[0], uncertain: false, candidates: candidates.map(([source, value]) => ({ source, value })) };
   // Nothing passed: prefer the candidate with the most letters, then the earliest.
   const best = [...candidates].sort((a, b) => (b[1].match(/\p{L}/gu) || []).length - (a[1].match(/\p{L}/gu) || []).length)[0];

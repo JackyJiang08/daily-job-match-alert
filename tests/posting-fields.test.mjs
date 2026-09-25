@@ -1,7 +1,7 @@
 // Workday company-name cleaning, posting-date precision, and the post-enrichment freshness re-check.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { cleanWorkdayCompany, companyFromUrl, companyIsUncertain, displayCompanyName, hasClockTime, holdsToExactWindow, isValidCompanyName, postedAtPrecision, resolveCompanyName } from '../src/posting-fields.mjs';
+import { cleanWorkdayCompany, companyFromUrl, companyIsUncertain, displayCompanyName, hasClockTime, holdsToExactWindow, isAcceptableCompanyName, isTrustedSourceName, isValidCompanyName, looksLikeEntityCode, postedAtPrecision, resolveCompanyName } from '../src/posting-fields.mjs';
 import { finalizeCompany } from '../src/index.mjs';
 import { buildResultSchema, buildSemanticPrompt, mergeSemanticResults } from '../src/subscription-match.mjs';
 import { applyFreshnessRecheck } from '../src/index.mjs';
@@ -107,7 +107,27 @@ test('cards show day-level dates without a time and say so on hover; precise one
   assert.match(renderJobCard(preciseCard), /<span class="meta" title="Posted Sep 18, 2026, 8:15 PM">Posted Sep 18, 8:15 PM · fixture<\/span>/);
 });
 
-test('company validation: legal words alone, codes, numbers, and generic words fail; real names pass', () => {
+test('company validation: a list or feed name is trusted unless empty, legal-only, or shorter than two characters; ATS and URL names face the strict rules', () => {
+  // Names as curated lists print them: short brands with digits are real companies.
+  for (const name of ['3M', '7-Eleven', 'Q2', 'A2 Hosting', 'S&P Global', 'The Boeing Company', 'Clarios', 'IBM', 'GD Information Technology, Inc.']) {
+    assert.equal(isTrustedSourceName(name), true, `${name} is a trusted source name`);
+    assert.equal(isAcceptableCompanyName(name, 'source'), true, `${name} from a list`);
+    assert.equal(isAcceptableCompanyName(name, 'registry'), true, `${name} from the board registry`);
+  }
+  for (const name of ['Inc. Company', 'LLC', 'Inc.', 'Company', '', 'A', null, 'Holdings Group', 'External']) {
+    assert.equal(isTrustedSourceName(name), false, `${String(name)} is not a usable source name`);
+    assert.equal(isAcceptableCompanyName(name, 'source'), false, String(name));
+  }
+  // The strict rules apply to ATS entities and URL derivations only.
+  for (const name of ['US101', 'Us101', '1007 Clarios, LLC', 'R-123456', '100000']) {
+    assert.equal(isTrustedSourceName(name), true, `${name} would be accepted from a list`);
+    assert.equal(isAcceptableCompanyName(name, 'ats'), false, `${name} from an ATS entity is a code`);
+    assert.equal(isAcceptableCompanyName(name, 'url'), false, `${name} from a URL is a code`);
+    assert.equal(isAcceptableCompanyName(name, 'employerName'), false, `${name} from the scorer is a code`);
+  }
+  assert.equal(isAcceptableCompanyName('3M', 'ats'), false, 'the strict check still rejects a two-character brand with a digit; lists vouch for those');
+  for (const name of ['3M', '7-Eleven', 'Q2', 'A2 Hosting', 'S&P Global', 'Clarios']) assert.equal(looksLikeEntityCode(name), false, `${name} is not flagged on the Letters page`);
+  for (const name of ['US101', 'R-123456', '1007 Clarios, LLC', 'Inc. Company', 'LLC']) assert.equal(looksLikeEntityCode(name), true, `${name} is flagged on the Letters page`);
   for (const [name, expected] of [
     ['Inc. Company', false], ['LLC', false], ['US101', false], ['Us101', false], ['1007 Clarios, LLC', false], ['R-123456', false], ['100000', false],
     ['Company', false], ['External', false], ['Hiring', false], ['a', false], ['', false], [null, false],
@@ -129,7 +149,10 @@ test('the URL is the last candidate: Workday site names become words, board slug
 test('the candidate chain takes the first valid name in order and marks the job uncertain when none passes', () => {
   const url = 'https://relx.wd3.myworkdayjobs.com/LexisNexisLegal/job/Analyst_R1';
   assert.deepEqual(resolveCompanyName({ companyFromSource: 'RELX', boardCompany: 'LexisNexis', employerNameFromJd: 'LexisNexis Risk', atsCompany: '1000 RELX Inc.', url }).name, 'RELX');
-  assert.equal(resolveCompanyName({ companyFromSource: 'US101', boardCompany: 'LexisNexis', employerNameFromJd: 'LexisNexis Risk', atsCompany: '1000 RELX Inc.', url }).source, 'registry', 'an invalid source name falls through');
+  assert.equal(resolveCompanyName({ companyFromSource: 'Inc.', boardCompany: 'LexisNexis', employerNameFromJd: 'LexisNexis Risk', atsCompany: '1000 RELX Inc.', url }).source, 'registry', 'a legal-only source name falls through');
+  assert.deepEqual(resolveCompanyName({ companyFromSource: '3M', atsCompany: '1000 3M Company', url }).name, '3M', 'a short brand from a list is trusted as it is');
+  assert.deepEqual(resolveCompanyName({ companyFromSource: 'Q2', employerNameFromJd: 'Q2 Holdings', url }).source, 'source');
+  assert.equal(resolveCompanyName({ companyFromSource: 'US101', boardCompany: 'LexisNexis', url }).name, 'US101', 'a list name that looks like a code is still the list\'s word');
   assert.equal(resolveCompanyName({ companyFromSource: '', employerNameFromJd: 'LexisNexis Risk', atsCompany: '1000 RELX Inc.', url }).source, 'employerName', 'the scorer\'s employer name is third');
   const ats = resolveCompanyName({ companyFromSource: '', atsCompany: '1000 RELX Inc.', url });
   assert.deepEqual([ats.name, ats.source], ['RELX', 'ats'], 'the ATS entity is cleaned before it is judged');
@@ -154,8 +177,10 @@ test('enrichment keeps a valid list name over the ATS entity and stores the enti
   const url = 'https://motorola.wd5.myworkdayjobs.com/Careers/job/Chicago-IL/Data-Analyst-Intern_R1';
   const kept = await enrichJob({ url, company: 'Motorola', title: 'x' }, {}, fetchWorkday);
   assert.deepEqual([kept.company, kept.companyFromSource, kept.atsCompany], ['Motorola', 'Motorola', '100000 Motorola Solutions, Inc.']);
-  const codeOnly = await enrichJob({ url, company: 'US101', title: 'x' }, {}, fetchWorkday);
-  assert.deepEqual([codeOnly.company, codeOnly.companyFromSource, codeOnly.atsCompany], ['Motorola Solutions', 'US101', '100000 Motorola Solutions, Inc.'], 'an invalid list name is replaced by the cleaned entity');
+  const codeOnly = await enrichJob({ url, company: 'Inc.', title: 'x' }, {}, fetchWorkday);
+  assert.deepEqual([codeOnly.company, codeOnly.companyFromSource, codeOnly.atsCompany], ['Motorola Solutions', 'Inc.', '100000 Motorola Solutions, Inc.'], 'a legal-only list name is replaced by the cleaned entity');
+  const shortBrand = await enrichJob({ url, company: '3M', title: 'x' }, {}, fetchWorkday);
+  assert.equal(shortBrand.company, '3M', 'a short brand from a list is never overwritten by the entity');
   const greenhouse = { title: 'Analyst', company_name: 'Acme Holdings LLC', location: { name: 'Remote' }, content: 'x'.repeat(300), updated_at: '2026-09-18T10:00:00Z' };
   const fromBoard = await enrichJob({ url: 'https://job-boards.greenhouse.io/acme/jobs/1', company: 'Acme', title: 'x' }, {}, async () => new Response(JSON.stringify(greenhouse), { status: 200, headers: { 'content-type': 'application/json' } }));
   assert.deepEqual([fromBoard.company, fromBoard.atsCompany], ['Acme', 'Acme Holdings LLC']);
@@ -171,6 +196,6 @@ test('the scoring schema requires employerName and the merge keeps it beside, ne
   assert.equal(merged[0].employerNameFromJd, 'Acme Robotics');
   const blank = mergeSemanticResults([{ semanticId: 'abc', url: 'https://x/1', company: 'Acme', scores: { data: 10 }, bestScore: 10 }], [{ id: 'abc', roleType: 'new_grad', scores: { data: 80 }, recommendedTrack: 'data', employerName: '   ', matchLevel: 'high', reasons: [], gaps: [], blockers: [] }], 'claude', [{ id: 'data', label: 'Data', text: 'r' }]);
   assert.equal(blank[0].employerNameFromJd, null);
-  const resolved = finalizeCompany({ companyFromSource: 'US101', employerNameFromJd: 'Acme Robotics', atsCompany: 'US101', url: 'https://x.wd5.myworkdayjobs.com/External/job/y' });
+  const resolved = finalizeCompany({ companyFromSource: 'Inc.', employerNameFromJd: 'Acme Robotics', atsCompany: 'US101', url: 'https://x.wd5.myworkdayjobs.com/External/job/y' });
   assert.deepEqual([resolved.company, resolved.companySource], ['Acme Robotics', 'employerName'], 'the employer name from the posting is the third candidate');
 });

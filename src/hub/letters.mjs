@@ -12,7 +12,7 @@ import { sha256 } from '../utils.mjs';
 import { HubInputError, readReportPayload } from './services.mjs';
 import { displayCompanyName } from '../posting-fields.mjs';
 import { QuotaError, classifyQuotaError, describeQuota, nextLadderModel, normalizeQuotaPolicy } from '../engines/quota.mjs';
-import { isValidCompanyName, resolveCompanyName } from '../posting-fields.mjs';
+import { isAcceptableCompanyName, isTrustedSourceName, resolveCompanyName } from '../posting-fields.mjs';
 import { renderLetterPdf as renderPdfDefault } from '../cover-letter/pdf.mjs';
 
 export function jobIdOf(job) {
@@ -23,8 +23,8 @@ export function jobIdOf(job) {
 // the candidate chain over the stored job; `uncertain` means no candidate passed validation.
 export function letterCompanyFor(job) {
   const resolved = resolveCompanyName(job);
-  if (job?.companySource && !job.companyUncertain && isValidCompanyName(job.company)) return { name: job.company, uncertain: false, source: job.companySource };
-  return { name: resolved.name, uncertain: resolved.uncertain || !isValidCompanyName(resolved.name), source: resolved.source };
+  if (job?.companySource && !job.companyUncertain && isAcceptableCompanyName(job.company, job.companySource)) return { name: job.company, uncertain: false, source: job.companySource };
+  return { name: resolved.name, uncertain: resolved.uncertain || !isAcceptableCompanyName(resolved.name, resolved.source), source: resolved.source };
 }
 
 export async function findLetterJob(ctx, date, jobId) {
@@ -134,7 +134,8 @@ export async function saveLetter(ctx, { date, jobId, trackId, company, paragraph
   const body = (Array.isArray(paragraphs) ? paragraphs : []).map(item => String(item || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
   if (!body.length) throw new HubInputError('The letter body is empty');
   const companyName = String(company || letterCompanyFor(job).name || '').trim();
-  if (!isValidCompanyName(companyName)) throw new HubInputError(`"${companyName || 'Company'}" is not a usable company name; confirm the company before rendering`);
+  // A name the owner typed or confirmed is trusted like a source name; only empty or legal-only names are refused.
+  if (!isTrustedSourceName(companyName)) throw new HubInputError(`"${companyName || 'Company'}" is not a usable company name; confirm the company before rendering`);
   const now = ctx.now();
   const timeZone = config.timeZone || 'America/Chicago';
   const letter = assembleLetter({ profile, company: companyName, paragraphs: body, now, timeZone });
@@ -177,7 +178,7 @@ export async function saveLetter(ctx, { date, jobId, trackId, company, paragraph
 export async function renameLetter(ctx, { date, slug, company }) {
   const config = await ctx.loadConfig();
   const companyName = String(company || '').trim();
-  if (!isValidCompanyName(companyName)) throw new HubInputError(`"${companyName || ''}" is not a usable company name`);
+  if (!isTrustedSourceName(companyName)) throw new HubInputError(`"${companyName || ''}" is not a usable company name`);
   const existing = await ctx.letterStore.loadLetter(date, slug);
   if (!existing) throw new HubInputError('Letter not found');
   const { profile } = await ctx.letterStore.readiness();

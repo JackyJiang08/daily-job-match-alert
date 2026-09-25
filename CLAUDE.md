@@ -126,8 +126,13 @@ disabled; do not expand them unless a task says so.
 - Company names (src/posting-fields.mjs): `resolveCompanyName` runs the
   candidate chain list/source name → board registry label → the scorer's
   employerName (schema field, kept as job.employerNameFromJd) → cleaned ATS
-  entity → URL (Workday site / board slug); `isValidCompanyName` rejects legal
-  words alone, codes ("US101", "1007 Clarios, LLC"), and generic words. The
+  entity → URL (Workday site / board slug). Source and registry names (and
+  names the owner types) are trusted unless empty, legal-only, or shorter than
+  two characters (`isTrustedSourceName`: "3M", "Q2", "S&P Global" pass); ATS,
+  employerName, and URL candidates also face the strict `isValidCompanyName`
+  (no leading tenant code, no bare code such as "US101" or "1007 Clarios, LLC",
+  no generic word). The Letters page flags stored salutations that look like
+  raw entities (`looksLikeEntityCode`). The
   pipeline settles job.company/companySource/companyUncertain after scoring
   (`finalizeCompany`); enrichment never overwrites a valid source name. An
   uncertain company shows a "Company name uncertain" badge, blocks one-click

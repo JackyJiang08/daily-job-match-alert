@@ -4,7 +4,7 @@
 import { formatLocalDateTime } from '../time-format.mjs';
 import { roleLabel } from '../report.mjs';
 import { htmlEscape } from '../utils.mjs';
-import { isValidCompanyName } from '../posting-fields.mjs';
+import { looksLikeEntityCode } from '../posting-fields.mjs';
 
 export const TRACK_LABELS = { data: 'Data', llm: 'LLM', agent: 'AI Agent' };
 export const MAX_SAMPLE_COUNT = 10;
@@ -163,7 +163,7 @@ export function lettersPage({ letters, timeZone = 'America/Chicago' }) {
   const rows = sorted.length
     ? `<table class="plain"><tr><th>Date</th><th>Company</th><th>Role</th><th>Track</th><th>Engine</th><th>Pages</th><th>Generated</th><th>Notes</th><th>File</th><th>Actions</th></tr>${sorted.map(letter => `<tr>
       <td>${htmlEscape(letter.date)}</td>
-      <td><a href="/letters/${letter.date}/${letter.slug}">${htmlEscape(letter.company)}</a>${isValidCompanyName(letter.company) ? '' : ' <span class="badge badge-warn" data-badge="company-suspect" title="The salutation may not name the employer; open the letter and use Rename Company">Check company name</span>'}</td>
+      <td><a href="/letters/${letter.date}/${letter.slug}">${htmlEscape(letter.company)}</a>${looksLikeEntityCode(letter.company) ? ' <span class="badge badge-warn" data-badge="company-suspect" title="The salutation may not name the employer; open the letter and use Rename Company">Check company name</span>' : ''}</td>
       <td>${htmlEscape(letter.jobTitle || '')}</td>
       <td>${trackBadge(letter.track) || htmlEscape(letter.trackLabel || '')}</td>
       <td>${htmlEscape(letter.engine || '')}${letter.model ? ` · ${htmlEscape(letter.model)}` : ''}</td>

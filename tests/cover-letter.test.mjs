@@ -836,10 +836,13 @@ test('an uncertain company blocks one-click generation and Save & Render, sends 
     assert.match(panel.text, /id="letter-company" class="control-input" value="US101"/);
     assert.match(panel.text, /<p class="letter-status" id="company-hint" data-company-uncertain="yes">No source gave a usable employer name/);
     assert.match(panel.text, /data-company-uncertain="yes"/);
-    const refusedSave = await hub.form('/letters/save', { date: '2026-09-15', job: vagueId, track: 'data', company: 'US101', paragraph: fiveParagraphs(100), engine: 'claude', model: 'x' });
-    assert.equal(refusedSave.status, 400);
+    const refusedSave = await hub.form('/letters/save', { date: '2026-09-15', job: vagueId, track: 'data', company: 'Inc. Company', paragraph: fiveParagraphs(100), engine: 'claude', model: 'x' });
+    assert.equal(refusedSave.status, 400, 'a legal-only name is refused');
     assert.match(JSON.parse(refusedSave.text).error, /not a usable company name/);
-    assert.equal((await hub.form('/letters/save', { date: '2026-09-15', job: vagueId, track: 'data', company: 'Inc. Company', paragraph: fiveParagraphs(100), engine: 'claude', model: 'x' })).status, 400);
+    assert.equal((await hub.form('/letters/save', { date: '2026-09-15', job: vagueId, track: 'data', company: 'LLC', paragraph: fiveParagraphs(100), engine: 'claude', model: 'x' })).status, 400);
+    const typedBrand = await hub.form('/letters/save', { date: '2026-09-15', job: vagueId, track: 'data', company: '3M', paragraph: fiveParagraphs(100), engine: 'claude', model: 'x' });
+    assert.equal(typedBrand.status, 200, 'a name the owner typed is trusted like a list name');
+    assert.equal(JSON.parse(typedBrand.text).slug, '3M');
 
     // A confirmed name goes through, is used in the salutation and the file name, and can be renamed later.
     const drafted = JSON.parse((await hub.form('/letters/generate', { date: '2026-09-15', job: vagueId, track: 'data', company: 'Guidehouse' })).text);
