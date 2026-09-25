@@ -79,6 +79,19 @@ disabled; do not expand them unless a task says so.
   step down the same ladder (editor note + footer) and offer "Generate with
   Codex"; Status has a Quota card; Settings exposes the ladder and fallback.
   Fixture: tests/fixtures/quota-errors.json (recorded from the CLI binary).
+- Expired login (src/engines/engine-errors.mjs): the CLI's print-mode result
+  envelope ({ is_error: true, result: "<notice>" }, recorded in
+  tests/fixtures/engine-errors.json) is unwrapped before any text reaches a
+  person; quotaPolicy.patterns.authExpired classifies "Failed to authenticate",
+  "OAuth session expired", "could not be refreshed", "not logged in",
+  "loggedIn=false" as auth_expired. Nightly: defer like a quota (never
+  unreviewed), meta.authExpired, banner + footer + Run Details, macOS
+  notification via notifyAuthExpired (injectable through main({ notifier })).
+  Hub: ctx.authState (expire/clear), "Session expired" badge on Connections
+  and the sidebar, Status banner, POST /settings/connections/refresh clears
+  it; every user-visible engine error goes through humanizeEngineError
+  (auth sentence, quota sentence, or "Generation failed (<reason>); details
+  in the hub log"); raw text only in the hub log.
 - Review budget: config.semanticMatching.maxReviewedPerRun (default 120,
   0 = no limit) caps the local candidates sent to the engine per run; the
   rest are deferred in state.deferred (not seen), come back next run whatever

@@ -329,6 +329,25 @@ async function installedSchedule(ctx) {
 // Small summary for the sidebar of every page: last run time and result, next run time. When the most
 // recent scheduled time passed (plus a grace period) without a completed run, the sidebar shows that
 // missed time as overdue instead of the following occurrence.
+// The hub's view of Claude's login: expired when this process saw a login failure and nothing has cleared
+// it, or when the newest run reported one and no later clear happened.
+export function claudeAuthView(ctx, latest) {
+  const own = ctx.authState?.claude || {};
+  const fromRun = latest?.meta?.authExpired || null;
+  const runAt = fromRun ? String(fromRun.at || latest?.meta?.completedAt || '') : '';
+  const runStillCurrent = Boolean(fromRun) && (!own.clearedAt || String(own.clearedAt) < runAt);
+  if (own.expired) return { expired: true, at: own.at, notice: own.notice, source: 'hub' };
+  if (runStillCurrent) return { expired: true, at: runAt || null, notice: fromRun.notice || null, source: 'nightly run' };
+  return { expired: false, at: null, notice: null, source: null };
+}
+
+// Applies the hub's expired flag on top of the CLI probe: "Session expired" is a distinct state from
+// "Not connected" (the CLI still says it is logged in, but calls fail).
+export function annotateConnections(connections, auth) {
+  if (!connections || !auth?.expired) return connections;
+  return { ...connections, claude: { ...(connections.claude || {}), connected: false, sessionExpired: true, hint: 'claude auth login --claudeai', reason: auth.notice || 'The last call to Claude failed to authenticate' } };
+}
+
 export async function sidebarSummary(ctx, config) {
   const dates = await listReportDates(ctx);
   const latest = dates[0] ? await readReportPayload(ctx, dates[0]) : null;
@@ -345,6 +364,7 @@ export async function sidebarSummary(ctx, config) {
     lastResult: latest ? (latest.complete === true ? 'success' : 'incomplete') : null,
     nextRunAt: overdue ? previous.toISOString() : (next ? next.toISOString() : null),
     overdue,
+    claudeAuth: claudeAuthView(ctx, latest),
   };
 }
 
@@ -410,6 +430,7 @@ export async function buildStatusView(ctx, config) {
     errors,
     sources: await sourcesView(ctx, config, latest),
     quota: quotaView(ctx, config, latest, state),
+    claudeAuth: claudeAuthView(ctx, latest),
     outputDirectory: config.outputDirectory,
   };
 }

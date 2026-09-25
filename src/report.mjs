@@ -174,6 +174,7 @@ export function runDetailsView(jobs, meta, tracks) {
     counts.push(`${jobs.length} matched`);
     rows.push({ term: 'Postings', detail: counts.join(' · ') });
   }
+  if (meta.authExpired) rows.push({ term: 'Claude login', detail: `${meta.authExpired.message}${meta.authExpired.deferred ? ` (${meta.authExpired.deferred} deferred)` : ''}` });
   if (meta.quota?.events?.length) {
     const events = meta.quota.events.map(event => `${describeQuota(event, { timeZone: meta.timeZone })}: ${event.action}${event.detail ? ` (${event.detail})` : ''}`);
     rows.push({ term: 'Subscription quota', detail: `${events.length} event(s)${meta.quota.effectiveModel || meta.quota.effectiveEngine ? ` · scored by ${meta.quota.effectiveEngine || 'claude'}${meta.quota.effectiveModel ? ` · ${meta.quota.effectiveModel}` : ''}` : ''}${meta.quota.deferredByQuota ? ` · ${meta.quota.deferredByQuota} deferred` : ''}`, items: events });
@@ -250,11 +251,11 @@ export function buildReportView(jobs, meta, options = {}) {
       ? { title: readableDate(meta.date), subtitle: mastheadSubtitle(jobs, meta, { withDate: false }) }
       : { title: REPORT_TITLE, subtitle: mastheadSubtitle(jobs, meta) },
     toolbar: { roleTypes, tracks, quiet: jobs.length < 5, total: jobs.length },
-    banner: meta.quota?.banner || null,
+    banner: meta.authExpired ? `${meta.authExpired.message}${meta.authExpired.deferred ? ` ${meta.authExpired.deferred} posting(s) were deferred to the next run and are not lost.` : ''}` : (meta.quota?.banner || null),
     cards,
     emptyMessage: 'No new postings cleared the configured threshold for this date.',
     runDetails: runDetailsView(jobs, meta, tracks),
-    footer: 'Generated locally. Scores are triage aids, not facts. Verify eligibility, posting date, and JD before applying. No applications were submitted.',
+    footer: `Generated locally. Scores are triage aids, not facts. Verify eligibility, posting date, and JD before applying. No applications were submitted.${meta.authExpired ? ` ${meta.authExpired.message}` : ''}`,
   };
 }
 

@@ -892,3 +892,89 @@ test('an uncertain company blocks one-click generation and Save & Render, sends 
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test('an expired Claude login reaches the card and the panel as one sentence, flips the hub to Session expired, offers Codex when signed in, and clears on Refresh', async () => {
+  const root = await prepareProject();
+  const mode = { value: 'expired' };
+  const envelope = { type: 'result', subtype: 'success', is_error: true, result: 'Failed to authenticate: OAuth session expired and could not be refreshed', num_turns: 1, modelUsage: {} };
+  const engineFor = ({ engine = 'claude', model = 'fable' } = {}) => ({
+    id: engine, label: engine === 'codex' ? 'ChatGPT subscription via Codex' : 'Claude subscription', model,
+    async generateText(prompt) {
+      if (engine === 'claude' && mode.value === 'expired') throw Object.assign(new Error(`/Users/me/.local/bin/claude exited 1: ${JSON.stringify(envelope)}`), { notice: envelope.result, code: 'SUBSCRIPTION_AUTH' });
+      if (engine === 'claude' && mode.value === 'weird') throw new Error(`claude exited 1: ${JSON.stringify({ ...envelope, result: 'TypeError: cannot read properties of undefined' })}`);
+      if (prompt.startsWith('EDITOR REVIEW')) return { output: { issues: [], revised_paragraphs: [] }, scoringModel: `${engine}-${model}` };
+      return { output: { paragraphs: fiveParagraphs(100) }, scoringModel: `${engine}-${model}` };
+    },
+  });
+  const hub = await startHub(root, { letterEngine: engineFor() });
+  hub.ctx.makeLetterEngine = engineFor;
+  const jobId = sha256('https://example.com/jobs/1').slice(0, 16);
+  try {
+    await hub.upload('/settings/cover-letter', PROFILE, [{ field: 'playbook', name: 'playbook.md', data: Buffer.from(`# Playbook\n${'Real evidence line. '.repeat(10)}`) }]);
+    assert.doesNotMatch((await hub.request('GET', '/status')).text, /data-banner="auth-expired"/);
+
+    const refused = await hub.form('/letters/generate', { date: '2026-09-15', job: jobId, track: 'data', company: 'Acme' });
+    assert.equal(refused.status, 401);
+    const body = JSON.parse(refused.text);
+    assert.equal(body.error, 'Claude session expired. Run `claude auth login --claudeai` in Terminal, then try again.');
+    assert.equal(body.kind, 'auth_expired');
+    assert.equal(body.codexAvailable, false, 'the fixture hub has no Codex sign-in');
+    assert.doesNotMatch(refused.text, /is_error|session_id|num_turns/, 'no raw envelope reaches the panel');
+
+    const started = await hub.form('/letters/oneclick', { date: '2026-09-15', job: jobId });
+    assert.equal(started.status, 202);
+    const failed = await hub.ctx.letterJobs.settle();
+    assert.equal(failed.state, 'failed');
+    assert.equal(failed.errorKind, 'auth_expired');
+    assert.equal(failed.error, 'Claude session expired. Run `claude auth login --claudeai` in Terminal, then try again.');
+    const polled = JSON.parse((await hub.request('GET', '/letters/oneclick.json')).text);
+    assert.equal(polled.codexAvailable, false);
+    assert.doesNotMatch(JSON.stringify(polled), /is_error|session_id/);
+
+    const settings = await hub.request('GET', '/settings');
+    assert.match(settings.text, /<dt>Claude<\/dt><dd><span class="badge badge-bad" data-conn="expired">Session expired<\/span> <span class="muted">Run <code>claude auth login --claudeai<\/code> in Terminal, then Refresh\.<\/span><br><span class="muted">Failed to authenticate: OAuth session expired and could not be refreshed<\/span>/);
+    assert.match(settings.text, /data-engine-state="expired">Session expired<\/span>/);
+    assert.match(settings.text, /<b>Claude<\/b><span class="bad" data-auth="expired">Session expired<\/span>/, 'the sidebar carries it too');
+    const status = await hub.request('GET', '/status');
+    assert.match(status.text, /<div class="flash error" data-banner="auth-expired">Claude session expired\. Run <code>claude auth login --claudeai<\/code> in Terminal, then try again\. <span class="muted">Seen Sep 15, 2026, 10:00 AM \(hub\)\.<\/span> <form class="inline" method="post" action="\/settings\/connections\/refresh">/);
+
+    // With Codex signed in, the same failure offers Generate with Codex, and a Codex generation succeeds.
+    hub.ctx.connections = { status: async () => ({ claude: { installed: true, connected: true, detail: 'Claude · Max · claude.ai' }, codex: { installed: true, connected: true, detail: 'Codex · ChatGPT' } }), reset() {} };
+    const withCodex = JSON.parse((await hub.form('/letters/generate', { date: '2026-09-15', job: jobId, track: 'data', company: 'Acme' })).text);
+    assert.equal(withCodex.codexAvailable, true);
+    assert.equal(JSON.parse((await hub.request('GET', '/letters/oneclick.json')).text).codexAvailable, true, 'the card can offer Generate with Codex');
+    const viaCodex = await hub.form('/letters/generate', { date: '2026-09-15', job: jobId, track: 'data', company: 'Acme', engine: 'codex' });
+    assert.equal(viaCodex.status, 200);
+    assert.match((await hub.request('GET', '/settings')).text, /data-conn="expired"/, 'a Codex success does not vouch for the Claude login');
+
+    // A manual Refresh clears the flag; a later Claude success also clears it.
+    const refreshed = await hub.form('/settings/connections/refresh', { back: 'status' });
+    assert.equal(refreshed.status, 303);
+    assert.match(refreshed.headers.location, /^\/status\?notice=Connections%20refreshed$/);
+    assert.doesNotMatch((await hub.request('GET', '/status')).text, /data-banner="auth-expired"/);
+    assert.doesNotMatch((await hub.request('GET', '/settings')).text, /data-conn="expired"/);
+    mode.value = 'ok';
+    assert.equal((await hub.form('/letters/generate', { date: '2026-09-15', job: jobId, track: 'data', company: 'Acme' })).status, 200);
+    mode.value = 'expired';
+    await hub.form('/letters/generate', { date: '2026-09-15', job: jobId, track: 'data', company: 'Acme' });
+    assert.match((await hub.request('GET', '/settings')).text, /data-conn="expired"/);
+    mode.value = 'ok';
+    await hub.form('/letters/generate', { date: '2026-09-15', job: jobId, track: 'data', company: 'Acme' });
+    assert.doesNotMatch((await hub.request('GET', '/settings')).text, /data-conn="expired"/, 'a successful Claude call clears the state');
+
+    // Any other engine failure is one short humanized line, with the raw text only in the log.
+    mode.value = 'weird';
+    const odd = await hub.form('/letters/generate', { date: '2026-09-15', job: jobId, track: 'data', company: 'Acme' });
+    assert.equal(odd.status, 502);
+    assert.equal(JSON.parse(odd.text).error, 'Generation failed (TypeError: cannot read properties of undefined); details in the hub log');
+    assert.doesNotMatch(odd.text, /is_error|num_turns/);
+    const oddClick = await hub.form('/letters/oneclick', { date: '2026-09-15', job: jobId });
+    assert.equal(oddClick.status, 202);
+    const oddJob = await hub.ctx.letterJobs.settle();
+    assert.equal(oddJob.error, 'Generation failed (TypeError: cannot read properties of undefined); details in the hub log');
+    assert.equal(oddJob.errorKind, 'engine_error');
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

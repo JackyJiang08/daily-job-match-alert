@@ -7,7 +7,7 @@ import { renderReportBody } from '../report-components.mjs';
 import { HubLockedError } from './config-file.mjs';
 import { parseMultipart } from './multipart.mjs';
 import {
-  HubInputError, assertDate, buildStatusView, configuredCliCommands, desktopCopyPath, desktopWorkbookPath, listReportSummaries, loadTracksView, readErrorReport,
+  HubInputError, annotateConnections, assertDate, buildStatusView, claudeAuthView, configuredCliCommands, desktopCopyPath, desktopWorkbookPath, listReportSummaries, loadTracksView, readErrorReport,
   readReportPayload, readSettings, resumeAtsBoard, saveCliPath, saveSettings, selectResumeVersion, setTrackEnabled, sidebarSummary, uploadResumePdf,
 } from './services.mjs';
 import { localDate } from '../time-format.mjs';
@@ -16,6 +16,7 @@ import { todayTarget } from './views.mjs';
 import { findLetterJob, generateLetter, jobIdOf, letterCompanyFor, letterEngineFor, oneClickLetter, renameLetter, saveLetter } from './letters.mjs';
 import { LetterBusyError } from './letter-jobs.mjs';
 import { QuotaError, describeQuota } from '../engines/quota.mjs';
+import { AuthExpiredError, EngineError, humanizeEngineError } from '../engines/engine-errors.mjs';
 import { LetterInputError } from '../cover-letter/store.mjs';
 import { displayCompanyName } from '../posting-fields.mjs';
 import { REPORTS_SCRIPT, SETTINGS_SCRIPT, STATUS_SCRIPT, renderHubPage, reportsPage, resumesPage, settingsPage, statusPage } from './views.mjs';
@@ -91,12 +92,14 @@ export function createHubHandler(ctx) {
   };
   // A quota refusal reaches the card or the panel as a plain sentence, the reset time when the CLI gave
   // one, and whether the Codex engine is signed in and can take over.
+  async function codexAvailable() {
+    const config = await ctx.loadConfig().catch(() => ({}));
+    try { return (await ctx.connections.status({ commands: configuredCliCommands(config) }))?.codex?.connected === true; } catch { return false; }
+  }
   async function quotaReply(quota) {
     const config = await ctx.loadConfig().catch(() => ({}));
     const timeZone = config.timeZone || 'America/Chicago';
-    let codexAvailable = false;
-    try { codexAvailable = (await ctx.connections.status({ commands: configuredCliCommands(config) }))?.codex?.connected === true; } catch {}
-    return { kind: quota.kind, model: quota.model || null, resetsAt: quota.resetsAt || null, message: describeQuota(quota, { timeZone }), codexAvailable };
+    return { kind: quota.kind, model: quota.model || null, resetsAt: quota.resetsAt || null, message: describeQuota(quota, { timeZone }), codexAvailable: await codexAvailable() };
   }
   // Every page carries the sidebar summary; config is re-read per request so nothing is cached in-process.
   const page = async (response, status, options) => {
@@ -157,7 +160,9 @@ export function createHubHandler(ctx) {
   async function getSettings(url, response) {
     const settings = await readSettings(ctx);
     const config = await ctx.loadConfig().catch(() => ({}));
-    const connections = ctx.connections ? await ctx.connections.status({ commands: configuredCliCommands(config) }).catch(() => null) : null;
+    const probed = ctx.connections ? await ctx.connections.status({ commands: configuredCliCommands(config) }).catch(() => null) : null;
+    const latest = (await listReportSummaries(ctx))[0]?.date ? await readReportPayload(ctx, (await listReportSummaries(ctx))[0].date) : null;
+    const connections = annotateConnections(probed, claudeAuthView(ctx, latest));
     const timeZone = config.timeZone || 'America/Chicago';
     const readiness = await ctx.letterStore.readiness();
     await page(response, 200, { active: 'settings', title: 'Settings', content: settingsPage({ settings, connections, timeZone, coverLetter: { profile: readiness.profile, readiness } }), script: SETTINGS_SCRIPT + SAMPLE_TRACK_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
@@ -247,6 +252,13 @@ export function createHubHandler(ctx) {
       case '/settings': {
         await saveSettings(ctx, fields);
         redirect(response, '/settings', 'Settings saved to config.json');
+        return;
+      }
+      case '/settings/connections/refresh': {
+        // A manual refresh re-probes the CLIs and forgets the expired flag until a call fails again.
+        ctx.authState?.clear?.();
+        if (ctx.connections?.reset) ctx.connections.reset();
+        redirect(response, fields.back === 'status' ? '/status' : '/settings', 'Connections refreshed');
         return;
       }
       case '/settings/cli-path': {
@@ -364,7 +376,7 @@ export function createHubHandler(ctx) {
         if (url.pathname === '/letters') return await getLetters(url, response);
         if (url.pathname === '/letters/oneclick.json') {
           const status = ctx.letterJobs.status();
-          return json(response, 200, status.quota ? { ...status, codexAvailable: (await quotaReply(status.quota)).codexAvailable } : status);
+          return json(response, 200, status.quota || status.errorKind === 'auth_expired' ? { ...status, codexAvailable: await codexAvailable() } : status);
         }
         if (url.pathname === '/letters/new') return await getLetterPanel(url, response, { date: assertDate(url.searchParams.get('date')), jobId: url.searchParams.get('job') });
         const letterOpen = /^\/letters\/(\d{4}-\d{2}-\d{2})\/([A-Za-z0-9]{1,80})$/.exec(url.pathname);
@@ -382,10 +394,13 @@ export function createHubHandler(ctx) {
       return send(response, 405, 'Method not allowed', 'text/plain; charset=utf-8');
     } catch (error) {
       const wantsJson = url.pathname === '/run' || url.pathname === '/letters/generate' || url.pathname === '/letters/save' || url.pathname === '/letters/rename' || url.pathname === '/letters/oneclick' || url.pathname === '/settings/cover-letter/sample-track' || url.pathname.endsWith('.json');
-      const status = error instanceof HubInputError || error instanceof LetterInputError ? 400 : error instanceof HubLockedError || error instanceof LetterBusyError ? 409 : error instanceof QuotaError ? 429 : Number(error?.status) || 500;
-      const message = status === 500 ? `Hub error: ${error?.message || error}` : String(error.message || error);
-      if (status === 500) console.error(error?.stack || error);
-      if (wantsJson) return json(response, status, { error: message, ...(error instanceof LetterBusyError ? { job: error.job } : {}), ...(error instanceof QuotaError ? { quota: await quotaReply(error.quota) } : {}) });
+      const letterRoute = url.pathname.startsWith('/letters/');
+      const status = error instanceof HubInputError || error instanceof LetterInputError ? 400 : error instanceof HubLockedError || error instanceof LetterBusyError ? 409 : error instanceof QuotaError ? 429 : error instanceof AuthExpiredError ? 401 : error instanceof EngineError ? 502 : Number(error?.status) || 500;
+      // Letter routes never echo an engine's raw text: a humanized line goes out, the raw text to the log.
+      const humanized = letterRoute && (status === 500 || status === 502 || status === 401) ? humanizeEngineError(error) : null;
+      const message = humanized ? humanized.message : status === 500 ? `Hub error: ${error?.message || error}` : String(error.message || error);
+      if (status === 500 || status === 502 || status === 401) console.error(error?.raw ? `${error.message}\n${error.raw}` : (error?.stack || error));
+      if (wantsJson) return json(response, status, { error: message, ...(humanized ? { kind: humanized.kind, codexAvailable: humanized.codexSuggested ? await codexAvailable() : false } : {}), ...(error instanceof LetterBusyError ? { job: error.job } : {}), ...(error instanceof QuotaError ? { quota: await quotaReply(error.quota) } : {}) });
       const back = url.pathname.startsWith('/resumes') ? '/resumes' : url.pathname.startsWith('/settings/cover-letter') ? '/settings#cover-letters' : url.pathname.startsWith('/settings') ? '/settings' : url.pathname.startsWith('/status') ? '/status' : url.pathname.startsWith('/letters') ? '/letters' : '/reports';
       if (request.method === 'POST' && status !== 403) return redirect(response, back, message, 'error');
       return await page(response, status, { active: '', title: 'Error', content: '<h1 class="hub-title">Error</h1>', error: message });

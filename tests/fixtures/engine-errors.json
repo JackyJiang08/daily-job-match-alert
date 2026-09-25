@@ -1,0 +1,17 @@
+{
+  "recordedFrom": "Claude Code 2.1.269: the print-mode result envelope shape is the one the hub logged on 2026-09-19 for a session-limit refusal (exit 1, JSON on stdout, is_error true, the notice in result); the authentication notices are the binary's own strings",
+  "envelope": { "type": "result", "subtype": "success", "is_error": true, "result": "<notice>", "num_turns": 1, "stop_reason": "stop_sequence", "duration_ms": 330, "duration_api_ms": 0, "total_cost_usd": 0, "modelUsage": {}, "permission_denials": [], "uuid": "1da1dcfb-9471-497a-97c8-b00c63b1cedb", "session_id": "d620090b-453c-45b0-bc64-5768f752b017" },
+  "cases": [
+    { "notice": "Failed to authenticate: OAuth session expired and could not be refreshed", "kind": "auth_expired" },
+    { "notice": "Failed to authenticate.", "kind": "auth_expired" },
+    { "notice": "You are not logged in. Run /login to sign in.", "kind": "auth_expired" },
+    { "notice": "Please run /login and sign in with your Claude.ai account (not Console).", "kind": "auth_expired" },
+    { "notice": "OAuth token revoked", "kind": "auth_expired" },
+    { "notice": "authentication_error: invalid x-api-key", "kind": "auth_expired" },
+    { "notice": "You've hit your session limit · resets 12:30am (America/Chicago)", "kind": "fiveHourLimit", "note": "the real envelope the hub logged" },
+    { "notice": "You've reached your Fable limit. Your Fable limit resets at 9am (America/Chicago).", "kind": "modelWeeklyLimit" },
+    { "notice": "you have reached your weekly usage limit", "kind": "accountWeeklyLimit" },
+    { "notice": "Unexpected token in JSON at position 0", "kind": "engine_error" },
+    { "notice": "Server is temporarily limiting requests (not your usage limit)", "kind": "engine_error" }
+  ]
+}

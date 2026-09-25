@@ -307,8 +307,9 @@ export const LETTER_SCRIPT = `
       .then(function (data) {
         if (data.httpStatus !== 200) {
           var quota = data.quota || null;
-          say(quota ? quota.message + (quota.resetsAt ? '' : '') + (!quota.codexAvailable ? '. Try again after the reset, or sign in to Codex to generate with ChatGPT.' : '') : data.error, true);
-          if (quota && quota.codexAvailable && codexButton) codexButton.hidden = false;
+          var offerCodex = (quota && quota.codexAvailable) || (data.kind === 'auth_expired' && data.codexAvailable);
+          say(quota ? quota.message + (!quota.codexAvailable ? '. Try again after the reset, or sign in to Codex to generate with ChatGPT.' : '') : (data.error || 'Generation failed (unknown error); details in the hub log'), true);
+          if (offerCodex && codexButton) codexButton.hidden = false;
           return;
         }
         render(data);
@@ -399,7 +400,8 @@ export const ONECLICK_SCRIPT = `
   }
   function markFailed(button, message, quota) {
     button.dataset.state = ''; button.disabled = false; button.textContent = 'Generate Cover Letter'; button.title = '';
-    noteOn(button, (quota && quota.message ? quota.message : 'Could not generate: ' + (message || 'unknown error')) + (quota && !quota.codexAvailable && quota.kind ? '. Try again after the reset, or sign in to Codex to generate with ChatGPT.' : ''));
+    // message is already a humanized line from the hub; quota carries the reset and the Codex option.
+    noteOn(button, (quota && quota.message ? quota.message : (message || 'Generation failed (unknown error); details in the hub log')) + (quota && !quota.codexAvailable && quota.kind && quota.kind !== 'auth_expired' ? '. Try again after the reset, or sign in to Codex to generate with ChatGPT.' : ''));
     var actions = button.closest('.actions');
     var old = actions && actions.querySelector('[data-codex]');
     if (old) old.remove();
@@ -420,7 +422,7 @@ export const ONECLICK_SCRIPT = `
       }
       if (button && button.dataset.state === 'generating') {
         if (job.state === 'ready' && job.result) markReady(button, job.result);
-        else markFailed(button, job.error, job.quota ? { kind: job.quota.kind, message: job.error, codexAvailable: job.codexAvailable === true } : null);
+        else markFailed(button, job.error, job.quota || job.errorKind === 'auth_expired' ? { kind: job.quota ? job.quota.kind : 'auth_expired', message: job.error, codexAvailable: job.codexAvailable === true } : null);
       }
       active = null;
       setBusy(false, null);
@@ -434,7 +436,7 @@ export const ONECLICK_SCRIPT = `
     if (engine) fields.engine = engine;
     post('/letters/oneclick', fields).then(function (data) {
       if (data.state === 'confirm' && data.panelUrl) { window.location.href = data.panelUrl; return; }
-      if (data.httpStatus !== 202) { markFailed(button, data.error, data.quota || null); if (data.httpStatus === 409) { setBusy(true, data.job); setTimeout(poll, 1500); } else { setBusy(false, null); } return; }
+      if (data.httpStatus !== 202) { markFailed(button, data.error, data.quota || (data.kind === 'auth_expired' ? { kind: 'auth_expired', message: data.error, codexAvailable: data.codexAvailable === true } : null)); if (data.httpStatus === 409) { setBusy(true, data.job); setTimeout(poll, 1500); } else { setBusy(false, null); } return; }
       active = data.id;
       setTimeout(poll, 1000);
     }).catch(function (error) { markFailed(button, error.message); setBusy(false, null); });

@@ -152,7 +152,8 @@ function renderMiniStatus(sidebar, timeZone, now) {
   const next = sidebar.nextRunAt
     ? `<span id="next-run" data-at="${htmlEscape(sidebar.nextRunAt)}">${htmlEscape(formatLocalShort(sidebar.nextRunAt, timeZone))} · <span class="rel${relative === 'overdue' ? ' overdue' : ''}">${htmlEscape(relative)}</span></span>`
     : '—';
-  return `<div class="mini"><b>Last run</b>${last}<b>Next run</b>${next}</div>`;
+  const auth = sidebar.claudeAuth?.expired ? '<b>Claude</b><span class="bad" data-auth="expired">Session expired</span>' : '';
+  return `<div class="mini"><b>Last run</b>${last}<b>Next run</b>${next}${auth}</div>`;
 }
 
 export function renderHubPage({ active, title, content, notice = '', error = '', port, script = '', sidebar = null, timeZone, now = null }) {
@@ -421,7 +422,11 @@ export function statusPage({ status, timeZone }) {
   const nextRunLine = nextRun.at
     ? `${at(nextRun.at)}${nextRun.installed ? '' : ' <span class="badge badge-warn" data-badge="not-installed">LaunchAgent not installed; showing the 20:00 default</span>'}`
     : '—';
+  const authBanner = status.claudeAuth?.expired
+    ? `<div class="flash error" data-banner="auth-expired">Claude session expired. Run <code>claude auth login --claudeai</code> in Terminal, then try again.${status.claudeAuth.at ? ` <span class="muted">Seen ${at(status.claudeAuth.at)}${status.claudeAuth.source ? ` (${htmlEscape(status.claudeAuth.source)})` : ''}.</span>` : ''} <form class="inline" method="post" action="/settings/connections/refresh"><input type="hidden" name="back" value="status"><button class="btn secondary small" type="submit">Refresh</button></form></div>`
+    : '';
   return `<h1 class="hub-title">Status</h1>
+  ${authBanner}
   <article class="card"><h2>Runs</h2><dl class="kv">
     <dt>Last run</dt><dd>${lastRunLine}</dd>
     <dt>Engine</dt><dd>${lastRun.engine ? `${htmlEscape(lastRun.engine)}${lastRun.scoringModel ? ` · ${htmlEscape(lastRun.scoringModel)}` : ''}` : (lastRun.scoringModel ? htmlEscape(lastRun.scoringModel) : '—')}</dd>
@@ -507,12 +512,14 @@ function connectionRow(name, engine, item) {
   if (!item.installed) {
     return `<dt>${htmlEscape(name)}</dt><dd><span class="badge badge-muted" data-conn="missing">Not found on this Mac</span> <span class="muted">Install with <code>${htmlEscape(item.hint)}</code>${item.configured ? `; config points at <code>${htmlEscape(item.configured)}</code>` : ''}</span><br><span class="muted" title="${htmlEscape((item.searched || []).join('\n'))}">Searched PATH, ~/.local/bin, /opt/homebrew/bin, /usr/local/bin, ~/.npm-global/bin, and nvm.</span></dd>`;
   }
+  if (item.sessionExpired) return `<dt>${htmlEscape(name)}</dt><dd><span class="badge badge-bad" data-conn="expired">Session expired</span> <span class="muted">Run <code>claude auth login --claudeai</code> in Terminal, then Refresh.</span>${item.reason ? `<br><span class="muted">${htmlEscape(item.reason)}</span>` : ''}${where}</dd>`;
   if (item.connected) return `<dt>${htmlEscape(name)}</dt><dd><span class="badge badge-good" data-conn="connected">Connected</span> ${htmlEscape(item.detail)}${where}${savePath ? ` ${savePath}` : ''}</dd>`;
   return `<dt>${htmlEscape(name)}</dt><dd><span class="badge badge-warn" data-conn="disconnected">Not connected</span> <span class="muted">Sign in from a terminal: <code>${htmlEscape(item.hint)}</code></span>${item.reason ? `<br><span class="muted">${htmlEscape(item.reason)}</span>` : ''}${where}${savePath ? ` ${savePath}` : ''}</dd>`;
 }
 
 function engineBadge(item) {
   if (!item) return '';
+  if (item.sessionExpired) return '<span class="badge badge-bad" data-engine-state="expired">Session expired</span>';
   if (item.connected) return '<span class="badge badge-good" data-engine-state="connected">Connected</span>';
   if (!item.installed) return '<span class="badge badge-muted" data-engine-state="missing">Not found</span>';
   return '<span class="badge badge-warn" data-engine-state="disconnected">Not connected</span>';
@@ -532,7 +539,8 @@ function modelSelect(engine, settings) {
 export function settingsPage({ settings, connections = null, timeZone, coverLetter = null }) {
   const levels = ['high', 'medium', 'low'].map(level => `<label class="check"><input type="checkbox" name="acceptedMatchLevels" value="${level}"${settings.acceptedMatchLevels.includes(level) ? ' checked' : ''}> ${level.charAt(0).toUpperCase()}${level.slice(1)}</label>`).join('');
   const engines = settings.engines.map(engine => `<label><input type="radio" name="engine" value="${engine.id}"${engine.id === settings.engine ? ' checked' : ''} data-connected="${connections?.[engine.id]?.connected ? 'yes' : 'no'}"> ${htmlEscape(engine.label)} ${engineBadge(connections?.[engine.id])}</label>`).join('');
-  const checked = connections?.checkedAt ? `<p class="form-foot">Checked ${htmlEscape(formatLocalDateTime(connections.checkedAt, timeZone))}; refreshed every minute. The hub never signs in for you.</p>` : '<p class="form-foot">The hub never signs in for you.</p>';
+  const refresh = '<form class="inline" method="post" action="/settings/connections/refresh"><button class="btn secondary small" type="submit">Refresh</button></form>';
+  const checked = connections?.checkedAt ? `<p class="form-foot">Checked ${htmlEscape(formatLocalDateTime(connections.checkedAt, timeZone))}; refreshed every minute. The hub never signs in for you. ${refresh}</p>` : `<p class="form-foot">The hub never signs in for you. ${refresh}</p>`;
   return `<h1 class="hub-title">Settings</h1>
   <article class="card"><h2>Connections</h2><dl class="conn">${connectionRow('Claude', 'claude', connections?.claude)}${connectionRow('Codex', 'codex', connections?.codex)}</dl>${checked}</article>
   <article class="card"><form method="post" action="/settings" id="settings-form">

@@ -28,6 +28,7 @@ import { formatLocalDateTime } from './time-format.mjs';
 import { holdsToExactWindow, resolveCompanyName } from './posting-fields.mjs';
 import { describeConnections } from './engines/index.mjs';
 import { describeQuota, normalizeQuotaPolicy } from './engines/quota.mjs';
+import { AUTH_EXPIRED_MESSAGE, AUTH_EXPIRED_NOTIFICATION, classifyEngineError } from './engines/engine-errors.mjs';
 
 const execFileAsync = promisify(execFile);
 const REPORT_PAYLOAD_PREFIX = 'report-payload-';
@@ -504,7 +505,7 @@ export function applyReviewBudget(jobs, state, configuredLimit, now = new Date()
   return { jobs: [...others, ...kept.map(entry => entry.job)], deferred: deferred.map(entry => entry.job), candidateCount: candidates.length, reviewedCount: kept.length, limit };
 }
 
-async function runPipeline(config, clock) {
+async function runPipeline(config, clock, options = {}) {
   const { now, runDate, applicationDate: date } = clock;
   const warnings = [];
   // Resume sync may recover an iCloud-evicted PDF; that disclosure belongs in the day's report.
@@ -610,6 +611,16 @@ async function runPipeline(config, clock) {
   for (const job of quotaDeferred) markDeferred(state, job, now.toISOString());
   evaluated = evaluated.filter(job => !job.quotaDeferred);
   const quota = summarizeQuota(quotaEvents, quotaPolicy, config, quotaDeferred.length);
+  // An expired login is surfaced everywhere at once: the report, the hub, and a desktop notification.
+  const authEvent = quotaEvents.find(event => event.kind === 'auth_expired') || null;
+  const authExpired = authEvent ? { at: authEvent.at, notice: authEvent.detail || null, deferred: quotaDeferred.length, message: AUTH_EXPIRED_MESSAGE } : null;
+  if (authExpired) {
+    try {
+      await (options.notifier || notifyAuthExpired)({ runner: options.notificationRunner });
+    } catch (error) {
+      console.warn(`Could not send the login-expired notification: ${errorSummary(error)}`);
+    }
+  }
   // Deterministic eligibility is applied after semantic review so the location gap survives the merge.
   evaluated = evaluated.map(job => annotateEligibility(job, prefs));
   // The company name is settled last: list name → board label → the scorer's employerName → cleaned
@@ -648,6 +659,7 @@ async function runPipeline(config, clock) {
     candidateCount: budget.candidateCount, reviewedThisRun: budget.reviewedCount, deferredCount: budget.deferred.length, maxReviewedPerRun: budget.limit,
     droppedAfterPreciseTimestamps: freshness.dropped.length,
     quota,
+    authExpired,
     warnings: finalWarnings,
     runsToday, firstGeneratedAt: previous?.meta?.firstGeneratedAt || now.toISOString(), lastUpdatedAt: now.toISOString(),
     trigger, completedAt: now.toISOString(), completedAtLocal: formatLocalDateTime(now, timeZone),
@@ -725,7 +737,7 @@ export async function main(options = {}) {
     return { skipped: true, reason: 'active_lock', pid: lock.pid };
   }
   try {
-    return await runPipeline(config, clock);
+    return await runPipeline(config, clock, options);
   } finally {
     try {
       await releaseRunLock(lock);
@@ -768,9 +780,18 @@ export async function writeFatalErrorReport(error, options = {}) {
   const reportPath = path.join(context.outputDirectory, `ERROR-${context.runDate}.html`);
   const warning = createWarning('pipeline', 'fatal error', errorSummary(error, 1000));
   const stack = String(error?.stack || error?.message || error || 'Unknown fatal error').slice(0, 12_000);
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Daily Job Match Alert failed — ${htmlEscape(context.runDate)}</title><style>body{margin:0;background:#f8fafc;color:#172033;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.wrap{max-width:900px;margin:48px auto;padding:0 20px}.panel{background:#fff;border:1px solid #fecaca;border-left:6px solid #dc2626;border-radius:14px;padding:24px;box-shadow:0 14px 40px #0f172a14}h1{margin:0 0 8px;font-size:28px}p{color:#475569}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#fff7ed;border-radius:10px;padding:16px;color:#7f1d1d}</style></head><body><main class="wrap"><section class="panel"><h1>Daily Job Match Alert did not complete</h1><p>${htmlEscape(warning.message)}</p><p>Run date: ${htmlEscape(context.runDate)} · Generated: ${htmlEscape(context.now.toISOString())}</p><pre>${htmlEscape(stack)}</pre><p>The scheduled catch-up path can retry this run. Existing reports and state were not deleted.</p></section></main></body></html>`;
+  const authNote = classifyEngineError(error)?.kind === 'auth_expired' ? `<p><strong>${htmlEscape(AUTH_EXPIRED_MESSAGE)}</strong></p>` : '';
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Daily Job Match Alert failed — ${htmlEscape(context.runDate)}</title><style>body{margin:0;background:#f8fafc;color:#172033;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.wrap{max-width:900px;margin:48px auto;padding:0 20px}.panel{background:#fff;border:1px solid #fecaca;border-left:6px solid #dc2626;border-radius:14px;padding:24px;box-shadow:0 14px 40px #0f172a14}h1{margin:0 0 8px;font-size:28px}p{color:#475569}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#fff7ed;border-radius:10px;padding:16px;color:#7f1d1d}</style></head><body><main class="wrap"><section class="panel"><h1>Daily Job Match Alert did not complete</h1>${authNote}<p>${htmlEscape(warning.message)}</p><p>Run date: ${htmlEscape(context.runDate)} · Generated: ${htmlEscape(context.now.toISOString())}</p><pre>${htmlEscape(stack)}</pre><p>The scheduled catch-up path can retry this run. Existing reports and state were not deleted.</p></section></main></body></html>`;
   await fs.writeFile(reportPath, html);
   return reportPath;
+}
+
+// macOS notification for an expired Claude login; a no-op off macOS.
+export async function notifyAuthExpired(options = {}) {
+  if ((options.platform || process.platform) !== 'darwin') return false;
+  const runner = options.runner || execFileAsync;
+  await runner('osascript', ['-e', `display notification "${AUTH_EXPIRED_NOTIFICATION}" with title "Daily Job Match Alert"`], { timeout: 10_000 });
+  return true;
 }
 
 export async function notifyFatalError(options = {}) {

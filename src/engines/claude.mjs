@@ -2,6 +2,7 @@
 import { compareVersions, extractResults, isMissingCommand, modelMatchesConfiguration, normalizeModelName, parseSemanticVersion, run, subscriptionEnvironment } from './shared.mjs';
 import { errorSummary } from '../warnings.mjs';
 import { INSTALL_HINTS, resolveCliCommand } from './cli-path.mjs';
+import { AuthExpiredError, isAuthExpiredText, unwrapCliEnvelope } from './engine-errors.mjs';
 
 // Subscription flags used below were validated against this installed Claude Code release.
 export const MINIMUM_CLAUDE_CODE_VERSION = '2.1.250';
@@ -70,9 +71,40 @@ export function extractScoringModel(parsed) {
   return null;
 }
 
+// The CLI's result envelope may report a failure with exit 0 as well; the notice then lives in `result`.
+export function assertNotErrorEnvelope(parsed) {
+  if (parsed && typeof parsed === 'object' && parsed.is_error === true) {
+    const notice = typeof parsed.result === 'string' ? parsed.result.trim() : 'the CLI reported an error';
+    if (isAuthExpiredText(notice)) throw new AuthExpiredError(notice);
+    const error = new Error(notice);
+    error.notice = notice;
+    error.envelope = parsed;
+    throw error;
+  }
+  return parsed;
+}
+
 export function parseStructuredOutput(raw) {
-  const parsed = JSON.parse(raw.trim());
+  const parsed = assertNotErrorEnvelope(JSON.parse(raw.trim()));
   return { results: extractResults(parsed).results, scoringModel: extractScoringModel(parsed) };
+}
+
+// A failed CLI exit whose stdout carried the result envelope is rethrown with the envelope's notice as the
+// message (the JSON stays on error.envelope for logs); an expired login becomes AuthExpiredError.
+export function unwrapCliFailure(error) {
+  if (!error || error.notice || error.code === 'SUBSCRIPTION_AUTH') return error;
+  const unwrapped = unwrapCliEnvelope(error.message);
+  if (!unwrapped?.notice) {
+    if (isAuthExpiredText(error.message)) return new AuthExpiredError(String(error.message).slice(0, 300), error);
+    return error;
+  }
+  if (isAuthExpiredText(unwrapped.notice)) return new AuthExpiredError(unwrapped.notice, error);
+  const clean = new Error(unwrapped.notice);
+  clean.notice = unwrapped.notice;
+  clean.envelope = unwrapped.envelope;
+  clean.raw = error.message;
+  clean.cause = error;
+  return clean;
 }
 
 export async function verifyClaudeSubscription(options = {}) {
@@ -147,9 +179,14 @@ export function createClaudeEngine(options = {}) {
         '--tools', '', '--output-format', 'json', '--json-schema', JSON.stringify(schema),
       ];
       if (model) args.push('--model', model);
-      const result = await runner(await commandOf(), args, {
-        input: prompt, cwd: context.tempDirectory || process.cwd(), timeoutMs: Number(options.timeoutMs || 600_000), env: subscriptionEnvironment(),
-      });
+      let result;
+      try {
+        result = await runner(await commandOf(), args, {
+          input: prompt, cwd: context.tempDirectory || process.cwd(), timeoutMs: Number(options.timeoutMs || 600_000), env: subscriptionEnvironment(),
+        });
+      } catch (error) {
+        throw unwrapCliFailure(error);
+      }
       return parseStructuredOutput(result.stdout);
     },
     // One structured call for free-form generation (cover letters); same flags, auth, and env scrubbing.
@@ -157,10 +194,15 @@ export function createClaudeEngine(options = {}) {
       const args = ['--print', '--safe-mode', '--no-session-persistence', '--permission-mode', 'dontAsk', '--tools', '', '--output-format', 'json'];
       if (context.schema) args.push('--json-schema', JSON.stringify(context.schema));
       if (model) args.push('--model', model);
-      const result = await runner(await commandOf(), args, {
-        input: prompt, cwd: context.tempDirectory || process.cwd(), timeoutMs: Number(context.timeoutMs || options.timeoutMs || 600_000), env: subscriptionEnvironment(),
-      });
-      const parsed = JSON.parse(String(result.stdout).trim());
+      let result;
+      try {
+        result = await runner(await commandOf(), args, {
+          input: prompt, cwd: context.tempDirectory || process.cwd(), timeoutMs: Number(context.timeoutMs || options.timeoutMs || 600_000), env: subscriptionEnvironment(),
+        });
+      } catch (error) {
+        throw unwrapCliFailure(error);
+      }
+      const parsed = assertNotErrorEnvelope(JSON.parse(String(result.stdout).trim()));
       const output = context.schema
         ? (parsed?.structured_output ?? (typeof parsed?.result === 'string' ? JSON.parse(parsed.result) : parsed?.result ?? parsed))
         : (typeof parsed?.result === 'string' ? parsed.result : String(parsed?.result ?? ''));

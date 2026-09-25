@@ -20,7 +20,7 @@ export function createLetterJobs({ now = () => new Date() } = {}) {
     return {
       id: job.id, state: job.state, busy: job.state === 'generating',
       date: job.date, jobId: job.jobId, company: job.company || null,
-      startedAt: job.startedAt, finishedAt: job.finishedAt, error: job.error, result: job.result, quota: job.quota || null,
+      startedAt: job.startedAt, finishedAt: job.finishedAt, error: job.error, errorKind: job.errorKind || null, result: job.result, quota: job.quota || null,
     };
   }
 
@@ -39,7 +39,11 @@ export function createLetterJobs({ now = () => new Date() } = {}) {
         job.company = result?.company || job.company;
       }, error => {
         job.state = 'failed';
-        job.error = String(error?.message || error || 'generation failed');
+        // Only humanized text reaches the card; anything else is logged here with its raw notice.
+        const known = error?.code === 'SUBSCRIPTION_QUOTA' || error?.code === 'SUBSCRIPTION_AUTH' || error?.code === 'ENGINE_FAILURE' || error?.code === 'HUB_INPUT' || error?.status === 400;
+        job.error = known ? String(error?.message || 'generation failed') : `Generation failed (${String(error?.message || error || 'unknown error').split(/\n/)[0].slice(0, 120)}); details in the hub log`;
+        if (!known) console.error(`[cover-letter] one-click job ${job.id} failed: ${String(error?.stack || error)}`);
+        job.errorKind = error?.code === 'SUBSCRIPTION_AUTH' ? 'auth_expired' : error?.code === 'SUBSCRIPTION_QUOTA' ? error.quota.kind : error?.code === 'ENGINE_FAILURE' ? 'engine_error' : known ? 'input' : 'engine_error';
         if (error?.code === 'SUBSCRIPTION_QUOTA') job.quota = { kind: error.quota.kind, model: error.quota.model || null, resetsAt: error.quota.resetsAt || null };
       }).then(() => { job.finishedAt = now().toISOString(); });
       return snapshot(job);

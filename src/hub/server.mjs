@@ -47,6 +47,12 @@ export function createHubContext(options) {
   ctx.letterJobs = options.letterJobs || createLetterJobs({ now });
   // The most recent quota refusal seen by the hub itself (cover letters); the pipeline's own events live in the day payload.
   ctx.quotaLog = options.quotaLog || { last: null, record(event) { this.last = event; return event; } };
+  // Whether the hub has seen Claude's login fail since the last successful call or manual refresh.
+  ctx.authState = options.authState || {
+    claude: { expired: false, at: null, notice: null, clearedAt: null },
+    expire(notice) { this.claude = { expired: true, at: now().toISOString(), notice: notice || null, clearedAt: null }; },
+    clear() { this.claude = { expired: false, at: null, notice: null, clearedAt: now().toISOString() }; },
+  };
   ctx.renderPdf = options.renderPdf || null;
   ctx.chromeCommand = options.chromeCommand;
   ctx.connections = options.connections || createConnectionsProbe({ now, runner: options.cliRunner, describe: options.describeConnections || (commands => describeConnections({ runner: options.cliRunner, homedir: ctx.homedir, env: process.env, ...commands })) });

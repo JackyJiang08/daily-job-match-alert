@@ -12,6 +12,7 @@ import { sha256 } from '../utils.mjs';
 import { HubInputError, readReportPayload } from './services.mjs';
 import { displayCompanyName } from '../posting-fields.mjs';
 import { QuotaError, classifyQuotaError, describeQuota, nextLadderModel, normalizeQuotaPolicy } from '../engines/quota.mjs';
+import { AuthExpiredError, EngineError, classifyEngineError, engineNotice, humanizeEngineError } from '../engines/engine-errors.mjs';
 import { isAcceptableCompanyName, isTrustedSourceName, resolveCompanyName } from '../posting-fields.mjs';
 import { renderLetterPdf as renderPdfDefault } from '../cover-letter/pdf.mjs';
 
@@ -61,11 +62,21 @@ export function letterEngineFor(ctx, config, { engine: engineOverride = null, mo
 async function withQuotaPolicy(ctx, config, engineChoice, attempt) {
   const policy = normalizeQuotaPolicy(config.semanticMatching?.quotaPolicy);
   const first = letterEngineFor(ctx, config, engineChoice);
+  const settle = (engine, outcome) => { if (engine.id === 'claude') ctx.authState?.clear?.(); return outcome; };
   try {
-    return { result: await attempt(first), engine: first, downgradeNote: null };
+    return settle(first, { result: await attempt(first), engine: first, downgradeNote: null });
   } catch (error) {
+    const verdict = classifyEngineError(error, { policy });
+    if (verdict?.kind === 'auth_expired') {
+      if (first.id === 'claude') ctx.authState?.expire?.(verdict.notice);
+      throw error instanceof AuthExpiredError ? error : new AuthExpiredError(verdict.notice, error);
+    }
     const quota = classifyQuotaError(error, { policy });
-    if (!quota) throw error;
+    if (!quota) {
+      // Not a quota, not a login: the raw text goes to the hub log, the person sees one short line.
+      console.error(`[cover-letter] ${first.id} ${first.model} failed: ${String(error?.raw || error?.stack || error?.message || error)}`);
+      throw new EngineError(humanizeEngineError(error, { policy, timeZone: config.timeZone }).message, error);
+    }
     ctx.quotaLog?.record?.({ ...quota, at: ctx.now().toISOString(), engine: first.id, model: first.model, source: 'cover-letter', action: 'refused' });
     const next = quota.kind === 'modelWeeklyLimit' ? nextLadderModel(policy, first.model) : null;
     if (next && first.id === 'claude') {
@@ -73,10 +84,12 @@ async function withQuotaPolicy(ctx, config, engineChoice, attempt) {
       const note = `Generated with ${next}: ${quota.model || first.model} weekly limit`;
       ctx.quotaLog?.record?.({ ...quota, at: ctx.now().toISOString(), engine: first.id, model: first.model, source: 'cover-letter', action: 'downgraded', detail: `switched to ${next}` });
       try {
-        return { result: await attempt(fallback), engine: fallback, downgradeNote: note };
+        return settle(fallback, { result: await attempt(fallback), engine: fallback, downgradeNote: note });
       } catch (secondError) {
+        const secondVerdict = classifyEngineError(secondError, { policy });
+        if (secondVerdict?.kind === 'auth_expired') { ctx.authState?.expire?.(secondVerdict.notice); throw new AuthExpiredError(secondVerdict.notice, secondError); }
         const again = classifyQuotaError(secondError, { policy });
-        if (!again) throw secondError;
+        if (!again) { console.error(`[cover-letter] ${fallback.id} ${fallback.model} failed: ${String(secondError?.raw || secondError?.stack || secondError?.message || secondError)}`); throw new EngineError(humanizeEngineError(secondError, { policy, timeZone: config.timeZone }).message, secondError); }
         throw new QuotaError(again, secondError);
       }
     }

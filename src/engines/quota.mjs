@@ -21,6 +21,23 @@ const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
 // Each list is tried in order; the first list with a match wins. Config may override any list under
 // semanticMatching.quotaPolicy.patterns.<kind> (strings compiled with the "i" flag).
 export const DEFAULT_QUOTA_PATTERNS = {
+  // A login that no longer works. Recorded from the Claude Code 2.1.269 binary: "Failed to authenticate:
+  // OAuth session expired and could not be refreshed", "You are not logged in. Run …", "Please run /login
+  // and sign in with your Claude.ai account (not Console)", "OAuth token revoked", "authentication_error".
+  // Not a quota: handled by engine-errors.mjs as auth_expired.
+  authExpired: [
+    'failed to authenticate',
+    'oauth session expired',
+    'could not be refreshed',
+    'not logged in',
+    'oauth token revoked',
+    'please run /login',
+    'authentication_error',
+    'invalid authentication credentials',
+    // The engine's own auth check when the CLI reports no login at all (a Console or API-key login is a
+    // configuration problem, not an expiry, and keeps the local fallback).
+    'loggedin=false',
+  ],
   notQuota: [
     'not your usage limit',
     'experiencing high load',

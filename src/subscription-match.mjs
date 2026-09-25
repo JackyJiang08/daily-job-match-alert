@@ -7,6 +7,7 @@ import { createWarning, errorSummary } from './warnings.mjs';
 
 import { createEngine, normalizeEngineId, resolveModel } from './engines/index.mjs';
 import { classifyQuotaError, describeQuota, nextLadderModel, normalizeQuotaPolicy } from './engines/quota.mjs';
+import { AUTH_EXPIRED_MESSAGE, classifyEngineError, engineNotice } from './engines/engine-errors.mjs';
 import { MINIMUM_CLAUDE_CODE_VERSION, assessClaudeAuthStatus, claudeModelMatches, expandModelAlias, extractScoringModel, parseClaudeCodeVersion, parseStructuredOutput, verifyClaudeSubscription } from './engines/claude.mjs';
 import { compareVersions, isCredentialEnvironmentKey, normalizeModelName, run, subscriptionEnvironment } from './engines/shared.mjs';
 
@@ -218,9 +219,19 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
   if (!candidates.length) return jobs;
   const schema = buildResultSchema(tracks);
 
+  // An expired login is not a scoring failure: every candidate waits for the next run, the reason is
+  // written plainly, and the caller raises the desktop notification.
+  const deferForAuth = (remaining, notice) => {
+    quotaEvents.push({ kind: 'auth_expired', model: engine.model, resetsAt: null, at: clock().toISOString(), action: 'deferred', detail: notice || null, engine: engineName, message: AUTH_EXPIRED_MESSAGE });
+    for (const job of remaining) deferredIds.add(job.semanticId);
+    addWarning(options, `${AUTH_EXPIRED_MESSAGE} ${remaining.length} postings were deferred to the next run (not marked unreviewed).`);
+    const held = new Set(remaining.map(job => job.semanticId));
+    return jobs.map(job => (job.semanticId && held.has(job.semanticId)) || candidates.some(candidate => candidate.url === job.url && held.has(candidate.semanticId)) ? { ...job, quotaDeferred: true } : job);
+  };
   try {
     await engine.verifyAuth();
   } catch (error) {
+    if (classifyEngineError(error, { now: clock(), policy })?.kind === 'auth_expired') return deferForAuth(candidates, engineNotice(error));
     addWarning(options, `Subscription authentication check failed; ${candidates.length} jobs used local fallback: ${errorSummary(error)}`);
     const fallbackByUrl = new Map(candidates.map(job => [job.url, localFallbackJob(job)]));
     return jobs.map(job => fallbackByUrl.get(job.url) || job);
@@ -263,7 +274,8 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
           return { response: await invokeBatch(batch), error: null };
         } catch (error) {
           lastError = error;
-          // A quota refusal is not retried blindly; the policy below decides.
+          // A quota refusal or an expired login is not retried blindly; the policy below decides.
+          if (classifyEngineError(error, { now: clock(), policy })?.kind === 'auth_expired') return { response: null, error };
           if (classifyQuotaError(error, { now: clock(), policy })) return { response: null, error };
           if (attempt === 1) await sleep(Number(options.retryDelayMs ?? 10_000));
         }
@@ -304,6 +316,13 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
       const batch = batches[index];
       batchNumber += 1;
       let { response, error } = await invokeWithRetry(batch);
+      if (error && classifyEngineError(error, { now: clock(), policy })?.kind === 'auth_expired') {
+        const held = batches.slice(index).flat();
+        quotaEvents.push({ kind: 'auth_expired', model: engine.model, resetsAt: null, at: clock().toISOString(), action: 'deferred', detail: engineNotice(error) || null, engine: engineName, message: AUTH_EXPIRED_MESSAGE });
+        for (const job of held) deferredIds.add(job.semanticId);
+        addWarning(options, `${AUTH_EXPIRED_MESSAGE} ${held.length} postings were deferred to the next run (not marked unreviewed).`);
+        break;
+      }
       let quota = error ? classifyQuotaError(error, { now: clock(), policy }) : null;
       if (quota?.kind === 'fiveHourLimit') {
         const event = recordEvent(quota, 'wait');

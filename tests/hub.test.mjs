@@ -682,6 +682,28 @@ test('the Quota card shows the last limit event, the model in effect, and the de
   }
 });
 
+test('an expired login reported by the nightly run marks Claude as Session expired in the hub until Refresh', async () => {
+  const root = await prepareProject();
+  const payloadPath = path.join(root, 'state', 'report-payload-2026-08-27.json');
+  const payload = JSON.parse(await fs.readFile(payloadPath, 'utf8'));
+  payload.meta.authExpired = { at: '2026-08-27T01:00:00.000Z', notice: 'Failed to authenticate: OAuth session expired and could not be refreshed', deferred: 12, message: 'Claude session expired. Run `claude auth login --claudeai` in Terminal, then try again.' };
+  await fs.writeFile(payloadPath, JSON.stringify(payload));
+  const hub = await startHub(root);
+  try {
+    const status = await hub.request('GET', '/status');
+    assert.match(status.text, /data-banner="auth-expired">Claude session expired\. Run <code>claude auth login --claudeai<\/code> in Terminal, then try again\. <span class="muted">Seen Aug 26, 2026, 8:00 PM \(nightly run\)\.<\/span>/);
+    assert.match(status.text, /<b>Claude<\/b><span class="bad" data-auth="expired">Session expired<\/span>/);
+    assert.match((await hub.request('GET', '/settings')).text, /data-conn="expired">Session expired<\/span>/, 'the probe says connected, the run says the login failed: expired wins');
+    assert.equal((await hub.form('/settings/connections/refresh', {})).status, 303);
+    assert.doesNotMatch((await hub.request('GET', '/status')).text, /data-banner="auth-expired"/, 'a refresh after the run clears it');
+    assert.doesNotMatch((await hub.request('GET', '/settings')).text, /data-conn="expired"/);
+    assert.match((await hub.request('GET', '/settings')).text, /<form class="inline" method="post" action="\/settings\/connections\/refresh"><button class="btn secondary small" type="submit">Refresh<\/button><\/form>/);
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('/desktop serves the Desktop HTML and workbook read-only, and refuses anything but a valid date', async () => {
   const root = await prepareProject();
   const hub = await startHub(root);
