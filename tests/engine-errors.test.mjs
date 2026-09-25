@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import test from 'node:test';
-import { AUTH_EXPIRED_MESSAGE, AuthExpiredError, EngineError, classifyEngineError, engineNotice, humanizeEngineError, unwrapCliEnvelope } from '../src/engines/engine-errors.mjs';
+import { AUTH_EXPIRED_MESSAGE, AuthExpiredError, EngineError, classifyEngineError, engineNotice, humanizeEngineError, resultFieldOf, shortReason, unwrapCliEnvelope } from '../src/engines/engine-errors.mjs';
 import { assertNotErrorEnvelope, createClaudeEngine, unwrapCliFailure } from '../src/engines/claude.mjs';
 import { normalizeQuotaPolicy } from '../src/engines/quota.mjs';
 import { applySubscriptionMatching } from '../src/subscription-match.mjs';
@@ -50,8 +50,8 @@ test('humanizeEngineError gives one sentence per class and never the raw text', 
   assert.equal(plain.message, 'Generation failed (Unexpected token in JSON at position 0); details in the hub log');
   assert.equal(plain.codexSuggested, false);
   assert.equal(humanizeEngineError(new Error('claude timed out after 600000ms')).message, 'Generation failed (claude timed out after 600000ms); details in the hub log');
-  assert.equal(humanizeEngineError(new Error(`x ${'y'.repeat(300)}`)).message.length <= 160, true, 'long reasons are cut');
-  assert.equal(humanizeEngineError(new EngineError('Generation failed (custom); details in the hub log', new Error('raw'))).message, 'Generation failed (custom); details in the hub log');
+  assert.equal(humanizeEngineError(new Error(`x ${'y'.repeat(300)}`)).message, `Generation failed (x ${'y'.repeat(115)}…); details in the hub log`, 'reasons are cut at 120 characters');
+  assert.equal(humanizeEngineError(new EngineError('Generation failed (custom); details in the hub log', new Error('raw'))).message, 'Generation failed (raw); details in the hub log', 'an EngineError is rebuilt from its raw text, never echoed');
   assert.equal(humanizeEngineError(Object.assign(new Error('spawn claude ENOENT'), { code: 'ENOENT' })).message, 'Generation failed (the Claude CLI was not found on this Mac); details in the hub log');
   assert.equal(humanizeEngineError(undefined).message, 'Generation failed (unknown error); details in the hub log');
 });
@@ -110,4 +110,31 @@ test('Session expired is a distinct connection state from Not connected and clea
   const flagged = annotateConnections(probe, { expired: true, notice: 'OAuth session expired' });
   assert.deepEqual([flagged.claude.connected, flagged.claude.sessionExpired, flagged.claude.reason, flagged.claude.hint], [false, true, 'OAuth session expired', 'claude auth login --claudeai']);
   assert.equal(flagged.codex, probe.codex);
+});
+
+test('an unknown error carrying a CLI JSON envelope, intact or cut off, is shown as its result field only, never as JSON', () => {
+  const envelope = { ...fixture.envelope, result: 'TypeError: cannot read properties of undefined (reading foo)', usage: { output_tokens_details: { thinking_tokens: 0 } } };
+  const full = `/Users/me/.local/bin/claude exited 1: ${JSON.stringify(envelope)}`;
+  const truncated = full.slice(0, full.length - 40);
+  const cases = [
+    ['intact envelope', new Error(full)],
+    ['truncated envelope (no closing brace)', new Error(truncated)],
+    ['EngineError whose message already carries the raw JSON', new EngineError(`Generation failed (${truncated}); details in the hub log`, new Error(truncated))],
+    ['EngineError with the raw text only on cause', Object.assign(new EngineError('Generation failed (x); details in the hub log', new Error(full)), { raw: '' })],
+  ];
+  for (const [label, error] of cases) {
+    const message = humanizeEngineError(error).message;
+    assert.equal(message, 'Generation failed (TypeError: cannot read properties of undefined (reading foo)); details in the hub log', label);
+    assert.doesNotMatch(message, /[{}]|is_error|session_id/, label);
+  }
+  const noResult = new Error('claude exited 1: {"type":"result","is_error":true,"usage":{"input_tokens":0');
+  const shown = humanizeEngineError(noResult).message;
+  assert.equal(shown, 'Generation failed (claude exited 1:); details in the hub log', 'without a result field the first line loses everything from the brace on');
+  assert.doesNotMatch(shown, /[{}]|is_error/);
+  assert.equal(resultFieldOf('{"is_error":true,"result":"He said \\"no\\" and left","num'), 'He said "no" and left', 'escaped quotes survive a cut-off envelope');
+  assert.equal(resultFieldOf('nothing'), '');
+  assert.equal(shortReason('a'.repeat(200)), `${'a'.repeat(117)}…`);
+  assert.equal(shortReason('{"is_error":true}'), 'is_error :true', 'braces and quotes never survive');
+  assert.equal(shortReason(''), 'unknown error');
+  assert.equal(engineNotice(new Error(truncated)), 'TypeError: cannot read properties of undefined (reading foo)');
 });

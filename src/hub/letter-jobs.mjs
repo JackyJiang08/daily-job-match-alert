@@ -1,4 +1,6 @@
 // One-click cover-letter generation runs in the background of the hub process, one letter at a time.
+import { humanizeEngineError } from '../engines/engine-errors.mjs';
+
 // The manager keeps the current job's state (idle → generating → ready | failed) so the Reports page can
 // poll it, and refuses a second start while one is generating.
 export class LetterBusyError extends Error {
@@ -40,8 +42,8 @@ export function createLetterJobs({ now = () => new Date() } = {}) {
       }, error => {
         job.state = 'failed';
         // Only humanized text reaches the card; anything else is logged here with its raw notice.
-        const known = error?.code === 'SUBSCRIPTION_QUOTA' || error?.code === 'SUBSCRIPTION_AUTH' || error?.code === 'ENGINE_FAILURE' || error?.code === 'HUB_INPUT' || error?.status === 400;
-        job.error = known ? String(error?.message || 'generation failed') : `Generation failed (${String(error?.message || error || 'unknown error').split(/\n/)[0].slice(0, 120)}); details in the hub log`;
+        const known = error?.code === 'SUBSCRIPTION_QUOTA' || error?.code === 'SUBSCRIPTION_AUTH' || error?.code === 'HUB_INPUT' || error?.status === 400;
+        job.error = known ? String(error?.message || 'generation failed') : humanizeEngineError(error).message;
         if (!known) console.error(`[cover-letter] one-click job ${job.id} failed: ${String(error?.stack || error)}`);
         job.errorKind = error?.code === 'SUBSCRIPTION_AUTH' ? 'auth_expired' : error?.code === 'SUBSCRIPTION_QUOTA' ? error.quota.kind : error?.code === 'ENGINE_FAILURE' ? 'engine_error' : known ? 'input' : 'engine_error';
         if (error?.code === 'SUBSCRIPTION_QUOTA') job.quota = { kind: error.quota.kind, model: error.quota.model || null, resetsAt: error.quota.resetsAt || null };
