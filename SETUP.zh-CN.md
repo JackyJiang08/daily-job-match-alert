@@ -92,7 +92,7 @@ Cover letter 由同一个订阅引擎根据你的 playbook、最多三封样稿�
 - **补跑。** 只有 HTML 与 XLSX 都落盘才记录 `state.lastSuccessfulRun`；登录或开机触发的补跑路径仅在上次成功超过 26 小时时执行。
 - **锁。** `state/.lock` 保存持有者 PID；第二个实例直接退出，PID 已死的陈旧锁自动清除。
 - **同日累积。** `state/report-payload-<日期>.json` 保存该投递日期的全部结果；每次运行合并进去（语义评审过的版本优先、更长的 JD 优先）并以 `Daily update #N` 重新渲染；未完成的日期在下一次运行开始时先重建。
-- **评分配额。** `semanticMatching.maxReviewedPerRun`（默认 120，`0` 为不限）限制每晚送引擎评审的本地候选数：本地分数高的先评，超出的岗位顺延到下一轮且不写 seen，次晚无论多旧都会回来，连续两轮被顺延的岗位第三轮优先。Run Details 与 Status 显示候选数 / 评审数 / 顺延数，Settings 可改上限。
+- **评分配额。** `semanticMatching.maxReviewedPerRun`（默认 120，`0` 为不限）限制每晚送引擎评审的本地候选数。新鲜度优先于完整性：回看窗口内的当晚岗位永远排在积压之前，本地分数与顺延加权只在同一桶内重排。超出的岗位顺延且不写 seen，但只在发布时间（天级来源用首次发现时间）距今不超过 `lookbackHours + deferralGraceHours`（默认 24 + 24 小时）时仍可评审，超期的从队列移除、不评分（Run Details 记 "expired N backlog postings"）。窗口内候选连续 3 晚超过预算时，warnings 与 Status 的 Quota 卡提示并显示近 7 晚的候选/预算数字。同一需求在多个招聘站路径出现（Workday 多站点）时合并为一张卡、只评审一次，备用链接列在卡片上。报告页眉按实际最早发布时间写明 "posted within the last 24 hours / N days"。
 - **chaos 套件。** `npm run chaos` 在临时目录跑九个场景，CI 每次执行：基线、全部采集源断网、订阅 CLI 不可用、畸形 `.eml`、XLSX 失败后恢复、某 ATS 接口返回 500、候选超出评审上限、Fable 周限额（降级到 Opus）、账户总限额（全部顺延并显示横幅）。每个场景都必须仍留下当日文件夹与 HTML。
 
 ## 快速开始

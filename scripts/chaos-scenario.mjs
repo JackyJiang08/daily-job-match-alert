@@ -1,7 +1,7 @@
 // One chaos scenario: build an isolated config under <workRoot>/<scenario>, run src/index.mjs
 // against it, and assert that the Desktop-equivalent output folder still holds a usable report.
 //
-//   node scripts/chaos-scenario.mjs <baseline|offline|llm-down|bad-input|xlsx-recovery|ats-500|review-cap|fable-weekly-limit|account-limit> <workRoot>
+//   node scripts/chaos-scenario.mjs <baseline|offline|llm-down|bad-input|xlsx-recovery|ats-500|review-cap|fable-weekly-limit|account-limit|backlog-priority> <workRoot>
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -401,7 +401,7 @@ scenarios['review-cap'] = async function reviewCap() {
   assert.ok(deferral, `no review budget warning: ${warningLines(artifacts.warnings).join(' | ')}`);
   assert.equal(deferral.level, 'info');
   assert.match(deferral.message, /^deferred \d+ postings to the next run \(review limit 1 per run\)/);
-  assert.match(artifacts.html, /Review budget<\/dt><dd>\d+ candidates · 1 reviewed · \d+ deferred \(limit 1 per run\)/);
+  assert.match(artifacts.html, /Review budget<\/dt><dd>\d+ candidates \(\d+ within the window\) · 1 reviewed · \d+ deferred · expired \d+ backlog postings \(limit 1 per run\)/);
   const state = JSON.parse(await fs.readFile(path.join(directory, 'state', 'state.json'), 'utf8'));
   const deferredUrls = Object.values(state.deferred || {}).map(entry => entry.url);
   assert.equal(deferredUrls.length, first.summary.meta.deferredCount, 'every deferred posting is recorded');
@@ -463,6 +463,76 @@ scenarios['account-limit'] = async function accountLimit() {
   for (const entry of deferred) assert.ok(!Object.values(state.seen).some(seen => seen.url === entry.url), `${entry.url} was deferred but marked seen`);
   assert.match(await readWarningsFile(config, run) || '', /^\[llm \/ claude\] info: Claude subscription weekly account limit reached/m);
   return `all ${run.summary.meta.candidateCount} candidate(s) deferred, banner shown, report still written`;
+};
+
+// Three nights over budget with a cap of one review per night: each night's fresh postings must be
+// reviewed before the previous night's backlog, a backlog posting older than 48 hours must expire without
+// being scored or marked seen, and the third night must raise the budget alert.
+scenarios['backlog-priority'] = async function backlogPriority() {
+  const directory = await prepareDirectory('backlog-priority');
+  const config = baseConfig(directory);
+  config.semanticMatching = { engine: 'local_only', maxReviewedPerRun: 1 };
+  const configPath = await writeConfig(directory, config);
+  const nights = [
+    { now: '2026-08-27T12:00:00Z', date: 'Thu, 27 Aug 2026 01:00:00 -0500', jobs: ['a1', 'a2'] },
+    { now: '2026-08-28T12:00:00Z', date: 'Fri, 28 Aug 2026 01:00:00 -0500', jobs: ['b1', 'b2'] },
+    { now: '2026-08-29T12:00:00Z', date: 'Sat, 29 Aug 2026 01:00:00 -0500', jobs: ['c1', 'c2'] },
+  ];
+  const runs = [];
+  for (const night of nights) {
+    for (const id of night.jobs) {
+      await addFixtureEmail(directory, `demo-new-grad-alert.eml`, text => text
+        .replace(/^Date: .*$/m, `Date: ${night.date}`)
+        .replace('new-grad-data-analyst', `new-grad-data-analyst-${id}`)
+        .replace('New Grad Data Analyst - Example Analytics', `New Grad Data Analyst ${id.toUpperCase()} - Example Analytics`)
+        .replace('hiring a New Grad Data Analyst', `hiring a New Grad Data Analyst ${id.toUpperCase()}`));
+      await fs.rename(path.join(directory, 'intake', 'demo-new-grad-alert.eml'), path.join(directory, 'intake', `${id}.eml`));
+    }
+    const run = await runPipeline(configPath, night.now);
+    assert.equal(run.exitCode, 0, `night ${night.now} exited ${run.exitCode}`);
+    await assertDesktopArtifacts(config, run);
+    runs.push(run);
+  }
+  const urlOf = id => `https://www.example.com/careers/new-grad-data-analyst-${id}`;
+  const [first, second, third] = runs;
+  assert.equal(first.summary.meta.reviewedThisRun, 1);
+  assert.equal(first.summary.meta.deferredCount, 1);
+  assert.equal(first.summary.meta.candidateInWindowCount, 2);
+  const keptFirst = first.summary.debug.reviewBudget.kept.map(item => item.url);
+  const backlogFromFirst = first.summary.debug.reviewBudget.deferred.map(item => item.url);
+  assert.ok(keptFirst.every(url => url.startsWith(urlOf('a')) ), 'night one reviews a night-one posting');
+
+  // Night two: b1 and b2 are tonight's; the leftover a-posting is the backlog and must lose to both of them.
+  assert.equal(second.summary.meta.candidateCount, 3, 'two fresh postings plus one backlog posting');
+  assert.equal(second.summary.meta.candidateInWindowCount, 2);
+  const secondRanking = second.summary.debug.reviewBudget;
+  assert.deepEqual(secondRanking.kept.map(item => item.bucket), [0], 'the single review slot goes to a fresh posting');
+  assert.ok(secondRanking.kept[0].url.startsWith(urlOf('b')), `night two reviewed ${secondRanking.kept[0].url} instead of a fresh posting`);
+  const secondDeferred = secondRanking.deferred.map(item => item.url);
+  assert.ok(backlogFromFirst.every(url => secondDeferred.includes(url)), 'the backlog posting is deferred again behind tonight\'s');
+  assert.ok(secondRanking.deferred.find(item => backlogFromFirst.includes(item.url)).bucket === 1, 'the backlog posting sits in the older bucket');
+  assert.equal(second.summary.meta.budgetAlert, null, 'two nights over budget are not an alert yet');
+  assert.equal(second.summary.meta.expiredBacklogCount, 0);
+
+  // Night three: the night-one leftover is now past 48 hours and expires; c1/c2 are tonight's.
+  assert.equal(third.summary.meta.candidateInWindowCount, 2);
+  assert.ok(third.summary.meta.expiredBacklogCount >= 1, `expected the night-one backlog to expire, got ${third.summary.meta.expiredBacklogCount}`);
+  assert.ok(third.summary.debug.reviewBudget.expired.some(url => backlogFromFirst.includes(url)), 'the expired posting is the night-one leftover');
+  assert.ok(third.summary.debug.reviewBudget.kept[0].url.startsWith(urlOf('c')), 'night three reviews a night-three posting first');
+  assert.ok(third.summary.meta.budgetAlert, 'three nights over budget raise the alert');
+  assert.equal(third.summary.meta.budgetAlert.nights, 3);
+  assert.match(third.summary.meta.budgetAlert.message, /exceeded the review budget for 3 nights in a row \(2026-08-27: 2\/1, 2026-08-28: 2\/1, 2026-08-29: 2\/1\)/);
+  const state = JSON.parse(await fs.readFile(path.join(directory, 'state', 'state.json'), 'utf8'));
+  for (const url of backlogFromFirst) {
+    assert.ok(!Object.values(state.deferred || {}).some(entry => entry.url === url), `${url} should have left the queue`);
+    assert.ok(!Object.values(state.seen).some(entry => entry.url === url), `${url} expired but was marked seen`);
+  }
+  assert.equal(state.budgetHistory.length, 3);
+  const html = await fs.readFile(path.join(config.outputDirectory, third.summary.meta.date, `Daily Job Match Alert - ${third.summary.meta.date}.html`), 'utf8');
+  assert.match(html, /exceeded the review budget for 3 nights in a row/);
+  assert.match(html, /posted within the last 24 hours/);
+  assert.match(html, /expired \d+ backlog postings/);
+  return `3 nights over a budget of 1: fresh postings reviewed first each night, night-one leftover expired unscored on night three, alert raised`;
 };
 
 const scenario = scenarios[scenarioName];

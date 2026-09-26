@@ -151,7 +151,7 @@ test('Reports lists dates newest first with counts, titles the report by date, a
     assert.match(list.text, /<ul class="datelist" id="datelist"><li class="month" data-month="2026-08" data-current="1">August 2026<\/li><li data-month="2026-08"><a href="\/reports\/2026-08-27" class="active today" title="2026-08-27 \(today\)"><span>Thu, Aug 27<\/span><span class="n">1 match<\/span><span class="tag" data-tag="today">Today<\/span><\/a><\/li><li data-month="2026-08" data-empty="1"><a href="\/reports\/2026-08-26" class="quiet" title="2026-08-26"><span>Wed, Aug 26<\/span><span class="n">0 matches<\/span><\/a><\/li><\/ul>/);
     assert.match(list.text, /localStorage\.getItem\(key\)/, 'the toggle remembers itself');
     assert.doesNotMatch(list.text, /<h1 class="hub-title">Reports<\/h1>/, 'no page heading above the report');
-    assert.match(list.text, /<header class="masthead"><h1>August 27, 2026<\/h1><p class="sub">1 match · Ran Aug 26, 8:00 PM<\/p><\/header>/);
+    assert.match(list.text, /<header class="masthead"><h1>August 27, 2026<\/h1><p class="sub">1 match · posted within the last 24 hours · Ran Aug 26, 8:00 PM<\/p><\/header>/);
     assert.equal((list.text.match(/<h1/g) || []).length, 1, 'a single h1 on the page');
     assert.match(list.text, /<a class="btn secondary small" href="\/desktop\/2026-08-27" target="_blank" rel="noopener noreferrer" title="[^"]*output\/2026-08-27\/Daily Job Match Alert - 2026-08-27\.html">Open Desktop Copy<\/a><a class="btn secondary small" href="\/desktop\/2026-08-27\/xlsx"[^>]*>Download XLSX<\/a>/);
     assert.doesNotMatch(list.text, /file:\/\//);
@@ -652,6 +652,15 @@ test('the Quota card shows the last limit event, the model in effect, and the de
     assert.match(page.text, /<dt>Deferred postings<\/dt><dd id="quota-deferred">2 waiting for the next run<\/dd>/);
     assert.match(page.text, /<dt>Policy<\/dt><dd>Ladder fable → opus · no engine fallback<\/dd>/);
     assert.doesNotMatch(page.text, /\bUTC\b/);
+    assert.doesNotMatch(page.text, /<dt>Candidates vs budget<\/dt>/, 'no history yet, no row');
+    const withHistory = JSON.parse(await fs.readFile(statePath, 'utf8'));
+    withHistory.budgetHistory = [{ date: '2026-08-25', inWindow: 130, limit: 120 }, { date: '2026-08-26', inWindow: 141, limit: 120 }, { date: '2026-08-27', inWindow: 150, limit: 120 }];
+    await fs.writeFile(statePath, JSON.stringify(withHistory));
+    const alertPayload = JSON.parse(await fs.readFile(payloadPath, 'utf8'));
+    alertPayload.meta.budgetAlert = { nights: 3, message: 'Candidates inside the lookback window have exceeded the review budget for 3 nights in a row', history: withHistory.budgetHistory };
+    alertPayload.meta.expiredBacklogCount = 4;
+    await fs.writeFile(payloadPath, JSON.stringify(alertPayload));
+    assert.match((await hub.request('GET', '/status')).text, /<dt>Candidates vs budget<\/dt><dd id="quota-history"><span class="badge badge-warn" data-badge="budget-alert">Over budget 3 nights running<\/span> <span class="muted">Raise Max Reviewed Per Run or tighten the prefilter\.<\/span><br><span class="mono">2026-08-25 130\/120 · 2026-08-26 141\/120 · 2026-08-27 150\/120<\/span> <span class="muted">\(in-window candidates \/ budget, last 3 nights; 4 backlog postings expired last run\)<\/span><\/dd>/);
 
     // A cover-letter refusal seen by this hub process outranks an older run event.
     hub.ctx.quotaLog.record({ kind: 'accountWeeklyLimit', at: '2026-08-27T13:00:00Z', action: 'refused', source: 'cover-letter', engine: 'claude', model: 'fable' });

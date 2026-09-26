@@ -20,9 +20,9 @@ import { annotateEligibility, summarizeExclusions } from './eligibility.mjs';
 import { applySubscriptionMatching, isSemanticCandidate, localFallbackJob, summarizeScoringModel } from './subscription-match.mjs';
 import { normalizeEngineId } from './engines/index.mjs';
 import { buildHtml, writeReports, writeWarningsFile } from './report.mjs';
-import { clearDeferred, deferredStatus, isJobSeen, markDeferred, markJobSeen, normalizeState, pruneDeferred, pruneSeen, releaseRecentBaselines } from './state.mjs';
+import { clearDeferred, deferredStatus, expireDeferred, isJobSeen, markDeferred, markJobSeen, normalizeState, pruneSeen, releaseRecentBaselines } from './state.mjs';
 import { acquireRunLock, releaseRunLock } from './lock.mjs';
-import { canonicalUrl, dateWithOffset, htmlEscape, mapLimit, resolveFrom, sha256 } from './utils.mjs';
+import { canonicalUrl, dateWithOffset, htmlEscape, mapLimit, normalizeLocation, resolveFrom, sha256 } from './utils.mjs';
 import { createWarning, errorSummary } from './warnings.mjs';
 import { formatLocalDateTime } from './time-format.mjs';
 import { holdsToExactWindow, resolveCompanyName } from './posting-fields.mjs';
@@ -34,6 +34,11 @@ const execFileAsync = promisify(execFile);
 const REPORT_PAYLOAD_PREFIX = 'report-payload-';
 const REPORT_PAYLOAD_PATTERN = /^report-payload-(\d{4}-\d{2}-\d{2})\.json$/;
 export const DEFAULT_MAX_REVIEWED_PER_RUN = 120;
+// A deferred posting may wait this long beyond the lookback window before it leaves the backlog unscored.
+export const DEFAULT_DEFERRAL_GRACE_HOURS = 24;
+// Nights in a row the in-window candidates must exceed the budget before the report says so.
+export const BUDGET_ALERT_NIGHTS = 3;
+export const BUDGET_HISTORY_NIGHTS = 7;
 const BASELINE_RELEASE_HOURS = 48;
 
 function arg(argv, name, fallback = null) {
@@ -486,24 +491,115 @@ export function finalizeCompany(job) {
   return { ...job, company: resolved.name || job.company || '', companySource: resolved.source, companyUncertain: resolved.uncertain, companyCandidates: resolved.candidates };
 }
 
+// How old a posting is, in hours, by its posting date or (day-level sources) its discovery time.
+export function postingAgeHours(job, now = new Date()) {
+  const basis = job?.postedAt || job?.discoveredAt || null;
+  if (!basis) return null;
+  const stamp = new Date(basis).getTime();
+  return Number.isFinite(stamp) ? Math.max(0, (now.getTime() - stamp) / 3_600_000) : null;
+}
+
+// Freshness bucket: 0 for postings inside the lookback window (tonight's), 1 for anything older (the
+// backlog). A posting with no date at all counts as tonight's, since only tonight's sources produce one.
+export function freshnessBucket(job, now = new Date(), lookbackHours = 24) {
+  const age = postingAgeHours(job, now);
+  return age == null || age <= Number(lookbackHours) ? 0 : 1;
+}
+
+// Deferred postings that enrichment has now dated past the grace period leave the backlog unscored and
+// unseen; the next collection drops them by the lookback window on its own.
+export function applyBacklogExpiry(jobs, state, now = new Date(), maxAgeHours = 48) {
+  const kept = [];
+  const expired = [];
+  for (const job of jobs) {
+    const age = postingAgeHours(job, now);
+    if (deferredStatus(state, job).deferred && age != null && age > Number(maxAgeHours)) { clearDeferred(state, job); expired.push(job); }
+    else kept.push(job);
+  }
+  return { jobs: kept, expired };
+}
+
 // Keeps the best `limit` local candidates for the engine (0 or a non-number means no limit). Ranking:
-// postings already deferred twice go first, then local best score with a small bonus per deferral.
-// Non-candidates (no role relevance or a hard blocker) never reach the engine and pass through as-is.
-export function applyReviewBudget(jobs, state, configuredLimit, now = new Date()) {
+// the freshness bucket first (tonight's postings always ahead of last night's backlog), then local best
+// score with a bonus per deferral, and a twice-deferred posting ahead of its bucket-mates. Non-candidates
+// (no role relevance or a hard blocker) never reach the engine and pass through as-is.
+export function applyReviewBudget(jobs, state, configuredLimit, now = new Date(), { lookbackHours = 24 } = {}) {
   const limit = configuredLimit == null || configuredLimit === '' ? DEFAULT_MAX_REVIEWED_PER_RUN : Math.max(0, Math.floor(Number(configuredLimit)) || 0);
   const candidates = jobs.filter(isSemanticCandidate);
   const others = jobs.filter(job => !isSemanticCandidate(job));
   const ranked = candidates
-    .map(job => ({ job, deferredCount: deferredStatus(state, job).deferredCount }))
-    .sort((a, b) => (Number(b.deferredCount >= 2) - Number(a.deferredCount >= 2))
+    .map(job => ({ job, deferredCount: deferredStatus(state, job).deferredCount, bucket: freshnessBucket(job, now, lookbackHours) }))
+    .sort((a, b) => (a.bucket - b.bucket)
+      || (Number(b.deferredCount >= 2) - Number(a.deferredCount >= 2))
       || ((Number(b.job.bestScore) || 0) + 10 * b.deferredCount) - ((Number(a.job.bestScore) || 0) + 10 * a.deferredCount));
   const kept = limit > 0 ? ranked.slice(0, limit) : ranked;
   const deferred = limit > 0 ? ranked.slice(limit) : [];
   const at = now.toISOString();
   for (const entry of kept) clearDeferred(state, entry.job);
   for (const entry of deferred) markDeferred(state, entry.job, at);
-  return { jobs: [...others, ...kept.map(entry => entry.job)], deferred: deferred.map(entry => entry.job), candidateCount: candidates.length, reviewedCount: kept.length, limit };
+  const ranking = ranked.map(entry => ({ url: entry.job.url, bucket: entry.bucket, bestScore: Number(entry.job.bestScore) || 0, deferredCount: entry.deferredCount, kept: kept.includes(entry) }));
+  return {
+    jobs: [...others, ...kept.map(entry => entry.job)], deferred: deferred.map(entry => entry.job),
+    candidateCount: candidates.length, inWindowCount: ranked.filter(entry => entry.bucket === 0).length, reviewedCount: kept.length, limit, ranking,
+  };
 }
+
+// One entry per application date (a same-day rerun overwrites its own), last seven kept. Returns the
+// alert when the in-window candidates have exceeded a positive budget on the last three nights.
+export function recordBudgetHistory(state, { date, at, candidates, inWindow, limit, reviewed }) {
+  const history = (Array.isArray(state.budgetHistory) ? state.budgetHistory : []).filter(entry => entry && entry.date !== date);
+  history.push({ date, at, candidates: Number(candidates) || 0, inWindow: Number(inWindow) || 0, limit: Number(limit) || 0, reviewed: Number(reviewed) || 0 });
+  history.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  state.budgetHistory = history.slice(-BUDGET_HISTORY_NIGHTS);
+  const recent = state.budgetHistory.slice(-BUDGET_ALERT_NIGHTS);
+  const over = recent.length === BUDGET_ALERT_NIGHTS && recent.every(entry => entry.limit > 0 && entry.inWindow > entry.limit);
+  if (!over) return null;
+  const curve = recent.map(entry => `${entry.date}: ${entry.inWindow}/${entry.limit}`).join(', ');
+  return {
+    nights: BUDGET_ALERT_NIGHTS,
+    message: `Candidates inside the lookback window have exceeded the review budget for ${BUDGET_ALERT_NIGHTS} nights in a row (${curve}); raise semanticMatching.maxReviewedPerRun or tighten the prefilter`,
+    history: state.budgetHistory,
+  };
+}
+
+// The same requisition listed on several career-site paths (Workday multi-site postings): one company,
+// one normalized title, one location, different URLs. The copy with the most description becomes the
+// card; the others ride along as alternates. URL dedupe is untouched; this affects only the card and
+// the review (one call instead of several).
+const REQUISITION_ID = /\s*[\[(]?\b(?:R|JR|REQ|ID)?[-_ ]?\d{4,}[-_]?\d*\b[\])]?/gi;
+function duplicateKey(job) {
+  const company = String(job.company || '').toLowerCase().replace(/\b(?:inc|llc|ltd|corp|corporation|company|co|holdings|group|limited)\b\.?/g, ' ').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  const title = String(job.title || '').toLowerCase().replace(REQUISITION_ID, ' ').replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
+  const location = normalizeLocation(job.location || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  return company && title ? `${company}|${title}|${location}` : null;
+}
+
+export function mergeNearDuplicates(jobs) {
+  const groups = new Map();
+  const order = [];
+  for (const job of jobs) {
+    const key = duplicateKey(job);
+    if (!key) { order.push({ primary: job, others: [] }); continue; }
+    if (!groups.has(key)) { const group = { primary: job, others: [] }; groups.set(key, group); order.push(group); continue; }
+    groups.get(key).others.push(job);
+  }
+  const merged = [];
+  const report = [];
+  let mergedCount = 0;
+  for (const group of order) {
+    if (!group.others.length) { merged.push(group.primary); continue; }
+    const all = [group.primary, ...group.others];
+    const best = [...all].sort((a, b) => String(b.description || '').length - String(a.description || '').length || String(a.postedAt || '').localeCompare(String(b.postedAt || '')))[0];
+    const rest = all.filter(job => job !== best);
+    const sources = [...new Set(all.flatMap(job => String(job.source || '').split(' | ')).map(item => item.trim()).filter(Boolean))];
+    merged.push({ ...best, source: sources.join(' | '), alternates: [...(best.alternates || []), ...rest.map(job => ({ url: job.url, source: job.source || null, location: job.location || null }))] });
+    mergedCount += rest.length;
+    report.push({ primary: best.url, alternates: rest.map(job => job.url) });
+  }
+  return { jobs: merged, mergedCount, groups: report };
+}
+
+// Keeps the best `limit` local candidates for the engine
 
 async function runPipeline(config, clock, options = {}) {
   const { now, runDate, applicationDate: date } = clock;
@@ -527,6 +623,11 @@ async function runPipeline(config, clock, options = {}) {
   // through once. Idempotent: released entries are gone, so a later run finds nothing to release.
   const releasedBaselines = releaseRecentBaselines(state, now, BASELINE_RELEASE_HOURS);
   if (releasedBaselines) warnings.push(createWarning('collector', 'baseline', `released ${releasedBaselines} baseline postings for review`, 'info'));
+  // The backlog only holds postings still worth reviewing: anything older than the lookback window plus
+  // the grace period leaves the queue now (this also migrates queues written under the old one-week rule).
+  const deferralMaxAgeHours = Number(config.lookbackHours || 24) + Number(config.deferralGraceHours ?? DEFAULT_DEFERRAL_GRACE_HOURS);
+  const staleBacklog = expireDeferred(state, now, deferralMaxAgeHours);
+  if (staleBacklog.removed) warnings.push(createWarning('llm', 'review budget', `expired ${staleBacklog.removed} backlog postings older than ${deferralMaxAgeHours} hours (not scored, not marked seen)`, 'info'));
   if (!prefs.graduationDate) {
     warnings.push(createWarning('eligibility', 'graduation window', 'preferences.graduationDate is not set, so the graduation-window hard filter is disabled and only the semantic review checks cohort wording'));
   }
@@ -583,13 +684,24 @@ async function runPipeline(config, clock, options = {}) {
   if (freshness.dropped.length) {
     warnings.push(createWarning('collector', 'freshness', `dropped ${freshness.dropped.length} postings after precise timestamps put them outside the ${config.lookbackHours}-hour window`, 'info'));
   }
-  const locallyEvaluated = freshness.jobs.map(job => evaluateJob(job, resumes, prefs));
-  // Review budget: only the best maxReviewedPerRun local candidates go to the engine tonight. The rest
-  // are deferred (not marked seen) and come back next run with priority once deferred twice.
-  const budget = applyReviewBudget(locallyEvaluated, state, config.semanticMatching?.maxReviewedPerRun, now);
+  // A deferred posting whose enriched date now puts it past the grace period leaves the backlog here.
+  const backlog = applyBacklogExpiry(freshness.jobs, state, now, deferralMaxAgeHours);
+  const expiredBacklogCount = staleBacklog.removed + backlog.expired.length;
+  if (backlog.expired.length) warnings.push(createWarning('llm', 'review budget', `expired ${backlog.expired.length} backlog postings after enrichment dated them past ${deferralMaxAgeHours} hours`, 'info'));
+  // The same requisition on several career-site paths (Workday multi-site postings) is one card and one
+  // review; the extra links ride along as alternates and are marked seen with the primary.
+  const merged = mergeNearDuplicates(backlog.jobs);
+  if (merged.mergedCount) debug.nearDuplicates = merged.groups;
+  const locallyEvaluated = merged.jobs.map(job => evaluateJob(job, resumes, prefs));
+  // Review budget: tonight's postings first (freshness bucket), then local score; the rest are deferred
+  // (not marked seen) and come back next run while they are still inside the grace period.
+  const budget = applyReviewBudget(locallyEvaluated, state, config.semanticMatching?.maxReviewedPerRun, now, { lookbackHours: config.lookbackHours });
+  debug.reviewBudget = { kept: budget.ranking.filter(item => item.kept).map(item => ({ url: item.url, bucket: item.bucket, bestScore: item.bestScore, deferredCount: item.deferredCount })), deferred: budget.ranking.filter(item => !item.kept).map(item => ({ url: item.url, bucket: item.bucket, bestScore: item.bestScore, deferredCount: item.deferredCount })), expired: [...staleBacklog.urls, ...backlog.expired.map(job => job.url)] };
   if (budget.deferred.length) {
     warnings.push(createWarning('llm', 'review budget', `deferred ${budget.deferred.length} postings to the next run (review limit ${budget.limit} per run); they are not marked as seen`, 'info'));
   }
+  const budgetAlert = recordBudgetHistory(state, { date, at: now.toISOString(), candidates: budget.candidateCount, inWindow: budget.inWindowCount, limit: budget.limit, reviewed: budget.reviewedCount });
+  if (budgetAlert) warnings.push(createWarning('llm', 'review budget', budgetAlert.message));
   let evaluated;
   const quotaEvents = [];
   const quotaPolicy = normalizeQuotaPolicy(config.semanticMatching?.quotaPolicy);
@@ -656,7 +768,8 @@ async function runPipeline(config, clock, options = {}) {
     minimumMatchScore: config.minimumMatchScore, resumeSync, resumeTracks, collectedCount: collected.length,
     sourceCounts: sourceStats,
     newCount: reviewed.length, newThisRun: enriched.length, reviewedCount: reviewed.length, matchCount: matches.length,
-    candidateCount: budget.candidateCount, reviewedThisRun: budget.reviewedCount, deferredCount: budget.deferred.length, maxReviewedPerRun: budget.limit,
+    candidateCount: budget.candidateCount, candidateInWindowCount: budget.inWindowCount, reviewedThisRun: budget.reviewedCount, deferredCount: budget.deferred.length, expiredBacklogCount, maxReviewedPerRun: budget.limit,
+    budgetAlert, budgetHistory: (state.budgetHistory || []).slice(-BUDGET_HISTORY_NIGHTS),
     droppedAfterPreciseTimestamps: freshness.dropped.length,
     quota,
     authExpired,
@@ -675,9 +788,9 @@ async function runPipeline(config, clock, options = {}) {
   await writeReportPayload(config, payload);
   for (const job of reviewed) {
     if (job.enrichment !== 'failed') markJobSeen(state, job, now.toISOString());
+    for (const alternate of job.alternates || []) markJobSeen(state, { url: alternate.url, enrichment: 'near_duplicate' }, now.toISOString());
   }
   pruneSeen(state, now, 90);
-  pruneDeferred(state, now, 7);
   await pruneReportPayloads(config, now, 90);
   await writeState(statePath, state);
 

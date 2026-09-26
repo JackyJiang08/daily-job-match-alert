@@ -106,25 +106,35 @@ export function markDeferred(state, job, deferredAt) {
   state.deferred = state.deferred && typeof state.deferred === 'object' ? state.deferred : {};
   const key = deferredKey(job);
   const previous = state.deferred[key];
-  state.deferred[key] = { url: canonicalUrl(job.finalUrl || job.url) || job.url, deferredCount: Number(previous?.deferredCount || 0) + 1, firstDeferredAt: previous?.firstDeferredAt || deferredAt, lastDeferredAt: deferredAt, postedAt: job.postedAt || previous?.postedAt || null };
+  state.deferred[key] = { url: canonicalUrl(job.finalUrl || job.url) || job.url, deferredCount: Number(previous?.deferredCount || 0) + 1, firstDeferredAt: previous?.firstDeferredAt || deferredAt, lastDeferredAt: deferredAt, postedAt: job.postedAt || previous?.postedAt || null, discoveredAt: job.discoveredAt || previous?.discoveredAt || null };
   return state.deferred[key];
+}
+
+// When a posting was published, as far as the queue knows: its posting date, else the moment it was
+// first discovered (day-level sources), else the moment it was first deferred.
+export function deferralAgeBasis(entry) {
+  return entry?.postedAt || entry?.discoveredAt || entry?.firstDeferredAt || null;
 }
 
 export function clearDeferred(state, job) {
   if (state?.deferred) delete state.deferred[deferredKey(job)];
 }
 
-export function pruneDeferred(state, now = new Date(), retentionDays = 7) {
-  if (!state?.deferred || typeof state.deferred !== 'object') return 0;
-  const cutoff = (now instanceof Date ? now : new Date(now)).getTime() - Number(retentionDays) * 24 * 60 * 60 * 1000;
-  let removed = 0;
+// Freshness beats completeness: a deferred posting stays eligible only while its posting date (or first
+// discovery) is at most `maxAgeHours` old. Older entries leave the queue without being scored or marked
+// seen; the next collection simply filters them by the lookback window. Idempotent.
+export function expireDeferred(state, now = new Date(), maxAgeHours = 48) {
+  if (!state?.deferred || typeof state.deferred !== 'object') return { removed: 0, urls: [] };
+  const cutoff = (now instanceof Date ? now : new Date(now)).getTime() - Number(maxAgeHours) * 60 * 60 * 1000;
+  const urls = [];
   for (const [key, entry] of Object.entries(state.deferred)) {
-    const stamp = entry?.lastDeferredAt ? new Date(entry.lastDeferredAt).getTime() : Number.NaN;
+    const basis = deferralAgeBasis(entry);
+    const stamp = basis ? new Date(basis).getTime() : Number.NaN;
     if (Number.isFinite(stamp) && stamp >= cutoff) continue;
+    urls.push(entry?.url || key);
     delete state.deferred[key];
-    removed += 1;
   }
-  return removed;
+  return { removed: urls.length, urls };
 }
 
 export function pruneSeen(state, now = new Date(), retentionDays = 90) {

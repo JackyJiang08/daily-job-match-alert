@@ -130,6 +130,7 @@ details.more[open]>summary{display:none}
 details.jd{margin-top:var(--space-3)}
 details.jd>summary{cursor:pointer;font-size:var(--fs-meta);color:var(--ink-3)}
 details.jd p{margin:var(--space-2) 0 0;padding:var(--space-3);max-height:360px;overflow:auto;white-space:pre-wrap;font-size:var(--fs-meta);line-height:1.5;color:var(--ink-2);background:var(--bg);border-radius:var(--radius-sm)}
+.alternates{margin:var(--space-2) 0 0;font-size:var(--fs-meta);color:var(--ink-3);overflow-wrap:anywhere}
 .actions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-3);margin-top:var(--space-3)}
 .apply{display:inline-block;background:var(--accent);color:var(--accent-ink);text-decoration:none;font-weight:650;font-size:var(--fs-body);padding:7px 13px;border-radius:var(--radius-sm)}
 .apply:hover{filter:brightness(1.06)}

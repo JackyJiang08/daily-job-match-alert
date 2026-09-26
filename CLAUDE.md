@@ -93,10 +93,20 @@ disabled; do not expand them unless a task says so.
   (auth sentence, quota sentence, or "Generation failed (<reason>); details
   in the hub log"); raw text only in the hub log.
 - Review budget: config.semanticMatching.maxReviewedPerRun (default 120,
-  0 = no limit) caps the local candidates sent to the engine per run; the
-  rest are deferred in state.deferred (not seen), come back next run whatever
-  their age, and jump the queue once deferred twice. Run Details and Status
-  show candidates / reviewed / deferred.
+  0 = no limit) caps the local candidates sent to the engine per run. Ranking
+  is freshness first (postings inside lookbackHours, then the backlog), then
+  local score with a deferral bonus inside a bucket. The rest are deferred in
+  state.deferred (not seen) and stay eligible only while their posting date
+  (or first discovery) is within lookbackHours + deferralGraceHours (default
+  48 h); older entries expire at startup and after enrichment, unscored and
+  unseen ("expired N backlog postings" in Run Details; also the one-time
+  migration of the old one-week queue). state.budgetHistory keeps 7 nights of
+  in-window candidates vs budget; 3 nights over raises meta.budgetAlert (a
+  warning, the Run Details, and the Status Quota card). Near-duplicates (same
+  company + normalized title + location, different URLs) merge into one card
+  with `alternates` links and one review; alternates are marked seen with the
+  primary. The masthead says "posted within the last 24 hours / N days" from
+  the report's oldest posting date at run time.
 
 ## Scoring engines (src/engines/)
 - One interface per engine: verifyAuth(), reviewBatch(prompt, schema,

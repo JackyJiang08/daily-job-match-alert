@@ -123,6 +123,7 @@ export function cardView(job, tracks, timeZone = null, decorate = null) {
     description: String(job.description || '').trim(),
     footnote: note.text,
     footnoteTitle: note.title,
+    alternates: (Array.isArray(job.alternates) ? job.alternates : []).map(item => ({ url: String(item?.url || ''), label: [item?.source, item?.location].filter(Boolean).join(' · ') || 'alternate listing' })).filter(item => item.url),
     sort: {
       score: Number(job.bestScore) || 0,
       company: company.toLowerCase(),
@@ -184,7 +185,9 @@ export function runDetailsView(jobs, meta, tracks) {
   }
   if (meta.candidateCount != null) {
     const limit = Number(meta.maxReviewedPerRun || 0);
-    rows.push({ term: 'Review budget', detail: `${Number(meta.candidateCount)} candidates · ${Number(meta.reviewedThisRun || 0)} reviewed · ${Number(meta.deferredCount || 0)} deferred${limit > 0 ? ` (limit ${limit} per run)` : ' (no limit)'}` });
+    const inWindow = meta.candidateInWindowCount != null ? ` (${Number(meta.candidateInWindowCount)} within the window)` : '';
+    const expired = meta.expiredBacklogCount != null ? ` · expired ${Number(meta.expiredBacklogCount)} backlog postings` : '';
+    rows.push({ term: 'Review budget', detail: `${Number(meta.candidateCount)} candidates${inWindow} · ${Number(meta.reviewedThisRun || 0)} reviewed · ${Number(meta.deferredCount || 0)} deferred${expired}${limit > 0 ? ` (limit ${limit} per run)` : ' (no limit)'}`, items: meta.budgetAlert ? [meta.budgetAlert.message] : [] });
   }
   if (Array.isArray(meta.sourceCounts) && meta.sourceCounts.length) {
     rows.push({ term: 'Sources', detail: sourcesSummary(meta.sourceCounts), items: meta.sourceCounts.map(sourceLine) });
@@ -227,10 +230,26 @@ export function runDetailsView(jobs, meta, tracks) {
 
 // The view object consumed by report-components; the hub renders the same view inside its shell.
 // "1 match · Ran Sep 12, 8:00 PM"; the run time comes from the pipeline's own meta.completedAt.
+// "posted within the last 24 hours" / "last 2 days" from the oldest posting date actually in the report,
+// measured at the run time; absent when no card carries a date or the payload records no run time.
+export function postingWindowLabel(jobs, meta) {
+  const ranAt = meta.completedAt || meta.lastUpdatedAt || meta.generatedAt || null;
+  if (!ranAt || Number.isNaN(new Date(ranAt).getTime())) return null;
+  const end = new Date(ranAt).getTime();
+  const stamps = jobs.map(job => new Date(job.postedAt || job.discoveredAt || '').getTime()).filter(Number.isFinite);
+  if (!stamps.length) return null;
+  const hours = Math.max(0, (end - Math.min(...stamps)) / 3_600_000);
+  if (hours <= 24) return 'posted within the last 24 hours';
+  const days = Math.ceil(hours / 24);
+  return `posted within the last ${days} days`;
+}
+
 export function mastheadSubtitle(jobs, meta, { withDate = true } = {}) {
   const parts = [];
   if (withDate) parts.push(readableDate(meta.date));
   parts.push(matchLabel(jobs.length));
+  const window = postingWindowLabel(jobs, meta);
+  if (window) parts.push(window);
   const ranAt = meta.completedAt || meta.lastUpdatedAt || null;
   if (ranAt) parts.push(`Ran ${formatLocalShort(ranAt, meta.timeZone)}`);
   return parts.join(' · ');

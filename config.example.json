@@ -1,5 +1,6 @@
 {
   "lookbackHours": 24,
+  "deferralGraceHours": 24,
   "timeZone": "America/Chicago",
   "reportDateOffsetDays": 1,
   "minimumMatchScore": 70,

@@ -2,8 +2,9 @@
 // recorded before in-window postings became exempt from baselines. Pure state logic, no network.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DEFAULT_MAX_REVIEWED_PER_RUN, applyReviewBudget } from '../src/index.mjs';
-import { deferredStatus, isJobSeen, markJobSeen, pruneDeferred, releaseRecentBaselines } from '../src/state.mjs';
+import { BUDGET_ALERT_NIGHTS, DEFAULT_MAX_REVIEWED_PER_RUN, applyBacklogExpiry, applyReviewBudget, freshnessBucket, mergeNearDuplicates, recordBudgetHistory } from '../src/index.mjs';
+import { deferredStatus, expireDeferred, isJobSeen, markDeferred, markJobSeen, releaseRecentBaselines } from '../src/state.mjs';
+import { mastheadSubtitle, postingWindowLabel } from '../src/report.mjs';
 import { runDetailsView } from '../src/report.mjs';
 
 const NOW = new Date('2026-09-19T01:00:00Z');
@@ -74,7 +75,7 @@ test('a posting deferred twice is reviewed first on the third run, and one defer
   assert.deepEqual(nudged.jobs.map(job => job.url), ['https://x/f'], 'one deferral adds 10 points: 85 + 10 beats 88');
 });
 
-test('a limit of 0 means no limit, an absent limit means the default, and stale deferrals are pruned', () => {
+test('a limit of 0 means no limit and an absent limit means the default', () => {
   const state = { seen: {} };
   const jobs = Array.from({ length: 5 }, (_, index) => candidate(`https://x/${index}`, 50 + index));
   assert.equal(applyReviewBudget(jobs, state, 0, NOW).deferred.length, 0);
@@ -85,6 +86,107 @@ test('a limit of 0 means no limit, an absent limit means the default, and stale 
   assert.equal(applyReviewBudget(jobs, state, undefined, NOW).deferred.length, 0);
   applyReviewBudget(jobs, state, 3, NOW);
   assert.equal(Object.keys(state.deferred).length, 2);
-  assert.equal(pruneDeferred(state, new Date('2026-09-25T01:00:00Z'), 7), 0);
-  assert.equal(pruneDeferred(state, new Date('2026-09-27T01:00:00Z'), 7), 2, 'deferrals older than a week are forgotten');
+});
+
+test('the backlog expires by posting age, not by how long it has waited: 48 hours after posting (or first discovery) a deferred entry leaves the queue unscored and unseen', () => {
+  const state = { seen: {} };
+  const at = '2026-09-19T01:00:00.000Z';
+  markDeferred(state, { url: 'https://x/fresh', postedAt: '2026-09-18T20:00:00Z' }, at);
+  markDeferred(state, { url: 'https://x/old', postedAt: '2026-09-16T20:00:00Z' }, at);
+  markDeferred(state, { url: 'https://x/day-level', discoveredAt: '2026-09-18T02:00:00Z' }, at);
+  markDeferred(state, { url: 'https://x/day-level-old', discoveredAt: '2026-09-16T02:00:00Z' }, at);
+  markDeferred(state, { url: 'https://x/undated' }, '2026-09-10T01:00:00.000Z');
+  const result = expireDeferred(state, NOW, 48);
+  assert.deepEqual(result.urls.sort(), ['https://x/day-level-old', 'https://x/old', 'https://x/undated'], 'posting date, then first discovery, then first deferral decide');
+  assert.equal(result.removed, 3);
+  assert.deepEqual(Object.values(state.deferred).map(entry => entry.url).sort(), ['https://x/day-level', 'https://x/fresh']);
+  for (const url of result.urls) assert.equal(isJobSeen(state, { url }), false, `${url} is not marked seen`);
+  assert.deepEqual(expireDeferred(state, NOW, 48), { removed: 0, urls: [] }, 'a second pass (the startup migration is idempotent) finds nothing');
+  // After enrichment a deferred posting can turn out older than the queue knew.
+  const enriched = [{ ...candidate('https://x/fresh', 60), postedAt: '2026-09-15T20:00:00Z' }, candidate('https://x/day-level', 70)];
+  const expiry = applyBacklogExpiry(enriched, state, NOW, 48);
+  assert.deepEqual(expiry.expired.map(job => job.url), ['https://x/fresh']);
+  assert.deepEqual(expiry.jobs.map(job => job.url), ['https://x/day-level']);
+  assert.equal(deferredStatus(state, { url: 'https://x/fresh' }).deferred, false, 'the expired entry is cleared');
+  assert.equal(isJobSeen(state, { url: 'https://x/fresh' }), false);
+  assert.deepEqual(applyBacklogExpiry([candidate('https://x/never-deferred', 60)], state, NOW, 48).expired, [], 'only deferred postings expire here');
+});
+
+test('tonight\'s postings always rank ahead of the backlog; score and deferral bonuses only reorder within a bucket', () => {
+  const state = { seen: {} };
+  const tonightLow = { ...candidate('https://x/tonight-low', 40), postedAt: '2026-09-18T20:00:00Z' };
+  const tonightHigh = { ...candidate('https://x/tonight-high', 60), postedAt: '2026-09-18T22:00:00Z' };
+  const backlogHigh = { ...candidate('https://x/backlog-high', 95), postedAt: '2026-09-17T12:00:00Z' };
+  const backlogTwice = { ...candidate('https://x/backlog-twice', 50), postedAt: '2026-09-17T13:00:00Z' };
+  state.deferred = {};
+  markDeferred(state, backlogTwice, '2026-09-17T01:00:00Z');
+  markDeferred(state, backlogTwice, '2026-09-18T01:00:00Z');
+  markDeferred(state, backlogHigh, '2026-09-18T01:00:00Z');
+  assert.equal(freshnessBucket(tonightLow, NOW, 24), 0);
+  assert.equal(freshnessBucket(backlogHigh, NOW, 24), 1);
+  assert.equal(freshnessBucket(candidate('https://x/undated', 10), NOW, 24), 0, 'no date at all counts as tonight');
+  const budget = applyReviewBudget([backlogHigh, tonightLow, backlogTwice, tonightHigh], state, 3, NOW, { lookbackHours: 24 });
+  assert.deepEqual(budget.ranking.map(item => [item.url, item.bucket, item.kept]), [
+    ['https://x/tonight-high', 0, true], ['https://x/tonight-low', 0, true], ['https://x/backlog-twice', 1, true], ['https://x/backlog-high', 1, false],
+  ], 'both of tonight\'s postings come first even against a 95-point backlog posting; within the backlog the twice-deferred one leads');
+  assert.deepEqual([budget.candidateCount, budget.inWindowCount, budget.reviewedCount], [4, 2, 3]);
+  assert.deepEqual(budget.deferred.map(job => job.url), ['https://x/backlog-high']);
+});
+
+test('the budget alert fires only after three consecutive nights over budget and shows the seven-night curve', () => {
+  const state = { seen: {} };
+  const night = (date, inWindow, limit = 2) => recordBudgetHistory(state, { date, at: `${date}T01:00:00Z`, candidates: inWindow + 1, inWindow, limit, reviewed: Math.min(inWindow, limit) });
+  assert.equal(night('2026-09-16', 5), null);
+  assert.equal(night('2026-09-17', 5), null, 'two nights are not enough');
+  assert.equal(night('2026-09-18', 1), null, 'a quiet night resets the streak');
+  assert.equal(night('2026-09-19', 5), null);
+  assert.equal(night('2026-09-20', 5), null);
+  const alert = night('2026-09-21', 6);
+  assert.equal(alert.nights, BUDGET_ALERT_NIGHTS);
+  assert.equal(alert.message, 'Candidates inside the lookback window have exceeded the review budget for 3 nights in a row (2026-09-19: 5/2, 2026-09-20: 5/2, 2026-09-21: 6/2); raise semanticMatching.maxReviewedPerRun or tighten the prefilter');
+  assert.equal(alert.history.length, 6);
+  const rerun = night('2026-09-21', 7);
+  assert.equal(rerun.history.length, 6, 'a same-day rerun overwrites its own entry instead of adding one');
+  assert.match(rerun.message, /2026-09-21: 7\/2\)/);
+  assert.equal(night('2026-09-22', 9).history.length, 7);
+  night('2026-09-23', 9);
+  assert.equal(state.budgetHistory.length, 7, 'only the last seven nights are kept');
+  assert.equal(state.budgetHistory[0].date, '2026-09-17');
+  const unlimited = { seen: {} };
+  for (const date of ['2026-09-19', '2026-09-20', '2026-09-21']) recordBudgetHistory(unlimited, { date, at: `${date}T01:00:00Z`, candidates: 9, inWindow: 9, limit: 0, reviewed: 9 });
+  assert.equal(recordBudgetHistory(unlimited, { date: '2026-09-22', at: 'x', candidates: 9, inWindow: 9, limit: 0, reviewed: 9 }), null, 'no budget, no alert');
+});
+
+test('near-duplicate postings (same company, normalized title, and location on different URLs) merge into one card with alternate links; URLs elsewhere stay distinct', () => {
+  const base = { company: 'Live Oak Bank', location: 'Wilmington, NC', description: 'x'.repeat(300), postedAt: '2026-09-18T20:00:00Z', source: 'Workday · Live Oak Bank' };
+  const jobs = [
+    { ...base, url: 'https://liveoak.wd1.myworkdayjobs.com/External/job/Wilmington-NC/Data-Analyst_R-1234', title: 'Data Analyst (R-1234)', description: 'x'.repeat(200) },
+    { ...base, url: 'https://liveoak.wd1.myworkdayjobs.com/Campus/job/Wilmington-NC/Data-Analyst_R-1234-1', title: 'Data Analyst', source: 'SimplifyJobs New Grad' },
+    { ...base, url: 'https://liveoak.wd1.myworkdayjobs.com/External/job/Raleigh-NC/Data-Analyst_R-9999', title: 'Data Analyst', location: 'Raleigh, NC' },
+    { ...base, company: 'Live Oak Bank, Inc.', url: 'https://example.com/other', title: 'Data  Analyst!' },
+    { company: '', title: 'Nameless', url: 'https://example.com/nameless', description: 'y' },
+  ];
+  const merged = mergeNearDuplicates(jobs);
+  assert.equal(merged.mergedCount, 2);
+  assert.equal(merged.jobs.length, 3);
+  const primary = merged.jobs.find(job => job.alternates);
+  assert.equal(primary.url, 'https://liveoak.wd1.myworkdayjobs.com/Campus/job/Wilmington-NC/Data-Analyst_R-1234-1', 'the copy with the longest description is the card');
+  assert.deepEqual(primary.alternates.map(item => item.url), ['https://liveoak.wd1.myworkdayjobs.com/External/job/Wilmington-NC/Data-Analyst_R-1234', 'https://example.com/other']);
+  assert.equal(primary.source, 'Workday · Live Oak Bank | SimplifyJobs New Grad');
+  assert.ok(merged.jobs.some(job => job.location === 'Raleigh, NC' && !job.alternates), 'a different location is a different posting');
+  assert.ok(merged.jobs.some(job => job.url === 'https://example.com/nameless'), 'a posting without a company is left alone');
+  assert.deepEqual(merged.groups, [{ primary: primary.url, alternates: primary.alternates.map(item => item.url) }]);
+  assert.equal(mergeNearDuplicates([]).mergedCount, 0);
+});
+
+test('the masthead describes the real posting window of the report', () => {
+  const meta = { date: '2026-09-19', timeZone: 'America/Chicago', completedAt: '2026-09-19T01:00:00Z' };
+  assert.equal(postingWindowLabel([{ postedAt: '2026-09-18T20:00:00Z' }, { postedAt: '2026-09-18T02:00:00Z' }], meta), 'posted within the last 24 hours');
+  assert.equal(postingWindowLabel([{ postedAt: '2026-09-18T20:00:00Z' }, { postedAt: '2026-09-17T12:00:00Z' }], meta), 'posted within the last 2 days');
+  assert.equal(postingWindowLabel([{ discoveredAt: '2026-09-14T12:00:00Z' }], meta), 'posted within the last 5 days', 'discovery time stands in for day-level sources');
+  assert.equal(postingWindowLabel([{ title: 'undated' }], meta), null);
+  assert.equal(postingWindowLabel([], meta), null);
+  assert.equal(postingWindowLabel([{ postedAt: '2026-09-18T20:00:00Z' }], { date: '2026-09-19' }), null, 'no run time, no window (never the wall clock)');
+  assert.equal(mastheadSubtitle([{ postedAt: '2026-09-18T20:00:00Z' }], meta), 'September 19, 2026 · 1 match · posted within the last 24 hours · Ran Sep 18, 8:00 PM');
+  assert.equal(mastheadSubtitle([], meta), 'September 19, 2026 · No matches · Ran Sep 18, 8:00 PM');
 });

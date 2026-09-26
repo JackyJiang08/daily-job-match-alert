@@ -86,13 +86,13 @@ test('run metadata lives only in the collapsed Run details block, including the 
 test('the masthead names the run time in the configured zone, and the embedded view is titled by date', () => {
   const ran = { ...meta, timeZone: 'America/Chicago', completedAt: '2026-09-13T01:00:00Z', trigger: 'scheduled', runsToday: 1, lastUpdatedAt: '2026-09-13T01:00:00Z' };
   const html = buildHtml([job], { ...ran, date: '2026-09-13' });
-  assert.equal(header(html), '<h1>Daily Job Match Alert</h1><p class="sub">September 13, 2026 · 1 match · Ran Sep 12, 8:00 PM</p>');
-  assert.equal(mastheadSubtitle([job], { ...ran, date: '2026-09-13' }), 'September 13, 2026 · 1 match · Ran Sep 12, 8:00 PM');
+  assert.equal(header(html), '<h1>Daily Job Match Alert</h1><p class="sub">September 13, 2026 · 1 match · posted within the last 17 days · Ran Sep 12, 8:00 PM</p>');
+  assert.equal(mastheadSubtitle([job], { ...ran, date: '2026-09-13' }), 'September 13, 2026 · 1 match · posted within the last 17 days · Ran Sep 12, 8:00 PM');
   assert.match(html, /<dt>Trigger<\/dt><dd>scheduled<\/dd>/);
   assert.match(buildHtml([job], { ...ran, engine: 'codex', scoringModel: 'gpt-5.6-sol' }), /<dt>Engine<\/dt><dd>codex<\/dd>/);
   assert.doesNotMatch(html, /\bUTC\b/);
   const embedded = buildReportView([job], { ...ran, date: '2026-09-13' }, { embedded: true });
-  assert.deepEqual(embedded.masthead, { title: 'September 13, 2026', subtitle: '1 match · Ran Sep 12, 8:00 PM' });
+  assert.deepEqual(embedded.masthead, { title: 'September 13, 2026', subtitle: '1 match · posted within the last 17 days · Ran Sep 12, 8:00 PM' });
   assert.equal(buildReportView([job], meta).masthead.subtitle, 'August 27, 2026 · 1 match', 'no run time when the payload has none');
   // Older payloads without completedAt fall back to lastUpdatedAt.
   assert.equal(mastheadSubtitle([], { date: '2026-08-27', timeZone: 'America/Chicago', lastUpdatedAt: '2026-08-27T13:30:00Z' }), 'August 27, 2026 · No matches · Ran Aug 27, 8:30 AM');
