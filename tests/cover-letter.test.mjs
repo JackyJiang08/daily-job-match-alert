@@ -883,10 +883,10 @@ test('an uncertain company blocks one-click generation and Save & Render, sends 
     assert.match(list.text, /<td><span class="mono">MollyDoe_Cover_Letter_GuidehouseFederal\.pdf<\/span><\/td>/);
 
     // Changing the prefix under Settings changes the next file name.
-    await hub.upload('/settings/cover-letter', { ...PROFILE, signatureName: 'Mary (Molly) Doe', fileNamePrefix: 'YJiang' }, []);
+    await hub.upload('/settings/cover-letter', { ...PROFILE, signatureName: 'Mary (Molly) Doe', fileNamePrefix: 'MDoe' }, []);
     const again = await hub.form('/letters/rename', { date: '2026-09-15', slug: 'GuidehouseFederal', company: 'Guidehouse Federal' });
-    assert.equal(JSON.parse(again.text).pdfFileName, 'YJiang_Cover_Letter_GuidehouseFederal.pdf');
-    assert.deepEqual((await fs.readdir(path.join(root, 'private', 'cover-letters', '2026-09-15', 'GuidehouseFederal'))).filter(name => name.endsWith('.pdf')), ['YJiang_Cover_Letter_GuidehouseFederal.pdf'], 'the old PDF is removed when the prefix changes');
+    assert.equal(JSON.parse(again.text).pdfFileName, 'MDoe_Cover_Letter_GuidehouseFederal.pdf');
+    assert.deepEqual((await fs.readdir(path.join(root, 'private', 'cover-letters', '2026-09-15', 'GuidehouseFederal'))).filter(name => name.endsWith('.pdf')), ['MDoe_Cover_Letter_GuidehouseFederal.pdf'], 'the old PDF is removed when the prefix changes');
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });
