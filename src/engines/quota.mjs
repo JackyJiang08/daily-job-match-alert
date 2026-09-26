@@ -38,6 +38,15 @@ export const DEFAULT_QUOTA_PATTERNS = {
     // configuration problem, not an expiry, and keeps the local fallback).
     'loggedin=false',
   ],
+  // A model the plan does not include or the CLI does not know. Conservative: the text must name a
+  // model or a plan; recorded in tests/fixtures/engine-errors.json.
+  modelUnavailable: [
+    'not available (?:on|for|with) your (?:plan|subscription|account)',
+    'requires an? (?:pro|max|team|enterprise) (?:plan|subscription)',
+    'upgrade to (?:pro|max|team|enterprise) to use',
+    'model[^.\\n]{0,60}(?:not found|does not exist|is not available|not available)',
+    'unknown model',
+  ],
   notQuota: [
     'not your usage limit',
     'experiencing high load',
@@ -147,7 +156,7 @@ function nextClockInZone(now, hour, minute, zone) {
 }
 
 // "Fable limit", "seven_day_opus": model names may sit between underscores as well as spaces.
-function modelNamed(text) {
+export function modelNamed(text) {
   const match = /(?:^|[^a-z])(fable|opus|sonnet|haiku)(?![a-z])/i.exec(String(text || ''));
   return match ? match[1].toLowerCase() : null;
 }
@@ -186,6 +195,8 @@ export const QUOTA_LABELS = { fiveHourLimit: 'five-hour usage limit', modelWeekl
 // One plain sentence for reports, cards, and the panel.
 export function describeQuota(quota, { timeZone = 'America/Chicago' } = {}) {
   if (!quota) return '';
+  if (quota.kind === 'model_unavailable') return `Claude model ${quota.model || 'unknown'} is not available on ${planLabel(quota.plan)}`;
+  if (quota.kind === 'auth_expired') return 'Claude session expired';
   const label = quota.kind === 'modelWeeklyLimit' && quota.model ? `${quota.model.charAt(0).toUpperCase()}${quota.model.slice(1)} weekly limit` : QUOTA_LABELS[quota.kind] || 'usage limit';
   const reset = quota.resetsAt ? `; expected to reset ${new Date(quota.resetsAt).toLocaleString('en-US', { timeZone, dateStyle: 'medium', timeStyle: 'short' })}` : '';
   return `Claude subscription ${label} reached${reset}`;
@@ -196,4 +207,10 @@ export function nextLadderModel(policy, model) {
   const ladder = policy.modelLadder || [];
   const index = ladder.indexOf(normalizeModelName(model));
   return index >= 0 && index + 1 < ladder.length ? ladder[index + 1] : null;
+}
+
+// "Max" / "Pro" / "this plan" for sentences.
+export function planLabel(plan) {
+  const value = String(plan || '').trim();
+  return value ? value.charAt(0).toUpperCase() + value.slice(1).toLowerCase() : 'this plan';
 }

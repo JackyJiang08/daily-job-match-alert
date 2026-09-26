@@ -7,7 +7,7 @@ import { renderReportBody } from '../report-components.mjs';
 import { HubLockedError } from './config-file.mjs';
 import { parseMultipart } from './multipart.mjs';
 import {
-  HubInputError, annotateConnections, assertDate, buildStatusView, claudeAuthView, configuredCliCommands, desktopCopyPath, desktopWorkbookPath, listReportSummaries, loadTracksView, readErrorReport,
+  HubInputError, annotateConnections, assertDate, buildStatusView, claudeAuthView, clearModelAvailability, configuredCliCommands, desktopCopyPath, desktopWorkbookPath, listReportSummaries, loadTracksView, modelAvailabilityView, readErrorReport,
   readReportPayload, readSettings, resumeAtsBoard, saveCliPath, saveSettings, selectResumeVersion, setTrackEnabled, sidebarSummary, uploadResumePdf,
 } from './services.mjs';
 import { localDate } from '../time-format.mjs';
@@ -165,7 +165,10 @@ export function createHubHandler(ctx) {
     const connections = annotateConnections(probed, claudeAuthView(ctx, latest));
     const timeZone = config.timeZone || 'America/Chicago';
     const readiness = await ctx.letterStore.readiness();
-    await page(response, 200, { active: 'settings', title: 'Settings', content: settingsPage({ settings, connections, timeZone, coverLetter: { profile: readiness.profile, readiness } }), script: SETTINGS_SCRIPT + SAMPLE_TRACK_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
+    // Opening Settings counts as reviewing a plan change.
+    ctx.planReviewedAt = ctx.now().toISOString();
+    const modelAvailability = await modelAvailabilityView(ctx, connections?.claude?.plan || null);
+    await page(response, 200, { active: 'settings', title: 'Settings', content: settingsPage({ settings, connections, timeZone, modelAvailability, coverLetter: { profile: readiness.profile, readiness } }), script: SETTINGS_SCRIPT + SAMPLE_TRACK_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
   }
 
   // Read-only pass-through of the Desktop folder's own files: the HTML report and the workbook.
@@ -252,6 +255,11 @@ export function createHubHandler(ctx) {
       case '/settings': {
         await saveSettings(ctx, fields);
         redirect(response, '/settings', 'Settings saved to config.json');
+        return;
+      }
+      case '/settings/models/recheck': {
+        await clearModelAvailability(ctx);
+        redirect(response, '/settings', 'Model availability marks cleared; every model is tried again on the next call');
         return;
       }
       case '/settings/connections/refresh': {

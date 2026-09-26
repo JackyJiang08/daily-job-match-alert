@@ -92,6 +92,24 @@ disabled; do not expand them unless a task says so.
   it; every user-visible engine error goes through humanizeEngineError
   (auth sentence, quota sentence, or "Generation failed (<reason>); details
   in the hub log"); raw text only in the hub log.
+- Plan awareness (src/engines/model-availability.mjs): both connection probes
+  report `plan` (Claude subscriptionType; Codex when its status prints one);
+  the sidebar, the Status Quota card, and the Settings engine radios show it.
+  The pipeline records the plan the CLI reported in state.observedPlans; a
+  change sends the macOS notification "Claude plan changed: max → pro. Review
+  the model ladder in Settings." (notifyMessage / recordObservedPlan), an info
+  warning, meta.planChange, and a Status banner with a Review Settings link
+  (plus the `claude auth login --claudeai` hint when the session also looks
+  expired; cleared when Settings is opened). No plan → model table: a refusal
+  matching quotaPolicy.patterns.modelUnavailable ("not available on your
+  plan", "requires a Max subscription", "model … not found", fixture cases in
+  tests/fixtures/engine-errors.json) classifies as model_unavailable, steps
+  the ladder down for that very call, and marks the model in
+  state/model-availability.json ({ model, plan, detectedAt }); marked models
+  are skipped by the matcher and by cover letters until the plan changes or 7
+  days pass (then tried once more). Settings disables marked models
+  "(unavailable on Pro)", shows the marks beside the ladder, and Re-check
+  Models (POST /settings/models/recheck, under the run lock) clears them.
 - Review budget: config.semanticMatching.maxReviewedPerRun (default 120,
   0 = no limit) caps the local candidates sent to the engine per run. Ranking
   is freshness first (postings inside lookbackHours, then the backlog), then

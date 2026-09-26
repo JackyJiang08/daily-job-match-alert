@@ -3,7 +3,7 @@
 // is_error: true, result: "<notice>" }, recorded in tests/fixtures/engine-errors.json) is unwrapped to its
 // notice, quota notices go through quota.mjs, an expired login becomes auth_expired, and anything else
 // becomes a short "Generation failed" line while the full text stays in the hub log.
-import { classifyQuotaError, describeQuota, normalizeQuotaPolicy } from './quota.mjs';
+import { classifyQuotaError, describeQuota, modelNamed, normalizeQuotaPolicy, planLabel } from './quota.mjs';
 
 export const AUTH_EXPIRED_MESSAGE = 'Claude session expired. Run `claude auth login --claudeai` in Terminal, then try again.';
 export const AUTH_EXPIRED_NOTIFICATION = 'Claude login expired, run claude auth login';
@@ -55,6 +55,11 @@ export function engineNotice(error) {
   return withoutJson(message);
 }
 
+export function isModelUnavailableText(text, policy = normalizeQuotaPolicy()) {
+  const value = String(text || '');
+  return (policy.patterns.modelUnavailable || []).some(pattern => pattern.test(value));
+}
+
 export function isAuthExpiredText(text, policy = normalizeQuotaPolicy()) {
   const value = String(text || '');
   return (policy.patterns.authExpired || []).some(pattern => pattern.test(value));
@@ -67,6 +72,7 @@ export function classifyEngineError(error, { now = new Date(), policy = normaliz
   const notice = engineNotice(error);
   const haystack = `${notice}\n${String(error?.message || '')}`;
   if (error?.code === 'SUBSCRIPTION_AUTH' || isAuthExpiredText(haystack, policy)) return { kind: 'auth_expired', notice };
+  if (error?.code === 'MODEL_UNAVAILABLE' || isModelUnavailableText(haystack, policy)) return { kind: 'model_unavailable', notice, model: error?.model || modelNamed(haystack) || null };
   const quota = error?.code === 'SUBSCRIPTION_QUOTA' ? error.quota : classifyQuotaError(new Error(notice || String(error?.message || '')), { now, policy });
   if (quota) return { kind: quota.kind, notice, quota };
   if (error?.code === 'ENOENT' || /\bENOENT\b/.test(String(error?.message || ''))) return { kind: 'missing_cli', notice };
@@ -111,6 +117,7 @@ export function humanizeEngineError(error, { now = new Date(), policy = normaliz
   const verdict = classifyEngineError(error, { now, policy });
   if (!verdict) return { kind: 'engine_error', message: 'Generation failed (unknown error); details in the hub log', codexSuggested: false };
   if (verdict.kind === 'auth_expired') return { kind: 'auth_expired', message: AUTH_EXPIRED_MESSAGE, codexSuggested: true, notice: verdict.notice };
+  if (verdict.kind === 'model_unavailable') return { kind: 'model_unavailable', message: generationFailedMessage(`the ${verdict.model || 'configured'} model is not available on ${planLabel(error?.plan || error?.cause?.plan)}; pick another model or ladder step in Settings`), codexSuggested: true, notice: verdict.notice, model: verdict.model || null };
   if (verdict.quota) return { kind: verdict.kind, message: describeQuota(verdict.quota, { timeZone }), codexSuggested: true, quota: verdict.quota, notice: verdict.notice };
   if (verdict.kind === 'missing_cli') return { kind: 'missing_cli', message: generationFailedMessage('the Claude CLI was not found on this Mac'), codexSuggested: true, notice: verdict.notice };
   // An EngineError is rebuilt from its raw text every time, so a message that once carried CLI JSON

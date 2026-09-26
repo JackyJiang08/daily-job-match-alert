@@ -978,3 +978,53 @@ test('an expired Claude login reaches the card and the panel as one sentence, fl
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test('a model the plan refuses steps the letter down the ladder with a note naming the plan, and the mark is honoured before the next letter', async () => {
+  const root = await prepareProject();
+  const calls = [];
+  const refuse = new Set(['fable']);
+  const engineFor = ({ engine = 'claude', model = 'fable' } = {}) => ({
+    id: engine, label: 'Claude subscription', model,
+    async generateText(prompt) {
+      calls.push({ model, kind: prompt.startsWith('EDITOR REVIEW') ? 'review' : 'draft' });
+      if (refuse.has(model)) throw new Error(`claude exited 1: {"type":"result","is_error":true,"result":"The model claude-${model}-5 is not available on your plan."}`);
+      if (prompt.startsWith('EDITOR REVIEW')) return { output: { issues: [], revised_paragraphs: [] }, scoringModel: `claude-${model}` };
+      return { output: { paragraphs: fiveParagraphs(100) }, scoringModel: `claude-${model}` };
+    },
+  });
+  const hub = await startHub(root, { letterEngine: engineFor() });
+  hub.ctx.makeLetterEngine = engineFor;
+  hub.ctx.connections = { status: async () => ({ claude: { installed: true, connected: true, detail: 'Claude · Max · claude.ai', plan: 'max' }, codex: { installed: false, connected: false } }), reset() {} };
+  const jobId = sha256('https://example.com/jobs/1').slice(0, 16);
+  try {
+    await hub.upload('/settings/cover-letter', PROFILE, [{ field: 'playbook', name: 'playbook.md', data: Buffer.from(`# Playbook\n${'Real evidence line. '.repeat(10)}`) }]);
+    const first = await hub.form('/letters/generate', { date: '2026-09-15', job: jobId, track: 'data', company: 'Acme' });
+    assert.equal(first.status, 200, first.text);
+    const draft = JSON.parse(first.text);
+    assert.equal(draft.model, 'claude-opus');
+    assert.equal(draft.downgradeNote, 'Generated with opus: fable unavailable on Max');
+    assert.equal(draft.editorNotes[0], 'Generated with opus: fable unavailable on Max');
+    assert.deepEqual(calls.map(call => [call.model, call.kind]), [['fable', 'draft'], ['opus', 'draft'], ['opus', 'review']]);
+    assert.deepEqual([hub.ctx.quotaLog.last.kind, hub.ctx.quotaLog.last.action, hub.ctx.quotaLog.last.source, hub.ctx.quotaLog.last.plan], ['model_unavailable', 'downgraded', 'cover-letter', 'max']);
+    const marks = JSON.parse(await fs.readFile(path.join(root, 'state', 'model-availability.json'), 'utf8'));
+    assert.deepEqual(Object.keys(marks.models), ['fable']);
+    assert.equal(marks.models.fable.plan, 'max');
+
+    calls.length = 0;
+    const second = await hub.form('/letters/generate', { date: '2026-09-15', job: jobId, track: 'data', company: 'Acme' });
+    assert.equal(second.status, 200);
+    assert.equal(JSON.parse(second.text).downgradeNote, 'Generated with opus: fable unavailable on Max');
+    assert.deepEqual(calls.map(call => call.model), ['opus', 'opus'], 'the marked model is skipped without a wasted call');
+
+    // Every rung refused: a plain sentence, never JSON, with the hub-log pointer.
+    refuse.add('opus');
+    await fs.writeFile(path.join(root, 'state', 'model-availability.json'), JSON.stringify({ version: 1, models: {} }));
+    const failed = await hub.form('/letters/generate', { date: '2026-09-15', job: jobId, track: 'data', company: 'Acme' });
+    assert.equal(failed.status, 502);
+    assert.equal(JSON.parse(failed.text).error, 'Generation failed (the opus model is not available on Max; pick another model or ladder step in Settings); details in the hub log');
+    assert.doesNotMatch(failed.text, /is_error/);
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

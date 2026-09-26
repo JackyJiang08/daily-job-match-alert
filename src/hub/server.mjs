@@ -13,6 +13,8 @@ import { createConnectionsProbe } from './connections.mjs';
 import { describeConnections } from '../engines/index.mjs';
 import { createLetterStore } from '../cover-letter/store.mjs';
 import { createLetterJobs } from './letter-jobs.mjs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 
 export const DEFAULT_HUB_PORT = 4747;
 export const HUB_HOST = '127.0.0.1';
@@ -45,6 +47,15 @@ export function createHubContext(options) {
   });
   ctx.letterEngine = options.letterEngine || null;
   ctx.letterJobs = options.letterJobs || createLetterJobs({ now });
+  // Desktop notification from the hub itself (plan changes seen by the probe); a no-op off macOS.
+  ctx.notify = options.notify || (async text => {
+    if (process.platform !== 'darwin') return false;
+    await promisify(execFile)('osascript', ['-e', `display notification "${String(text).replace(/["\\]/g, ' ')}" with title "Daily Job Match Alert"`], { timeout: 10_000 });
+    return true;
+  });
+  // Plan changes the hub has already announced in this process, and when Settings was last opened.
+  ctx.planNotices = options.planNotices || new Set();
+  ctx.planReviewedAt = null;
   // The most recent quota refusal seen by the hub itself (cover letters); the pipeline's own events live in the day payload.
   ctx.quotaLog = options.quotaLog || { last: null, record(event) { this.last = event; return event; } };
   // Whether the hub has seen Claude's login fail since the last successful call or manual refresh.

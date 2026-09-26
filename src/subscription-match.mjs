@@ -8,6 +8,8 @@ import { createWarning, errorSummary } from './warnings.mjs';
 import { createEngine, normalizeEngineId, resolveModel } from './engines/index.mjs';
 import { classifyQuotaError, describeQuota, nextLadderModel, normalizeQuotaPolicy } from './engines/quota.mjs';
 import { AUTH_EXPIRED_MESSAGE, classifyEngineError, engineNotice } from './engines/engine-errors.mjs';
+import { firstAvailableModel, modelKey, nextAvailableModel } from './engines/model-availability.mjs';
+import { planLabel } from './engines/quota.mjs';
 import { MINIMUM_CLAUDE_CODE_VERSION, assessClaudeAuthStatus, claudeModelMatches, expandModelAlias, extractScoringModel, parseClaudeCodeVersion, parseStructuredOutput, verifyClaudeSubscription } from './engines/claude.mjs';
 import { compareVersions, isCredentialEnvironmentKey, normalizeModelName, run, subscriptionEnvironment } from './engines/shared.mjs';
 
@@ -200,8 +202,6 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
   }
   const preferredModel = options.engineInstance?.model || resolveModel(options, engineId);
   const makeEngine = options.makeEngine || ((id, model) => createEngine(id, { ...options, model }));
-  let engine = options.engineInstance || makeEngine(engineId, preferredModel);
-  let engineName = engineId;
   // Quota policy: how a refused call is handled (see engines/quota.mjs). Events are reported back through
   // options.quotaEvents; postings the policy could not score are returned with quotaDeferred: true so the
   // caller can hold them for the next run instead of marking them unreviewed.
@@ -212,6 +212,17 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
   const strategicModels = new Set();
   let downgradeNote = null;
   const deferredIds = new Set();
+  // Models the plan refused earlier (state/model-availability.json) are skipped before the first call.
+  const unavailable = new Set([...(options.unavailableModels || [])].map(item => modelKey(item)));
+  let plan = options.plan || null;
+  const startModel = engineId === 'claude' && !options.engineInstance ? firstAvailableModel(preferredModel, policy.modelLadder, unavailable) : preferredModel;
+  let engine = options.engineInstance || makeEngine(engineId, startModel);
+  let engineName = engineId;
+  if (startModel !== normalizeModelName(preferredModel)) {
+    strategicModels.add(startModel);
+    downgradeNote = `${normalizeModelName(preferredModel)} unavailable on ${planLabel(plan)}`;
+    quotaEvents.push({ kind: 'model_unavailable', model: normalizeModelName(preferredModel), plan, resetsAt: null, at: clock().toISOString(), action: 'skipped', detail: `switched to ${startModel} (marked unavailable earlier)`, engine: engineName, message: `${normalizeModelName(preferredModel)} is marked unavailable on ${planLabel(plan)}` });
+  }
 
   const tracks = resumeTrackList(resumes);
   if (!tracks.length) throw new Error('applySubscriptionMatching needs at least one enabled resume track');
@@ -229,7 +240,9 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
     return jobs.map(job => (job.semanticId && held.has(job.semanticId)) || candidates.some(candidate => candidate.url === job.url && held.has(candidate.semanticId)) ? { ...job, quotaDeferred: true } : job);
   };
   try {
-    await engine.verifyAuth();
+    const auth = await engine.verifyAuth();
+    if (auth && typeof auth === 'object' && auth.subscriptionType) plan = String(auth.subscriptionType).toLowerCase();
+    if (typeof options.onAuth === 'function') await options.onAuth({ engine: engineName, plan, status: auth });
   } catch (error) {
     if (classifyEngineError(error, { now: clock(), policy })?.kind === 'auth_expired') return deferForAuth(candidates, engineNotice(error));
     addWarning(options, `Subscription authentication check failed; ${candidates.length} jobs used local fallback: ${errorSummary(error)}`);
@@ -274,8 +287,9 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
           return { response: await invokeBatch(batch), error: null };
         } catch (error) {
           lastError = error;
-          // A quota refusal or an expired login is not retried blindly; the policy below decides.
-          if (classifyEngineError(error, { now: clock(), policy })?.kind === 'auth_expired') return { response: null, error };
+          // A quota refusal, an expired login, or an unavailable model is not retried blindly; the policy below decides.
+          const kind = classifyEngineError(error, { now: clock(), policy })?.kind;
+          if (kind === 'auth_expired' || kind === 'model_unavailable') return { response: null, error };
           if (classifyQuotaError(error, { now: clock(), policy })) return { response: null, error };
           if (attempt === 1) await sleep(Number(options.retryDelayMs ?? 10_000));
         }
@@ -323,6 +337,27 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
         addWarning(options, `${AUTH_EXPIRED_MESSAGE} ${held.length} postings were deferred to the next run (not marked unreviewed).`);
         break;
       }
+      // An unavailable model steps down the ladder at once and is remembered for later calls.
+      if (error && classifyEngineError(error, { now: clock(), policy })?.kind === 'model_unavailable') {
+        const refused = engine.model;
+        unavailable.add(modelKey(refused));
+        if (typeof options.markUnavailable === 'function') await options.markUnavailable(refused, { plan, notice: engineNotice(error), at: clock().toISOString() });
+        const next = engineName === 'claude' ? nextAvailableModel(policy.modelLadder, refused, unavailable) : null;
+        if (next) {
+          quotaEvents.push({ kind: 'model_unavailable', model: refused, plan, resetsAt: null, at: clock().toISOString(), action: 'downgraded', detail: `switched to ${next}`, engine: engineName, message: engineNotice(error) });
+          downgradeNote = `${refused} unavailable on ${planLabel(plan)}`;
+          addWarning(options, `${refused} is not available on ${planLabel(plan)}; continuing with ${next}`, 'info');
+          engine = makeEngine(engineName, next);
+          strategicModels.add(next);
+          index -= 1;
+          batchNumber -= 1;
+          continue;
+        }
+        quotaEvents.push({ kind: 'model_unavailable', model: refused, plan, resetsAt: null, at: clock().toISOString(), action: 'local-fallback', detail: 'no model left on the ladder', engine: engineName, message: engineNotice(error) });
+        for (const job of batch) fallbackIds.add(job.semanticId);
+        addWarning(options, `${refused} is not available on ${planLabel(plan)} and no model is left on the ladder; ${batch.length} jobs used local fallback`);
+        continue;
+      }
       let quota = error ? classifyQuotaError(error, { now: clock(), policy }) : null;
       if (quota?.kind === 'fiveHourLimit') {
         const event = recordEvent(quota, 'wait');
@@ -337,7 +372,7 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
         }
       }
       if (quota?.kind === 'modelWeeklyLimit') {
-        const next = nextLadderModel(policy, engine.model);
+        const next = nextAvailableModel(policy.modelLadder, engine.model, unavailable);
         if (next) {
           const reason = `${(quota.model || engine.model)} weekly limit`;
           recordEvent(quota, 'downgraded', `switched to ${next}`);

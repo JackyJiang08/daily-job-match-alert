@@ -13,6 +13,8 @@ import { readConfigFile, updateConfigFile } from './config-file.mjs';
 import { readLockStatus } from './run.mjs';
 import { boardLabel, readRegistry, resumeBoard, writeRegistry } from '../collectors/ats-boards.mjs';
 import { builtinSources } from '../collectors/catalog.mjs';
+import { availabilityPath, pruneAvailability, readAvailability, writeAvailability } from '../engines/model-availability.mjs';
+import { planLabel } from '../engines/quota.mjs';
 import { describeQuota, normalizeQuotaPolicy } from '../engines/quota.mjs';
 import { HubLockedError } from './config-file.mjs';
 import { acquireRunLock, releaseRunLock } from '../lock.mjs';
@@ -348,6 +350,63 @@ export function annotateConnections(connections, auth) {
   return { ...connections, claude: { ...(connections.claude || {}), connected: false, sessionExpired: true, hint: 'claude auth login --claudeai', reason: auth.notice || 'The last call to Claude failed to authenticate' } };
 }
 
+// The plans the CLIs report, from the cached probe; nulls when the probe is unavailable.
+export async function currentPlans(ctx, config) {
+  try {
+    const status = await ctx.connections.status({ commands: configuredCliCommands(config) });
+    return { claude: status?.claude?.plan || null, codex: status?.codex?.plan || null, claudeConnected: status?.claude?.connected === true };
+  } catch { return { claude: null, codex: null, claudeConnected: false }; }
+}
+
+// A plan change worth a banner: reported by the newest run (meta.planChange), or seen by the hub's own
+// probe against the plan the pipeline last recorded. Cleared once Settings is opened after it.
+export async function planChangeView(ctx, config, latest, plans) {
+  const state = await readJson(ctx.io, path.join(ctx.root, 'state', 'state.json'), {}) || {};
+  const recorded = state.observedPlans?.claude?.type || null;
+  let change = latest?.meta?.planChange || null;
+  if (plans?.claude && recorded && plans.claude !== recorded && (!change || change.to !== plans.claude)) {
+    change = { engine: 'claude', from: recorded, to: plans.claude, at: ctx.now().toISOString(), source: 'hub probe', message: `Claude plan changed: ${recorded} → ${plans.claude}. Review the model ladder in Settings.` };
+    const key = `${change.from}→${change.to}`;
+    if (!ctx.planNotices.has(key)) { ctx.planNotices.add(key); await ctx.notify?.(change.message).catch(() => {}); }
+  }
+  if (!change) return null;
+  if (ctx.planReviewedAt && String(ctx.planReviewedAt) >= String(change.at || '')) return null;
+  return change;
+}
+
+// Model availability marks for the hub: pruned the same way the pipeline prunes them, but never written
+// here except by markModelUnavailableInHub and clearModelAvailability (both under the run lock).
+export async function modelAvailabilityView(ctx, plan) {
+  const record = await readAvailability(availabilityPath(ctx.root), ctx.io);
+  pruneAvailability(record, { now: ctx.now(), plan });
+  return { models: record.models, unavailable: Object.keys(record.models), plan: plan || null };
+}
+
+async function withRunLock(ctx, work) {
+  const lock = await acquireRunLock(ctx.runManager.lockPath, { pidAlive: ctx.pidAlive });
+  if (!lock.acquired) throw new HubLockedError(lock.pid);
+  try { return await work(); } finally { await releaseRunLock(lock); }
+}
+
+export async function markModelUnavailableInHub(ctx, model, info) {
+  return withRunLock(ctx, async () => {
+    const file = availabilityPath(ctx.root);
+    const record = await readAvailability(file, ctx.io);
+    const { markModelUnavailable } = await import('../engines/model-availability.mjs');
+    markModelUnavailable(record, model, info);
+    await writeAvailability(file, record, ctx.io);
+    return record;
+  });
+}
+
+export async function clearModelAvailability(ctx) {
+  return withRunLock(ctx, async () => {
+    const file = availabilityPath(ctx.root);
+    await writeAvailability(file, { version: 1, models: {} }, ctx.io);
+    return { cleared: true };
+  });
+}
+
 // Whether the most recent scheduled slot was missed: "due now" inside the grace period, "overdue" after it.
 // A slot never counts as missed while a run holds the lock.
 export function slotState(now, timeZone, schedule, lastRunAt, running = false) {
@@ -399,6 +458,7 @@ export async function sidebarSummary(ctx, config) {
     runningSince: running.since,
     waitingOnQuota: waitingOnQuota(ctx, latest),
     claudeAuth: claudeAuthView(ctx, latest),
+    plans: await currentPlans(ctx, config),
   };
 }
 
@@ -432,6 +492,7 @@ export async function buildStatusView(ctx, config) {
   const lock = await readLockStatus(ctx.runManager.lockPath, ctx.pidAlive, ctx.io);
   const availability = await ctx.runManager.availability();
   const running = await runningState(ctx);
+  const plans = await currentPlans(ctx, config);
 
   const days = [];
   for (const date of dates.slice(0, 7)) {
@@ -467,8 +528,9 @@ export async function buildStatusView(ctx, config) {
     days,
     errors,
     sources: await sourcesView(ctx, config, latest),
-    quota: quotaView(ctx, config, latest, state),
+    quota: { ...quotaView(ctx, config, latest, state), plans, modelAvailability: await modelAvailabilityView(ctx, plans.claude || state.observedPlans?.claude?.type || null) },
     claudeAuth: claudeAuthView(ctx, latest),
+    planChange: await planChangeView(ctx, config, latest, plans),
     outputDirectory: config.outputDirectory,
   };
 }

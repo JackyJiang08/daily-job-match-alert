@@ -45,7 +45,7 @@ export function createLetterJobs({ now = () => new Date() } = {}) {
         const known = error?.code === 'SUBSCRIPTION_QUOTA' || error?.code === 'SUBSCRIPTION_AUTH' || error?.code === 'HUB_INPUT' || error?.status === 400;
         job.error = known ? String(error?.message || 'generation failed') : humanizeEngineError(error).message;
         if (!known) console.error(`[cover-letter] one-click job ${job.id} failed: ${String(error?.stack || error)}`);
-        job.errorKind = error?.code === 'SUBSCRIPTION_AUTH' ? 'auth_expired' : error?.code === 'SUBSCRIPTION_QUOTA' ? error.quota.kind : error?.code === 'ENGINE_FAILURE' ? 'engine_error' : known ? 'input' : 'engine_error';
+        job.errorKind = error?.code === 'SUBSCRIPTION_AUTH' ? 'auth_expired' : error?.code === 'SUBSCRIPTION_QUOTA' ? error.quota.kind : error?.code === 'ENGINE_FAILURE' ? (error.kind === 'model_unavailable' ? 'model_unavailable' : 'engine_error') : known ? 'input' : 'engine_error';
         if (error?.code === 'SUBSCRIPTION_QUOTA') job.quota = { kind: error.quota.kind, model: error.quota.model || null, resetsAt: error.quota.resetsAt || null };
       }).then(() => { job.finishedAt = now().toISOString(); });
       return snapshot(job);

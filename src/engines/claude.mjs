@@ -153,7 +153,7 @@ export async function describeClaudeConnection(options = {}) {
     const verdict = assessClaudeAuthStatus(status);
     if (!verdict.accepted) return { installed: true, connected: false, detail: null, hint: 'claude auth login --claudeai', reason: verdict.reason, ...location };
     const plan = status.subscriptionType ? String(status.subscriptionType).charAt(0).toUpperCase() + String(status.subscriptionType).slice(1) : 'Subscription';
-    return { installed: true, connected: true, detail: `Claude · ${plan} · ${status.authMethod}`, hint: null, reason: null, ...location };
+    return { installed: true, connected: true, detail: `Claude · ${plan} · ${status.authMethod}`, plan: status.subscriptionType ? String(status.subscriptionType).toLowerCase() : null, hint: null, reason: null, ...location };
   } catch (error) {
     if (isMissingCommand(error)) return { installed: false, connected: false, detail: null, hint: INSTALL_HINTS.claude, reason: 'Claude Code CLI was not found on this Mac', ...location, path: null, source: 'missing' };
     return { installed: true, connected: false, detail: null, hint: 'claude auth login --claudeai', reason: errorSummary(error), ...location };

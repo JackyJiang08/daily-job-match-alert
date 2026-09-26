@@ -174,14 +174,14 @@ test('connection probes report installed, connected, and signed-out states witho
   const found = async name => ({ found: true, command: `/fake/bin/${name}`, source: 'path', configured: null, configuredMissing: false, searched: [`/fake/bin/${name}`] });
   const location = name => ({ path: `/fake/bin/${name}`, source: 'path', configured: null, configuredMissing: false, searched: [`/fake/bin/${name}`] });
   const claudeRunner = status => async () => ({ stdout: JSON.stringify(status), stderr: '' });
-  assert.deepEqual(await describeClaudeConnection({ resolveCommand: found, runner: claudeRunner({ loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty', subscriptionType: 'max' }) }), { installed: true, connected: true, detail: 'Claude · Max · claude.ai', hint: null, reason: null, ...location('claude') });
+  assert.deepEqual(await describeClaudeConnection({ resolveCommand: found, runner: claudeRunner({ loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty', subscriptionType: 'max' }) }), { installed: true, connected: true, detail: 'Claude · Max · claude.ai', hint: null, reason: null, plan: 'max', ...location('claude') });
   const consoleLogin = await describeClaudeConnection({ resolveCommand: found, runner: claudeRunner({ loggedIn: true, authMethod: 'console' }) });
   assert.equal(consoleLogin.connected, false);
   assert.equal(consoleLogin.hint, 'claude auth login --claudeai');
   const missingClaude = await describeClaudeConnection({ resolveCommand: found, runner: async () => { throw Object.assign(new Error('spawn claude ENOENT'), { code: 'ENOENT' }); } });
   assert.deepEqual([missingClaude.installed, missingClaude.connected, missingClaude.path], [false, false, null]);
 
-  assert.deepEqual(await describeCodexConnection({ resolveCommand: found, runner: async () => ({ stdout: 'Logged in using ChatGPT', stderr: '' }) }), { installed: true, connected: true, detail: 'Codex · ChatGPT', hint: null, reason: null, ...location('codex') });
+  assert.deepEqual(await describeCodexConnection({ resolveCommand: found, runner: async () => ({ stdout: 'Logged in using ChatGPT', stderr: '' }) }), { installed: true, connected: true, detail: 'Codex · ChatGPT', hint: null, reason: null, plan: null, ...location('codex') });
   const apiKey = await describeCodexConnection({ resolveCommand: found, runner: async () => ({ stdout: 'Logged in using API key', stderr: '' }) });
   assert.equal(apiKey.connected, false);
   assert.equal(apiKey.hint, 'codex login');

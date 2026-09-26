@@ -69,7 +69,9 @@ export async function describeCodexConnection(options = {}) {
     const status = await loginStatus(runner, resolution.command);
     const verdict = assessCodexLoginStatus(status.text, status.exitCode);
     if (!verdict.accepted) return { installed: true, connected: false, detail: null, hint: 'codex login', reason: verdict.reason, ...location };
-    return { installed: true, connected: true, detail: 'Codex · ChatGPT', hint: null, reason: null, ...location };
+    // `codex login status` names no plan today; an optional "(plan)" or "plan: x" suffix is read when present.
+    const plan = /ChatGPT\s*\(([^)]+)\)|\bplan[:=]\s*([a-z0-9_-]+)/i.exec(status.text || '');
+    return { installed: true, connected: true, detail: plan ? `Codex · ChatGPT · ${(plan[1] || plan[2]).trim()}` : 'Codex · ChatGPT', plan: plan ? String(plan[1] || plan[2]).trim().toLowerCase() : null, hint: null, reason: null, ...location };
   } catch (error) {
     if (isMissingCommand(error)) return { installed: false, connected: false, detail: null, hint: INSTALL_HINTS.codex, reason: 'Codex CLI was not found on this Mac', ...location, path: null, source: 'missing' };
     return { installed: true, connected: false, detail: null, hint: 'codex login', reason: errorSummary(error), ...location };

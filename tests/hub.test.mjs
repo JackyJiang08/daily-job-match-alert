@@ -667,7 +667,7 @@ test('the Quota card shows the last limit event, the model in effect, and the de
     assert.match((await hub.request('GET', '/status')).text, /<dd id="quota-last">Claude subscription weekly account limit reached · Aug 27, 2026, 8:00 AM · <span class="badge badge-warn" data-badge="quota-action">refused<\/span> <span class="muted">\(cover-letter\)<\/span><\/dd>/);
 
     const settings = await hub.request('GET', '/settings');
-    assert.match(settings.text, /<span>Model Ladder \(tried in order when a model hits its weekly limit\)<\/span><input type="text" name="modelLadder" class="control-input" value="fable, opus" placeholder="fable, opus">/);
+    assert.match(settings.text, /<span>Model Ladder \(tried in order when a model hits its weekly limit or is not on the plan\)<\/span><input type="text" name="modelLadder" class="control-input" value="fable, opus" placeholder="fable, opus">/);
     assert.match(settings.text, /<input type="checkbox" name="fallbackEngine" value="codex"> Fall Back to Codex on a Weekly Account Limit/);
     const saved = await hub.form('/settings', { minimumMatchScore: '60', acceptedMatchLevels: 'high', model: 'fable', hubPort: '4747', modelLadder: 'fable, opus, sonnet', quotaPresent: '1', fallbackEngine: 'codex' });
     assert.equal(saved.status, 303);
@@ -919,4 +919,93 @@ test('the multipart parser keeps binary bodies intact and reads quoted filenames
   assert.equal(parsed.files[0].filename, 'a "b".pdf');
   assert.ok(parsed.files[0].data.equals(data));
   assert.throws(() => parseMultipart(body, 'text/plain'), /boundary is missing/);
+});
+
+test('the hub shows each subscription plan, disables models the plan refused, explains the marks beside the ladder, and Re-check Models clears them', async () => {
+  const root = await prepareProject();
+  await fs.writeFile(path.join(root, 'state', 'model-availability.json'), JSON.stringify({ version: 1, models: { fable: { model: 'fable', plan: 'pro', detectedAt: '2026-08-26T12:00:00.000Z', notice: 'The model claude-fable-5 is not available on your plan.' } } }));
+  const hub = await startHub(root, {
+    connections: {
+      claude: { installed: true, connected: true, detail: 'Claude · Pro · claude.ai', hint: null, reason: null, plan: 'pro' },
+      codex: { installed: true, connected: true, detail: 'Codex · ChatGPT · Plus', hint: null, reason: null, plan: 'plus' },
+    },
+  });
+  try {
+    const reports = await hub.request('GET', '/reports');
+    assert.match(reports.text, /<b>Plan<\/b><span data-plan="claude">Claude · Pro<\/span><br><span data-plan="codex">Codex · Plus<\/span><\/div>/, 'the sidebar names both plans');
+    const status = await hub.request('GET', '/status');
+    assert.match(status.text, /<dt>Plan<\/dt><dd id="quota-plan">Claude · Pro · Codex · Plus · <span class="badge badge-warn" data-badge="unavailable-models">unavailable: fable<\/span><\/dd>/);
+    const settings = await hub.request('GET', '/settings');
+    assert.match(settings.text, /value="claude" checked data-connected="yes"> Claude subscription <span class="badge badge-good" data-engine-state="connected">Connected<\/span> <span class="badge badge-muted" data-plan="claude">Pro<\/span><\/label>/, 'the plan sits beside the engine radio');
+    assert.match(settings.text, /<option value="fable" selected data-unavailable="1">Fable \(recommended\) \(unavailable on Pro\)<\/option><option value="opus">Opus<\/option>/, 'the configured model stays selectable, only labelled, so Save keeps working');
+    assert.match(settings.text, /<p class="form-foot" id="ladder-status">Current plan: Pro · unavailable: fable \(since Aug 26, 2026, 7:00 AM\); marks clear when the plan changes or after 7 days<\/p>/);
+    assert.match(settings.text, /<form method="post" action="\/settings\/models\/recheck" class="inline"><button class="btn secondary small" type="submit" title="[^"]*">Re-check Models<\/button><\/form>/);
+
+    // A model that is not the configured one is disabled outright.
+    const config = JSON.parse(await fs.readFile(path.join(root, 'config.json'), 'utf8'));
+    config.semanticMatching.models = { claude: 'opus' };
+    await fs.writeFile(path.join(root, 'config.json'), JSON.stringify(config, null, 2));
+    assert.match((await hub.request('GET', '/settings')).text, /<option value="fable" disabled data-unavailable="1">Fable \(recommended\) \(unavailable on Pro\)<\/option><option value="opus" selected>Opus<\/option>/);
+
+    const cleared = await hub.form('/settings/models/recheck', {});
+    assert.equal(cleared.status, 303);
+    assert.match(decodeURIComponent(cleared.headers.location), /Model availability marks cleared/);
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(root, 'state', 'model-availability.json'), 'utf8')), { version: 1, models: {} });
+    const after = await hub.request('GET', '/settings');
+    assert.doesNotMatch(after.text, /data-unavailable|unavailable on Pro/);
+    assert.match(after.text, /<p class="form-foot" id="ladder-status">Current plan: Pro · no model marked unavailable<\/p>/);
+    assert.doesNotMatch((await hub.request('GET', '/status')).text, /data-badge="unavailable-models"/);
+    assert.equal((await hub.form('/settings/models/recheck', {}, { origin: 'http://evil.example' })).status, 403);
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a plan change raises a Status banner with a Review Settings link, adds the login-refresh hint when the session also looks expired, and is announced once by the hub probe', async () => {
+  const root = await prepareProject();
+  const payloadPath = path.join(root, 'state', 'report-payload-2026-08-27.json');
+  const payload = JSON.parse(await fs.readFile(payloadPath, 'utf8'));
+  payload.meta.planChange = { engine: 'claude', from: 'max', to: 'pro', at: '2026-08-27T01:00:00.000Z', message: 'Claude plan changed: max → pro. Review the model ladder in Settings.' };
+  await fs.writeFile(payloadPath, JSON.stringify(payload));
+  await fs.writeFile(path.join(root, 'state', 'state.json'), JSON.stringify({ seen: {}, lastSuccessfulRun: '2026-08-27T01:00:00.000Z', observedPlans: { claude: { type: 'pro', at: '2026-08-27T01:00:00.000Z', previous: 'max', changedAt: '2026-08-27T01:00:00.000Z' } } }));
+  const hub = await startHub(root, { connections: { claude: { installed: true, connected: true, detail: 'Claude · Pro · claude.ai', hint: null, reason: null, plan: 'pro' }, codex: { installed: false, connected: false } } });
+  const notices = [];
+  hub.ctx.notify = async text => { notices.push(text); return true; };
+  try {
+    const status = await hub.request('GET', '/status');
+    assert.match(status.text, /<div class="flash notice" data-banner="plan-change">Claude plan changed: max → pro\. Review the model ladder in Settings\. <a href="\/settings">Review Settings<\/a><\/div>/);
+    assert.doesNotMatch(status.text, /claude auth login --claudeai/, 'no refresh hint while the login is healthy');
+    assert.deepEqual(notices, [], 'the nightly run already sent the notification; the hub does not repeat it');
+
+    // The login also looks expired: the plan may not have changed at all, so the banner says how to refresh.
+    hub.ctx.authState.expire({ notice: 'OAuth session expired', at: '2026-08-27T11:00:00Z', source: 'hub' });
+    const expired = await hub.request('GET', '/status');
+    assert.match(expired.text, /data-banner="plan-change">Claude plan changed: max → pro\. Review the model ladder in Settings\. <a href="\/settings">Review Settings<\/a> <span class="muted">If the plan did not actually change, run <code>claude auth login --claudeai<\/code> to refresh the login\.<\/span><\/div>/);
+    hub.ctx.authState.clear();
+
+    // Opening Settings counts as reviewing it.
+    await hub.request('GET', '/settings');
+    assert.doesNotMatch((await hub.request('GET', '/status')).text, /data-banner="plan-change"/);
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+
+  // The hub's own probe sees a plan the pipeline has not recorded yet: one notification per process, a banner until Settings is opened.
+  const probeRoot = await prepareProject();
+  await fs.writeFile(path.join(probeRoot, 'state', 'state.json'), JSON.stringify({ seen: {}, lastSuccessfulRun: '2026-08-27T01:00:00.000Z', observedPlans: { claude: { type: 'max', at: '2026-08-27T01:00:00.000Z' } } }));
+  const probeHub = await startHub(probeRoot, { connections: { claude: { installed: true, connected: true, detail: 'Claude · Pro · claude.ai', hint: null, reason: null, plan: 'pro' }, codex: { installed: false, connected: false } } });
+  const probeNotices = [];
+  probeHub.ctx.notify = async text => { probeNotices.push(text); return true; };
+  try {
+    assert.match((await probeHub.request('GET', '/status')).text, /data-banner="plan-change">Claude plan changed: max → pro\. Review the model ladder in Settings\. <a href="\/settings">Review Settings<\/a>/);
+    await probeHub.request('GET', '/status');
+    assert.deepEqual(probeNotices, ['Claude plan changed: max → pro. Review the model ladder in Settings.'], 'announced once, not on every page view');
+    await probeHub.request('GET', '/settings');
+    assert.doesNotMatch((await probeHub.request('GET', '/status')).text, /data-banner="plan-change"/);
+  } finally {
+    await probeHub.close();
+    await fs.rm(probeRoot, { recursive: true, force: true });
+  }
 });

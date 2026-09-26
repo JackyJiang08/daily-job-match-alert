@@ -29,6 +29,7 @@ import { holdsToExactWindow, resolveCompanyName } from './posting-fields.mjs';
 import { describeConnections } from './engines/index.mjs';
 import { describeQuota, normalizeQuotaPolicy } from './engines/quota.mjs';
 import { AUTH_EXPIRED_MESSAGE, AUTH_EXPIRED_NOTIFICATION, classifyEngineError } from './engines/engine-errors.mjs';
+import { availabilityPath, markModelUnavailable, pruneAvailability, readAvailability, unavailableModelNames, writeAvailability } from './engines/model-availability.mjs';
 
 const execFileAsync = promisify(execFile);
 const REPORT_PAYLOAD_PREFIX = 'report-payload-';
@@ -705,12 +706,32 @@ async function runPipeline(config, clock, options = {}) {
   let evaluated;
   const quotaEvents = [];
   const quotaPolicy = normalizeQuotaPolicy(config.semanticMatching?.quotaPolicy);
+  // Models the plan refused earlier are skipped until the plan changes or a week passes.
+  const availabilityFile = availabilityPath(config.root);
+  const availability = await readAvailability(availabilityFile);
+  const observedPlan = state.observedPlans?.claude?.type || null;
+  const droppedMarks = pruneAvailability(availability, { now, plan: observedPlan });
+  if (droppedMarks.length) warnings.push(createWarning('llm', 'model availability', `retrying ${droppedMarks.map(item => `${item.model} (${item.reason})`).join(', ')}`, 'info'));
+  let availabilityChanged = droppedMarks.length > 0;
+  let planChange = null;
   try {
     evaluated = await applySubscriptionMatching(budget.jobs, resumes, prefs, {
       ...(config.semanticMatching || {}),
       warnings,
       quotaEvents,
       now: () => new Date(),
+      plan: observedPlan,
+      unavailableModels: unavailableModelNames(availability),
+      markUnavailable: (model, info) => { markModelUnavailable(availability, model, info); availabilityChanged = true; },
+      onAuth: ({ engine: engineId, plan }) => {
+        // The plan the CLI reports is remembered; a change gets a notification, a warning, and a banner.
+        const change = recordObservedPlan(state, engineId, plan, now);
+        if (change) {
+          planChange = change;
+          warnings.push(createWarning('plan', engineId, change.message, 'info'));
+          if (pruneAvailability(availability, { now, plan }).length) availabilityChanged = true;
+        }
+      },
       // The Codex fallback only runs when the CLI is installed and signed in with a ChatGPT subscription.
       fallbackConnected: async engineId => (await describeConnections({ ...(config.semanticMatching || {}) }))[engineId]?.connected === true,
     });
@@ -722,7 +743,15 @@ async function runPipeline(config, clock, options = {}) {
   const quotaDeferred = evaluated.filter(job => job.quotaDeferred);
   for (const job of quotaDeferred) markDeferred(state, job, now.toISOString());
   evaluated = evaluated.filter(job => !job.quotaDeferred);
+  if (availabilityChanged) await writeAvailability(availabilityFile, availability);
   const quota = summarizeQuota(quotaEvents, quotaPolicy, config, quotaDeferred.length);
+  if (planChange) {
+    try {
+      await (options.notify || notifyMessage)(planChange.message, { runner: options.notificationRunner });
+    } catch (error) {
+      console.warn(`Could not send the plan-change notification: ${errorSummary(error)}`);
+    }
+  }
   // An expired login is surfaced everywhere at once: the report, the hub, and a desktop notification.
   const authEvent = quotaEvents.find(event => event.kind === 'auth_expired') || null;
   const authExpired = authEvent ? { at: authEvent.at, notice: authEvent.detail || null, deferred: quotaDeferred.length, message: AUTH_EXPIRED_MESSAGE } : null;
@@ -773,6 +802,9 @@ async function runPipeline(config, clock, options = {}) {
     droppedAfterPreciseTimestamps: freshness.dropped.length,
     quota,
     authExpired,
+    planChange,
+    plan: state.observedPlans?.claude?.type || null,
+    unavailableModels: Object.values(availability.models),
     warnings: finalWarnings,
     runsToday, firstGeneratedAt: previous?.meta?.firstGeneratedAt || now.toISOString(), lastUpdatedAt: now.toISOString(),
     trigger, completedAt: now.toISOString(), completedAtLocal: formatLocalDateTime(now, timeZone),
@@ -899,12 +931,31 @@ export async function writeFatalErrorReport(error, options = {}) {
   return reportPath;
 }
 
-// macOS notification for an expired Claude login; a no-op off macOS.
-export async function notifyAuthExpired(options = {}) {
+// macOS notification with the given sentence; a no-op off macOS.
+export async function notifyMessage(text, options = {}) {
   if ((options.platform || process.platform) !== 'darwin') return false;
   const runner = options.runner || execFileAsync;
-  await runner('osascript', ['-e', `display notification "${AUTH_EXPIRED_NOTIFICATION}" with title "Daily Job Match Alert"`], { timeout: 10_000 });
+  const safe = String(text || '').replace(/["\\]/g, ' ');
+  await runner('osascript', ['-e', `display notification "${safe}" with title "Daily Job Match Alert"`], { timeout: 10_000 });
   return true;
+}
+
+// macOS notification for an expired Claude login; a no-op off macOS.
+export async function notifyAuthExpired(options = {}) {
+  return notifyMessage(AUTH_EXPIRED_NOTIFICATION, options);
+}
+
+// Remembers the plan each engine reported (state.observedPlans) and describes a change: the message is
+// the notification, the warning, and the banner. The first observation is recorded silently.
+export function recordObservedPlan(state, engineId, plan, now = new Date()) {
+  if (!plan) return null;
+  state.observedPlans = state.observedPlans && typeof state.observedPlans === 'object' ? state.observedPlans : {};
+  const previous = state.observedPlans[engineId] || null;
+  const type = String(plan).toLowerCase();
+  state.observedPlans[engineId] = { type, at: now.toISOString(), previous: previous && previous.type !== type ? previous.type : previous?.previous || null, changedAt: previous && previous.type !== type ? now.toISOString() : previous?.changedAt || null };
+  if (!previous || previous.type === type) return null;
+  const label = engineId === 'claude' ? 'Claude' : engineId === 'codex' ? 'Codex' : engineId;
+  return { engine: engineId, from: previous.type, to: type, at: now.toISOString(), message: `${label} plan changed: ${previous.type} → ${type}. Review the model ladder in Settings.` };
 }
 
 export async function notifyFatalError(options = {}) {

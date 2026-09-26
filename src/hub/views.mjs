@@ -3,6 +3,8 @@
 // and dark mode. Every timestamp is shown in config.timeZone; resume text is never rendered here.
 import { REPORT_SCRIPT, REPORT_STYLES } from '../report-theme.mjs';
 import { formatCount, formatDateLabel, formatElapsed, formatLocalDateTime, formatLocalDay, formatLocalShort, formatRelativeTime } from '../time-format.mjs';
+import { planLabel } from '../engines/quota.mjs';
+import { modelKey } from '../engines/model-availability.mjs';
 import { htmlEscape } from '../utils.mjs';
 import { LETTER_STYLES, coverLetterSettingsSection } from './letter-views.mjs';
 
@@ -163,7 +165,11 @@ function renderMiniStatus(sidebar, timeZone, now) {
     : sidebar.nextRunAt
       ? `<span id="next-run" data-at="${htmlEscape(sidebar.nextRunAt)}" data-overdue-suffix="${htmlEscape(suffix)}">${htmlEscape(formatLocalShort(sidebar.nextRunAt, timeZone))} · <span class="rel${relative === 'overdue' ? ' overdue' : ''}">${htmlEscape(relative === 'overdue' ? `overdue${suffix}` : relative)}</span></span>`
       : '—';
-  const auth = sidebar.claudeAuth?.expired ? '<b>Claude</b><span class="bad" data-auth="expired">Session expired</span>' : '';
+  const planLine = engine => {
+    const plan = sidebar.plans?.[engine];
+    return plan ? `<span data-plan="${engine}">${engine === 'claude' ? 'Claude' : 'Codex'} · ${htmlEscape(planLabel(plan))}</span>` : '';
+  };
+  const auth = sidebar.claudeAuth?.expired ? '<b>Claude</b><span class="bad" data-auth="expired">Session expired</span>' : (sidebar.plans?.claude || sidebar.plans?.codex ? `<b>Plan</b>${[planLine('claude'), planLine('codex')].filter(Boolean).join('<br>')}` : '');
   return `<div class="mini"><b>Last run</b>${last}<b>Next run</b>${next}${auth}</div>`;
 }
 
@@ -400,6 +406,7 @@ function quotaCard(quota, timeZone) {
     : `${htmlEscape(quota.effectiveEngine)} · ${htmlEscape(quota.effectiveModel || 'default')}${quota.effectiveModel && quota.configuredModel && quota.effectiveModel !== quota.configuredModel ? ` <span class="badge badge-warn" data-badge="downgraded">downgraded from ${htmlEscape(quota.configuredModel)}</span>` : ''}`;
   return `<article class="card" id="quota-card"><h2>Quota</h2><dl class="kv">
     <dt>Last limit event</dt><dd id="quota-last">${event}</dd>
+    <dt>Plan</dt><dd id="quota-plan">${quota.plans?.claude ? `Claude · ${htmlEscape(planLabel(quota.plans.claude))}` : '<span class="muted">Claude plan unknown</span>'}${quota.plans?.codex ? ` · Codex · ${htmlEscape(planLabel(quota.plans.codex))}` : ''}${quota.modelAvailability?.unavailable?.length ? ` · <span class="badge badge-warn" data-badge="unavailable-models">unavailable: ${htmlEscape(quota.modelAvailability.unavailable.join(', '))}</span>` : ''}</dd>
     <dt>Model in effect</dt><dd id="quota-model">${effective}</dd>
     <dt>Deferred postings</dt><dd id="quota-deferred">${Number(quota.deferredCount || 0)} waiting for the next run${quota.deferredByQuota ? ` · ${Number(quota.deferredByQuota)} of them because of a limit` : ''}</dd>
     <dt>Policy</dt><dd>Ladder ${htmlEscape((quota.modelLadder || []).join(' → '))} · ${quota.fallbackEngine ? `Codex fallback on` : 'no engine fallback'}</dd>
@@ -440,7 +447,11 @@ export function statusPage({ status, timeZone }) {
   const authBanner = status.claudeAuth?.expired
     ? `<div class="flash error" data-banner="auth-expired">Claude session expired. Run <code>claude auth login --claudeai</code> in Terminal, then try again.${status.claudeAuth.at ? ` <span class="muted">Seen ${at(status.claudeAuth.at)}${status.claudeAuth.source ? ` (${htmlEscape(status.claudeAuth.source)})` : ''}.</span>` : ''} <form class="inline" method="post" action="/settings/connections/refresh"><input type="hidden" name="back" value="status"><button class="btn secondary small" type="submit">Refresh</button></form></div>`
     : '';
+  const planBanner = status.planChange
+    ? `<div class="flash notice" data-banner="plan-change">${htmlEscape(status.planChange.message)} <a href="/settings">Review Settings</a>${status.claudeAuth?.expired ? ' <span class="muted">If the plan did not actually change, run <code>claude auth login --claudeai</code> to refresh the login.</span>' : ''}</div>`
+    : '';
   return `<h1 class="hub-title">Status</h1>
+  ${planBanner}
   ${authBanner}
   <article class="card"><h2>Runs</h2><dl class="kv">
     <dt>Last run</dt><dd>${lastRunLine}</dd>
@@ -540,20 +551,29 @@ function engineBadge(item) {
   return '<span class="badge badge-warn" data-engine-state="disconnected">Not connected</span>';
 }
 
-function modelSelect(engine, settings) {
+function modelSelect(engine, settings, availability = null) {
   const choices = settings.modelChoices[engine] || [];
   const current = settings.models[engine] || '';
   const listed = choices.some(choice => choice.value === current);
-  const options = choices.map(choice => `<option value="${htmlEscape(choice.value)}"${choice.value === current ? ' selected' : ''}>${htmlEscape(choice.label)}</option>`).join('');
+  const marks = engine === 'claude' && availability?.models ? availability.models : {};
+  // A model the plan refused is labelled and disabled; the configured one stays selectable so Save works.
+  const options = choices.map(choice => {
+    const mark = marks[modelKey(choice.value)];
+    const label = mark ? `${choice.label} (unavailable on ${planLabel(mark.plan || availability?.plan)})` : choice.label;
+    return `<option value="${htmlEscape(choice.value)}"${choice.value === current ? ' selected' : ''}${mark && choice.value !== current ? ' disabled data-unavailable="1"' : mark ? ' data-unavailable="1"' : ''}>${htmlEscape(label)}</option>`;
+  }).join('');
   return `<div class="model-group" data-engine="${engine}"${engine === settings.engine ? '' : ' hidden'}>
       <label class="field"><span>Scoring Model</span><select name="model_${engine}" class="model-select control-input">${options}<option value="__custom__"${listed ? '' : ' selected'}>Custom…</option></select></label>
       <label class="field model-custom"${listed ? ' hidden' : ''}><span>Custom model name</span><input type="text" name="modelCustom_${engine}" class="control-input" value="${listed ? '' : htmlEscape(current)}" placeholder="${engine === 'codex' ? 'gpt-5.6-sol' : 'claude-fable-5'}"></label>
     </div>`;
 }
 
-export function settingsPage({ settings, connections = null, timeZone, coverLetter = null }) {
+export function settingsPage({ settings, connections = null, timeZone, coverLetter = null, modelAvailability = null }) {
   const levels = ['high', 'medium', 'low'].map(level => `<label class="check"><input type="checkbox" name="acceptedMatchLevels" value="${level}"${settings.acceptedMatchLevels.includes(level) ? ' checked' : ''}> ${level.charAt(0).toUpperCase()}${level.slice(1)}</label>`).join('');
-  const engines = settings.engines.map(engine => `<label><input type="radio" name="engine" value="${engine.id}"${engine.id === settings.engine ? ' checked' : ''} data-connected="${connections?.[engine.id]?.connected ? 'yes' : 'no'}"> ${htmlEscape(engine.label)} ${engineBadge(connections?.[engine.id])}</label>`).join('');
+  const planBadge = engine => (connections?.[engine]?.plan ? ` <span class="badge badge-muted" data-plan="${engine}">${htmlEscape(planLabel(connections[engine].plan))}</span>` : '');
+  const engines = settings.engines.map(engine => `<label><input type="radio" name="engine" value="${engine.id}"${engine.id === settings.engine ? ' checked' : ''} data-connected="${connections?.[engine.id]?.connected ? 'yes' : 'no'}"> ${htmlEscape(engine.label)} ${engineBadge(connections?.[engine.id])}${planBadge(engine.id)}</label>`).join('');
+  const marks = Object.values(modelAvailability?.models || {});
+  const ladderStatus = `<p class="form-foot" id="ladder-status">Current plan: ${connections?.claude?.plan ? htmlEscape(planLabel(connections.claude.plan)) : 'unknown'} · ${marks.length ? `unavailable: ${marks.map(mark => `${htmlEscape(mark.model)} (since ${htmlEscape(formatLocalDateTime(mark.detectedAt, timeZone))})`).join(', ')}` : 'no model marked unavailable'}${marks.length ? '; marks clear when the plan changes or after 7 days' : ''}</p>`;
   const refresh = '<form class="inline" method="post" action="/settings/connections/refresh"><button class="btn secondary small" type="submit">Refresh</button></form>';
   const checked = connections?.checkedAt ? `<p class="form-foot">Checked ${htmlEscape(formatLocalDateTime(connections.checkedAt, timeZone))}; refreshed every minute. The hub never signs in for you. ${refresh}</p>` : `<p class="form-foot">The hub never signs in for you. ${refresh}</p>`;
   return `<h1 class="hub-title">Settings</h1>
@@ -563,11 +583,12 @@ export function settingsPage({ settings, connections = null, timeZone, coverLett
       <label class="field"><span>Minimum Match Score (0–100)</span><input type="number" name="minimumMatchScore" class="control-input" min="0" max="100" step="1" value="${Number(settings.minimumMatchScore)}" required></label>
       <div class="field"><span>Accepted Match Levels</span>${levels}</div>
       <label class="field"><span>Max Reviewed Per Run (0 = no limit)</span><input type="number" name="maxReviewedPerRun" class="control-input" min="0" max="5000" step="1" value="${Number(settings.maxReviewedPerRun ?? 120)}" required></label>
-      <label class="field"><span>Model Ladder (tried in order when a model hits its weekly limit)</span><input type="text" name="modelLadder" class="control-input" value="${htmlEscape(settings.modelLadder || 'fable, opus')}" placeholder="fable, opus"></label>
+      <label class="field"><span>Model Ladder (tried in order when a model hits its weekly limit or is not on the plan)</span><input type="text" name="modelLadder" class="control-input" value="${htmlEscape(settings.modelLadder || 'fable, opus')}" placeholder="fable, opus"></label>
+      ${ladderStatus}
       <input type="hidden" name="quotaPresent" value="1">
       <div class="field"><label class="check"><input type="checkbox" name="fallbackEngine" value="codex"${settings.fallbackEngine === 'codex' ? ' checked' : ''}> Fall Back to Codex on a Weekly Account Limit (only when Codex is signed in)</label></div>
       <div class="field"><span>Engine</span><div class="radio-row">${engines}</div><p class="engine-warning" id="engine-warning" hidden>This engine is not connected on this Mac; the nightly run will keep local scores (unreviewed) until it is signed in. You can still save.</p></div>
-      ${settings.engines.map(engine => modelSelect(engine.id, settings)).join('')}
+      ${settings.engines.map(engine => modelSelect(engine.id, settings, modelAvailability)).join('')}
     </fieldset>
     <fieldset class="group"><legend>Reports</legend>
       <div class="field"><label class="check"><input type="checkbox" name="xlsxRequired"${settings.xlsxRequired ? ' checked' : ''}> Require XLSX Workbook (fail the run when it cannot be written)</label></div>
@@ -581,7 +602,8 @@ export function settingsPage({ settings, connections = null, timeZone, coverLett
     </fieldset>
     <button class="btn" type="submit">Save</button>
     <p class="form-foot">Changes apply to the next run.</p>
-  </form></article>
+  </form>
+  <form method="post" action="/settings/models/recheck" class="inline"><button class="btn secondary small" type="submit" title="Forget every unavailable-model mark; the next call tries the configured model again">Re-check Models</button></form></article>
   ${coverLetter ? coverLetterSettingsSection({ ...coverLetter, timeZone }) : ''}`;
 }
 

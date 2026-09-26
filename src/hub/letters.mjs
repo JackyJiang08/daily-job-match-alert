@@ -9,7 +9,9 @@ import { graduationTerms } from '../cover-letter/compose.mjs';
 import { renderLetterPdf } from '../cover-letter/pdf.mjs';
 import { LetterInputError } from '../cover-letter/store.mjs';
 import { sha256 } from '../utils.mjs';
-import { HubInputError, readReportPayload } from './services.mjs';
+import { HubInputError, currentPlans, markModelUnavailableInHub, modelAvailabilityView, readReportPayload } from './services.mjs';
+import { firstAvailableModel, nextAvailableModel } from '../engines/model-availability.mjs';
+import { planLabel } from '../engines/quota.mjs';
 import { displayCompanyName } from '../posting-fields.mjs';
 import { QuotaError, classifyQuotaError, describeQuota, nextLadderModel, normalizeQuotaPolicy } from '../engines/quota.mjs';
 import { AuthExpiredError, EngineError, classifyEngineError, engineNotice, humanizeEngineError } from '../engines/engine-errors.mjs';
@@ -61,12 +63,35 @@ export function letterEngineFor(ctx, config, { engine: engineOverride = null, mo
 // it, on any other quota refusal it throws a QuotaError the routes turn into a plain-language reply.
 async function withQuotaPolicy(ctx, config, engineChoice, attempt) {
   const policy = normalizeQuotaPolicy(config.semanticMatching?.quotaPolicy);
-  const first = letterEngineFor(ctx, config, engineChoice);
+  const plans = await currentPlans(ctx, config);
+  const availability = await modelAvailabilityView(ctx, plans.claude).catch(() => ({ unavailable: [] }));
+  const configured = letterEngineFor(ctx, config, engineChoice);
+  // A model the plan refused earlier is skipped before the first call; the note names the step taken.
+  const startModel = configured.id === 'claude' ? firstAvailableModel(configured.model, policy.modelLadder, availability.unavailable) : configured.model;
+  const first = startModel === configured.model ? configured : letterEngineFor(ctx, config, { ...engineChoice, engine: configured.id, model: startModel });
+  const startNote = startModel === configured.model ? null : `Generated with ${startModel}: ${configured.model} unavailable on ${planLabel(plans.claude)}`;
   const settle = (engine, outcome) => { if (engine.id === 'claude') ctx.authState?.clear?.(); return outcome; };
   try {
-    return settle(first, { result: await attempt(first), engine: first, downgradeNote: null });
+    return settle(first, { result: await attempt(first), engine: first, downgradeNote: startNote });
   } catch (error) {
     const verdict = classifyEngineError(error, { policy });
+    if (verdict?.kind === 'model_unavailable' && first.id === 'claude') {
+      await markModelUnavailableInHub(ctx, first.model, { plan: plans.claude, notice: verdict.notice, at: ctx.now().toISOString() }).catch(() => {});
+      ctx.quotaLog?.record?.({ kind: 'model_unavailable', model: first.model, plan: plans.claude, at: ctx.now().toISOString(), engine: first.id, source: 'cover-letter', action: 'downgraded' });
+      const next = nextAvailableModel(policy.modelLadder, first.model, [...availability.unavailable, first.model]);
+      if (next) {
+        const fallback = letterEngineFor(ctx, config, { ...engineChoice, engine: first.id, model: next });
+        const note = `Generated with ${next}: ${first.model} unavailable on ${planLabel(plans.claude)}`;
+        try {
+          return settle(fallback, { result: await attempt(fallback), engine: fallback, downgradeNote: note });
+        } catch (secondError) {
+          const again = classifyEngineError(secondError, { policy });
+          if (again?.kind === 'model_unavailable') { await markModelUnavailableInHub(ctx, next, { plan: plans.claude, notice: again.notice, at: ctx.now().toISOString() }).catch(() => {}); }
+          throw new EngineError(humanizeEngineError(Object.assign(secondError, { plan: plans.claude }), { policy, timeZone: config.timeZone }).message, secondError, again?.kind || 'engine_error');
+        }
+      }
+      throw new EngineError(humanizeEngineError(Object.assign(error, { plan: plans.claude }), { policy, timeZone: config.timeZone }).message, error, 'model_unavailable');
+    }
     if (verdict?.kind === 'auth_expired') {
       if (first.id === 'claude') ctx.authState?.expire?.(verdict.notice);
       throw error instanceof AuthExpiredError ? error : new AuthExpiredError(verdict.notice, error);
