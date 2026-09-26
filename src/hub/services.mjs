@@ -348,6 +348,34 @@ export function annotateConnections(connections, auth) {
   return { ...connections, claude: { ...(connections.claude || {}), connected: false, sessionExpired: true, hint: 'claude auth login --claudeai', reason: auth.notice || 'The last call to Claude failed to authenticate' } };
 }
 
+// Whether the most recent scheduled slot was missed: "due now" inside the grace period, "overdue" after it.
+// A slot never counts as missed while a run holds the lock.
+export function slotState(now, timeZone, schedule, lastRunAt, running = false) {
+  const previous = previousScheduledRun(now, timeZone, schedule.hour, schedule.minute);
+  const lastRunTime = lastRunAt ? new Date(lastRunAt).getTime() : NaN;
+  const missed = !running && Boolean(previous) && (Number.isNaN(lastRunTime) || lastRunTime < previous.getTime());
+  const overdue = missed && now.getTime() - previous.getTime() >= OVERDUE_GRACE_MS;
+  return { missedSlotAt: missed ? previous.toISOString() : null, dueNow: missed && !overdue, overdue };
+}
+
+// A run in progress: the lock is held by a live process; its start is the lock file's write time.
+export async function runningState(ctx) {
+  const lockPath = ctx.runManager?.lockPath;
+  if (!lockPath) return { running: false, since: null, pid: null };
+  const lock = await readLockStatus(lockPath, ctx.pidAlive, ctx.io).catch(() => ({ locked: false }));
+  if (!lock.locked) return { running: false, since: null, pid: null };
+  let since = null;
+  try { since = (await ctx.io.stat(lockPath)).mtime.toISOString(); } catch {}
+  return { running: true, since, pid: lock.pid };
+}
+
+// True when the newest thing the hub knows about is a five-hour limit being waited out.
+export function waitingOnQuota(ctx, latest) {
+  const events = [latest?.meta?.quota?.lastEvent || null, ctx.quotaLog?.last || null].filter(Boolean);
+  events.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+  return events[0]?.kind === 'fiveHourLimit';
+}
+
 export async function sidebarSummary(ctx, config) {
   const dates = await listReportDates(ctx);
   const latest = dates[0] ? await readReportPayload(ctx, dates[0]) : null;
@@ -358,12 +386,18 @@ export async function sidebarSummary(ctx, config) {
   const previous = previousScheduledRun(now, timeZone, schedule.hour, schedule.minute);
   const lastRunAt = latest?.meta?.completedAt || latest?.meta?.lastUpdatedAt || latest?.meta?.generatedAt || null;
   const lastRunTime = lastRunAt ? new Date(lastRunAt).getTime() : NaN;
-  const overdue = Boolean(previous) && now.getTime() - previous.getTime() >= OVERDUE_GRACE_MS && (Number.isNaN(lastRunTime) || lastRunTime < previous.getTime());
+  const missed = Boolean(previous) && (Number.isNaN(lastRunTime) || lastRunTime < previous.getTime());
+  const overdue = missed && now.getTime() - previous.getTime() >= OVERDUE_GRACE_MS;
+  const running = await runningState(ctx);
   return {
     lastRunAt,
     lastResult: latest ? (latest.complete === true ? 'success' : 'incomplete') : null,
-    nextRunAt: overdue ? previous.toISOString() : (next ? next.toISOString() : null),
-    overdue,
+    // While a run holds the lock the slot it is filling is shown as "Running since", never as due or overdue.
+    nextRunAt: running.running ? (next ? next.toISOString() : null) : (missed ? previous.toISOString() : (next ? next.toISOString() : null)),
+    overdue: !running.running && overdue,
+    running: running.running,
+    runningSince: running.since,
+    waitingOnQuota: waitingOnQuota(ctx, latest),
     claudeAuth: claudeAuthView(ctx, latest),
   };
 }
@@ -397,6 +431,7 @@ export async function buildStatusView(ctx, config) {
   const next = nextScheduledRun(now, config.timeZone || 'America/Chicago', schedule.hour, schedule.minute);
   const lock = await readLockStatus(ctx.runManager.lockPath, ctx.pidAlive, ctx.io);
   const availability = await ctx.runManager.availability();
+  const running = await runningState(ctx);
 
   const days = [];
   for (const date of dates.slice(0, 7)) {
@@ -424,6 +459,9 @@ export async function buildStatusView(ctx, config) {
     lastRun,
     nextRun: { at: next ? next.toISOString() : null, hour: schedule.hour, minute: schedule.minute, installed: schedule.installed, plist: schedule.path },
     lock: { ...lock, path: ctx.runManager.lockPath },
+    running,
+    waitingOnQuota: waitingOnQuota(ctx, latest),
+    ...slotState(now, config.timeZone || 'America/Chicago', schedule, lastUpdatedAt, running.running),
     runNow: availability,
     run: ctx.runManager.status(),
     days,

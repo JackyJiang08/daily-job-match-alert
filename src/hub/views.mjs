@@ -2,7 +2,7 @@
 // tokens as the Desktop report (report-components.mjs / report-theme.mjs), so both look alike in light
 // and dark mode. Every timestamp is shown in config.timeZone; resume text is never rendered here.
 import { REPORT_SCRIPT, REPORT_STYLES } from '../report-theme.mjs';
-import { formatCount, formatDateLabel, formatLocalDateTime, formatLocalDay, formatLocalShort, formatRelativeTime } from '../time-format.mjs';
+import { formatCount, formatDateLabel, formatElapsed, formatLocalDateTime, formatLocalDay, formatLocalShort, formatRelativeTime } from '../time-format.mjs';
 import { htmlEscape } from '../utils.mjs';
 import { LETTER_STYLES, coverLetterSettingsSection } from './letter-views.mjs';
 
@@ -129,9 +129,17 @@ export const HUB_SCRIPT = `
       var days = Math.floor(hours / 24);
       return 'in ' + days + 'd' + (hours % 24 ? ' ' + (hours % 24) + 'h' : '');
     }
-    function tick() { var text = relative(); rel.textContent = text; rel.classList.toggle('overdue', text === 'overdue'); }
+    var suffix = next.dataset.overdueSuffix || '';
+    function tick() { var text = relative(); rel.textContent = text === 'overdue' ? text + suffix : text; rel.classList.toggle('overdue', text === 'overdue'); }
     tick();
     setInterval(tick, 60000);
+  }
+  // A run in progress: keep the elapsed time ticking too.
+  var running = document.getElementById('running-elapsed');
+  var since = next && next.dataset.since ? new Date(next.dataset.since).getTime() : null;
+  if (running && since) {
+    function elapsed() { var m = Math.max(0, Math.floor((Date.now() - since) / 60000)); if (m < 60) return m + 'm'; var h = Math.floor(m / 60); return h < 24 ? h + 'h' + (m % 60 ? ' ' + (m % 60) + 'm' : '') : Math.floor(h / 24) + 'd' + (h % 24 ? ' ' + (h % 24) + 'h' : ''); }
+    setInterval(function () { running.textContent = elapsed(); }, 60000);
   }
 })();
 `;
@@ -148,10 +156,13 @@ function resultIcon(result) {
 function renderMiniStatus(sidebar, timeZone, now) {
   if (!sidebar) return '';
   const last = sidebar.lastRunAt ? `${resultIcon(sidebar.lastResult)} ${htmlEscape(formatLocalShort(sidebar.lastRunAt, timeZone))}` : '– No run yet';
+  const suffix = sidebar.waitingOnQuota ? ' (waiting on quota)' : '';
   const relative = sidebar.nextRunAt ? formatRelativeTime(sidebar.nextRunAt, now) : '';
-  const next = sidebar.nextRunAt
-    ? `<span id="next-run" data-at="${htmlEscape(sidebar.nextRunAt)}">${htmlEscape(formatLocalShort(sidebar.nextRunAt, timeZone))} · <span class="rel${relative === 'overdue' ? ' overdue' : ''}">${htmlEscape(relative)}</span></span>`
-    : '—';
+  const next = sidebar.running
+    ? `<span id="next-run" data-running="1"${sidebar.runningSince ? ` data-since="${htmlEscape(sidebar.runningSince)}"` : ''}><span class="ok">Running</span>${sidebar.runningSince ? ` since ${htmlEscape(formatLocalShort(sidebar.runningSince, timeZone))} · <span class="rel" id="running-elapsed">${htmlEscape(formatElapsed(sidebar.runningSince, now))}</span>` : ''}</span>`
+    : sidebar.nextRunAt
+      ? `<span id="next-run" data-at="${htmlEscape(sidebar.nextRunAt)}" data-overdue-suffix="${htmlEscape(suffix)}">${htmlEscape(formatLocalShort(sidebar.nextRunAt, timeZone))} · <span class="rel${relative === 'overdue' ? ' overdue' : ''}">${htmlEscape(relative === 'overdue' ? `overdue${suffix}` : relative)}</span></span>`
+      : '—';
   const auth = sidebar.claudeAuth?.expired ? '<b>Claude</b><span class="bad" data-auth="expired">Session expired</span>' : '';
   return `<div class="mini"><b>Last run</b>${last}<b>Next run</b>${next}${auth}</div>`;
 }
@@ -420,9 +431,12 @@ export function statusPage({ status, timeZone }) {
   const lastRunLine = lastRun.at
     ? `${at(lastRun.at)}${lastRun.trigger ? ` · ${htmlEscape(lastRun.trigger)}` : ''} · ${htmlEscape(lastRun.result)}${lastRun.matchCount != null ? ` · ${lastRun.matchCount} match${lastRun.matchCount === 1 ? '' : 'es'}` : ''}${lastRun.date ? ` · <a href="/reports/${lastRun.date}">report</a>` : ''}`
     : 'No run yet';
-  const nextRunLine = nextRun.at
-    ? `${at(nextRun.at)}${nextRun.installed ? '' : ' <span class="badge badge-warn" data-badge="not-installed">LaunchAgent not installed; showing the 20:00 default</span>'}`
-    : '—';
+  const running = status.running || { running: false };
+  const nextRunLine = running.running
+    ? `<span class="badge badge-good" data-badge="running">Running</span>${running.since ? ` since ${at(running.since)} · ${htmlEscape(formatElapsed(running.since, status.now))} so far` : ''}${running.pid ? ` <span class="muted">(PID ${running.pid})</span>` : ''}${nextRun.at ? `<br><span class="muted">Next scheduled ${at(nextRun.at)}</span>` : ''}`
+    : nextRun.at
+      ? `${at(nextRun.at)}${status.overdue ? ` <span class="badge badge-bad" data-badge="overdue">overdue${status.waitingOnQuota ? ' (waiting on quota)' : ''}</span>` : status.dueNow ? ' <span class="badge badge-warn" data-badge="due-now">due now</span>' : ''}${nextRun.installed ? '' : ' <span class="badge badge-warn" data-badge="not-installed">LaunchAgent not installed; showing the 20:00 default</span>'}`
+      : '—';
   const authBanner = status.claudeAuth?.expired
     ? `<div class="flash error" data-banner="auth-expired">Claude session expired. Run <code>claude auth login --claudeai</code> in Terminal, then try again.${status.claudeAuth.at ? ` <span class="muted">Seen ${at(status.claudeAuth.at)}${status.claudeAuth.source ? ` (${htmlEscape(status.claudeAuth.source)})` : ''}.</span>` : ''} <form class="inline" method="post" action="/settings/connections/refresh"><input type="hidden" name="back" value="status"><button class="btn secondary small" type="submit">Refresh</button></form></div>`
     : '';

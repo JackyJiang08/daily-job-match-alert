@@ -73,6 +73,19 @@ export function formatRelativeTime(target, now) {
   return `in ${days}d${hours % 24 ? ` ${hours % 24}h` : ''}`;
 }
 
+// "12m" / "1h 5m" / "2d 3h" of time elapsed since `start`.
+export function formatElapsed(start, now) {
+  const from = parse(start);
+  const base = parse(now) || new Date();
+  if (!from) return '';
+  const minutes = Math.max(0, Math.floor((base.getTime() - from.getTime()) / 60_000));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h${minutes % 60 ? ` ${minutes % 60}m` : ''}`;
+  const days = Math.floor(hours / 24);
+  return `${days}d${hours % 24 ? ` ${hours % 24}h` : ''}`;
+}
+
 export function formatCount(value) {
   return Number(value || 0).toLocaleString('en-US');
 }

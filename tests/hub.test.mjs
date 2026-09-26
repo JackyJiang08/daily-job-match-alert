@@ -159,7 +159,7 @@ test('Reports lists dates newest first with counts, titles the report by date, a
     assert.match(list.text, /<article class="job"/);
     assert.match(list.text, /<form class="toolbar/);
     assert.match(list.text, /<dt>Trigger<\/dt><dd>scheduled<\/dd>/);
-    assert.match(list.text, /<div class="mini"><b>Last run<\/b><span class="ok">✓<\/span> Aug 26, 8:00 PM<b>Next run<\/b><span id="next-run" data-at="2026-08-28T01:00:00\.000Z">Aug 27, 8:00 PM · <span class="rel">in 13h<\/span><\/span><\/div>/);
+    assert.match(list.text, /<div class="mini"><b>Last run<\/b><span class="ok">✓<\/span> Aug 26, 8:00 PM<b>Next run<\/b><span id="next-run" data-at="2026-08-28T01:00:00\.000Z" data-overdue-suffix="">Aug 27, 8:00 PM · <span class="rel">in 13h<\/span><\/span><\/div>/);
     assert.doesNotMatch(list.text, /\bUTC\b/);
     assert.match(list.text, /<a href="\/reports" class="active">Reports<\/a>/);
     const day = await hub.request('GET', '/reports/2026-08-26');
@@ -535,9 +535,9 @@ test('Status merges runs into one card, formats every time in the configured zon
     await fs.mkdir(path.join(root, 'Library', 'LaunchAgents'), { recursive: true });
     await fs.writeFile(path.join(root, 'Library', 'LaunchAgents', 'com.dailyjobmatchalert.daily.plist'), '<plist><dict><key>StartCalendarInterval</key><dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>30</integer></dict></dict></plist>');
     const installed = await hub.request('GET', '/status');
-    assert.match(installed.text, /<dt>Next run<\/dt><dd>Aug 28, 2026, 6:30 AM<\/dd>/);
+    assert.match(installed.text, /<dt>Next run<\/dt><dd>Aug 28, 2026, 6:30 AM <span class="badge badge-bad" data-badge="overdue">overdue<\/span><\/dd>/, 'the Runs card marks the missed 6:30 slot');
     assert.doesNotMatch(installed.text, /LaunchAgent not installed/);
-    assert.match(installed.text, /<b>Next run<\/b><span id="next-run" data-at="2026-08-27T11:30:00\.000Z">Aug 27, 6:30 AM · <span class="rel overdue">overdue<\/span><\/span><\/div>/, 'the 6:30 slot passed 30 minutes ago with no run since, so the sidebar flags it instead of pointing at tomorrow');
+    assert.match(installed.text, /<b>Next run<\/b><span id="next-run" data-at="2026-08-27T11:30:00\.000Z" data-overdue-suffix="">Aug 27, 6:30 AM · <span class="rel overdue">overdue<\/span><\/span><\/div>/, 'the 6:30 slot passed 30 minutes ago with no run since, so the sidebar flags it instead of pointing at tomorrow');
 
     assert.equal(nextScheduledRun(new Date('2026-08-27T12:00:00Z'), 'America/Chicago', 20, 0).toISOString(), '2026-08-28T01:00:00.000Z');
     assert.equal(nextScheduledRun(new Date('2026-08-27T01:30:00Z'), 'America/Chicago', 20, 0).toISOString(), '2026-08-28T01:00:00.000Z', 'after 20:00 local the next slot is tomorrow');
@@ -710,6 +710,62 @@ test('an expired login reported by the nightly run marks Claude as Session expir
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('the sidebar and the Runs card tell a run in progress from a due, overdue, or quota-waiting slot', async () => {
+  const plist = '<plist><dict><key>StartCalendarInterval</key><dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>30</integer></dict></dict></plist>';
+  // 1. The lock is held by a live process: "Running since", never due or overdue, on both pages.
+  const running = await prepareProject();
+  await fs.mkdir(path.join(running, 'Library', 'LaunchAgents'), { recursive: true });
+  await fs.writeFile(path.join(running, 'Library', 'LaunchAgents', 'com.dailyjobmatchalert.daily.plist'), plist);
+  const lockPath = path.join(running, 'state', '.lock');
+  await fs.writeFile(lockPath, '9001\n');
+  await fs.utimes(lockPath, new Date('2026-08-27T11:40:00Z'), new Date('2026-08-27T11:40:00Z'));
+  const hubRunning = await startHub(running, { alivePids: [9001] });
+  try {
+    const reports = await hubRunning.request('GET', '/reports');
+    assert.match(reports.text, /<b>Next run<\/b><span id="next-run" data-running="1" data-since="2026-08-27T11:40:00\.000Z"><span class="ok">Running<\/span> since Aug 27, 6:40 AM · <span class="rel" id="running-elapsed">20m<\/span><\/span><\/div>/);
+    assert.doesNotMatch(/<div class="mini">[\s\S]*?<\/nav>/.exec(reports.text)[0], /due now|overdue/, 'no due or overdue wording in the sidebar while a run is in progress');
+    const status = await hubRunning.request('GET', '/status');
+    assert.match(status.text, /<dt>Next run<\/dt><dd><span class="badge badge-good" data-badge="running">Running<\/span> since Aug 27, 2026, 6:40 AM · 20m so far <span class="muted">\(PID 9001\)<\/span><br><span class="muted">Next scheduled Aug 28, 2026, 6:30 AM<\/span><\/dd>/);
+    assert.doesNotMatch(status.text, /data-badge="overdue"|data-badge="due-now"/);
+  } finally {
+    await hubRunning.close();
+    await fs.rm(running, { recursive: true, force: true });
+  }
+
+  // 2. The 6:30 slot passed 20 minutes ago with no run and no lock: "due now".
+  const due = await prepareProject();
+  await fs.mkdir(path.join(due, 'Library', 'LaunchAgents'), { recursive: true });
+  await fs.writeFile(path.join(due, 'Library', 'LaunchAgents', 'com.dailyjobmatchalert.daily.plist'), plist);
+  const hubDue = await startHub(due, { now: '2026-08-27T11:50:00Z' });
+  try {
+    assert.match((await hubDue.request('GET', '/reports')).text, /<span id="next-run" data-at="2026-08-27T11:30:00\.000Z" data-overdue-suffix="">Aug 27, 6:30 AM · <span class="rel">due now<\/span><\/span>/);
+    assert.match((await hubDue.request('GET', '/status')).text, /<dt>Next run<\/dt><dd>Aug 28, 2026, 6:30 AM <span class="badge badge-warn" data-badge="due-now">due now<\/span><\/dd>/);
+  } finally {
+    await hubDue.close();
+    await fs.rm(due, { recursive: true, force: true });
+  }
+
+  // 3. Thirty minutes past the slot, and the newest quota event is a five-hour limit being waited out.
+  const waiting = await prepareProject();
+  await fs.mkdir(path.join(waiting, 'Library', 'LaunchAgents'), { recursive: true });
+  await fs.writeFile(path.join(waiting, 'Library', 'LaunchAgents', 'com.dailyjobmatchalert.daily.plist'), plist);
+  const payloadPath = path.join(waiting, 'state', 'report-payload-2026-08-27.json');
+  const payload = JSON.parse(await fs.readFile(payloadPath, 'utf8'));
+  payload.meta.quota = { events: [], lastEvent: { kind: 'fiveHourLimit', at: '2026-08-27T01:05:00Z', action: 'wait', resetsAt: '2026-08-27T12:30:00Z' }, effectiveEngine: 'claude', effectiveModel: 'fable', configuredModel: 'fable', modelLadder: ['fable', 'opus'], fallbackEngine: null, deferredByQuota: 0, banner: null };
+  await fs.writeFile(payloadPath, JSON.stringify(payload));
+  const hubWaiting = await startHub(waiting);
+  try {
+    assert.match((await hubWaiting.request('GET', '/reports')).text, /<span id="next-run" data-at="2026-08-27T11:30:00\.000Z" data-overdue-suffix=" \(waiting on quota\)">Aug 27, 6:30 AM · <span class="rel overdue">overdue \(waiting on quota\)<\/span><\/span>/);
+    assert.match((await hubWaiting.request('GET', '/status')).text, /<dt>Next run<\/dt><dd>Aug 28, 2026, 6:30 AM <span class="badge badge-bad" data-badge="overdue">overdue \(waiting on quota\)<\/span><\/dd>/);
+    // A later, different event ends the suffix.
+    hubWaiting.ctx.quotaLog.record({ kind: 'accountWeeklyLimit', at: '2026-08-27T11:00:00Z', action: 'deferred' });
+    assert.match((await hubWaiting.request('GET', '/status')).text, /data-badge="overdue">overdue<\/span>/);
+  } finally {
+    await hubWaiting.close();
+    await fs.rm(waiting, { recursive: true, force: true });
   }
 });
 
