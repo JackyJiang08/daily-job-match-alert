@@ -1,4 +1,6 @@
 import { canonicalUrl, sha256, unique } from './utils.mjs';
+import { postedAtPrecision } from './posting-fields.mjs';
+import { endOfLocalDay } from './time-format.mjs';
 
 export function normalizeState(value) {
   const state = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -106,14 +108,16 @@ export function markDeferred(state, job, deferredAt) {
   state.deferred = state.deferred && typeof state.deferred === 'object' ? state.deferred : {};
   const key = deferredKey(job);
   const previous = state.deferred[key];
-  state.deferred[key] = { url: canonicalUrl(job.finalUrl || job.url) || job.url, deferredCount: Number(previous?.deferredCount || 0) + 1, firstDeferredAt: previous?.firstDeferredAt || deferredAt, lastDeferredAt: deferredAt, postedAt: job.postedAt || previous?.postedAt || null, discoveredAt: job.discoveredAt || previous?.discoveredAt || null };
+  state.deferred[key] = { url: canonicalUrl(job.finalUrl || job.url) || job.url, deferredCount: Number(previous?.deferredCount || 0) + 1, firstDeferredAt: previous?.firstDeferredAt || deferredAt, lastDeferredAt: deferredAt, postedAt: job.postedAt || previous?.postedAt || null, postedAtPrecision: job.postedAt ? postedAtPrecision(job) : previous?.postedAtPrecision || null, discoveredAt: job.discoveredAt || previous?.discoveredAt || null };
   return state.deferred[key];
 }
 
-// When a posting was published, as far as the queue knows: its posting date, else the moment it was
-// first discovered (day-level sources), else the moment it was first deferred.
-export function deferralAgeBasis(entry) {
-  return entry?.postedAt || entry?.discoveredAt || entry?.firstDeferredAt || null;
+// When a posting was published, as far as the queue knows: its posting date (a date-only value counts as
+// the end of that local day), else, only for a posting with no date at all, the moment it was first
+// discovered, else the moment it was first deferred.
+export function deferralAgeBasis(entry, timeZone) {
+  if (entry?.postedAt) return entry.postedAtPrecision === 'date' ? endOfLocalDay(entry.postedAt, timeZone) || entry.postedAt : entry.postedAt;
+  return entry?.discoveredAt || entry?.firstDeferredAt || null;
 }
 
 export function clearDeferred(state, job) {
@@ -123,12 +127,12 @@ export function clearDeferred(state, job) {
 // Freshness beats completeness: a deferred posting stays eligible only while its posting date (or first
 // discovery) is at most `maxAgeHours` old. Older entries leave the queue without being scored or marked
 // seen; the next collection simply filters them by the lookback window. Idempotent.
-export function expireDeferred(state, now = new Date(), maxAgeHours = 48) {
+export function expireDeferred(state, now = new Date(), maxAgeHours = 48, { timeZone = null } = {}) {
   if (!state?.deferred || typeof state.deferred !== 'object') return { removed: 0, urls: [] };
   const cutoff = (now instanceof Date ? now : new Date(now)).getTime() - Number(maxAgeHours) * 60 * 60 * 1000;
   const urls = [];
   for (const [key, entry] of Object.entries(state.deferred)) {
-    const basis = deferralAgeBasis(entry);
+    const basis = deferralAgeBasis(entry, timeZone);
     const stamp = basis ? new Date(basis).getTime() : Number.NaN;
     if (Number.isFinite(stamp) && stamp >= cutoff) continue;
     urls.push(entry?.url || key);

@@ -9,7 +9,7 @@ import { renderReportPage } from './report-components.mjs';
 import { warningText } from './warnings.mjs';
 import { formatLocalDateTime, formatLocalDay, formatLocalShort } from './time-format.mjs';
 import { normalizeLocation, sha256 } from './utils.mjs';
-import { companyIsUncertain, displayCompanyName, postedAtPrecision } from './posting-fields.mjs';
+import { companyIsUncertain, displayCompanyName, postedAtPrecision, unknownPostedLabel } from './posting-fields.mjs';
 import { describeQuota } from './engines/quota.mjs';
 
 export const REPORT_TITLE = 'Daily Job Match Alert';
@@ -88,7 +88,11 @@ function footnote(job, timeZone) {
       parts.push(`Posted ${formatLocalDay(job.postedAt, timeZone)}`);
       title = 'Date only: the source reports no time of day';
     }
-  } else if (job.discoveredAt) parts.push(`Found ${formatLocalDay(job.discoveredAt, timeZone)}`);
+  } else {
+    // The source gives no posting date: say so, and when this pipeline first saw the posting.
+    parts.push(`Posted ${unknownPostedLabel(job, timeZone)}`);
+    title = 'The source reports no posting date; the day shown is when this pipeline first found it';
+  }
   if (job.source) parts.push(String(job.source));
   return { text: parts.join(' · '), title };
 }
@@ -146,6 +150,11 @@ export function sourceLine(stat) {
   return `${name}: ${parts.join(', ')}`;
 }
 
+// "12 precise · 30 date only · 3 undated"
+function precisionCounts(entry) {
+  return `${Number(entry?.datetime || 0)} precise · ${Number(entry?.date || 0)} date only · ${Number(entry?.none || 0)} undated`;
+}
+
 function sourcesSummary(stats) {
   const polled = stats.filter(stat => !stat.skipped);
   const failed = polled.filter(stat => stat.ok === false).length;
@@ -183,10 +192,15 @@ export function runDetailsView(jobs, meta, tracks) {
   if (meta.droppedAfterPreciseTimestamps != null) {
     rows.push({ term: 'Freshness check', detail: `dropped ${Number(meta.droppedAfterPreciseTimestamps)} postings after precise timestamps` });
   }
+  if (meta.datePrecision) {
+    const precision = meta.datePrecision;
+    const perSource = (Array.isArray(precision.bySource) ? precision.bySource : []).map(entry => `${entry.source}: ${precisionCounts(entry)}`);
+    rows.push({ term: 'Date precision', detail: `${precisionCounts(precision)} (by source below)`, items: perSource });
+  }
   if (meta.candidateCount != null) {
     const limit = Number(meta.maxReviewedPerRun || 0);
     const inWindow = meta.candidateInWindowCount != null ? ` (${Number(meta.candidateInWindowCount)} within the window)` : '';
-    const expired = meta.expiredBacklogCount != null ? ` · expired ${Number(meta.expiredBacklogCount)} backlog postings` : '';
+    const expired = `${meta.expiredBacklogCount != null ? ` · expired ${Number(meta.expiredBacklogCount)} backlog postings` : ''}${meta.undatedAbandonedCount ? ` · stopped carrying ${Number(meta.undatedAbandonedCount)} undated postings` : ''}`;
     rows.push({ term: 'Review budget', detail: `${Number(meta.candidateCount)} candidates${inWindow} · ${Number(meta.reviewedThisRun || 0)} reviewed · ${Number(meta.deferredCount || 0)} deferred${expired}${limit > 0 ? ` (limit ${limit} per run)` : ' (no limit)'}`, items: meta.budgetAlert ? [meta.budgetAlert.message] : [] });
   }
   if (Array.isArray(meta.sourceCounts) && meta.sourceCounts.length) {

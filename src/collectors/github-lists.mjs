@@ -45,6 +45,12 @@ export function listDateToIso(text, now = new Date()) {
   return Number.isFinite(stamp) ? new Date(stamp).toISOString() : null;
 }
 
+// A relative age ("3d", "Posted 3 Days Ago") names the calendar day that many days before `now`.
+export function ageDaysToPostedAt(ageDays, now = new Date()) {
+  if (ageDays == null || !Number.isFinite(Number(ageDays))) return null;
+  return new Date(now.getTime() - Math.floor(Number(ageDays)) * 24 * 60 * 60 * 1000).toISOString();
+}
+
 // zapply age tokens: 23m = minutes, 1h, 2d, 3w, 1mo; anything else is unknown.
 export function ageTokenToDays(text) {
   const match = /^(\d+)\s*(mo|m|h|d|w)$/i.exec(plain(text).toLowerCase());
@@ -118,8 +124,11 @@ function rowJob(cells, at, format, source, roleType, now, previousCompany) {
   if (format === 'zapply') {
     const ageDays = ageTokenToDays(postedCell);
     if (ageDays == null) return { company, job: null };
+    // "3d" is a posting date, not a hint: the day `ageDays` ago, held to the window as a date-only value.
     job.sourceAgeDays = ageDays;
-    job.freshnessBasis = 'source_age_days_approximate';
+    job.postedAt = ageDaysToPostedAt(ageDays, now);
+    job.freshnessBasis = 'source_list_age';
+    job.postedAtPrecision = 'date';
   } else {
     const postedAt = listDateToIso(postedCell, now);
     if (!postedAt) return { company, job: null };

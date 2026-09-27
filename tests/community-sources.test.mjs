@@ -78,8 +78,11 @@ test('zapply layout: bold companies, minute/hour/day/month age tokens, redirect 
     ['Old Co', 'Machine Learning Intern', 'Boston', 30],
   ]);
   assert.equal(jobs[0].url, 'https://zapply.jobs/l/d/workday-examplecorp-jobs-RP1?s=gh-internships-2027', 'the redirect link is kept; enrichment follows it to the employer');
-  assert.equal(jobs[0].freshnessBasis, 'source_age_days_approximate');
-  assert.equal(jobs[0].postedAt, undefined);
+  assert.equal(jobs[0].freshnessBasis, 'source_list_age');
+  // The age token becomes a date-only posting date: "3d" is the calendar day three days before the run.
+  assert.equal(jobs[2].postedAt, '2026-09-16T01:00:00.000Z');
+  assert.equal(jobs[2].postedAtPrecision, 'date');
+  assert.equal(jobs[0].postedAt, NOW.toISOString(), 'minutes and hours round down to today');
 });
 
 test('jobright layout: linked bold companies, the posting link inside the title cell, and the work model folded into the location', async () => {

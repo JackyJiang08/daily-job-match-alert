@@ -91,8 +91,8 @@ test('a limit of 0 means no limit and an absent limit means the default', () => 
 test('the backlog expires by posting age, not by how long it has waited: 48 hours after posting (or first discovery) a deferred entry leaves the queue unscored and unseen', () => {
   const state = { seen: {} };
   const at = '2026-09-19T01:00:00.000Z';
-  markDeferred(state, { url: 'https://x/fresh', postedAt: '2026-09-18T20:00:00Z' }, at);
-  markDeferred(state, { url: 'https://x/old', postedAt: '2026-09-16T20:00:00Z' }, at);
+  markDeferred(state, { url: 'https://x/fresh', postedAt: '2026-09-18T20:00:00Z', postedAtPrecision: 'datetime' }, at);
+  markDeferred(state, { url: 'https://x/old', postedAt: '2026-09-16T20:00:00Z', postedAtPrecision: 'datetime' }, at);
   markDeferred(state, { url: 'https://x/day-level', discoveredAt: '2026-09-18T02:00:00Z' }, at);
   markDeferred(state, { url: 'https://x/day-level-old', discoveredAt: '2026-09-16T02:00:00Z' }, at);
   markDeferred(state, { url: 'https://x/undated' }, '2026-09-10T01:00:00.000Z');
@@ -116,15 +116,15 @@ test('tonight\'s postings always rank ahead of the backlog; score and deferral b
   const state = { seen: {} };
   const tonightLow = { ...candidate('https://x/tonight-low', 40), postedAt: '2026-09-18T20:00:00Z' };
   const tonightHigh = { ...candidate('https://x/tonight-high', 60), postedAt: '2026-09-18T22:00:00Z' };
-  const backlogHigh = { ...candidate('https://x/backlog-high', 95), postedAt: '2026-09-17T12:00:00Z' };
-  const backlogTwice = { ...candidate('https://x/backlog-twice', 50), postedAt: '2026-09-17T13:00:00Z' };
+  const backlogHigh = { ...candidate('https://x/backlog-high', 95), postedAt: '2026-09-17T12:00:00Z', postedAtPrecision: 'datetime' };
+  const backlogTwice = { ...candidate('https://x/backlog-twice', 50), postedAt: '2026-09-17T13:00:00Z', postedAtPrecision: 'datetime' };
   state.deferred = {};
   markDeferred(state, backlogTwice, '2026-09-17T01:00:00Z');
   markDeferred(state, backlogTwice, '2026-09-18T01:00:00Z');
   markDeferred(state, backlogHigh, '2026-09-18T01:00:00Z');
   assert.equal(freshnessBucket(tonightLow, NOW, 24), 0);
   assert.equal(freshnessBucket(backlogHigh, NOW, 24), 1);
-  assert.equal(freshnessBucket(candidate('https://x/undated', 10), NOW, 24), 0, 'no date at all counts as tonight');
+  assert.equal(freshnessBucket(candidate('https://x/undated', 10), NOW, 24), 2, 'no date at all ranks after every dated posting');
   const budget = applyReviewBudget([backlogHigh, tonightLow, backlogTwice, tonightHigh], state, 3, NOW, { lookbackHours: 24 });
   assert.deepEqual(budget.ranking.map(item => [item.url, item.bucket, item.kept]), [
     ['https://x/tonight-high', 0, true], ['https://x/tonight-low', 0, true], ['https://x/backlog-twice', 1, true], ['https://x/backlog-high', 1, false],

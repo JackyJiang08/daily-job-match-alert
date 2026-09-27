@@ -53,6 +53,25 @@ export function localDate(now, timeZone) {
   return `${value('year')}-${value('month')}-${value('day')}`;
 }
 
+// The last instant (23:59:59.999) of the calendar day that `value` falls on in the zone. Day-level posting
+// dates are held to the window by this instant, so "posted yesterday" stays fresh for the whole day.
+export function endOfLocalDay(value, timeZone) {
+  const date = parse(value);
+  if (!date) return null;
+  const zone = safeZone(timeZone);
+  const [year, month, day] = localDate(date, zone).split('-').map(Number);
+  // Start from the wall-clock instant read as UTC, then correct by the zone's offset at that instant
+  // (twice, so a DST switch inside the day lands on the right offset).
+  let guess = Date.UTC(year, month - 1, day, 23, 59, 59, 999);
+  for (let pass = 0; pass < 2; pass += 1) {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: zone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(new Date(guess));
+    const value = type => Number(parts.find(part => part.type === type)?.value);
+    const wall = Date.UTC(value('year'), value('month') - 1, value('day'), value('hour') % 24, value('minute'), value('second'), 999);
+    guess -= wall - Date.UTC(year, month - 1, day, 23, 59, 59, 999);
+  }
+  return new Date(guess).toISOString();
+}
+
 // A scheduled time that passed this long ago without a completed run reads as "overdue"; inside the
 // window it reads "due now", since the run itself takes a few minutes.
 export const OVERDUE_GRACE_MS = 30 * 60_000;

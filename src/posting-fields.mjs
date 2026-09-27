@@ -5,6 +5,7 @@
 //     list age ("1d"), a Workday "Posted Yesterday", or a date-only JSON-LD datePosted.
 // Both are pure functions of the job so the pipeline, the Desktop report, the XLSX, and the hub agree.
 import { cleanText } from './utils.mjs';
+import { endOfLocalDay, formatLocalDay } from './time-format.mjs';
 
 // Leading tenant codes: "100000 ", "1007 ", "US101 ", "CP1367 ", "6942-", and 3–4 letter codes such as
 // "TMN " when a multi-word name follows (two-letter codes like "GD" or "GE" are part of real names).
@@ -185,6 +186,44 @@ export function postedAtPrecision(job) {
   // Older payloads kept only the ISO value: a midnight instant came from a bare date.
   if (basis === 'jobposting_date_posted') return /T(?!00:00:00)\d{2}:\d{2}:\d{2}/.test(String(job.postedAt)) ? 'datetime' : 'date';
   return 'date';
+}
+
+// The instant a posting is held to the window by: its own time when precise, the end of its local
+// calendar day when the source gives a date only, null when the source gives no date at all.
+export function freshnessInstant(job, timeZone) {
+  if (!job?.postedAt) return null;
+  if (postedAtPrecision(job) === 'datetime') return job.postedAt;
+  return endOfLocalDay(job.postedAt, timeZone) || job.postedAt;
+}
+
+// Freshness and deferral age are judged by the posting date; the discovery time stands in only when the
+// source gives no date at all. A dated posting is never judged by when this pipeline first saw it.
+export function ageBasisInstant(job, timeZone) {
+  return freshnessInstant(job, timeZone) || (job?.postedAt ? null : job?.discoveredAt || null);
+}
+
+export function isUndated(job) {
+  return !job?.postedAt;
+}
+
+// "Unknown (found Sep 26)" for a posting whose source gives no date; the report and the workbook show it.
+export function unknownPostedLabel(job, timeZone) {
+  return job?.discoveredAt ? `Unknown (found ${formatLocalDay(job.discoveredAt, timeZone)})` : 'Unknown';
+}
+
+// How many postings carry a precise time, a date only, or no date, overall and per source.
+export function datePrecisionSummary(jobs) {
+  const totals = { datetime: 0, date: 0, none: 0 };
+  const perSource = new Map();
+  for (const job of Array.isArray(jobs) ? jobs : []) {
+    const key = postedAtPrecision(job) || 'none';
+    totals[key] += 1;
+    const source = String(job?.source || 'unknown source');
+    if (!perSource.has(source)) perSource.set(source, { source, datetime: 0, date: 0, none: 0 });
+    perSource.get(source)[key] += 1;
+  }
+  const bySource = [...perSource.values()].sort((a, b) => (b.datetime + b.date + b.none) - (a.datetime + a.date + a.none) || a.source.localeCompare(b.source));
+  return { ...totals, bySource };
 }
 
 export function hasPreciseTimestamp(job) {

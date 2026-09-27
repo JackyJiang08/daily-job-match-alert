@@ -31,6 +31,7 @@ import path from 'node:path';
 import { workdayPostedOn } from '../enrich.mjs';
 import { canonicalUrl, cleanText, isoDate, mapLimit, normalizeLocation } from '../utils.mjs';
 import { createWarning, errorSummary } from '../warnings.mjs';
+import { freshnessInstant } from '../posting-fields.mjs';
 
 export const ATS_KINDS = { greenhouse: 'Greenhouse', lever: 'Lever', ashby: 'Ashby', workday: 'Workday' };
 export const ATS_SOURCE_KIND = 'public_ats_board';
@@ -434,8 +435,9 @@ export async function pollBoard(board, options = {}) {
 
 // Inside the lookback window means posted or updated at or after the cutoff. A posting whose date the
 // source could not supply counts as old, never as new.
-export function withinWindow(job, cutoff) {
-  return Boolean(job.postedAt) && new Date(job.postedAt) >= cutoff;
+export function withinWindow(job, cutoff, timeZone = null) {
+  const instant = freshnessInstant(job, timeZone);
+  return Boolean(instant) && new Date(instant) >= cutoff;
 }
 
 // A board is quiet once nothing new has appeared for QUIET_AFTER_DAYS (counted from its last new
@@ -452,7 +454,7 @@ export function isQuietBoard(board, now = new Date()) {
 // normal flow at once. Baseline marks skip URLs in `excludeUrls` (postings another source collected this
 // run) so a listing elsewhere is never swallowed. Failures are isolated per board; the seventh
 // consecutive failure marks the board dormant.
-export async function collectAtsBoards({ registry, settings = {}, network = {}, now = new Date(), lookbackHours = 24, warnings = [], isSeen = () => false, isDeferred = () => false, excludeUrls = new Set(), fetchImpl = fetch }) {
+export async function collectAtsBoards({ registry, settings = {}, network = {}, now = new Date(), lookbackHours = 24, timeZone = null, warnings = [], isSeen = () => false, isDeferred = () => false, excludeUrls = new Set(), fetchImpl = fetch }) {
   const cutoff = new Date(now.getTime() - Number(lookbackHours) * 60 * 60 * 1000);
   const minimumHours = Number(settings.minimumPollIntervalHours ?? DEFAULT_MINIMUM_POLL_HOURS);
   const headers = { 'user-agent': network.userAgent || 'DailyJobMatchAlert/0.1' };
@@ -460,7 +462,7 @@ export async function collectAtsBoards({ registry, settings = {}, network = {}, 
   const baseline = [];
   const results = [];
   const boards = Object.values(registry.boards);
-  const wanted = job => (withinWindow(job, cutoff) || isDeferred(job)) && !isSeen(job);
+  const wanted = job => (withinWindow(job, cutoff, timeZone) || isDeferred(job)) && !isSeen(job);
   await mapLimit(boards, Number(network.concurrency || 3), async board => {
     const label = boardLabel(board);
     board.quiet = board.enabled !== false && !board.dormant && isQuietBoard(board, now);

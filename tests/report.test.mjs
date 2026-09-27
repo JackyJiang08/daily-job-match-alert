@@ -131,8 +131,8 @@ test('cards carry the ring score, compact track scores, the recommendation, and 
   const dayOnly = buildHtml([{ ...job, postedAt: '2026-08-27T00:00:00.000Z' }], { ...meta, timeZone: 'America/Chicago' });
   assert.match(dayOnly, /<span class="meta" title="Date only: the source reports no time of day">Posted Aug 26 · fixture<\/span>/, 'a bare-date datePosted shows the local day only and says so on hover');
   const found = buildHtml([{ ...job, postedAt: null, discoveredAt: '2026-09-13T01:30:00Z' }], { ...meta, timeZone: 'America/Chicago' });
-  assert.match(found, /<span class="meta">Found Sep 12 · fixture<\/span>/);
-  assert.doesNotMatch(found, /Discovered/);
+  assert.match(found, /<span class="meta" title="The source reports no posting date; the day shown is when this pipeline first found it">Posted Unknown \(found Sep 12\) · fixture<\/span>/);
+  assert.doesNotMatch(found, /Discovered|Found Sep/);
   assert.doesNotMatch(html, /Match level:|Use LLM|Apply with LLM resume/);
 
   const multi = buildHtml([{ ...job, location: 'Boston, MA · Johnston, RI · Columbus, OH' }], meta);

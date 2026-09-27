@@ -8,7 +8,7 @@
 
 1. **采集。** 来源包括公开 GitHub 榜单（SimplifyJobs、Jobright、vanshb03、Zapply、zshah101）、当月的 Hacker News "Who is hiring" 帖、RemoteOK feed、由此前岗位链接自动发现的 Greenhouse / Lever / Ashby / Workday 公开 job board 接口，以及放进 `intake/eml` 的 `.eml` 提醒邮件。每个 board 每晚只轮询一次，带固定 user agent，并使用 ETag / If-Modified-Since 条件请求。
 2. **去重。** URL 规范化（去追踪参数、解析跳转）后与 `state/state.json` 比对，同一岗位即使三个来源都列出也只出现一次。
-3. **抓 JD。** board 接口直接给出完整正文；其他链接只抓取一次，Workday 页面改走租户公开的 JSON 接口。抓不到的岗位后续夜晚重试，被拒绝或已下线的直接关闭。抓取后若拿到精确到分钟的发布时间（board 接口、带时分秒的 JSON-LD `datePosted`），会重新严格套用回看窗口，超出者不评分、不写 seen；天级来源（榜单的 "1d"、Workday 的 "Posted Yesterday"）维持宽松规则。Workday 的实体名（如 `100000 Motorola Solutions, Inc.`）优先换成榜单或注册表里的公司标签，没有时做清洗；旧报告在渲染时同样清洗。报告卡片与 xlsx 的 Posted At 只在来源给出时间时显示时间，天级来源只显示日期并在悬停/Notes 注明 date only。
+3. **抓 JD。** board 接口直接给出完整正文；其他链接只抓取一次，Workday 页面改走租户公开的 JSON 接口。抓不到的岗位后续夜晚重试，被拒绝或已下线的直接关闭。抓取后若拿到精确到分钟的发布时间（board 接口、带时分秒的 JSON-LD `datePosted`），会重新严格套用回看窗口，超出者不评分、不写 seen；天级来源（榜单的 "3d"、Workday 的 "Posted 3 Days Ago"）换算成发布日期，并按该日当地时间 23:59 参与所有窗口判断：昨天发布的整天都算新鲜，"3 天前" 连积压队列也进不了。来源完全不给日期的岗位（如 Oracle Cloud 招聘页）才以首次发现时间为准，报告与 xlsx 的 Posted At 显示 "Unknown (found Sep 26)"，评审排在所有有日期岗位之后，连续两晚仍无日期则不再顺延。Run Details 按来源统计精确 / 天级 / 无日期的条数。Workday 的实体名（如 `100000 Motorola Solutions, Inc.`）优先换成榜单或注册表里的公司标签，没有时做清洗；旧报告在渲染时同样清洗。报告卡片与 xlsx 的 Posted At 只在来源给出时间时显示时间，天级来源只显示日期并在悬停/Notes 注明 date only。
 4. **硬过滤。** 两条规则由代码强制执行，与模型无关：地点必须在美国（无法判断的会标记 `Location unverified`），岗位要求的毕业窗口必须与 `preferences.graduationDate` 相符。
 5. **订阅引擎评分。** 剩余岗位由 Claude Code CLI 或 Codex CLI（以 claude.ai 或 ChatGPT 订阅登录）逐轨评分，每条简历轨道得到 0–100 分、理由与 gaps，并推荐最合适的轨道。
 6. **写两个文件到桌面。** `~/Desktop/Daily Job Match Alert/<投递日期>/` 下生成一份自包含的 HTML 清单（可排序、搜索、深色模式、每张卡片折叠完整 JD）和一份 XLSX（每条轨道一列分数）。只有当本次运行有降级时才会多出 `warnings.txt`。
@@ -94,7 +94,7 @@ Cover letter 由同一个订阅引擎根据你的 playbook、最多三封样稿�
 - **补跑。** 只有 HTML 与 XLSX 都落盘才记录 `state.lastSuccessfulRun`；登录或开机触发的补跑路径仅在上次成功超过 26 小时时执行。
 - **锁。** `state/.lock` 保存持有者 PID；第二个实例直接退出，PID 已死的陈旧锁自动清除。
 - **同日累积。** `state/report-payload-<日期>.json` 保存该投递日期的全部结果；每次运行合并进去（语义评审过的版本优先、更长的 JD 优先）并以 `Daily update #N` 重新渲染；未完成的日期在下一次运行开始时先重建。
-- **评分配额。** `semanticMatching.maxReviewedPerRun`（默认 120，`0` 为不限）限制每晚送引擎评审的本地候选数。新鲜度优先于完整性：回看窗口内的当晚岗位永远排在积压之前，本地分数与顺延加权只在同一桶内重排。超出的岗位顺延且不写 seen，但只在发布时间（天级来源用首次发现时间）距今不超过 `lookbackHours + deferralGraceHours`（默认 24 + 24 小时）时仍可评审，超期的从队列移除、不评分（Run Details 记 "expired N backlog postings"）。窗口内候选连续 3 晚超过预算时，warnings 与 Status 的 Quota 卡提示并显示近 7 晚的候选/预算数字。同一需求在多个招聘站路径出现（Workday 多站点）时合并为一张卡、只评审一次，备用链接列在卡片上。报告页眉按实际最早发布时间写明 "posted within the last 24 hours / N days"。
+- **评分配额。** `semanticMatching.maxReviewedPerRun`（默认 120，`0` 为不限）限制每晚送引擎评审的本地候选数。新鲜度优先于完整性：回看窗口内的当晚岗位永远排在积压之前，本地分数与顺延加权只在同一桶内重排。超出的岗位顺延且不写 seen，但只在发布时间（天级日期按当天 23:59 当地时间计；仅无日期岗位用首次发现时间）距今不超过 `lookbackHours + deferralGraceHours`（默认 24 + 24 小时）时仍可评审，超期的从队列移除、不评分（Run Details 记 "expired N backlog postings"）。窗口内候选连续 3 晚超过预算时，warnings 与 Status 的 Quota 卡提示并显示近 7 晚的候选/预算数字。同一需求在多个招聘站路径出现（Workday 多站点）时合并为一张卡、只评审一次，备用链接列在卡片上。报告页眉按实际最早发布时间写明 "posted within the last 24 hours / N days"。
 - **chaos 套件。** `npm run chaos` 在临时目录跑九个场景，CI 每次执行：基线、全部采集源断网、订阅 CLI 不可用、畸形 `.eml`、XLSX 失败后恢复、某 ATS 接口返回 500、候选超出评审上限、Fable 周限额（降级到 Opus）、账户总限额（全部顺延并显示横幅）。每个场景都必须仍留下当日文件夹与 HTML。
 
 ## 快速开始

@@ -65,7 +65,18 @@ disabled; do not expand them unless a task says so.
 - Freshness re-check: after enrichment, a posting with a minute-precise publish
   time (board APIs, JSON-LD datePosted with a clock time; src/posting-fields.mjs
   `holdsToExactWindow`) must sit inside lookbackHours or it is dropped, not seen
-  (meta.droppedAfterPreciseTimestamps). Day-level sources stay lenient. Workday
+  (meta.droppedAfterPreciseTimestamps). Day-level dates (Workday "Posted N Days
+  Ago", list "Nd" tokens, bare datePosted) are converted to a posting date and
+  held to every window by the end of that local day (`freshnessInstant`,
+  `endOfLocalDay`): "yesterday" passes a 24 h window, "3 days ago" fails the
+  24 + 24 h backlog rule. The discovery time is a basis only for postings with
+  no date at all (`ageBasisInstant`); it never substitutes for a dated posting.
+  Undated postings (Oracle Cloud pages) render "Unknown (found Sep 26)" on the
+  card and in the xlsx, rank in freshness bucket 2 after every dated posting,
+  and after UNDATED_DEFERRAL_NIGHTS (2) deferrals are marked seen
+  (`undated_abandoned`, meta.undatedAbandonedCount) instead of deferred again.
+  meta.datePrecision (`datePrecisionSummary`) feeds the Run Details "Date
+  precision" row: precise / date only / undated, overall and per source. Workday
   company names prefer the list/registry label, else `cleanWorkdayCompany`;
   `displayCompanyName` is applied at render time (cards, xlsx, letter panel).
 - Subscription quota (src/engines/quota.mjs): the CLI has no usage command, so
@@ -112,10 +123,12 @@ disabled; do not expand them unless a task says so.
   Models (POST /settings/models/recheck, under the run lock) clears them.
 - Review budget: config.semanticMatching.maxReviewedPerRun (default 120,
   0 = no limit) caps the local candidates sent to the engine per run. Ranking
-  is freshness first (postings inside lookbackHours, then the backlog), then
-  local score with a deferral bonus inside a bucket. The rest are deferred in
-  state.deferred (not seen) and stay eligible only while their posting date
-  (or first discovery) is within lookbackHours + deferralGraceHours (default
+  is freshness first (postings inside lookbackHours, then the backlog, then
+  undated postings), then local score with a deferral bonus inside a bucket.
+  The rest are deferred in state.deferred (not seen; entries keep
+  postedAtPrecision) and stay eligible only while their posting date (the end
+  of its local day for date-only values; first discovery only when there is no
+  date) is within lookbackHours + deferralGraceHours (default
   48 h); older entries expire at startup and after enrichment, unscored and
   unseen ("expired N backlog postings" in Run Details; also the one-time
   migration of the old one-week queue). state.budgetHistory keeps 7 nights of

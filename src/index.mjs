@@ -21,6 +21,7 @@ import { applySubscriptionMatching, isSemanticCandidate, localFallbackJob, summa
 import { normalizeEngineId } from './engines/index.mjs';
 import { buildHtml, writeReports, writeWarningsFile } from './report.mjs';
 import { clearDeferred, deferredStatus, expireDeferred, isJobSeen, markDeferred, markJobSeen, normalizeState, pruneSeen, releaseRecentBaselines } from './state.mjs';
+import { ageBasisInstant, datePrecisionSummary, freshnessInstant, isUndated } from './posting-fields.mjs';
 import { acquireRunLock, releaseRunLock } from './lock.mjs';
 import { canonicalUrl, dateWithOffset, htmlEscape, mapLimit, normalizeLocation, resolveFrom, sha256 } from './utils.mjs';
 import { createWarning, errorSummary } from './warnings.mjs';
@@ -87,10 +88,12 @@ async function optionallyRunCareerOps(config, runner = execFileAsync) {
   });
 }
 
-// A posting is inside the lookback window when its source dates it (postedAt, or an approximate age)
-// at or after the cutoff; a posting without any date counts as old.
-export function insideLookbackWindow(job, cutoff, lookbackHours) {
-  if (job?.postedAt) return new Date(job.postedAt) >= cutoff;
+// A posting is inside the lookback window when its source dates it at or after the cutoff (a date-only
+// value counts as the end of that local day, so yesterday's postings pass); a posting without any date
+// counts as old.
+export function insideLookbackWindow(job, cutoff, lookbackHours, timeZone = null) {
+  const instant = freshnessInstant(job, timeZone);
+  if (instant) return new Date(instant) >= cutoff;
   if (job?.sourceAgeDays != null) return Number(job.sourceAgeDays) * 24 <= Number(lookbackHours);
   return false;
 }
@@ -183,7 +186,7 @@ export async function collectEnabledSources(config, cutoff, options = {}) {
   for (const batch of batches) {
     for (const job of batch.jobs) {
       const url = canonicalUrl(job.url);
-      if (url && (!needsBaseline(batch) || insideLookbackWindow(job, cutoff, lookbackHours) || isDeferred(job))) normalUrls.add(url);
+      if (url && (!needsBaseline(batch) || insideLookbackWindow(job, cutoff, lookbackHours, config.timeZone) || isDeferred(job))) normalUrls.add(url);
     }
   }
   const collected = [];
@@ -199,7 +202,7 @@ export async function collectEnabledSources(config, cutoff, options = {}) {
       continue;
     }
     const at = (options.baseline.now || new Date()).toISOString();
-    const fresh = jobs.filter(job => insideLookbackWindow(job, cutoff, lookbackHours) || isDeferred(job));
+    const fresh = jobs.filter(job => insideLookbackWindow(job, cutoff, lookbackHours, config.timeZone) || isDeferred(job));
     const old = jobs.filter(job => !fresh.includes(job) && !normalUrls.has(canonicalUrl(job.url)));
     for (const job of old) markJobSeen(state, { ...job, enrichment: 'source_baseline' }, at);
     state.sourceBaselines = { ...(state.sourceBaselines || {}), [source.name]: { baselinedAt: at, count: old.length } };
@@ -222,7 +225,7 @@ export async function collectAtsBoardSources(config, state, collectedJobs, { now
   registerBoards(registry, discoverBoards(collectedJobs), { now, origin: 'discovered' });
   applyConfigBoards(registry, settings.boards, { now });
   const polled = await collectAtsBoards({
-    registry, settings, network: config.network, now, lookbackHours: config.lookbackHours, warnings,
+    registry, settings, network: config.network, now, lookbackHours: config.lookbackHours, timeZone: config.timeZone, warnings,
     isSeen: job => isJobSeen(state, job),
     isDeferred: job => deferredStatus(state, job).deferred,
     excludeUrls: new Set(collectedJobs.map(job => canonicalUrl(job.url)).filter(Boolean)),
@@ -492,28 +495,35 @@ export function finalizeCompany(job) {
   return { ...job, company: resolved.name || job.company || '', companySource: resolved.source, companyUncertain: resolved.uncertain, companyCandidates: resolved.candidates };
 }
 
-// How old a posting is, in hours, by its posting date or (day-level sources) its discovery time.
-export function postingAgeHours(job, now = new Date()) {
-  const basis = job?.postedAt || job?.discoveredAt || null;
+// How old a posting is, in hours, by its posting date (a date-only value counts as the end of that local
+// day, so the age can read as zero for today's postings); only a posting with no date at all is aged by
+// its discovery time.
+export function postingAgeHours(job, now = new Date(), timeZone = null) {
+  const basis = ageBasisInstant(job, timeZone);
   if (!basis) return null;
   const stamp = new Date(basis).getTime();
   return Number.isFinite(stamp) ? Math.max(0, (now.getTime() - stamp) / 3_600_000) : null;
 }
 
 // Freshness bucket: 0 for postings inside the lookback window (tonight's), 1 for anything older (the
-// backlog). A posting with no date at all counts as tonight's, since only tonight's sources produce one.
-export function freshnessBucket(job, now = new Date(), lookbackHours = 24) {
-  const age = postingAgeHours(job, now);
+// backlog), 2 for postings whose source gives no date at all (Oracle Cloud recruiting pages and the like),
+// which rank after every dated posting.
+export function freshnessBucket(job, now = new Date(), lookbackHours = 24, timeZone = null) {
+  if (isUndated(job)) return 2;
+  const age = postingAgeHours(job, now, timeZone);
   return age == null || age <= Number(lookbackHours) ? 0 : 1;
 }
 
+// How many nights an undated posting may be deferred before the pipeline stops carrying it.
+export const UNDATED_DEFERRAL_NIGHTS = 2;
+
 // Deferred postings that enrichment has now dated past the grace period leave the backlog unscored and
 // unseen; the next collection drops them by the lookback window on its own.
-export function applyBacklogExpiry(jobs, state, now = new Date(), maxAgeHours = 48) {
+export function applyBacklogExpiry(jobs, state, now = new Date(), maxAgeHours = 48, { timeZone = null } = {}) {
   const kept = [];
   const expired = [];
   for (const job of jobs) {
-    const age = postingAgeHours(job, now);
+    const age = postingAgeHours(job, now, timeZone);
     if (deferredStatus(state, job).deferred && age != null && age > Number(maxAgeHours)) { clearDeferred(state, job); expired.push(job); }
     else kept.push(job);
   }
@@ -521,27 +531,32 @@ export function applyBacklogExpiry(jobs, state, now = new Date(), maxAgeHours = 
 }
 
 // Keeps the best `limit` local candidates for the engine (0 or a non-number means no limit). Ranking:
-// the freshness bucket first (tonight's postings always ahead of last night's backlog), then local best
-// score with a bonus per deferral, and a twice-deferred posting ahead of its bucket-mates. Non-candidates
-// (no role relevance or a hard blocker) never reach the engine and pass through as-is.
-export function applyReviewBudget(jobs, state, configuredLimit, now = new Date(), { lookbackHours = 24 } = {}) {
+// the freshness bucket first (tonight's postings, then last night's backlog, then postings with no date),
+// then local best score with a bonus per deferral, and a twice-deferred posting ahead of its bucket-mates.
+// An undated posting that misses the budget for the third night running is not deferred again: it is
+// marked seen and reported as abandoned. Non-candidates (no role relevance or a hard blocker) never reach
+// the engine and pass through as-is.
+export function applyReviewBudget(jobs, state, configuredLimit, now = new Date(), { lookbackHours = 24, timeZone = null, undatedNights = UNDATED_DEFERRAL_NIGHTS } = {}) {
   const limit = configuredLimit == null || configuredLimit === '' ? DEFAULT_MAX_REVIEWED_PER_RUN : Math.max(0, Math.floor(Number(configuredLimit)) || 0);
   const candidates = jobs.filter(isSemanticCandidate);
   const others = jobs.filter(job => !isSemanticCandidate(job));
   const ranked = candidates
-    .map(job => ({ job, deferredCount: deferredStatus(state, job).deferredCount, bucket: freshnessBucket(job, now, lookbackHours) }))
+    .map(job => ({ job, deferredCount: deferredStatus(state, job).deferredCount, bucket: freshnessBucket(job, now, lookbackHours, timeZone) }))
     .sort((a, b) => (a.bucket - b.bucket)
       || (Number(b.deferredCount >= 2) - Number(a.deferredCount >= 2))
       || ((Number(b.job.bestScore) || 0) + 10 * b.deferredCount) - ((Number(a.job.bestScore) || 0) + 10 * a.deferredCount));
   const kept = limit > 0 ? ranked.slice(0, limit) : ranked;
-  const deferred = limit > 0 ? ranked.slice(limit) : [];
+  const missed = limit > 0 ? ranked.slice(limit) : [];
+  const abandoned = missed.filter(entry => entry.bucket === 2 && entry.deferredCount >= Number(undatedNights));
+  const deferred = missed.filter(entry => !abandoned.includes(entry));
   const at = now.toISOString();
   for (const entry of kept) clearDeferred(state, entry.job);
   for (const entry of deferred) markDeferred(state, entry.job, at);
-  const ranking = ranked.map(entry => ({ url: entry.job.url, bucket: entry.bucket, bestScore: Number(entry.job.bestScore) || 0, deferredCount: entry.deferredCount, kept: kept.includes(entry) }));
+  for (const entry of abandoned) { clearDeferred(state, entry.job); markJobSeen(state, { ...entry.job, enrichment: 'undated_abandoned' }, at); }
+  const ranking = ranked.map(entry => ({ url: entry.job.url, bucket: entry.bucket, bestScore: Number(entry.job.bestScore) || 0, deferredCount: entry.deferredCount, kept: kept.includes(entry), abandoned: abandoned.includes(entry) }));
   return {
-    jobs: [...others, ...kept.map(entry => entry.job)], deferred: deferred.map(entry => entry.job),
-    candidateCount: candidates.length, inWindowCount: ranked.filter(entry => entry.bucket === 0).length, reviewedCount: kept.length, limit, ranking,
+    jobs: [...others, ...kept.map(entry => entry.job)], deferred: deferred.map(entry => entry.job), abandoned: abandoned.map(entry => entry.job),
+    candidateCount: candidates.length, inWindowCount: ranked.filter(entry => entry.bucket === 0).length, undatedCount: ranked.filter(entry => entry.bucket === 2).length, reviewedCount: kept.length, limit, ranking,
   };
 }
 
@@ -627,7 +642,7 @@ async function runPipeline(config, clock, options = {}) {
   // The backlog only holds postings still worth reviewing: anything older than the lookback window plus
   // the grace period leaves the queue now (this also migrates queues written under the old one-week rule).
   const deferralMaxAgeHours = Number(config.lookbackHours || 24) + Number(config.deferralGraceHours ?? DEFAULT_DEFERRAL_GRACE_HOURS);
-  const staleBacklog = expireDeferred(state, now, deferralMaxAgeHours);
+  const staleBacklog = expireDeferred(state, now, deferralMaxAgeHours, { timeZone: config.timeZone });
   if (staleBacklog.removed) warnings.push(createWarning('llm', 'review budget', `expired ${staleBacklog.removed} backlog postings older than ${deferralMaxAgeHours} hours (not scored, not marked seen)`, 'info'));
   if (!prefs.graduationDate) {
     warnings.push(createWarning('eligibility', 'graduation window', 'preferences.graduationDate is not set, so the graduation-window hard filter is disabled and only the semantic review checks cohort wording'));
@@ -642,8 +657,9 @@ async function runPipeline(config, clock, options = {}) {
   const collected = dedupe([...collectedRaw, ...atsSources.jobs]).filter(job => {
     // A posting deferred by the review budget is due whatever its age.
     if (deferredStatus(state, job).deferred) return true;
-    if (job.sourceAgeDays != null && job.sourceAgeDays > Math.ceil(config.lookbackHours / 24)) return false;
-    const timestamp = job.postedAt || job.discoveredAt;
+    // The posting date decides (a date-only value as the end of its local day); the discovery time only
+    // stands in for a posting with no date at all.
+    const timestamp = ageBasisInstant(job, config.timeZone);
     return !timestamp || new Date(timestamp) >= cutoff;
   });
   const unseenCandidates = collected.filter(job => !isJobSeen(state, job));
@@ -686,7 +702,7 @@ async function runPipeline(config, clock, options = {}) {
     warnings.push(createWarning('collector', 'freshness', `dropped ${freshness.dropped.length} postings after precise timestamps put them outside the ${config.lookbackHours}-hour window`, 'info'));
   }
   // A deferred posting whose enriched date now puts it past the grace period leaves the backlog here.
-  const backlog = applyBacklogExpiry(freshness.jobs, state, now, deferralMaxAgeHours);
+  const backlog = applyBacklogExpiry(freshness.jobs, state, now, deferralMaxAgeHours, { timeZone: config.timeZone });
   const expiredBacklogCount = staleBacklog.removed + backlog.expired.length;
   if (backlog.expired.length) warnings.push(createWarning('llm', 'review budget', `expired ${backlog.expired.length} backlog postings after enrichment dated them past ${deferralMaxAgeHours} hours`, 'info'));
   // The same requisition on several career-site paths (Workday multi-site postings) is one card and one
@@ -696,8 +712,9 @@ async function runPipeline(config, clock, options = {}) {
   const locallyEvaluated = merged.jobs.map(job => evaluateJob(job, resumes, prefs));
   // Review budget: tonight's postings first (freshness bucket), then local score; the rest are deferred
   // (not marked seen) and come back next run while they are still inside the grace period.
-  const budget = applyReviewBudget(locallyEvaluated, state, config.semanticMatching?.maxReviewedPerRun, now, { lookbackHours: config.lookbackHours });
-  debug.reviewBudget = { kept: budget.ranking.filter(item => item.kept).map(item => ({ url: item.url, bucket: item.bucket, bestScore: item.bestScore, deferredCount: item.deferredCount })), deferred: budget.ranking.filter(item => !item.kept).map(item => ({ url: item.url, bucket: item.bucket, bestScore: item.bestScore, deferredCount: item.deferredCount })), expired: [...staleBacklog.urls, ...backlog.expired.map(job => job.url)] };
+  const budget = applyReviewBudget(locallyEvaluated, state, config.semanticMatching?.maxReviewedPerRun, now, { lookbackHours: config.lookbackHours, timeZone: config.timeZone });
+  if (budget.abandoned.length) warnings.push(createWarning('llm', 'review budget', `stopped carrying ${budget.abandoned.length} undated postings after ${UNDATED_DEFERRAL_NIGHTS} nights without a posting date (not scored)`, 'info'));
+  debug.reviewBudget = { kept: budget.ranking.filter(item => item.kept).map(item => ({ url: item.url, bucket: item.bucket, bestScore: item.bestScore, deferredCount: item.deferredCount })), deferred: budget.ranking.filter(item => !item.kept && !item.abandoned).map(item => ({ url: item.url, bucket: item.bucket, bestScore: item.bestScore, deferredCount: item.deferredCount })), abandoned: budget.abandoned.map(job => job.url), expired: [...staleBacklog.urls, ...backlog.expired.map(job => job.url)] };
   if (budget.deferred.length) {
     warnings.push(createWarning('llm', 'review budget', `deferred ${budget.deferred.length} postings to the next run (review limit ${budget.limit} per run); they are not marked as seen`, 'info'));
   }
@@ -797,7 +814,8 @@ async function runPipeline(config, clock, options = {}) {
     minimumMatchScore: config.minimumMatchScore, resumeSync, resumeTracks, collectedCount: collected.length,
     sourceCounts: sourceStats,
     newCount: reviewed.length, newThisRun: enriched.length, reviewedCount: reviewed.length, matchCount: matches.length,
-    candidateCount: budget.candidateCount, candidateInWindowCount: budget.inWindowCount, reviewedThisRun: budget.reviewedCount, deferredCount: budget.deferred.length, expiredBacklogCount, maxReviewedPerRun: budget.limit,
+    candidateCount: budget.candidateCount, candidateInWindowCount: budget.inWindowCount, candidateUndatedCount: budget.undatedCount, reviewedThisRun: budget.reviewedCount, deferredCount: budget.deferred.length, expiredBacklogCount, undatedAbandonedCount: budget.abandoned.length, maxReviewedPerRun: budget.limit,
+    datePrecision: datePrecisionSummary(reviewed),
     budgetAlert, budgetHistory: (state.budgetHistory || []).slice(-BUDGET_HISTORY_NIGHTS),
     droppedAfterPreciseTimestamps: freshness.dropped.length,
     quota,

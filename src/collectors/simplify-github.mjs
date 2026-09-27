@@ -16,7 +16,7 @@ function parseAgeDays(value) {
   return amount;
 }
 
-function parseRows(markdown, source, defaultRoleType) {
+function parseRows(markdown, source, defaultRoleType, now = new Date()) {
   const jobs = [];
   let currentCompany = '';
   const rows = String(markdown).match(/<tr>[\s\S]*?<\/tr>/gi) || [];
@@ -41,17 +41,20 @@ function parseRows(markdown, source, defaultRoleType) {
       url,
       roleType: defaultRoleType,
       sourceAgeDays: ageDays,
-      freshnessBasis: 'source_age_days_approximate',
+      // The list's "3d" is converted to the calendar day three days ago and judged as a date-only value.
+      postedAt: new Date(now.getTime() - Math.floor(ageDays) * 24 * 60 * 60 * 1000).toISOString(),
+      postedAtPrecision: 'date',
+      freshnessBasis: 'source_list_age',
       description: '',
     });
   }
   return jobs;
 }
 
-export async function collectSimplifyList({ url, source, roleType, fetchImpl = fetch, warnings = null }) {
+export async function collectSimplifyList({ url, source, roleType, fetchImpl = fetch, warnings = null, now = new Date() }) {
   const response = await fetchImpl(url, { headers: { accept: 'text/plain' } });
   if (!response.ok) throw new Error(`${source}: HTTP ${response.status}`);
-  const jobs = parseRows(await response.text(), source, roleType);
+  const jobs = parseRows(await response.text(), source, roleType, now);
   // These lists always carry rows; an empty parse after a successful fetch means the README layout changed
   // and the parser is silently missing every posting.
   if (!jobs.length && Array.isArray(warnings)) {
