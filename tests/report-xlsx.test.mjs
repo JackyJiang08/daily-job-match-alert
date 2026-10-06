@@ -247,3 +247,27 @@ test('Run Summary lists the hard-filter exclusion counts and the Gaps column car
     await fs.rm(directory, { recursive: true, force: true });
   }
 });
+
+test('Run Summary counts this run\'s reviewed postings and the all-time total on separate rows', async () => {
+  const payload = {
+    meta: { applicationDate: '2026-10-05', date: '2026-10-05', generatedAt: '2026-10-06T01:00:00Z', lookbackHours: 24, reviewedCount: 57, reviewedInRun: 12, reviewedAllTime: 3480, minimumMatchScore: 60, scoringModel: 'local_only', resumeTracks: [{ id: 'data', label: 'Data' }], warnings: [] },
+    matches: [], reviewed: [],
+  };
+  const { workbook, directory } = await buildWorkbook(payload, 'reviewed-counts');
+  try {
+    const rows = summaryRowsOf(workbook);
+    assert.equal(rows['Reviewed jobs (this run)'], 12, 'this run, not the day\'s merged total of 57');
+    assert.equal(rows['Reviewed (all time)'], 3480);
+    assert.equal(Object.hasOwn(rows, 'Reviewed jobs'), false);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+  const legacy = await buildWorkbook({ ...payload, meta: { ...payload.meta, reviewedInRun: undefined, reviewedAllTime: undefined } }, 'reviewed-legacy');
+  try {
+    const rows = summaryRowsOf(legacy.workbook);
+    assert.equal(rows['Reviewed jobs (this run)'], 57, 'an older payload falls back to its stored count');
+    assert.equal(rows['Reviewed (all time)'], 'not recorded');
+  } finally {
+    await fs.rm(legacy.directory, { recursive: true, force: true });
+  }
+});

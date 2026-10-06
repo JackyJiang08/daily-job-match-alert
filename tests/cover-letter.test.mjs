@@ -1028,3 +1028,30 @@ test('a model the plan refuses steps the letter down the ladder with a note nami
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test('cover-letter calls record their usage as letter and editor entries under the full model id', async () => {
+  const root = await prepareProject();
+  const usage = model => ({ engine: 'claude', effort: null, models: [{ model, input: 100, output: 50, cacheRead: 10, cacheCreation: 0, reasoning: 0 }] });
+  const engineFor = ({ engine = 'claude', model = 'fable' } = {}) => ({
+    id: engine, label: 'Claude subscription', model,
+    async generateText(prompt) {
+      if (prompt.startsWith('EDITOR REVIEW')) return { output: { issues: [], revised_paragraphs: [] }, scoringModel: 'claude-fable-5-1', usage: usage('claude-fable-5-1') };
+      return { output: { paragraphs: fiveParagraphs(100) }, scoringModel: 'claude-fable-5-1', usage: usage('claude-fable-5-1') };
+    },
+  });
+  const hub = await startHub(root, { letterEngine: engineFor() });
+  hub.ctx.makeLetterEngine = engineFor;
+  const jobId = sha256('https://example.com/jobs/1').slice(0, 16);
+  try {
+    await hub.upload('/settings/cover-letter', PROFILE, [{ field: 'playbook', name: 'playbook.md', data: Buffer.from(`# Playbook\n${'Real evidence line. '.repeat(10)}`) }]);
+    assert.equal((await hub.form('/letters/generate', { date: '2026-09-15', job: jobId, track: 'data', company: 'Acme' })).status, 200);
+    const stored = JSON.parse(await fs.readFile(path.join(root, 'state', 'usage.json'), 'utf8'));
+    assert.deepEqual(stored.entries.map(entry => [entry.purpose, entry.model, entry.source, entry.input, entry.output]), [
+      ['letter', 'claude-fable-5-1', 'hub', 100, 50],
+      ['editor', 'claude-fable-5-1', 'hub', 100, 50],
+    ]);
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

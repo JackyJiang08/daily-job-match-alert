@@ -12,6 +12,7 @@ import { sha256 } from '../utils.mjs';
 import { HubInputError, currentPlans, markModelUnavailableInHub, modelAvailabilityView, readReportPayload } from './services.mjs';
 import { firstAvailableModel, nextAvailableModel } from '../engines/model-availability.mjs';
 import { planLabel } from '../engines/quota.mjs';
+import { appendUsage, usageEntries, usagePath } from '../engines/usage.mjs';
 import { displayCompanyName } from '../posting-fields.mjs';
 import { QuotaError, classifyQuotaError, describeQuota, nextLadderModel, normalizeQuotaPolicy } from '../engines/quota.mjs';
 import { AuthExpiredError, EngineError, classifyEngineError, engineNotice, humanizeEngineError } from '../engines/engine-errors.mjs';
@@ -51,7 +52,29 @@ export async function resumeTextFor(ctx, config, trackId) {
   }
 }
 
-export function letterEngineFor(ctx, config, { engine: engineOverride = null, model: modelOverride = null } = {}) {
+// Cover-letter calls report their token usage like nightly reviews do: the editor pass as "editor", the
+// draft and the condensing pass as "letter".
+function withUsageRecording(ctx, engine) {
+  if (!engine || typeof engine.generateText !== 'function' || engine.recordsUsage) return engine;
+  const wrapped = Object.create(engine);
+  wrapped.recordsUsage = true;
+  wrapped.generateText = async (prompt, context) => {
+    const response = await engine.generateText(prompt, context);
+    if (response?.usage?.models?.length) {
+      const purpose = String(prompt || '').startsWith('EDITOR REVIEW') ? 'editor' : 'letter';
+      const entries = usageEntries(response.usage, { purpose, at: ctx.now().toISOString(), source: 'hub' });
+      await appendUsage(usagePath(ctx.root), entries, { now: ctx.now(), io: ctx.io }).catch(error => console.error(`[cover-letter] could not record usage: ${error?.message || error}`));
+    }
+    return response;
+  };
+  return wrapped;
+}
+
+export function letterEngineFor(ctx, config, choice = {}) {
+  return withUsageRecording(ctx, buildLetterEngine(ctx, config, choice));
+}
+
+function buildLetterEngine(ctx, config, { engine: engineOverride = null, model: modelOverride = null } = {}) {
   if (ctx.letterEngine && !engineOverride && !modelOverride) return ctx.letterEngine;
   const semantic = config.semanticMatching || {};
   const engineId = normalizeEngineId(engineOverride || semantic.engine || 'claude') || 'claude';

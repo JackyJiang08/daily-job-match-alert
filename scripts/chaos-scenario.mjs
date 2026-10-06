@@ -401,7 +401,7 @@ scenarios['review-cap'] = async function reviewCap() {
   assert.ok(deferral, `no review budget warning: ${warningLines(artifacts.warnings).join(' | ')}`);
   assert.equal(deferral.level, 'info');
   assert.match(deferral.message, /^deferred \d+ postings to the next run \(review limit 1 per run\)/);
-  assert.match(artifacts.html, /Review budget<\/dt><dd>\d+ candidates \(\d+ within the window\) · 1 reviewed · \d+ deferred · expired \d+ backlog postings \(limit 1 per run\)/);
+  assert.match(artifacts.html, /Review budget<\/dt><dd>\d+ candidates \(\d+ within the window\) · 1 reviewed · \d+ deferred · expired \d+ backlog postings(?: · \d+ early-career full-time weighed like internships)? \(limit 1 per run\)/);
   const state = JSON.parse(await fs.readFile(path.join(directory, 'state', 'state.json'), 'utf8'));
   const deferredUrls = Object.values(state.deferred || {}).map(entry => entry.url);
   assert.equal(deferredUrls.length, first.summary.meta.deferredCount, 'every deferred posting is recorded');

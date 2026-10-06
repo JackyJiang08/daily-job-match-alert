@@ -1009,3 +1009,32 @@ test('a plan change raises a Status banner with a Review Settings link, adds the
     await fs.rm(probeRoot, { recursive: true, force: true });
   }
 });
+
+test('the Quota card shows seven days of subscription usage by full model id, by purpose, and per night', async () => {
+  const root = await prepareProject();
+  const entry = (at, purpose, model, input, output, extra = {}) => ({ at, purpose, source: 'nightly', engine: model.startsWith('gpt') ? 'codex' : 'claude', effort: null, model, input, output, cacheRead: 0, cacheCreation: 0, reasoning: 0, ...extra });
+  await fs.writeFile(path.join(root, 'state', 'usage.json'), JSON.stringify({ version: 1, entries: [
+    entry('2026-08-27T01:10:00Z', 'review', 'claude-fable-5-1', 1000, 2000),
+    entry('2026-08-27T01:12:00Z', 'supplemental', 'claude-fable-5-1', 100, 200),
+    entry('2026-08-25T01:10:00Z', 'review', 'claude-haiku-4-5-20251001', 400, 20),
+    entry('2026-08-26T15:00:00Z', 'letter', 'gpt-6-astra', 5000, 300, { effort: 'medium', source: 'hub' }),
+    entry('2026-08-01T01:00:00Z', 'review', 'claude-opus-5', 9, 9),
+  ] }));
+  const hub = await startHub(root);
+  try {
+    const status = (await hub.request('GET', '/status')).text;
+    const usage = /<dd id="quota-usage">([\s\S]*?)<\/dd>/.exec(status)[1];
+    assert.match(usage, /^6\.5k in · 2\.5k out \(4 calls\)/, 'the 7-day total leaves the Aug 1 entry out');
+    assert.match(usage, /<li data-usage-model="gpt-6-astra"><span class="mono">gpt-6-astra<\/span> <span class="muted">\(medium effort\)<\/span>: 5\.0k in · 300 out \(1 call\)<\/li>/);
+    assert.match(usage, /<li data-usage-model="claude-fable-5-1"><span class="mono">claude-fable-5-1<\/span>: 1\.1k in · 2\.2k out \(2 calls\)<\/li>/);
+    assert.match(usage, /<li data-usage-model="claude-haiku-4-5-20251001">/);
+    assert.doesNotMatch(usage, /claude-opus-5|data-usage-model="fable"/);
+    assert.match(usage, /<li data-usage-purpose="review">review: 1\.4k in · 2\.0k out \(2 calls\)<\/li><li data-usage-purpose="supplemental">supplemental: 100 in · 200 out \(1 call\)<\/li><li data-usage-purpose="letter">letter: 5\.0k in · 300 out \(1 call\)<\/li>/);
+    assert.match(usage, /<span class="mono" id="quota-usage-nights">08-21 0 · 08-22 0 · 08-23 0 · 08-24 420 · 08-25 0 · 08-26 8\.6k · 08-27 0<\/span>/, 'nights are local days in America/Chicago');
+    await fs.writeFile(path.join(root, 'state', 'usage.json'), JSON.stringify({ version: 1, entries: [] }));
+    assert.match((await hub.request('GET', '/status')).text, /<dd id="quota-usage"><span class="muted">No subscription calls recorded in the last 7 days\.<\/span><\/dd>/);
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

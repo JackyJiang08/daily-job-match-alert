@@ -8,6 +8,7 @@
 // The final message is read from the --output-last-message file (the JSONL stream is the fallback), then
 // parsed and validated strictly; anything else propagates to the orchestrator's retry / supplemental /
 // local_fallback chain.
+import { codexUsageFromJsonl } from './usage.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { extractResults, isMissingCommand, modelMatchesConfiguration, run, subscriptionEnvironment } from './shared.mjs';
@@ -114,7 +115,7 @@ export function lastAgentMessage(jsonl) {
   return last;
 }
 
-export function parseCodexOutput(lastMessage, jsonl, configuredModel) {
+export function parseCodexOutput(lastMessage, jsonl, configuredModel, effort = null) {
   const text = String(lastMessage || '').trim() || lastAgentMessage(jsonl) || '';
   if (!text) throw new Error('Codex returned no final message');
   const start = text.indexOf('{');
@@ -123,7 +124,7 @@ export function parseCodexOutput(lastMessage, jsonl, configuredModel) {
   const parsed = JSON.parse(text.slice(start, end + 1));
   const results = extractResults(parsed).results;
   if (!Array.isArray(results)) throw new Error('Codex JSON lacks a results[] array');
-  return { results, scoringModel: extractCodexModel(jsonl, configuredModel) };
+  return { results, scoringModel: extractCodexModel(jsonl, configuredModel), usage: codexUsageFromJsonl(jsonl, { model: configuredModel, effort }) };
 }
 
 export function createCodexEngine(options = {}) {
@@ -154,7 +155,7 @@ export function createCodexEngine(options = {}) {
           input: prompt, cwd: directory, timeoutMs: Number(options.timeoutMs || 600_000), env: subscriptionEnvironment(),
         });
         const lastMessage = await io.readFile(lastMessagePath, 'utf8').catch(() => '');
-        return parseCodexOutput(lastMessage, result.stdout, model);
+        return parseCodexOutput(lastMessage, result.stdout, model, options.reasoningEffort || null);
       } finally {
         await io.rm(schemaPath, { force: true }).catch(() => {});
         await io.rm(lastMessagePath, { force: true }).catch(() => {});
@@ -183,7 +184,7 @@ export function createCodexEngine(options = {}) {
           if (start < 0 || end < start) throw new Error('Codex final message is not a JSON object');
           output = JSON.parse(lastMessage.slice(start, end + 1));
         }
-        return { output, scoringModel: extractCodexModel(result.stdout, model) };
+        return { output, scoringModel: extractCodexModel(result.stdout, model), usage: codexUsageFromJsonl(result.stdout, { model, effort: options.reasoningEffort || null }) };
       } finally {
         await io.rm(schemaPath, { force: true }).catch(() => {});
         await io.rm(lastMessagePath, { force: true }).catch(() => {});

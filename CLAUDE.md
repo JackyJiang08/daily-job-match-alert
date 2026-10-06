@@ -121,6 +121,31 @@ disabled; do not expand them unless a task says so.
   days pass (then tried once more). Settings disables marked models
   "(unavailable on Pro)", shows the marks beside the ladder, and Re-check
   Models (POST /settings/models/recheck, under the run lock) clears them.
+- Pre-screen (src/prefilter.mjs), before enrichment and the budget, every
+  source: titles hitting preferences.excludeTitleTerms (the eligibility list)
+  + prefilterExcludeTitleTerms (head of, vice president, VP, account manager,
+  sales, technician, nurse, driver, mechanic) + excludeLevelSuffixes (II, III,
+  IV, standalone uppercase) are skipped; uncurated sources (ATS boards, HN,
+  RemoteOK) must also name a preferences.titleFamilies term (whole words);
+  curated lists and alert emails skip the family check. A location
+  assessLocation() calls non-US is skipped too. Skipped postings are not marked
+  seen. meta.prefilter feeds the Run Details "Prefilter" row (per-source counts
+  and a folded list: company · title · source · rule). Final scoring and
+  isEligible are unchanged. `detectEarlyCareer` marks job.earlyCareer
+  (entry_level from the title: level I, Associate, Junior, Graduate,
+  University, Early Career, Entry, Rotational, or a plain Analyst; new_grad
+  when the JD also says 0-2 years / recent graduate / Class of 2027 / new
+  grad); it never rewrites roleType and only ranks those postings with
+  internships inside a freshness bucket (`isEarlyCareerPriority`).
+- Usage (src/engines/usage.mjs): engines return `usage` (Claude modelUsage keyed
+  by the real model id, recorded verbatim; Codex turn.completed usage with the
+  model id and reasoning effort). The matcher tags review / supplemental, hub
+  letters tag letter / editor; entries go to state/usage.json (35 days, re-read
+  and appended by both writers). meta.usage → Run Details "Subscription usage";
+  the Quota card shows 7 days by model, by purpose, and per night. Fixtures:
+  tests/fixtures/usage/. Run Summary: "Reviewed jobs (this run)" (meta.
+  reviewedInRun) and "Reviewed (all time)" (state.reviewTotals, seeded once
+  from the stored day payloads).
 - Review budget: config.semanticMatching.maxReviewedPerRun (default 120,
   0 = no limit) caps the local candidates sent to the engine per run. Ranking
   is freshness first (postings inside lookbackHours, then the backlog, then

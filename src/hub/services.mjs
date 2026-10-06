@@ -15,6 +15,7 @@ import { boardLabel, readRegistry, resumeBoard, writeRegistry } from '../collect
 import { builtinSources } from '../collectors/catalog.mjs';
 import { availabilityPath, pruneAvailability, readAvailability, writeAvailability } from '../engines/model-availability.mjs';
 import { planLabel } from '../engines/quota.mjs';
+import { readUsage, usagePath, usageWindow } from '../engines/usage.mjs';
 import { describeQuota, normalizeQuotaPolicy } from '../engines/quota.mjs';
 import { HubLockedError } from './config-file.mjs';
 import { acquireRunLock, releaseRunLock } from '../lock.mjs';
@@ -528,7 +529,7 @@ export async function buildStatusView(ctx, config) {
     days,
     errors,
     sources: await sourcesView(ctx, config, latest),
-    quota: { ...quotaView(ctx, config, latest, state), plans, modelAvailability: await modelAvailabilityView(ctx, plans.claude || state.observedPlans?.claude?.type || null) },
+    quota: { ...quotaView(ctx, config, latest, state), plans, modelAvailability: await modelAvailabilityView(ctx, plans.claude || state.observedPlans?.claude?.type || null), usage: usageWindow(await readUsage(usagePath(ctx.root), ctx.io).catch(() => ({ entries: [] })), { now: ctx.now(), timeZone: config.timeZone, days: 7 }) },
     claudeAuth: claudeAuthView(ctx, latest),
     planChange: await planChangeView(ctx, config, latest, plans),
     outputDirectory: config.outputDirectory,

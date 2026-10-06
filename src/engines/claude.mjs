@@ -1,4 +1,5 @@
 // Claude Code subscription engine: `claude --print` with a JSON schema, allow-listed claude.ai login.
+import { claudeUsageFromEnvelope } from './usage.mjs';
 import { compareVersions, extractResults, isMissingCommand, modelMatchesConfiguration, normalizeModelName, parseSemanticVersion, run, subscriptionEnvironment } from './shared.mjs';
 import { errorSummary } from '../warnings.mjs';
 import { INSTALL_HINTS, resolveCliCommand } from './cli-path.mjs';
@@ -86,7 +87,7 @@ export function assertNotErrorEnvelope(parsed) {
 
 export function parseStructuredOutput(raw) {
   const parsed = assertNotErrorEnvelope(JSON.parse(raw.trim()));
-  return { results: extractResults(parsed).results, scoringModel: extractScoringModel(parsed) };
+  return { results: extractResults(parsed).results, scoringModel: extractScoringModel(parsed), usage: claudeUsageFromEnvelope(parsed) };
 }
 
 // A failed CLI exit whose stdout carried the result envelope is rethrown with the envelope's notice as the
@@ -206,7 +207,7 @@ export function createClaudeEngine(options = {}) {
       const output = context.schema
         ? (parsed?.structured_output ?? (typeof parsed?.result === 'string' ? JSON.parse(parsed.result) : parsed?.result ?? parsed))
         : (typeof parsed?.result === 'string' ? parsed.result : String(parsed?.result ?? ''));
-      return { output, scoringModel: extractScoringModel(parsed) || model };
+      return { output, scoringModel: extractScoringModel(parsed) || model, usage: claudeUsageFromEnvelope(parsed) };
     },
     describeModel() {
       return { engine: 'claude', model, label: `Claude · ${model}` };

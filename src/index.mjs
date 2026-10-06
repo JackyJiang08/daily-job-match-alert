@@ -22,6 +22,8 @@ import { normalizeEngineId } from './engines/index.mjs';
 import { buildHtml, writeReports, writeWarningsFile } from './report.mjs';
 import { clearDeferred, deferredStatus, expireDeferred, isJobSeen, markDeferred, markJobSeen, normalizeState, pruneSeen, releaseRecentBaselines } from './state.mjs';
 import { ageBasisInstant, datePrecisionSummary, freshnessInstant, isUndated } from './posting-fields.mjs';
+import { detectEarlyCareer, isEarlyCareerPriority, prefilterJobs } from './prefilter.mjs';
+import { appendUsage, summarizeUsage, usageEntries, usagePath } from './engines/usage.mjs';
 import { acquireRunLock, releaseRunLock } from './lock.mjs';
 import { canonicalUrl, dateWithOffset, htmlEscape, mapLimit, normalizeLocation, resolveFrom, sha256 } from './utils.mjs';
 import { createWarning, errorSummary } from './warnings.mjs';
@@ -278,6 +280,27 @@ export function dedupeByFinalUrl(jobs) {
     dropped.push({ url: job.originalUrl || job.url, finalUrl: job.finalUrl || job.url, source: job.source, duplicateOf: existing.originalUrl || existing.url });
   }
   return { jobs: [...kept.values()], dropped };
+}
+
+// Adds this run's reviewed count to state.reviewTotals. The first time, the total starts from the day
+// payloads still on disk (90 days), so "all time" means everything the pipeline still has a record of.
+export async function bumpReviewTotals(config, state, count, now = new Date()) {
+  if (!state.reviewTotals || !Number.isFinite(Number(state.reviewTotals.count))) {
+    let seed = 0;
+    let since = null;
+    let names = [];
+    try { names = await fs.readdir(path.join(config.root, 'state')); } catch {}
+    for (const name of names.filter(item => item.startsWith(REPORT_PAYLOAD_PREFIX) && item.endsWith('.json')).sort()) {
+      try {
+        const payload = JSON.parse(await fs.readFile(path.join(config.root, 'state', name), 'utf8'));
+        seed += Array.isArray(payload?.reviewed) ? payload.reviewed.length : 0;
+        since = since || name.slice(REPORT_PAYLOAD_PREFIX.length, -'.json'.length);
+      } catch {}
+    }
+    state.reviewTotals = { count: seed, since: since || now.toISOString().slice(0, 10) };
+  }
+  state.reviewTotals.count = Number(state.reviewTotals.count) + Number(count || 0);
+  return state.reviewTotals.count;
 }
 
 function statePathFor(config) {
@@ -544,6 +567,7 @@ export function applyReviewBudget(jobs, state, configuredLimit, now = new Date()
     .map(job => ({ job, deferredCount: deferredStatus(state, job).deferredCount, bucket: freshnessBucket(job, now, lookbackHours, timeZone) }))
     .sort((a, b) => (a.bucket - b.bucket)
       || (Number(b.deferredCount >= 2) - Number(a.deferredCount >= 2))
+      || (Number(isEarlyCareerPriority(b.job)) - Number(isEarlyCareerPriority(a.job)))
       || ((Number(b.job.bestScore) || 0) + 10 * b.deferredCount) - ((Number(a.job.bestScore) || 0) + 10 * a.deferredCount));
   const kept = limit > 0 ? ranked.slice(0, limit) : ranked;
   const missed = limit > 0 ? ranked.slice(limit) : [];
@@ -662,7 +686,16 @@ async function runPipeline(config, clock, options = {}) {
     const timestamp = ageBasisInstant(job, config.timeZone);
     return !timestamp || new Date(timestamp) >= cutoff;
   });
-  const unseenCandidates = collected.filter(job => !isJobSeen(state, job));
+  // Title and location pre-screen: nothing is fetched or reviewed for a title outside the families (ATS
+  // boards and other uncurated feeds), a title on the exclusion list (every source), or a location
+  // already known to be outside the US. Dropped postings are not marked seen, so a config change takes
+  // effect on the next run.
+  const prefiltered = prefilterJobs(collected.filter(job => !isJobSeen(state, job)), prefs);
+  for (const item of [...prefiltered.titleExcluded, ...prefiltered.locationExcluded]) clearDeferred(state, item);
+  if (prefiltered.titleExcluded.length || prefiltered.locationExcluded.length) {
+    warnings.push(createWarning('collector', 'prefilter', `skipped ${prefiltered.titleExcluded.length} postings by title and ${prefiltered.locationExcluded.length} by a non-US location before enrichment`, 'info'));
+  }
+  const unseenCandidates = prefiltered.jobs;
   const stamped = unseenCandidates.map(job => ({
     ...job,
     originalUrl: job.originalUrl || job.url,
@@ -709,7 +742,13 @@ async function runPipeline(config, clock, options = {}) {
   // review; the extra links ride along as alternates and are marked seen with the primary.
   const merged = mergeNearDuplicates(backlog.jobs);
   if (merged.mergedCount) debug.nearDuplicates = merged.groups;
-  const locallyEvaluated = merged.jobs.map(job => evaluateJob(job, resumes, prefs));
+  // Full-time early-career postings are recognised from the title and the description; the mark only
+  // weighs the review budget (like an internship), it never changes roleType or the score.
+  const locallyEvaluated = merged.jobs.map(job => {
+    const evaluated = evaluateJob(job, resumes, prefs);
+    const early = detectEarlyCareer(evaluated, prefs);
+    return early.level ? { ...evaluated, earlyCareer: early.level, earlyCareerSignal: early.signal } : evaluated;
+  });
   // Review budget: tonight's postings first (freshness bucket), then local score; the rest are deferred
   // (not marked seen) and come back next run while they are still inside the grace period.
   const budget = applyReviewBudget(locallyEvaluated, state, config.semanticMatching?.maxReviewedPerRun, now, { lookbackHours: config.lookbackHours, timeZone: config.timeZone });
@@ -730,6 +769,7 @@ async function runPipeline(config, clock, options = {}) {
   const droppedMarks = pruneAvailability(availability, { now, plan: observedPlan });
   if (droppedMarks.length) warnings.push(createWarning('llm', 'model availability', `retrying ${droppedMarks.map(item => `${item.model} (${item.reason})`).join(', ')}`, 'info'));
   let availabilityChanged = droppedMarks.length > 0;
+  const runUsage = [];
   let planChange = null;
   try {
     evaluated = await applySubscriptionMatching(budget.jobs, resumes, prefs, {
@@ -740,6 +780,7 @@ async function runPipeline(config, clock, options = {}) {
       plan: observedPlan,
       unavailableModels: unavailableModelNames(availability),
       markUnavailable: (model, info) => { markModelUnavailable(availability, model, info); availabilityChanged = true; },
+      recordUsage: (purpose, usage) => { runUsage.push(...usageEntries(usage, { purpose, at: new Date().toISOString(), source: 'nightly' })); },
       onAuth: ({ engine: engineId, plan }) => {
         // The plan the CLI reports is remembered; a change gets a notification, a warning, and a banner.
         const change = recordObservedPlan(state, engineId, plan, now);
@@ -761,6 +802,11 @@ async function runPipeline(config, clock, options = {}) {
   for (const job of quotaDeferred) markDeferred(state, job, now.toISOString());
   evaluated = evaluated.filter(job => !job.quotaDeferred);
   if (availabilityChanged) await writeAvailability(availabilityFile, availability);
+  try {
+    await appendUsage(usagePath(config.root), runUsage, { now });
+  } catch (error) {
+    warnings.push(createWarning('llm', 'usage log', `could not record subscription usage: ${errorSummary(error)}`, 'info'));
+  }
   const quota = summarizeQuota(quotaEvents, quotaPolicy, config, quotaDeferred.length);
   if (planChange) {
     try {
@@ -809,6 +855,9 @@ async function runPipeline(config, clock, options = {}) {
   const runsToday = Number(previous?.meta?.runsToday || 0) + 1;
   // How this run was started (the launchd dispatcher and the hub set the variable; a bare `npm run run` is manual).
   const trigger = ['scheduled', 'catchup', 'manual'].includes(process.env.DAILY_JOB_MATCH_ALERT_TRIGGER) ? process.env.DAILY_JOB_MATCH_ALERT_TRIGGER : 'manual';
+  // Run Summary: this run's reviewed postings, and the running total across runs (seeded once from the
+  // stored day payloads).
+  const reviewedAllTime = await bumpReviewTotals(config, state, evaluated.length, now);
   const meta = {
     generatedAt: now.toISOString(), date, applicationDate: date, runDate, timeZone, lookbackHours: config.lookbackHours,
     minimumMatchScore: config.minimumMatchScore, resumeSync, resumeTracks, collectedCount: collected.length,
@@ -816,6 +865,10 @@ async function runPipeline(config, clock, options = {}) {
     newCount: reviewed.length, newThisRun: enriched.length, reviewedCount: reviewed.length, matchCount: matches.length,
     candidateCount: budget.candidateCount, candidateInWindowCount: budget.inWindowCount, candidateUndatedCount: budget.undatedCount, reviewedThisRun: budget.reviewedCount, deferredCount: budget.deferred.length, expiredBacklogCount, undatedAbandonedCount: budget.abandoned.length, maxReviewedPerRun: budget.limit,
     datePrecision: datePrecisionSummary(reviewed),
+    reviewedInRun: evaluated.length, reviewedAllTime,
+    prefilter: { titleExcluded: prefiltered.titleExcluded, locationExcludedCount: prefiltered.locationExcluded.length, titleExcludedCount: prefiltered.titleExcluded.length, bySource: prefiltered.bySource },
+    earlyCareerCount: locallyEvaluated.filter(job => job.earlyCareer).length,
+    usage: summarizeUsage(runUsage),
     budgetAlert, budgetHistory: (state.budgetHistory || []).slice(-BUDGET_HISTORY_NIGHTS),
     droppedAfterPreciseTimestamps: freshness.dropped.length,
     quota,

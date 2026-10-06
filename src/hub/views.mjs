@@ -4,6 +4,7 @@
 import { REPORT_SCRIPT, REPORT_STYLES } from '../report-theme.mjs';
 import { formatCount, formatDateLabel, formatElapsed, formatLocalDateTime, formatLocalDay, formatLocalShort, formatRelativeTime } from '../time-format.mjs';
 import { planLabel } from '../engines/quota.mjs';
+import { USAGE_PURPOSES, describeTotals, formatTokens } from '../engines/usage.mjs';
 import { modelKey } from '../engines/model-availability.mjs';
 import { htmlEscape } from '../utils.mjs';
 import { LETTER_STYLES, coverLetterSettingsSection } from './letter-views.mjs';
@@ -64,6 +65,7 @@ export const HUB_STYLES = `
 .kv{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:var(--space-1) var(--space-4);margin:var(--space-2) 0 0;font-size:var(--fs-body)}
 .kv dt{color:var(--ink-3)}
 .kv dd{margin:0;overflow-wrap:anywhere}
+.kv .plain-list{margin:2px 0;padding-left:16px;font-size:var(--fs-meta)}
 .kv code,.mono{font-family:var(--font-mono);font-size:var(--fs-meta)}
 .row{display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center;margin-top:var(--space-3)}
 .btn{display:inline-block;background:var(--accent);color:var(--accent-ink);border:0;border-radius:var(--radius-sm);padding:7px 13px;font:inherit;font-size:var(--fs-body);font-weight:650;cursor:pointer;text-decoration:none;line-height:1.3}
@@ -410,8 +412,22 @@ function quotaCard(quota, timeZone) {
     <dt>Model in effect</dt><dd id="quota-model">${effective}</dd>
     <dt>Deferred postings</dt><dd id="quota-deferred">${Number(quota.deferredCount || 0)} waiting for the next run${quota.deferredByQuota ? ` · ${Number(quota.deferredByQuota)} of them because of a limit` : ''}</dd>
     <dt>Policy</dt><dd>Ladder ${htmlEscape((quota.modelLadder || []).join(' → '))} · ${quota.fallbackEngine ? `Codex fallback on` : 'no engine fallback'}</dd>
+    ${usageRows(quota.usage)}
     ${quota.budgetHistory?.length ? `<dt>Candidates vs budget</dt><dd id="quota-history">${quota.budgetAlert ? `<span class="badge badge-warn" data-badge="budget-alert">Over budget ${Number(quota.budgetAlert.nights)} nights running</span> <span class="muted">Raise Max Reviewed Per Run or tighten the prefilter.</span><br>` : ''}<span class="mono">${quota.budgetHistory.map(entry => `${htmlEscape(entry.date)} ${Number(entry.inWindow)}/${Number(entry.limit) || '∞'}`).join(' · ')}</span> <span class="muted">(in-window candidates / budget, last ${quota.budgetHistory.length} nights${quota.expiredBacklogCount ? `; ${Number(quota.expiredBacklogCount)} backlog postings expired last run` : ''})</span></dd>` : ''}
   </dl></article>`;
+}
+
+// Subscription usage over the last seven nights: totals by full model id and by purpose, and one figure
+// per night (input + output tokens, cache reads shown separately in the totals).
+function usageRows(usage) {
+  if (!usage) return '';
+  if (!usage.total?.calls) return `<dt>Usage (7 days)</dt><dd id="quota-usage"><span class="muted">No subscription calls recorded in the last ${Number(usage.days || 7)} days.</span></dd>`;
+  const models = Object.entries(usage.byModel || {}).sort((a, b) => (b[1].input + b[1].output) - (a[1].input + a[1].output))
+    .map(([model, totals]) => `<li data-usage-model="${htmlEscape(model)}"><span class="mono">${htmlEscape(model)}</span>${totals.effort ? ` <span class="muted">(${htmlEscape(totals.effort)} effort)</span>` : ''}: ${htmlEscape(describeTotals(totals))}</li>`).join('');
+  const purposes = USAGE_PURPOSES.filter(purpose => usage.byPurpose?.[purpose])
+    .map(purpose => `<li data-usage-purpose="${purpose}">${purpose}: ${htmlEscape(describeTotals(usage.byPurpose[purpose]))}</li>`).join('');
+  const nights = (usage.nights || []).map(night => `${htmlEscape(night.date.slice(5))} ${htmlEscape(formatTokens(night.input + night.output))}`).join(' · ');
+  return `<dt>Usage (7 days)</dt><dd id="quota-usage">${htmlEscape(describeTotals(usage.total))}<ul class="plain-list">${models}</ul><ul class="plain-list">${purposes}</ul><span class="mono" id="quota-usage-nights">${nights}</span> <span class="muted">(input + output tokens per night)</span></dd>`;
 }
 
 function sourcesCard(rows, timeZone) {

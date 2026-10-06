@@ -255,11 +255,16 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
   const fallbackIds = new Set();
   try {
     tempDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'daily-job-match-alert-semantic-'));
-    const invokeBatch = batch => engine.reviewBatch(
-      buildSemanticPrompt(batch, tracks, preferences, Number(options.maximumDescriptionCharacters || 7000)),
-      schema,
-      { tempDirectory },
-    );
+    // Every successful call reports its token usage, tagged with why it was made.
+    const invokeBatch = async (batch, purpose = 'review') => {
+      const response = await engine.reviewBatch(
+        buildSemanticPrompt(batch, tracks, preferences, Number(options.maximumDescriptionCharacters || 7000)),
+        schema,
+        { tempDirectory },
+      );
+      if (typeof options.recordUsage === 'function' && response?.usage) options.recordUsage(purpose, response.usage);
+      return response;
+    };
     const observedModels = new Set();
     let unknownModelBatches = 0;
     const scoringModelFor = response => {
@@ -422,7 +427,7 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
     if (missingJobs.length) {
       let supplemental;
       try {
-        const response = await invokeBatch(missingJobs);
+        const response = await invokeBatch(missingJobs, 'supplemental');
         supplemental = validateBatchResults(missingJobs, response.results);
         allResults.push(...stampModel(supplemental.accepted, scoringModelFor(response)));
         if (supplemental.ignoredIds.length) {

@@ -145,6 +145,8 @@ details.run>summary{cursor:pointer;font-weight:600;color:var(--ink-2)}
 .run dt{color:var(--ink-3)}
 .run dd{margin:0;color:var(--ink);overflow-wrap:anywhere}
 .run dd ul{margin:2px 0 0;padding-left:16px}
+details.run-list[open]>summary{display:block}
+details.run-list ul{max-height:320px;overflow:auto}
 .run dd li{margin:0}
 .foot{margin-top:var(--space-5);font-size:var(--fs-meta);color:var(--ink-3)}
 

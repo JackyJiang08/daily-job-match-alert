@@ -2,6 +2,7 @@
 // hands them to report-components.mjs. Pipeline warnings are not rendered in the page; they go to
 // warnings.txt beside it (see writeWarningsFile).
 import fs from 'node:fs/promises';
+import { describeTotals } from './engines/usage.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import { jobScores, reportTracks, trackScore } from './resume-tracks.mjs';
@@ -192,6 +193,27 @@ export function runDetailsView(jobs, meta, tracks) {
   if (meta.droppedAfterPreciseTimestamps != null) {
     rows.push({ term: 'Freshness check', detail: `dropped ${Number(meta.droppedAfterPreciseTimestamps)} postings after precise timestamps` });
   }
+  if (meta.prefilter) {
+    const prefilter = meta.prefilter;
+    const dropped = Array.isArray(prefilter.titleExcluded) ? prefilter.titleExcluded : [];
+    rows.push({
+      term: 'Prefilter',
+      detail: `${Number(prefilter.titleExcludedCount ?? dropped.length)} skipped by title · ${Number(prefilter.locationExcludedCount || 0)} skipped by a non-US location (before enrichment)`,
+      items: (prefilter.bySource || []).map(entry => `${entry.source}: title ${Number(entry.title || 0)} · location ${Number(entry.location || 0)}`),
+      folded: dropped.length ? { id: 'prefilter-titles', summary: `Show ${dropped.length} postings skipped by title`, items: dropped.map(item => `${item.company || 'Unknown company'} · ${item.title || 'Untitled'} · ${item.source || 'unknown source'} · ${item.rule}`) } : null,
+    });
+  }
+  if (meta.usage?.total?.calls) {
+    const usage = meta.usage;
+    rows.push({
+      term: 'Subscription usage',
+      detail: describeTotals(usage.total),
+      items: [
+        ...Object.entries(usage.byModel || {}).map(([model, totals]) => `${model}${totals.effort ? ` (${totals.effort} effort)` : ''}: ${describeTotals(totals)}`),
+        ...Object.entries(usage.byPurpose || {}).map(([purpose, totals]) => `${purpose}: ${describeTotals(totals)}`),
+      ],
+    });
+  }
   if (meta.datePrecision) {
     const precision = meta.datePrecision;
     const perSource = (Array.isArray(precision.bySource) ? precision.bySource : []).map(entry => `${entry.source}: ${precisionCounts(entry)}`);
@@ -201,7 +223,7 @@ export function runDetailsView(jobs, meta, tracks) {
     const limit = Number(meta.maxReviewedPerRun || 0);
     const inWindow = meta.candidateInWindowCount != null ? ` (${Number(meta.candidateInWindowCount)} within the window)` : '';
     const expired = `${meta.expiredBacklogCount != null ? ` · expired ${Number(meta.expiredBacklogCount)} backlog postings` : ''}${meta.undatedAbandonedCount ? ` · stopped carrying ${Number(meta.undatedAbandonedCount)} undated postings` : ''}`;
-    rows.push({ term: 'Review budget', detail: `${Number(meta.candidateCount)} candidates${inWindow} · ${Number(meta.reviewedThisRun || 0)} reviewed · ${Number(meta.deferredCount || 0)} deferred${expired}${limit > 0 ? ` (limit ${limit} per run)` : ' (no limit)'}`, items: meta.budgetAlert ? [meta.budgetAlert.message] : [] });
+    rows.push({ term: 'Review budget', detail: `${Number(meta.candidateCount)} candidates${inWindow} · ${Number(meta.reviewedThisRun || 0)} reviewed · ${Number(meta.deferredCount || 0)} deferred${expired}${meta.earlyCareerCount ? ` · ${Number(meta.earlyCareerCount)} early-career full-time weighed like internships` : ''}${limit > 0 ? ` (limit ${limit} per run)` : ' (no limit)'}`, items: meta.budgetAlert ? [meta.budgetAlert.message] : [] });
   }
   if (Array.isArray(meta.sourceCounts) && meta.sourceCounts.length) {
     rows.push({ term: 'Sources', detail: sourcesSummary(meta.sourceCounts), items: meta.sourceCounts.map(sourceLine) });

@@ -68,7 +68,11 @@
     "maxYearsExperience": 3,
     "needsSponsorship": false,
     "graduationDate": "2027-05",
-    "excludeTitleTerms": ["senior", "staff", "principal", "manager", "director", "lead"]
+    "excludeTitleTerms": ["senior", "staff", "principal", "manager", "director", "lead"],
+    "titleFamiliesNote": "Title pre-screen before enrichment: ATS boards, Hacker News, and RemoteOK postings must name one of these families; curated lists and alert emails skip this check. prefilterExcludeTitleTerms and excludeLevelSuffixes add to excludeTitleTerms for the pre-screen only (every source).",
+    "titleFamilies": ["data", "analytics", "analyst", "scientist", "machine learning", "ML", "AI", "quantitative", "quant", "business intelligence", "BI", "data engineer", "software engineer", "developer", "product analyst", "research", "insights", "decision"],
+    "prefilterExcludeTitleTerms": ["head of", "vice president", "VP", "account manager", "sales", "technician", "nurse", "driver", "mechanic"],
+    "excludeLevelSuffixes": ["II", "III", "IV"]
   },
   "sources": {
     "simplifyInternships": {

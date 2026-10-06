@@ -96,7 +96,11 @@ export function renderJobCard(card) {
 export function renderRunDetails({ rows }) {
   const items = rows.map(row => {
     const list = row.items?.length ? `<ul>${row.items.map(item => `<li>${htmlEscape(item)}</li>`).join('')}</ul>` : '';
-    return `<dt>${htmlEscape(row.term)}</dt><dd>${htmlEscape(row.detail)}${list}</dd>`;
+    // A long list the owner may want to audit (the postings a pre-screen dropped) stays folded.
+    const folded = row.folded?.items?.length
+      ? `<details class="more run-list"${row.folded.id ? ` id="${htmlEscape(row.folded.id)}"` : ''}><summary>${htmlEscape(row.folded.summary)}</summary><ul>${row.folded.items.map(item => `<li>${htmlEscape(item)}</li>`).join('')}</ul></details>`
+      : '';
+    return `<dt>${htmlEscape(row.term)}</dt><dd>${htmlEscape(row.detail)}${list}${folded}</dd>`;
   }).join('');
   return `<details class="run" id="run-details"><summary>Run Details</summary><dl>${items}</dl></details>`;
 }
