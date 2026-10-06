@@ -17,7 +17,7 @@ export const DEFAULT_TITLE_FAMILIES = [
   'data', 'analytics', 'analyst', 'scientist', 'machine learning', 'ML', 'AI', 'quantitative', 'quant',
   'business intelligence', 'BI', 'data engineer', 'software engineer', 'developer', 'product analyst',
   'research', 'insights', 'decision', 'statistic', 'actuarial', 'consultant', 'strategist',
-  'forward deployed engineer', 'solutions engineer', 'associate product manager',
+  'forward deployed engineer', 'solutions engineer', 'associate product manager', 'product manager',
 ];
 export const DEFAULT_ELIGIBILITY_EXCLUDES = ['senior', 'staff', 'principal', 'lead', 'manager', 'director'];
 export const DEFAULT_PREFILTER_EXCLUDES = ['head of', 'vice president', 'VP', 'account manager', 'sales', 'technician', 'nurse', 'driver', 'mechanic'];

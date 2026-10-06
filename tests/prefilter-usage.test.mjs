@@ -273,7 +273,7 @@ test('early-career wording overrides only the manager and level-suffix exclusion
   assert.equal(titleRule(ats('Associate Product Manager, 2027'), settings), null);
   assert.equal(titleRule(ats('Associate Product Manager'), settings), null, 'the title itself is an override');
   assert.equal(titleRule(ats('Analytics Manager, University Graduate'), settings), null);
-  assert.equal(titleRule(ats('Product Manager, University Graduate'), settings), 'no title family', 'the override lifts manager, the family check still applies');
+  assert.equal(titleRule(ats('Product Manager, University Graduate'), prefilterSettings({ titleFamilies: DEFAULT_TITLE_FAMILIES.filter(term => term !== 'product manager') })), 'no title family', 'without a matching family the override alone does not let a title through');
   assert.equal(titleRule(ats('Data Scientist III, Rotational Program'), settings), null);
   assert.equal(titleRule(ats('Associate Director, Data'), settings), 'exclude: director', 'director is not overridable');
   assert.equal(titleRule(ats('Data Analyst II'), settings), 'level suffix: II', 'no override word, the suffix still excludes');
@@ -325,4 +325,12 @@ test('a successful Claude reply with empty or unreadable modelUsage raises "usag
   const warning = usageParseEmptyWarning(empties);
   assert.equal(warning.message, 'usage parse empty: 2 successful Claude call(s) returned no readable modelUsage; their tokens are not counted in the usage log');
   assert.notEqual(warning.level, 'info', 'a warning, not an info line');
+});
+
+test('"product manager" is a default family; the manager exclusion still drops it unless an early-career override applies', () => {
+  assert.ok(DEFAULT_TITLE_FAMILIES.includes('product manager'));
+  const settings = prefilterSettings({});
+  assert.equal(titleRule(ats('Product Manager, University Graduate'), settings), null);
+  assert.equal(titleRule(ats('Senior Product Manager'), settings), 'exclude: senior');
+  assert.equal(titleRule(ats('Product Manager, Payments'), settings), 'exclude: manager');
 });
