@@ -945,7 +945,7 @@ test('Settings shows both plans with their source and scheduled change, every re
       'claude-sonnet-5-5': { model: 'claude-sonnet-5-5', plan: null, detectedAt: '2026-08-26T13:00:00.000Z', notice: "Unknown model 'claude-sonnet-5-5'", kind: 'unknown_model' },
     },
     limits: { 'claude-opus-5-5': { model: 'claude-opus-5-5', at: '2026-08-26T14:00:00.000Z', resetsAt: '2026-08-29T14:00:00.000Z' } },
-    seen: { 'claude-haiku-4-5': { resolvedId: 'claude-haiku-4-5-20251001', lastUsedAt: '2026-08-26T20:00:00.000Z' } },
+    seen: { 'claude-haiku-4-5': { resolvedId: 'claude-haiku-4-5-20251001', lastUsedAt: '2026-08-26T20:00:00.000Z' }, 'gpt-5.6-terra': { resolvedId: 'gpt-5.6-terra', lastUsedAt: '2026-08-26T20:00:00.000Z' }, 'claude-sonnet-5-5': { resolvedId: 'claude-sonnet-5-6', lastUsedAt: '2026-08-26T21:00:00.000Z' } },
   }));
   await fs.writeFile(path.join(root, 'state', 'usage.json'), JSON.stringify({ version: 1, entries: [
     { at: '2026-08-27T01:10:00Z', purpose: 'review', source: 'nightly', engine: 'claude', effort: null, model: 'claude-haiku-4-5-20251001', input: 1200, output: 300, cacheRead: 0, cacheCreation: 0, reasoning: 0 },
@@ -978,6 +978,9 @@ test('Settings shows both plans with their source and scheduled change, every re
     assert.match(row('claude-opus-5-5'), /<span class="badge badge-warn" data-model-state="weekly_limit">Weekly limit until Aug 29, 2026, 9:00 AM<\/span>/);
     assert.match(row('claude-opus-5-5'), /<span class="stage">Scoring<\/span>/, 'a ladder step is listed under the stages whose chain uses it');
     assert.match(row('claude-sonnet-5-5'), /<span class="badge badge-bad" data-model-state="unknown_model">Unknown model<\/span>/);
+    assert.match(row('claude-sonnet-5-5'), /<td class="mono">claude-sonnet-5-5<br><span class="new-version" data-new-version="claude-sonnet-5-6" title="[^"]*">New version: claude-sonnet-5-6<\/span><\/td>/, 'the alias ran a newer release than the registry id');
+    assert.doesNotMatch(row('claude-haiku-4-5'), /New version/, 'a dated snapshot of the same id is not a new version');
+    assert.doesNotMatch(row('gpt-5.6-terra'), /New version|resolved/);
     assert.match(row('claude-haiku-4-5'), /<td class="mono">claude-haiku-4-5<br><span class="muted mono" title="[^"]*">resolved claude-haiku-4-5-20251001<\/span><\/td><td><span class="badge badge-good" data-model-state="available">Available<\/span><div class="test-cell">[\s\S]*?<\/div><\/td><td>Aug 26, 2026, 3:00 PM<\/td>/);
     assert.match(row('gpt-5.6-sol'), /<span class="badge badge-muted" data-model-state="not_verified">Not verified<\/span>/);
     assert.match(row('gpt-5.6-sol'), /<form class="inline" method="post" action="\/settings\/models\/test" data-test-model="gpt-5\.6-sol"><input type="hidden" name="model" value="gpt-5\.6-sol"><input type="hidden" name="confirm" value="1"><button class="btn secondary small" type="submit">Test<\/button><\/form>/);
@@ -997,7 +1000,7 @@ test('Settings shows both plans with their source and scheduled change, every re
     const cleared = await hub.form('/settings/models/recheck', {});
     assert.equal(cleared.status, 303);
     const record = JSON.parse(await fs.readFile(path.join(root, 'state', 'model-availability.json'), 'utf8'));
-    assert.deepEqual([Object.keys(record.models), Object.keys(record.limits), Object.keys(record.seen)], [[], ['claude-opus-5-5'], ['claude-haiku-4-5']]);
+    assert.deepEqual([Object.keys(record.models), Object.keys(record.limits), Object.keys(record.seen)], [[], ['claude-opus-5-5'], ['claude-haiku-4-5', 'gpt-5.6-terra', 'claude-sonnet-5-5']]);
     assert.match((await hub.request('GET', '/settings')).text.split('<script>')[0], /<tr data-model="claude-fable-5-1">[\s\S]*?data-model-state="not_verified"/);
     assert.equal((await hub.form('/settings/models/recheck', {}, { origin: 'http://evil.example' })).status, 403);
 

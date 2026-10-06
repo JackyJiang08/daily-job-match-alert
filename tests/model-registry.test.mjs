@@ -7,7 +7,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { DEFAULT_CATALOG, canonicalModelId, defaultLadder, findModel, normalizeCatalog, validateLadder } from '../src/engines/catalog.mjs';
+import { DEFAULT_CATALOG, canonicalModelId, cliModelArg, defaultLadder, findModel, newerRelease, normalizeCatalog, validateLadder } from '../src/engines/catalog.mjs';
 import { resolveModel } from '../src/engines/index.mjs';
 import { normalizeQuotaPolicy } from '../src/engines/quota.mjs';
 import { createClaudeEngine, redactEnvelope } from '../src/engines/claude.mjs';
@@ -48,7 +48,7 @@ test('the registry holds the ids checked against the installed CLIs, and older c
   assert.equal(canonicalModelId('my-private-model', 'anthropic'), 'my-private-model', 'a custom name passes through');
 });
 
-test('the Claude CLI receives the full id, and the id it actually ran is read from modelUsage as resolvedId', async () => {
+test('the Claude CLI receives the registry alias, and the id it actually ran is read from modelUsage as resolvedId', async () => {
   const calls = [];
   const runner = async (command, args) => {
     calls.push(args);
@@ -62,7 +62,7 @@ test('the Claude CLI receives the full id, and the id it actually ran is read fr
     const engine = createClaudeEngine({ model: 'fable', runner, claudeCommand: '/fake/claude', resolveCommand: async () => ({ found: true, command: '/fake/claude', source: 'config' }), envelopeLog });
     assert.equal(engine.model, 'claude-fable-5-1');
     const response = await engine.generateText('Reply with OK', {});
-    assert.equal(calls.at(-1)[calls.at(-1).indexOf('--model') + 1], 'claude-fable-5-1', 'the CLI is asked for the full id');
+    assert.equal(calls.at(-1)[calls.at(-1).indexOf('--model') + 1], 'fable', 'the CLI is given the alias, so it picks the current release');
     assert.equal(response.scoringModel, 'claude-fable-5-1', 'the id with the most output tokens in modelUsage');
     assert.deepEqual(response.usage.models.map(item => item.model), ['claude-fable-5-1', 'claude-haiku-4-5-20251001']);
     const record = normalizeAvailability(null);
@@ -194,3 +194,29 @@ test('ladders take registry Claude models only, without repeats, and at least on
   assert.deepEqual(validateLadder(['claude-opus-9']).errors, ['claude-opus-9 is not in the model registry']);
   assert.deepEqual(validateLadder(['gpt-5.5', 'gpt-5.6-sol'], { provider: 'openai' }).errors, [], 'the same rules for a Codex list');
 });
+
+test('aliased models go to the CLI as their alias, a newer release it reports counts as the same model and is flagged as a new version', async () => {
+  assert.deepEqual(['claude-fable-5-1', 'opus', 'claude-sonnet-5-5', 'claude-haiku-4-5'].map(name => cliModelArg(name)), ['fable', 'opus', 'sonnet', 'haiku']);
+  assert.deepEqual(['gpt-5.6-sol', 'gpt-6-astra'].map(name => cliModelArg(name)), ['gpt-5.6-sol', 'gpt-6-astra'], 'Codex entries have no alias: the full id');
+  assert.equal(cliModelArg('my-private-model'), 'my-private-model');
+
+  // The alias resolved to a release newer than the registry id.
+  const calls = [];
+  const runner = async (command, args) => { calls.push(args); return { stdout: JSON.stringify({ type: 'result', is_error: false, result: 'OK', modelUsage: { 'claude-fable-5-2': { inputTokens: 9, outputTokens: 2 } } }), stderr: '' }; };
+  const engine = createClaudeEngine({ model: 'claude-fable-5-1', runner, resolveCommand: async () => ({ found: true, command: '/fake/claude', source: 'config' }) });
+  const response = await engine.generateText('Reply with OK', {});
+  assert.equal(calls[0][calls[0].indexOf('--model') + 1], 'fable');
+  assert.equal(engine.model, 'claude-fable-5-1', 'the registry id stays the model of record');
+  assert.equal(response.scoringModel, 'claude-fable-5-2', 'the full id the CLI reported');
+  assert.equal(engine.modelMatches('claude-fable-5-2'), true, 'a newer release of the alias is not a mismatch');
+  assert.equal(engine.modelMatches('claude-fable-5-1[1m]'), true);
+  assert.equal(engine.modelMatches('claude-opus-5-5'), false, 'another family still is');
+  const record = normalizeAvailability(null);
+  markModelUsed(record, engine.model, { resolvedId: response.scoringModel, at: NOW.toISOString() });
+  assert.equal(modelStatus(record, 'claude-fable-5-1', { now: NOW }).resolvedId, 'claude-fable-5-2');
+  assert.equal(newerRelease('claude-fable-5-1', 'claude-fable-5-2'), 'claude-fable-5-2');
+  assert.equal(newerRelease('claude-haiku-4-5', 'claude-haiku-4-5-20251001'), null, 'a dated snapshot of the same id is not a new version');
+  assert.equal(newerRelease('claude-fable-5-1', 'claude-fable-5-1'), null);
+  assert.equal(newerRelease('claude-fable-5-1', null), null);
+});
+

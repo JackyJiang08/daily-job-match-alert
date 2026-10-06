@@ -32,7 +32,8 @@
     "hub:restart": "sh scripts/hub-restart.sh",
     "test": "node --test tests/*.test.mjs",
     "demo": "node src/index.mjs --config tests/fixtures/config.demo.json --now 2026-08-27T12:00:00Z",
-    "chaos": "bash scripts/chaos-check.sh"
+    "chaos": "bash scripts/chaos-check.sh",
+    "fixture:envelope": "node scripts/record-envelope-fixture.mjs"
   },
   "engines": {
     "node": ">=20"

@@ -40,7 +40,10 @@ function planCard(card, { timeZone, connectionRow, refresh }) {
 function modelTable(card, { timeZone, testable }) {
   const rows = card.models.map(model => {
     const used = model.usedBy.length ? model.usedBy.map(item => `<span class="stage${item.primary ? ' primary' : ''}">${htmlEscape(item.stage)}</span>`).join(' ') : '<span class="muted">—</span>';
-    const resolved = model.status.resolvedId && model.status.resolvedId !== model.id ? `<br><span class="muted mono" title="Id the CLI reported on its last successful call">resolved ${htmlEscape(model.status.resolvedId)}</span>` : '';
+    // The CLI was given the alias; when it ran a different release than the registry id, say so.
+    const resolved = model.newVersion
+      ? `<br><span class="new-version" data-new-version="${htmlEscape(model.newVersion)}" title="The CLI ran this release on its last successful call">New version: ${htmlEscape(model.newVersion)}</span>`
+      : model.status.resolvedId && model.status.resolvedId !== model.id ? `<br><span class="muted mono" title="Id the CLI reported on its last successful call">resolved ${htmlEscape(model.status.resolvedId)}</span>` : '';
     const test = testable
       ? `<form class="inline" method="post" action="/settings/models/test" data-test-model="${htmlEscape(model.id)}"><input type="hidden" name="model" value="${htmlEscape(model.id)}"><input type="hidden" name="confirm" value="1"><button class="btn secondary small" type="submit">Test</button></form>`
       : '';
@@ -98,6 +101,7 @@ export const MODEL_SETTINGS_STYLES = `
 .models-table td,.models-table th,.assignments td,.assignments th{font-size:var(--fs-body);vertical-align:top}
 .models-table{min-width:520px}
 .test-cell{margin-top:6px}
+.new-version{display:inline-block;margin-top:2px;font-size:var(--fs-meta);font-weight:600;color:var(--warn-ink)}
 .assignments{min-width:760px}
 .models-table td.mono,.assignments td .mono,.ladder .mono{white-space:nowrap}
 .chain .step{white-space:nowrap}

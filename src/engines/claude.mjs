@@ -1,7 +1,7 @@
 // Claude Code subscription engine: `claude --print` with a JSON schema, allow-listed claude.ai login.
 import fsPromises from 'node:fs/promises';
 import path from 'node:path';
-import { DEFAULT_CATALOG, canonicalModelId, defaultModelId, providerModels } from './catalog.mjs';
+import { DEFAULT_CATALOG, canonicalModelId, cliModelArg, defaultModelId, familyPrefix, findModel, providerModels } from './catalog.mjs';
 import { claudeUsageFromEnvelope } from './usage.mjs';
 import { compareVersions, extractResults, isMissingCommand, modelMatchesConfiguration, normalizeModelName, parseSemanticVersion, run, subscriptionEnvironment } from './shared.mjs';
 import { errorSummary } from '../warnings.mjs';
@@ -23,7 +23,12 @@ export function expandModelAlias(value) {
   return CLAUDE_MODEL_ALIASES[normalized] || normalized;
 }
 
+// The CLI is given the alias, so any release of that family counts as the configured model; a model
+// outside the registry is compared by prefix as before.
 export function claudeModelMatches(configured, actual) {
+  const entry = findModel(DEFAULT_CATALOG, configured, 'anthropic');
+  const reported = normalizeModelName(actual);
+  if (entry?.alias && reported && reported !== 'unknown') return findModel(DEFAULT_CATALOG, reported)?.id === entry.id || reported.startsWith(`${familyPrefix(entry)}-`);
   return modelMatchesConfiguration(configured, actual, CLAUDE_MODEL_ALIASES);
 }
 
@@ -189,8 +194,10 @@ export async function describeClaudeConnection(options = {}) {
 }
 
 export function createClaudeEngine(options = {}) {
-  // The CLI always receives the registry's full id, even when a config still says "fable".
+  // Configured names resolve to the registry id, even when a config still says "fable".
   const model = canonicalModelId(options.model || CLAUDE_DEFAULT_MODEL, 'anthropic', Array.isArray(options.catalog) ? options.catalog : DEFAULT_CATALOG);
+  // engine.model stays the registry id (ladder, marks, display); the CLI is given the alias when there is one.
+  const cliModel = cliModelArg(model, Array.isArray(options.catalog) ? options.catalog : DEFAULT_CATALOG);
   const runner = options.runner || run;
   let command = null;
   const commandOf = async () => { command = command || await resolvedCommand(options); return command; };
@@ -207,7 +214,7 @@ export function createClaudeEngine(options = {}) {
         '--print', '--safe-mode', '--no-session-persistence', '--permission-mode', 'dontAsk',
         '--tools', '', '--output-format', 'json', '--json-schema', JSON.stringify(schema),
       ];
-      if (model) args.push('--model', model);
+      if (model) args.push('--model', cliModel);
       let result;
       try {
         result = await runner(await commandOf(), args, {
@@ -224,7 +231,7 @@ export function createClaudeEngine(options = {}) {
     async generateText(prompt, context = {}) {
       const args = ['--print', '--safe-mode', '--no-session-persistence', '--permission-mode', 'dontAsk', '--tools', '', '--output-format', 'json'];
       if (context.schema) args.push('--json-schema', JSON.stringify(context.schema));
-      if (model) args.push('--model', model);
+      if (model) args.push('--model', cliModel);
       let result;
       try {
         result = await runner(await commandOf(), args, {

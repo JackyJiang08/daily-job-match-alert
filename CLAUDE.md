@@ -108,8 +108,12 @@ disabled; do not expand them unless a task says so.
   alias, efforts (Codex only) }], defaulting to ids checked against Claude
   Code 2.1.292 (binary model table) and codex-cli 0.153.0 (`codex debug
   models`); hub.modelChoices migrates. resolveModel, both engines, the quota
-  ladder, and the hub canonicalize aliases to full ids, so the CLI always gets
-  `--model claude-fable-5-1`; never add a model string elsewhere.
+  ladder, and the hub canonicalize names to registry ids (engine.model, marks,
+  display); the CLI is given the entry's alias (`--model fable`, cliModelArg)
+  or the full id when there is none (Codex). The id modelUsage reports is the
+  resolvedId; a different release (newerRelease, e.g. claude-fable-5-2) shows
+  "New version: <id>" in Settings and still matches its family. Never add a
+  model string elsewhere.
   semanticMatching.reasoningEffort reaches Codex as `-c
   model_reasoning_effort="x"` (unset = CLI default).
 - Model status lives in state/model-availability.json (version 2): models
@@ -134,8 +138,9 @@ disabled; do not expand them unless a task says so.
   or a letter generates; never batch). Sidebar: "Claude Max → Pro Oct 26" and
   "ChatGPT Plus". Each nightly run writes a redacted last envelope
   (state/logs/claude-envelope-last.json: usage and modelUsage only) for
-  recording fixtures; tests/fixtures/usage/claude-result.synthetic.json is
-  still synthetic until one is recorded.
+  recording fixtures; `npm run fixture:envelope` turns it into
+  tests/fixtures/usage/claude-result.json (the synthetic fixture is still in
+  use until then).
 - Plan awareness (src/engines/model-availability.mjs): both connection probes
   report `plan` (Claude subscriptionType; Codex when its status prints one);
   the sidebar, the Status Quota card, and the Settings engine radios show it.

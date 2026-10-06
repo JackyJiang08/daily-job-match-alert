@@ -3,7 +3,7 @@
 // models per provider with a live status, which task stage uses each model, and every stage's fallback
 // chain. Built from what the hub already keeps: the connection probes, state/model-availability.json,
 // state/usage.json, and config.json. Nothing here calls a model.
-import { ENGINE_PROVIDER, PROVIDER_ENGINE, PROVIDER_LABELS, findModel, normalizeCatalog, providerModels } from '../engines/catalog.mjs';
+import { ENGINE_PROVIDER, PROVIDER_ENGINE, PROVIDER_LABELS, findModel, newerRelease, normalizeCatalog, providerModels } from '../engines/catalog.mjs';
 import { modelKey, modelStatus } from '../engines/model-availability.mjs';
 import { normalizeQuotaPolicy, planLabel } from '../engines/quota.mjs';
 import { planView } from '../engines/plans.mjs';
@@ -73,7 +73,7 @@ export function modelSettingsView({ config = {}, settings, connections = null, r
     const plans = planView(provider === 'anthropic' ? 'claude' : 'chatgpt', { detected: connection?.plan || null, detectedSource: connection?.planSource || null, config, now, timeZone });
     const models = providerModels(catalog, provider).map(entry => {
       const status = modelStatus(record, entry.id, { now });
-      return { ...entry, status, statusText: statusText(status, timeZone, plans.plan), usedBy: usedBy(entry.id) };
+      return { ...entry, status, statusText: statusText(status, timeZone, plans.plan), usedBy: usedBy(entry.id), newVersion: newerRelease(entry, status.resolvedId, catalog) };
     });
     return { provider, engine, name: PROVIDER_LABELS[provider], connection, plan: plans, usage: usageFor(usage, engine), models };
   };

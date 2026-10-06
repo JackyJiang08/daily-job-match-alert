@@ -90,6 +90,28 @@ export function canonicalModelId(value, provider = null, catalog = DEFAULT_CATAL
   return entry ? entry.id : (value == null || value === '' ? null : String(value).trim());
 }
 
+// What the CLI is given for a model: the registry alias when the entry has one (claude --model fable, so
+// the CLI picks the current release of that family), else the full id (Codex models have no alias). The
+// id the CLI actually ran comes back in its usage report and is recorded as the resolved id.
+export function cliModelArg(value, catalog = DEFAULT_CATALOG) {
+  const entry = findModel(catalog, value);
+  return entry ? (entry.alias || entry.id) : (value == null || value === '' ? null : String(value).trim());
+}
+
+// The family prefix of an aliased entry ("claude-fable" for claude-fable-5-1): any release the alias may
+// resolve to starts with it.
+export function familyPrefix(entry) {
+  return entry?.alias ? entry.id.toLowerCase().replace(/(-\d+)+$/, '') : null;
+}
+
+// A different release than the registry id ("claude-fable-5-2" for claude-fable-5-1), or null. A dated
+// snapshot of the same id (claude-haiku-4-5-20251001) is the same release.
+export function newerRelease(entryOrId, resolvedId, catalog = DEFAULT_CATALOG) {
+  const entry = typeof entryOrId === 'string' ? findModel(catalog, entryOrId) : entryOrId;
+  if (!entry || !resolvedId) return null;
+  return findModel(catalog, resolvedId)?.id === entry.id ? null : String(resolvedId);
+}
+
 export function defaultModelId(engineId, catalog = DEFAULT_CATALOG) {
   const provider = ENGINE_PROVIDER[engineId];
   if (!provider) return null;
