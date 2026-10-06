@@ -10,8 +10,9 @@
     "engine": "claude",
     "claudeCommand": "claude",
     "codexCommand": "codex",
-    "model": "fable",
-    "models": { "claude": "fable", "codex": "gpt-5.6-sol" },
+    "model": "claude-fable-5-1",
+    "models": { "claude": "claude-fable-5-1", "codex": "gpt-5.6-sol" },
+    "reasoningEffortNote": "Optional Codex reasoning effort (one of the efforts models.catalog lists for the Codex model); omit to keep the CLI default.",
     "required": true,
     "batchSize": 6,
     "maximumDescriptionCharacters": 7000,
@@ -19,9 +20,9 @@
     "maxReviewedPerRun": 120,
     "quotaPolicy": {
       "fiveHourLimit": { "retryIntervalMs": 600000, "maxWaitMs": 5400000 },
-      "modelLadder": ["fable", "opus"],
+      "modelLadder": ["claude-fable-5-1", "claude-opus-5-5"],
       "fallbackEngine": null,
-      "patternsNote": "Optional regex overrides per class (fiveHourLimit, modelWeeklyLimit, accountWeeklyLimit, notQuota, genericLimit); see src/engines/quota.mjs for the recorded defaults."
+      "patternsNote": "Optional regex overrides per class (fiveHourLimit, modelWeeklyLimit, accountWeeklyLimit, notQuota, genericLimit, authExpired, modelUnavailable, unknownModel); see src/engines/quota.mjs for the recorded defaults."
     },
     "timeoutMs": 600000
   },
@@ -37,19 +38,26 @@
   },
   "hub": {
     "port": 4747,
-    "chromeCommand": "",
-    "modelChoicesNote": "Options for the Settings page model dropdown; append your own entries (value = name passed to the CLI).",
-    "modelChoices": {
-      "claude": [
-        { "value": "fable", "label": "Fable (recommended)" },
-        { "value": "opus", "label": "Opus" },
-        { "value": "sonnet", "label": "Sonnet" },
-        { "value": "haiku", "label": "Haiku" }
-      ],
-      "codex": [
-        { "value": "gpt-5.6-sol", "label": "gpt-5.6-sol (Codex default)" }
-      ]
-    }
+    "chromeCommand": ""
+  },
+  "models": {
+    "catalogNote": "The model registry: every model the hub may call, by full id. The CLI receives the id; alias is the shorthand the CLI also accepts; efforts apply to Codex models only. Omit to use the defaults in src/engines/catalog.mjs (checked against Claude Code 2.1.292 and codex-cli 0.153.0); an older hub.modelChoices list is migrated automatically.",
+    "catalog": [
+      { "provider": "anthropic", "id": "claude-fable-5-1", "label": "Claude Fable 5.1", "alias": "fable", "isDefault": true },
+      { "provider": "anthropic", "id": "claude-opus-5-5", "label": "Claude Opus 5.5", "alias": "opus" },
+      { "provider": "anthropic", "id": "claude-sonnet-5-5", "label": "Claude Sonnet 5.5", "alias": "sonnet" },
+      { "provider": "anthropic", "id": "claude-haiku-4-5", "label": "Claude Haiku 4.5", "alias": "haiku" },
+      { "provider": "openai", "id": "gpt-5.6-sol", "label": "GPT-5.6 Sol", "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"], "isDefault": true },
+      { "provider": "openai", "id": "gpt-5.6-terra", "label": "GPT-5.6 Terra", "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"] },
+      { "provider": "openai", "id": "gpt-5.6-luna", "label": "GPT-5.6 Luna", "efforts": ["low", "medium", "high", "xhigh", "max"] },
+      { "provider": "openai", "id": "gpt-5.5", "label": "GPT-5.5", "efforts": ["low", "medium", "high", "xhigh"] },
+      { "provider": "openai", "id": "gpt-6-astra", "label": "GPT-6 Astra", "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"] }
+    ]
+  },
+  "plans": {
+    "plansNote": "Plans are detected from the CLIs (Claude: auth status; ChatGPT: codex login status, else the plan claim in ~/.codex/auth.json, decoded locally). manual overrides or fills in a plan; scheduledChange announces a known switch and takes effect on its local date.",
+    "claude": { "scheduledChange": { "plan": "pro", "effectiveDate": "2026-10-26" } },
+    "chatgpt": { "manual": "" }
   },
   "resumes": {
     "autoRefresh": true,

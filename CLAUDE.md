@@ -103,6 +103,39 @@ disabled; do not expand them unless a task says so.
   it; every user-visible engine error goes through humanizeEngineError
   (auth sentence, quota sentence, or "Generation failed (<reason>); details
   in the hub log"); raw text only in the hub log.
+- Model registry (src/engines/catalog.mjs) is the only place that names
+  models: config.models.catalog [{ provider anthropic|openai, id, label,
+  alias, efforts (Codex only) }], defaulting to ids checked against Claude
+  Code 2.1.292 (binary model table) and codex-cli 0.153.0 (`codex debug
+  models`); hub.modelChoices migrates. resolveModel, both engines, the quota
+  ladder, and the hub canonicalize aliases to full ids, so the CLI always gets
+  `--model claude-fable-5-1`; never add a model string elsewhere.
+  semanticMatching.reasoningEffort reaches Codex as `-c
+  model_reasoning_effort="x"` (unset = CLI default).
+- Model status lives in state/model-availability.json (version 2): models
+  (kind not_on_plan | unknown_model, skipped by the ladder), limits (weekly
+  limit, cleared at resetsAt or after 7 days), seen ({ resolvedId,
+  lastUsedAt } from modelUsage of every successful call: matcher recordUsage
+  info, hub letters, Test). Badges: Available, Not verified, Weekly limit,
+  Not on plan, Unknown model (quotaPolicy.patterns.unknownModel, incl. the
+  "not supported when using Codex with a ChatGPT account" refusal).
+- Plans (src/engines/plans.mjs): Claude from auth status; ChatGPT from codex
+  login status, else the plan claim of ~/.codex/auth.json's id_token decoded
+  locally (src/engines/chatgpt-plan.mjs; never log, store, or render a token
+  or any other claim). config.plans.<claude|chatgpt>.manual (Settings form,
+  POST /settings/plans) and .scheduledChange { plan, effectiveDate } (switches
+  on the local date); every plan is labelled auto or manual.
+- Settings (src/hub/model-settings.mjs + model-settings-views.mjs): two plan
+  cards with model tables, Model assignments (Scoring editable, Supplemental,
+  Cover letter draft/editor, reserved Prescreen) with fallback chains, the
+  Model Ladder as a reorderable list (validateLadder: Claude registry models,
+  no repeats, at least one), per-model Test (POST /settings/models/test: fake
+  engine via ctx.makeTestEngine in tests; refused while the run lock is held
+  or a letter generates; never batch). Sidebar: "Claude Max → Pro Oct 26" and
+  "ChatGPT Plus". Each nightly run writes a redacted last envelope
+  (state/logs/claude-envelope-last.json: usage and modelUsage only) for
+  recording fixtures; tests/fixtures/usage/claude-result.synthetic.json is
+  still synthetic until one is recorded.
 - Plan awareness (src/engines/model-availability.mjs): both connection probes
   report `plan` (Claude subscriptionType; Codex when its status prints one);
   the sidebar, the Status Quota card, and the Settings engine radios show it.
@@ -182,7 +215,7 @@ disabled; do not expand them unless a task says so.
   describeConnections). src/subscription-match.mjs only orchestrates batches,
   retries, supplemental review, and local_fallback on top of an engine.
 - config.semanticMatching.engine is "claude" (default) or "codex";
-  models: { claude, codex } holds each engine's model (legacy `model` still
+  models: { claude, codex } holds each engine's model as a registry id (legacy `model` still
   applies to Claude). meta.engine + meta.scoringModel record what a run used.
 - CLI binaries are found by src/engines/cli-path.mjs (config path → PATH →
   ~/.local/bin, /opt/homebrew/bin, /usr/local/bin, ~/.npm-global/bin, nvm);

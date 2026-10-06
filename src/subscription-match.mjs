@@ -262,7 +262,8 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
         schema,
         { tempDirectory },
       );
-      if (typeof options.recordUsage === 'function' && response?.usage) options.recordUsage(purpose, response.usage);
+      // The model asked for and the id the CLI reported ride along, so the registry learns the resolved id.
+      if (typeof options.recordUsage === 'function' && response?.usage) options.recordUsage(purpose, response.usage, { model: engine.model, engine: engine.id, scoringModel: response.scoringModel || null });
       return response;
     };
     const observedModels = new Set();
@@ -346,7 +347,7 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
       if (error && classifyEngineError(error, { now: clock(), policy })?.kind === 'model_unavailable') {
         const refused = engine.model;
         unavailable.add(modelKey(refused));
-        if (typeof options.markUnavailable === 'function') await options.markUnavailable(refused, { plan, notice: engineNotice(error), at: clock().toISOString() });
+        if (typeof options.markUnavailable === 'function') await options.markUnavailable(refused, { plan, notice: engineNotice(error), at: clock().toISOString(), kind: classifyEngineError(error, { now: clock(), policy })?.reason || 'not_on_plan' });
         const next = engineName === 'claude' ? nextAvailableModel(policy.modelLadder, refused, unavailable) : null;
         if (next) {
           quotaEvents.push({ kind: 'model_unavailable', model: refused, plan, resetsAt: null, at: clock().toISOString(), action: 'downgraded', detail: `switched to ${next}`, engine: engineName, message: engineNotice(error) });

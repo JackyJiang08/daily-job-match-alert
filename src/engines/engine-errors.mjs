@@ -57,7 +57,13 @@ export function engineNotice(error) {
 
 export function isModelUnavailableText(text, policy = normalizeQuotaPolicy()) {
   const value = String(text || '');
-  return (policy.patterns.modelUnavailable || []).some(pattern => pattern.test(value));
+  return [...(policy.patterns.modelUnavailable || []), ...(policy.patterns.unknownModel || [])].some(pattern => pattern.test(value));
+}
+
+// 'unknown_model' when the CLI or the account does not know the id at all, else 'not_on_plan'.
+export function modelUnavailableReason(text, policy = normalizeQuotaPolicy()) {
+  const value = String(text || '');
+  return (policy.patterns.unknownModel || []).some(pattern => pattern.test(value)) ? 'unknown_model' : 'not_on_plan';
 }
 
 export function isAuthExpiredText(text, policy = normalizeQuotaPolicy()) {
@@ -72,7 +78,7 @@ export function classifyEngineError(error, { now = new Date(), policy = normaliz
   const notice = engineNotice(error);
   const haystack = `${notice}\n${String(error?.message || '')}`;
   if (error?.code === 'SUBSCRIPTION_AUTH' || isAuthExpiredText(haystack, policy)) return { kind: 'auth_expired', notice };
-  if (error?.code === 'MODEL_UNAVAILABLE' || isModelUnavailableText(haystack, policy)) return { kind: 'model_unavailable', notice, model: error?.model || modelNamed(haystack) || null };
+  if (error?.code === 'MODEL_UNAVAILABLE' || isModelUnavailableText(haystack, policy)) return { kind: 'model_unavailable', notice, model: error?.model || modelNamed(haystack) || null, reason: modelUnavailableReason(haystack, policy) };
   const quota = error?.code === 'SUBSCRIPTION_QUOTA' ? error.quota : classifyQuotaError(new Error(notice || String(error?.message || '')), { now, policy });
   if (quota) return { kind: quota.kind, notice, quota };
   if (error?.code === 'ENOENT' || /\bENOENT\b/.test(String(error?.message || ''))) return { kind: 'missing_cli', notice };

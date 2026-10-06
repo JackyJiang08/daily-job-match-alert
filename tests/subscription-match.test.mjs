@@ -195,7 +195,7 @@ function claudeJsonOutput(results, modelUsage) {
 
 const fableUsage = {
   'claude-haiku-4-5-20251001': { inputTokens: 900, outputTokens: 11, canonicalModel: 'claude-haiku-4-5' },
-  'claude-fable-5': { inputTokens: 5000, outputTokens: 640, cacheCreationInputTokens: 2000, canonicalModel: 'claude-fable-5' },
+  'claude-fable-5-1': { inputTokens: 5000, outputTokens: 640, cacheCreationInputTokens: 2000, canonicalModel: 'claude-fable-5-1' },
 };
 const sonnetUsage = {
   'claude-haiku-4-5-20251001': { inputTokens: 900, outputTokens: 11, canonicalModel: 'claude-haiku-4-5' },
@@ -211,13 +211,14 @@ function claudeRunner(batchOutput) {
 }
 
 test('expands claude --model aliases to canonical model prefixes and compares by prefix', () => {
-  assert.equal(expandModelAlias('fable'), 'claude-fable');
-  assert.equal(expandModelAlias('Opus'), 'claude-opus');
+  assert.equal(expandModelAlias('fable'), 'claude-fable-5-1', 'aliases expand to the registry id');
+  assert.equal(expandModelAlias('Opus'), 'claude-opus-5-5');
   assert.equal(expandModelAlias('claude-sonnet-5'), 'claude-sonnet-5');
   assert.equal(expandModelAlias('claude-opus-4-8[1m]'), 'claude-opus-4-8');
-  assert.equal(modelMatchesConfiguration('fable', 'claude-fable-5'), true);
-  assert.equal(modelMatchesConfiguration('opus', 'claude-opus-4-8'), true);
-  assert.equal(modelMatchesConfiguration('claude-fable-5', 'claude-fable-5'), true);
+  assert.equal(modelMatchesConfiguration('fable', 'claude-fable-5-1'), true);
+  assert.equal(modelMatchesConfiguration('opus', 'claude-opus-5-5'), true);
+  assert.equal(modelMatchesConfiguration('claude-haiku-4-5', 'claude-haiku-4-5-20251001'), true, 'a dated id matches its registry id');
+  assert.equal(modelMatchesConfiguration('claude-fable-5-1', 'claude-fable-5-1'), true);
   assert.equal(modelMatchesConfiguration('fable', 'claude-sonnet-5'), false);
   assert.equal(modelMatchesConfiguration('claude-opus-4-8', 'claude-opus-5'), false);
   assert.equal(modelMatchesConfiguration('', 'claude-sonnet-5'), true);
@@ -225,7 +226,7 @@ test('expands claude --model aliases to canonical model prefixes and compares by
 });
 
 test('extracts the scoring model from modelUsage by output tokens and falls back to null', () => {
-  assert.equal(extractScoringModel({ modelUsage: fableUsage }), 'claude-fable-5');
+  assert.equal(extractScoringModel({ modelUsage: fableUsage }), 'claude-fable-5-1');
   assert.equal(extractScoringModel({ modelUsage: { 'claude-opus-4-8': { outputTokens: 5 } } }), 'claude-opus-4-8');
   assert.equal(extractScoringModel({ model: 'claude-sonnet-5' }), 'claude-sonnet-5');
   assert.equal(extractScoringModel({ results: [] }), null);
@@ -243,9 +244,9 @@ test('records the reported model on reviewed jobs without warning when it matche
     { engine: 'claude_subscription', model: 'fable', warnings, runner: claudeRunner(claudeJsonOutput([semanticResult(sha256(job.url).slice(0, 16))], fableUsage)) },
   );
   assert.equal(reviewed.semanticReviewed, true);
-  assert.equal(reviewed.scoringModel, 'claude-fable-5');
+  assert.equal(reviewed.scoringModel, 'claude-fable-5-1');
   assert.deepEqual(warnings, []);
-  assert.equal(summarizeScoringModel([reviewed]), 'claude-fable-5');
+  assert.equal(summarizeScoringModel([reviewed]), 'claude-fable-5-1');
 });
 
 test('flags a configured model that does not match the model the CLI actually used', async () => {
@@ -264,7 +265,7 @@ test('flags a configured model that does not match the model the CLI actually us
   assert.equal(jobs[0].bestScore, 85);
   const mismatch = warnings.filter(warning => /MODEL MISMATCH/.test(warning.message));
   assert.equal(mismatch.length, 1);
-  assert.match(mismatch[0].message, /"fable".*"claude-sonnet-5"/);
+  assert.match(mismatch[0].message, /"claude-fable-5-1".*"claude-sonnet-5"/);
   assert.equal(mismatch[0].stage, 'llm');
   assert.equal(summarizeScoringModel(jobs), 'claude-sonnet-5');
 });
@@ -282,13 +283,13 @@ test('records unknown with a warning when the CLI output carries no model inform
 });
 
 test('summarizes the scoring model for meta across reviewed, fallback, and local-only runs', () => {
-  assert.equal(summarizeScoringModel([{ semanticReviewed: false, scoringModel: 'claude-fable-5' }]), 'none');
+  assert.equal(summarizeScoringModel([{ semanticReviewed: false, scoringModel: 'claude-fable-5-1' }]), 'none');
   assert.equal(summarizeScoringModel([], 'local_only'), 'local_only');
   assert.equal(summarizeScoringModel([
-    { semanticReviewed: true, scoringModel: 'claude-fable-5' },
+    { semanticReviewed: true, scoringModel: 'claude-fable-5-1' },
     { semanticReviewed: true, scoringModel: 'claude-sonnet-5' },
-    { semanticReviewed: true, scoringModel: 'claude-fable-5' },
-  ]), 'claude-fable-5, claude-sonnet-5');
+    { semanticReviewed: true, scoringModel: 'claude-fable-5-1' },
+  ]), 'claude-fable-5-1, claude-sonnet-5');
 });
 
 test('a CLI that exits before reading its prompt is reported as a failed exit, not an EPIPE crash', async () => {

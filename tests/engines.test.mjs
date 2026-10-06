@@ -39,14 +39,16 @@ test('both engines expose the same interface and the registry normalizes ids and
   assert.equal(normalizeEngineId('codex_subscription'), null);
   assert.equal(normalizeEngineId('openai_api'), null);
   assert.throws(() => createEngine('codex_subscription'), /Unsupported semanticMatching.engine: codex_subscription/);
-  assert.equal(resolveModel({}), 'fable');
+  assert.equal(resolveModel({}), 'claude-fable-5-1', 'the registry default, as a full id');
   assert.equal(resolveModel({ engine: 'codex' }), 'gpt-5.6-sol');
   assert.equal(resolveModel({ engine: 'codex', model: 'fable' }), 'gpt-5.6-sol', 'the legacy single model only ever named Claude aliases');
   assert.equal(resolveModel({ engine: 'codex', models: { codex: 'gpt-5.5' } }), 'gpt-5.5');
-  assert.equal(resolveModel({ engine: 'claude', model: 'opus', models: { claude: 'sonnet' } }), 'sonnet');
-  assert.equal(createEngine('claude').model, 'fable');
+  assert.equal(resolveModel({ engine: 'claude', model: 'opus', models: { claude: 'sonnet' } }), 'claude-sonnet-5-5', 'an alias resolves to its registry id');
+  assert.equal(resolveModel({ engine: 'claude', models: { claude: 'my-custom-model' } }), 'my-custom-model', 'a name outside the registry passes through');
+  assert.equal(createEngine('claude').model, 'claude-fable-5-1');
   assert.equal(createEngine('codex').model, 'gpt-5.6-sol');
-  assert.equal(createEngine('claude', { model: 'fable' }).modelMatches('claude-fable-5'), true);
+  assert.equal(createEngine('claude', { model: 'fable' }).model, 'claude-fable-5-1', 'the engine passes the full id to the CLI');
+  assert.equal(createEngine('claude', { model: 'fable' }).modelMatches('claude-fable-5-1'), true);
   assert.equal(createEngine('codex', { model: 'gpt-5.6-sol' }).modelMatches('gpt-5.6-sol'), true);
   assert.equal(createEngine('codex', { model: 'gpt-5.6-sol' }).modelMatches('gpt-5.5'), false);
 });
@@ -174,14 +176,19 @@ test('connection probes report installed, connected, and signed-out states witho
   const found = async name => ({ found: true, command: `/fake/bin/${name}`, source: 'path', configured: null, configuredMissing: false, searched: [`/fake/bin/${name}`] });
   const location = name => ({ path: `/fake/bin/${name}`, source: 'path', configured: null, configuredMissing: false, searched: [`/fake/bin/${name}`] });
   const claudeRunner = status => async () => ({ stdout: JSON.stringify(status), stderr: '' });
-  assert.deepEqual(await describeClaudeConnection({ resolveCommand: found, runner: claudeRunner({ loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty', subscriptionType: 'max' }) }), { installed: true, connected: true, detail: 'Claude · Max · claude.ai', hint: null, reason: null, plan: 'max', ...location('claude') });
+  assert.deepEqual(await describeClaudeConnection({ resolveCommand: found, runner: claudeRunner({ loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty', subscriptionType: 'max' }) }), { installed: true, connected: true, detail: 'Claude · Max · claude.ai', hint: null, reason: null, plan: 'max', planSource: 'auth status', version: null, ...location('claude') });
   const consoleLogin = await describeClaudeConnection({ resolveCommand: found, runner: claudeRunner({ loggedIn: true, authMethod: 'console' }) });
   assert.equal(consoleLogin.connected, false);
   assert.equal(consoleLogin.hint, 'claude auth login --claudeai');
   const missingClaude = await describeClaudeConnection({ resolveCommand: found, runner: async () => { throw Object.assign(new Error('spawn claude ENOENT'), { code: 'ENOENT' }); } });
   assert.deepEqual([missingClaude.installed, missingClaude.connected, missingClaude.path], [false, false, null]);
 
-  assert.deepEqual(await describeCodexConnection({ resolveCommand: found, runner: async () => ({ stdout: 'Logged in using ChatGPT', stderr: '' }) }), { installed: true, connected: true, detail: 'Codex · ChatGPT', hint: null, reason: null, plan: null, ...location('codex') });
+  assert.deepEqual(await describeCodexConnection({ resolveCommand: found, readChatgptPlan: async () => null, runner: async () => ({ stdout: 'Logged in using ChatGPT', stderr: '' }) }), { installed: true, connected: true, detail: 'Codex · ChatGPT', hint: null, reason: null, plan: null, planSource: null, version: null, ...location('codex') });
+  // codex login status prints no plan: the plan claim from auth.json fills in, with its source, and the version comes from --version.
+  const viaAuthFile = await describeCodexConnection({ resolveCommand: found, readChatgptPlan: async () => ({ plan: 'plus', source: 'auth.json' }), runner: async (_command, args) => ({ stdout: args.includes('--version') ? 'codex-cli 0.153.0' : 'Logged in using ChatGPT', stderr: '' }) });
+  assert.deepEqual([viaAuthFile.plan, viaAuthFile.planSource, viaAuthFile.version, viaAuthFile.detail], ['plus', 'auth.json', '0.153.0', 'Codex · ChatGPT · plus']);
+  const printed = await describeCodexConnection({ resolveCommand: found, readChatgptPlan: async () => { throw new Error('must not read auth.json when status names the plan'); }, runner: async () => ({ stdout: 'Logged in using ChatGPT (pro)', stderr: '' }) });
+  assert.deepEqual([printed.plan, printed.planSource], ['pro', 'login status']);
   const apiKey = await describeCodexConnection({ resolveCommand: found, runner: async () => ({ stdout: 'Logged in using API key', stderr: '' }) });
   assert.equal(apiKey.connected, false);
   assert.equal(apiKey.hint, 'codex login');

@@ -13,6 +13,7 @@
 // Classification is conservative: a limit that names a model is modelWeeklyLimit; anything that says
 // weekly, seven-day, or credits is accountWeeklyLimit; a generic notice is fiveHourLimit only when its
 // reset time is at most five hours away, otherwise accountWeeklyLimit.
+import { DEFAULT_CATALOG, canonicalModelId, defaultLadder, providerModels } from './catalog.mjs';
 import { normalizeModelName } from './shared.mjs';
 
 export const QUOTA_KINDS = ['fiveHourLimit', 'modelWeeklyLimit', 'accountWeeklyLimit'];
@@ -46,6 +47,14 @@ export const DEFAULT_QUOTA_PATTERNS = {
     'upgrade to (?:pro|max|team|enterprise) to use',
     'model[^.\\n]{0,60}(?:not found|does not exist|is not available|not available)',
     'unknown model',
+  ],
+  // The subset that means the id itself is wrong for this CLI or account (Settings badge "Unknown model"),
+  // not that the plan lacks it: "Unknown model `x`" is verbatim from the codex 0.153.0 binary; the
+  // ChatGPT-account sentence comes from the server and was given by the owner.
+  unknownModel: [
+    'unknown model',
+    'model[^.\\n]{0,60}(?:not found|does not exist)',
+    'not supported when using codex with a chatgpt account',
   ],
   notQuota: [
     'not your usage limit',
@@ -83,7 +92,7 @@ export const DEFAULT_QUOTA_PATTERNS = {
 
 export const DEFAULT_QUOTA_POLICY = {
   fiveHourLimit: { retryIntervalMs: 10 * 60 * 1000, maxWaitMs: 90 * 60 * 1000 },
-  modelLadder: ['fable', 'opus'],
+  modelLadder: defaultLadder(),
   fallbackEngine: null,
   patterns: {},
 };
@@ -95,8 +104,9 @@ function compile(list) {
 export function normalizeQuotaPolicy(raw = {}) {
   const policy = raw && typeof raw === 'object' ? raw : {};
   const fiveHour = policy.fiveHourLimit && typeof policy.fiveHourLimit === 'object' ? policy.fiveHourLimit : {};
+  // Ladder steps are registry ids; an alias written by an older config ("fable") maps to its entry.
   const ladder = (Array.isArray(policy.modelLadder) ? policy.modelLadder : typeof policy.modelLadder === 'string' ? policy.modelLadder.split(',') : DEFAULT_QUOTA_POLICY.modelLadder)
-    .map(item => normalizeModelName(item)).filter(Boolean);
+    .map(item => normalizeModelName(item)).filter(Boolean).map(item => canonicalModelId(item, 'anthropic', Array.isArray(policy.catalog) ? policy.catalog : DEFAULT_CATALOG));
   const overrides = policy.patterns && typeof policy.patterns === 'object' ? policy.patterns : {};
   const patterns = Object.fromEntries(Object.keys(DEFAULT_QUOTA_PATTERNS).map(kind => [kind, compile(Array.isArray(overrides[kind]) ? overrides[kind] : DEFAULT_QUOTA_PATTERNS[kind])]));
   return {
@@ -156,9 +166,17 @@ function nextClockInZone(now, hour, minute, zone) {
 }
 
 // "Fable limit", "seven_day_opus": model names may sit between underscores as well as spaces.
+// The model a refusal names, as its registry id: a full id ("claude-opus-5-5"), or a family word the CLI
+// uses in its notices ("Your Fable limit") matched against the registry aliases.
+const ALIAS_WORDS = providerModels(DEFAULT_CATALOG, 'anthropic').map(entry => entry.alias).filter(Boolean);
+const NAMED_MODEL = new RegExp(`(?:^|[^a-z])(${ALIAS_WORDS.join('|')})(?![a-z])`, 'i');
+const MODEL_ID_IN_TEXT = /(?:^|[^a-z0-9.-])((?:claude|gpt)-[a-z0-9][a-z0-9.-]*[a-z0-9])(?:\[1m\])?(?![a-z0-9])/i;
 export function modelNamed(text) {
-  const match = /(?:^|[^a-z])(fable|opus|sonnet|haiku)(?![a-z])/i.exec(String(text || ''));
-  return match ? match[1].toLowerCase() : null;
+  const value = String(text || '');
+  const written = MODEL_ID_IN_TEXT.exec(value);
+  if (written) return canonicalModelId(written[1], null, DEFAULT_CATALOG).toLowerCase();
+  const match = NAMED_MODEL.exec(value);
+  return match ? canonicalModelId(match[1].toLowerCase(), 'anthropic', DEFAULT_CATALOG) : null;
 }
 
 // { kind, model, resetsAt, message } for a quota refusal, or null when the error is something else.
@@ -197,7 +215,8 @@ export function describeQuota(quota, { timeZone = 'America/Chicago' } = {}) {
   if (!quota) return '';
   if (quota.kind === 'model_unavailable') return `Claude model ${quota.model || 'unknown'} is not available on ${planLabel(quota.plan)}`;
   if (quota.kind === 'auth_expired') return 'Claude session expired';
-  const label = quota.kind === 'modelWeeklyLimit' && quota.model ? `${quota.model.charAt(0).toUpperCase()}${quota.model.slice(1)} weekly limit` : QUOTA_LABELS[quota.kind] || 'usage limit';
+  // Older payloads stored the family word ("fable"); it is shown as the registry id like everything else.
+  const label = quota.kind === 'modelWeeklyLimit' && quota.model ? `${canonicalModelId(quota.model, null, DEFAULT_CATALOG)} weekly limit` : QUOTA_LABELS[quota.kind] || 'usage limit';
   const reset = quota.resetsAt ? `; expected to reset ${new Date(quota.resetsAt).toLocaleString('en-US', { timeZone, dateStyle: 'medium', timeStyle: 'short' })}` : '';
   return `Claude subscription ${label} reached${reset}`;
 }
@@ -205,7 +224,7 @@ export function describeQuota(quota, { timeZone = 'America/Chicago' } = {}) {
 // The next model down the ladder after `model`, or null at the bottom (or when the model is not on it).
 export function nextLadderModel(policy, model) {
   const ladder = policy.modelLadder || [];
-  const index = ladder.indexOf(normalizeModelName(model));
+  const index = ladder.indexOf(canonicalModelId(normalizeModelName(model), 'anthropic', DEFAULT_CATALOG));
   return index >= 0 && index + 1 < ladder.length ? ladder[index + 1] : null;
 }
 

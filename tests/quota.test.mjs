@@ -14,7 +14,7 @@ const RESUMES = [{ id: 'data', label: 'Data', text: 'resume' }];
 function candidate(index) {
   return { url: `https://example.com/jobs/${index}`, title: `Analyst ${index}`, company: 'Acme', description: 'x', bestScore: 50, scores: { data: 50 }, scoreDetails: { data: { roleRelevance: 25 } }, blockers: [], reasons: [], gaps: [] };
 }
-function okResponse(batch, model = 'claude-fable-5') {
+function okResponse(batch, model = 'claude-fable-5-1') {
   return { results: batch.map(job => ({ id: job.semanticId, roleType: 'new_grad', scores: { data: 80 }, recommendedTrack: 'data', matchLevel: 'high', reasons: ['fit'], gaps: [], blockers: [] })), scoringModel: model };
 }
 function fakeEngine(id, model, behaviour) {
@@ -49,13 +49,14 @@ test('refusal texts classify into the three limit classes from the recorded fixt
   assert.equal(parseResetTime('nothing here', now), null);
   const custom = normalizeQuotaPolicy({ patterns: { accountWeeklyLimit: ['tenant budget exhausted'] }, modelLadder: 'fable, opus, sonnet', fallbackEngine: 'codex', fiveHourLimit: { retryIntervalMs: 1000, maxWaitMs: 5000 } });
   assert.equal(classifyQuotaError(new Error('tenant budget exhausted'), { policy: custom }).kind, 'accountWeeklyLimit');
-  assert.deepEqual(custom.modelLadder, ['fable', 'opus', 'sonnet']);
+  assert.deepEqual(custom.modelLadder, ['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5'], 'aliases in an older config map to registry ids');
   assert.equal(custom.fallbackEngine, 'codex');
   assert.deepEqual(custom.fiveHourLimit, { retryIntervalMs: 1000, maxWaitMs: 5000 });
-  assert.equal(nextLadderModel(custom, 'opus'), 'sonnet');
+  assert.equal(nextLadderModel(custom, 'opus'), 'claude-sonnet-5-5', 'an alias finds its step');
+  assert.equal(nextLadderModel(custom, 'claude-opus-5-5'), 'claude-sonnet-5-5');
   assert.equal(nextLadderModel(custom, 'sonnet'), null);
   assert.equal(nextLadderModel(custom, 'haiku'), null, 'a model off the ladder has no next step');
-  assert.equal(describeQuota({ kind: 'modelWeeklyLimit', model: 'fable', resetsAt: '2026-09-22T14:00:00Z' }, { timeZone: 'America/Chicago' }), 'Claude subscription Fable weekly limit reached; expected to reset Sep 22, 2026, 9:00 AM');
+  assert.equal(describeQuota({ kind: 'modelWeeklyLimit', model: 'claude-fable-5-1', resetsAt: '2026-09-22T14:00:00Z' }, { timeZone: 'America/Chicago' }), 'Claude subscription claude-fable-5-1 weekly limit reached; expected to reset Sep 22, 2026, 9:00 AM');
   assert.equal(describeQuota({ kind: 'accountWeeklyLimit' }), 'Claude subscription weekly account limit reached');
   assert.equal(new QuotaError({ kind: 'fiveHourLimit' }).code, 'SUBSCRIPTION_QUOTA');
 });
@@ -121,23 +122,23 @@ test('a model weekly limit steps down the ladder, audits the switch as an info l
   const jobs = [candidate(1), candidate(2), candidate(3)];
   const spy = [];
   const run = await runWithScript({ jobs, makeEngineSpy: spy, script: ({ batch, model }) => {
-    if (model === 'fable') throw new Error("claude exited 1: You've reached your Fable limit. Your Fable limit resets at 9am (America/Chicago).");
-    return okResponse(batch, 'claude-opus-5');
+    if (model === 'claude-fable-5-1') throw new Error("claude exited 1: You've reached your Fable limit. Your Fable limit resets at 9am (America/Chicago).");
+    return okResponse(batch, 'claude-opus-5-5');
   } });
-  assert.deepEqual(spy.map(item => item.model), ['fable', 'opus'], 'one downgrade for the whole run');
+  assert.deepEqual(spy.map(item => item.model), ['claude-fable-5-1', 'claude-opus-5-5'], 'one downgrade for the whole run');
   assert.equal(run.evaluated.filter(job => job.semanticReviewed).length, 3);
-  assert.deepEqual([...new Set(run.evaluated.map(job => job.scoringModel))], ['claude-opus-5']);
+  assert.deepEqual([...new Set(run.evaluated.map(job => job.scoringModel))], ['claude-opus-5-5']);
   assert.equal(run.warnings.some(warning => /MODEL MISMATCH/.test(warning.message)), false, 'a strategic downgrade is not a mismatch');
-  const audit = run.warnings.find(warning => /scored by opus/.test(warning.message));
+  const audit = run.warnings.find(warning => /scored by claude-opus-5-5/.test(warning.message));
   assert.equal(audit.level, 'info');
-  assert.equal(audit.message, 'scored by opus: fable weekly limit');
-  assert.deepEqual([run.quotaEvents[0].kind, run.quotaEvents[0].action, run.quotaEvents[0].detail, run.quotaEvents[0].model], ['modelWeeklyLimit', 'downgraded', 'switched to opus', 'fable']);
+  assert.equal(audit.message, 'scored by claude-opus-5-5: claude-fable-5-1 weekly limit');
+  assert.deepEqual([run.quotaEvents[0].kind, run.quotaEvents[0].action, run.quotaEvents[0].detail, run.quotaEvents[0].model], ['modelWeeklyLimit', 'downgraded', 'switched to claude-opus-5-5', 'claude-fable-5-1']);
 
   const nextSpy = [];
   const next = await runWithScript({ jobs, makeEngineSpy: nextSpy, script: ({ batch }) => okResponse(batch) });
-  assert.deepEqual(nextSpy.map(item => item.model), ['fable'], 'nothing is persisted: the next run tries the preferred model first');
+  assert.deepEqual(nextSpy.map(item => item.model), ['claude-fable-5-1'], 'nothing is persisted: the next run tries the preferred model first');
   assert.equal(next.quotaEvents.length, 0);
-  assert.deepEqual([...new Set(next.evaluated.map(job => job.scoringModel))], ['claude-fable-5']);
+  assert.deepEqual([...new Set(next.evaluated.map(job => job.scoringModel))], ['claude-fable-5-1']);
 
   const bottom = await runWithScript({ jobs, policy: { modelLadder: ['fable'] }, script: () => { throw new Error('claude exited 1: Fable limit reached'); } });
   assert.deepEqual(bottom.evaluated.map(job => job.quotaDeferred), [true, true, true], 'no model left: deferred');
@@ -165,7 +166,7 @@ test('an account weekly limit defers every remaining posting, or hands the run t
     if (id === 'claude') throw new Error('claude exited 1: you have reached your weekly usage limit');
     return okResponse(batch, 'gpt-5.6-sol');
   } });
-  assert.deepEqual(spy.map(item => [item.id, item.model]), [['claude', 'fable'], ['codex', 'gpt-5.6-sol']]);
+  assert.deepEqual(spy.map(item => [item.id, item.model]), [['claude', 'claude-fable-5-1'], ['codex', 'gpt-5.6-sol']]);
   assert.equal(codexRun.evaluated.every(job => job.semanticReviewed && job.scoringEngine === 'codex' && job.scoringModel === 'gpt-5.6-sol'), true);
   assert.equal(codexRun.evaluated.some(job => job.quotaDeferred), false);
   assert.deepEqual([codexRun.quotaEvents[0].action, codexRun.quotaEvents[0].detail], ['fallback-engine', 'switched to codex']);
@@ -178,7 +179,7 @@ test('the run summary and the report banner describe an account-wide refusal and
   const policy = normalizeQuotaPolicy(config.semanticMatching.quotaPolicy);
   const halted = summarizeQuota([{ kind: 'accountWeeklyLimit', model: null, resetsAt: '2026-09-22T14:00:00Z', at: '2026-09-19T01:05:00Z', action: 'deferred', detail: 'codex fallback is not connected', engine: 'claude' }], policy, config, 37);
   assert.equal(halted.banner, 'Claude subscription weekly account limit reached; expected to reset Sep 22, 2026, 9:00 AM; 37 posting(s) were deferred to the next run and are not lost');
-  assert.deepEqual([halted.effectiveEngine, halted.effectiveModel, halted.deferredByQuota], ['claude', 'fable', 37]);
+  assert.deepEqual([halted.effectiveEngine, halted.effectiveModel, halted.deferredByQuota], ['claude', 'claude-fable-5-1', 37]);
   const downgraded = summarizeQuota([{ kind: 'modelWeeklyLimit', model: 'fable', at: '2026-09-19T01:05:00Z', action: 'downgraded', detail: 'switched to opus', engine: 'claude' }], policy, config, 0);
   assert.equal(downgraded.banner, null, 'a downgrade is explained in Run Details, not shouted in a banner');
   assert.equal(downgraded.effectiveModel, 'opus');
@@ -191,6 +192,6 @@ test('the run summary and the report banner describe an account-wide refusal and
   const meta = { date: '2026-09-19', timeZone: 'America/Chicago', resumeTracks: [{ id: 'data', label: 'Data' }], warnings: [], quota: halted };
   const html = renderReportBody(buildReportView([], meta));
   assert.match(html, /<div class="banner" data-banner="quota">Claude subscription weekly account limit reached; expected to reset Sep 22, 2026, 9:00 AM; 37 posting\(s\) were deferred to the next run and are not lost<\/div>/);
-  assert.match(html, /<dt>Subscription quota<\/dt><dd>1 event\(s\) · scored by claude · fable · 37 deferred<ul><li>Claude subscription weekly account limit reached; expected to reset Sep 22, 2026, 9:00 AM: deferred \(codex fallback is not connected\)<\/li><\/ul><\/dd>/);
+  assert.match(html, /<dt>Subscription quota<\/dt><dd>1 event\(s\) · scored by claude · claude-fable-5-1 · 37 deferred<ul><li>Claude subscription weekly account limit reached; expected to reset Sep 22, 2026, 9:00 AM: deferred \(codex fallback is not connected\)<\/li><\/ul><\/dd>/);
   assert.doesNotMatch(renderReportBody(buildReportView([], { ...meta, quota: waited })), /data-banner="quota"/);
 });

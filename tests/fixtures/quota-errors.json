@@ -50,28 +50,28 @@
     {
       "text": "claude exited 1: You've reached your Fable limit. Your Fable limit resets at 9am (America/Chicago).",
       "kind": "modelWeeklyLimit",
-      "model": "fable",
+      "model": "claude-fable-5-1",
       "note": "verbatim model notice"
     },
     {
       "text": "claude exited 1: Fable limit reached · continuing on Opus",
       "kind": "modelWeeklyLimit",
-      "model": "fable"
+      "model": "claude-fable-5-1"
     },
     {
       "text": "claude exited 1: Opus limit reached",
       "kind": "modelWeeklyLimit",
-      "model": "opus"
+      "model": "claude-opus-5-5"
     },
     {
       "text": "claude exited 1: seven_day_opus utilization 100%",
       "kind": "modelWeeklyLimit",
-      "model": "opus"
+      "model": "claude-opus-5-5"
     },
     {
       "text": "claude exited 1: Fable 5 requires usage credits",
       "kind": "modelWeeklyLimit",
-      "model": "fable"
+      "model": "claude-fable-5-1"
     },
     {
       "text": "claude exited 1: Server is temporarily limiting requests (not your usage limit)",
@@ -92,5 +92,6 @@
       "kind": null
     }
   ],
-  "testClock": "2026-09-19T10:00:00Z"
+  "testClock": "2026-09-19T10:00:00Z",
+  "modelField": "model holds the registry id (src/engines/catalog.mjs) the notice names; family words map to their entry, ids written in the text are kept verbatim"
 }

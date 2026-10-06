@@ -1,0 +1,11 @@
+{
+  "auth_mode": "chatgpt",
+  "OPENAI_API_KEY": null,
+  "tokens": {
+    "id_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL2F1dGguZXhhbXBsZS5jb20iLCJzdWIiOiJ1c2VyLWZha2UiLCJlbWFpbCI6ImphbmUuZG9lQGV4YW1wbGUuY29tIiwibmFtZSI6IkphbmUgRG9lIiwiaHR0cHM6Ly9hcGkub3BlbmFpLmNvbS9hdXRoIjp7ImNoYXRncHRfYWNjb3VudF9pZCI6ImFjY3QtZmFrZSJ9fQ.ZmFrZS1zaWduYXR1cmUtbm90LXJlYWw",
+    "access_token": "FAKE-ACCESS-TOKEN-0000",
+    "refresh_token": "FAKE-REFRESH-TOKEN-0000",
+    "account_id": "00000000-0000-4000-8000-00000000abcd"
+  },
+  "last_refresh": "2026-10-01T00:00:00Z"
+}

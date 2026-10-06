@@ -9,8 +9,8 @@ import { graduationTerms } from '../cover-letter/compose.mjs';
 import { renderLetterPdf } from '../cover-letter/pdf.mjs';
 import { LetterInputError } from '../cover-letter/store.mjs';
 import { sha256 } from '../utils.mjs';
-import { HubInputError, currentPlans, markModelUnavailableInHub, modelAvailabilityView, readReportPayload } from './services.mjs';
-import { firstAvailableModel, nextAvailableModel } from '../engines/model-availability.mjs';
+import { HubInputError, currentPlans, markModelUnavailableInHub, modelAvailabilityView, readReportPayload, updateAvailabilityInHub } from './services.mjs';
+import { firstAvailableModel, markModelUsed, markWeeklyLimit, nextAvailableModel } from '../engines/model-availability.mjs';
 import { planLabel } from '../engines/quota.mjs';
 import { appendUsage, usageEntries, usagePath } from '../engines/usage.mjs';
 import { displayCompanyName } from '../posting-fields.mjs';
@@ -61,6 +61,7 @@ function withUsageRecording(ctx, engine) {
   wrapped.generateText = async (prompt, context) => {
     const response = await engine.generateText(prompt, context);
     if (response?.usage?.parseEmpty) console.error(`[cover-letter] usage parse empty: a successful ${engine.id} call returned no readable modelUsage; it is not counted in the usage log`);
+    await updateAvailabilityInHub(ctx, record => markModelUsed(record, engine.model, { resolvedId: response?.scoringModel || null, at: ctx.now().toISOString() })).catch(error => console.error(`[cover-letter] could not record model availability: ${error?.message || error}`));
     if (response?.usage?.models?.length) {
       const purpose = String(prompt || '').startsWith('EDITOR REVIEW') ? 'editor' : 'letter';
       const entries = usageEntries(response.usage, { purpose, at: ctx.now().toISOString(), source: 'hub' });
@@ -100,7 +101,7 @@ async function withQuotaPolicy(ctx, config, engineChoice, attempt) {
   } catch (error) {
     const verdict = classifyEngineError(error, { policy });
     if (verdict?.kind === 'model_unavailable' && first.id === 'claude') {
-      await markModelUnavailableInHub(ctx, first.model, { plan: plans.claude, notice: verdict.notice, at: ctx.now().toISOString() }).catch(() => {});
+      await markModelUnavailableInHub(ctx, first.model, { plan: plans.claude, notice: verdict.notice, at: ctx.now().toISOString(), kind: verdict.reason || 'not_on_plan' }).catch(() => {});
       ctx.quotaLog?.record?.({ kind: 'model_unavailable', model: first.model, plan: plans.claude, at: ctx.now().toISOString(), engine: first.id, source: 'cover-letter', action: 'downgraded' });
       const next = nextAvailableModel(policy.modelLadder, first.model, [...availability.unavailable, first.model]);
       if (next) {
@@ -110,7 +111,7 @@ async function withQuotaPolicy(ctx, config, engineChoice, attempt) {
           return settle(fallback, { result: await attempt(fallback), engine: fallback, downgradeNote: note });
         } catch (secondError) {
           const again = classifyEngineError(secondError, { policy });
-          if (again?.kind === 'model_unavailable') { await markModelUnavailableInHub(ctx, next, { plan: plans.claude, notice: again.notice, at: ctx.now().toISOString() }).catch(() => {}); }
+          if (again?.kind === 'model_unavailable') { await markModelUnavailableInHub(ctx, next, { plan: plans.claude, notice: again.notice, at: ctx.now().toISOString(), kind: again.reason || 'not_on_plan' }).catch(() => {}); }
           throw new EngineError(humanizeEngineError(Object.assign(secondError, { plan: plans.claude }), { policy, timeZone: config.timeZone }).message, secondError, again?.kind || 'engine_error');
         }
       }
@@ -127,6 +128,7 @@ async function withQuotaPolicy(ctx, config, engineChoice, attempt) {
       throw new EngineError(humanizeEngineError(error, { policy, timeZone: config.timeZone }).message, error);
     }
     ctx.quotaLog?.record?.({ ...quota, at: ctx.now().toISOString(), engine: first.id, model: first.model, source: 'cover-letter', action: 'refused' });
+    if (quota.kind === 'modelWeeklyLimit') await updateAvailabilityInHub(ctx, record => markWeeklyLimit(record, quota.model || first.model, { at: ctx.now().toISOString(), resetsAt: quota.resetsAt, notice: quota.message })).catch(() => {});
     const next = quota.kind === 'modelWeeklyLimit' ? nextLadderModel(policy, first.model) : null;
     if (next && first.id === 'claude') {
       const fallback = letterEngineFor(ctx, config, { ...engineChoice, engine: first.id, model: next });

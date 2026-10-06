@@ -64,28 +64,46 @@
     {
       "notice": "The model claude-fable-5 is not available on your plan.",
       "kind": "model_unavailable",
-      "model": "fable",
-      "note": "plan-gated model"
+      "model": "claude-fable-5",
+      "note": "plan-gated model",
+      "reason": "not_on_plan"
     },
     {
       "notice": "Fable requires a Max subscription. Switch to Sonnet or upgrade.",
       "kind": "model_unavailable",
-      "model": "fable"
+      "model": "claude-fable-5-1",
+      "reason": "not_on_plan"
     },
     {
       "notice": "model: claude-opus-9 not found",
       "kind": "model_unavailable",
-      "model": "opus"
+      "model": "claude-opus-9",
+      "reason": "unknown_model"
     },
     {
       "notice": "Unknown model 'claude-haiku-9'",
       "kind": "model_unavailable",
-      "model": "haiku"
+      "model": "claude-haiku-9",
+      "reason": "unknown_model"
     },
     {
       "notice": "Fable 5 requires usage credits",
       "kind": "modelWeeklyLimit",
       "note": "credits, not availability: stays a quota"
+    },
+    {
+      "notice": "Unknown model `gpt-9-preview`",
+      "kind": "model_unavailable",
+      "model": "gpt-9-preview",
+      "reason": "unknown_model",
+      "note": "prefix verbatim from the codex-cli 0.153.0 binary"
+    },
+    {
+      "notice": "The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account.",
+      "kind": "model_unavailable",
+      "model": "gpt-5.5",
+      "reason": "unknown_model",
+      "note": "server-side refusal; wording supplied by the owner, not found in the binary"
     }
   ]
 }

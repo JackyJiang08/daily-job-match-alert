@@ -8,6 +8,7 @@ import { USAGE_PURPOSES, describeTotals, formatTokens } from '../engines/usage.m
 import { modelKey } from '../engines/model-availability.mjs';
 import { htmlEscape } from '../utils.mjs';
 import { LETTER_STYLES, coverLetterSettingsSection } from './letter-views.mjs';
+import { MODEL_SETTINGS_STYLES, assignmentsFieldset, ladderEditor, subscriptionSection } from './model-settings-views.mjs';
 
 export const HUB_TITLE = 'Daily Job Match Alert Hub';
 export const HUB_BRAND = 'Job Match Hub';
@@ -167,11 +168,13 @@ function renderMiniStatus(sidebar, timeZone, now) {
     : sidebar.nextRunAt
       ? `<span id="next-run" data-at="${htmlEscape(sidebar.nextRunAt)}" data-overdue-suffix="${htmlEscape(suffix)}">${htmlEscape(formatLocalShort(sidebar.nextRunAt, timeZone))} · <span class="rel${relative === 'overdue' ? ' overdue' : ''}">${htmlEscape(relative === 'overdue' ? `overdue${suffix}` : relative)}</span></span>`
       : '—';
-  const planLine = engine => {
-    const plan = sidebar.plans?.[engine];
-    return plan ? `<span data-plan="${engine}">${engine === 'claude' ? 'Claude' : 'Codex'} · ${htmlEscape(planLabel(plan))}</span>` : '';
-  };
-  const auth = sidebar.claudeAuth?.expired ? '<b>Claude</b><span class="bad" data-auth="expired">Session expired</span>' : (sidebar.plans?.claude || sidebar.plans?.codex ? `<b>Plan</b>${[planLine('claude'), planLine('codex')].filter(Boolean).join('<br>')}` : '');
+  // Plan: one line per subscription ("Claude Max → Pro Oct 26", "ChatGPT Plus"); an expired Claude login
+  // replaces the Claude line.
+  const lines = sidebar.planLines || {};
+  const claudeLine = sidebar.claudeAuth?.expired ? null : lines.claude && lines.claude.plan ? `<span data-plan="claude">${htmlEscape(lines.claude.sidebar)}</span>` : null;
+  const chatgptLine = lines.chatgpt && lines.chatgpt.plan ? `<span data-plan="chatgpt">${htmlEscape(lines.chatgpt.sidebar)}</span>` : null;
+  const planBlock = claudeLine || chatgptLine ? `<b>Plan</b>${[claudeLine, chatgptLine].filter(Boolean).join('<br>')}` : '';
+  const auth = `${sidebar.claudeAuth?.expired ? '<b>Claude</b><span class="bad" data-auth="expired">Session expired</span>' : ''}${planBlock}`;
   return `<div class="mini"><b>Last run</b>${last}<b>Next run</b>${next}${auth}</div>`;
 }
 
@@ -183,7 +186,7 @@ export function renderHubPage({ active, title, content, notice = '', error = '',
   ].join('');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${htmlEscape(title)} — ${htmlEscape(HUB_TITLE)}</title>
-<style>${REPORT_STYLES}${HUB_STYLES}${LETTER_STYLES}</style></head>
+<style>${REPORT_STYLES}${HUB_STYLES}${LETTER_STYLES}${MODEL_SETTINGS_STYLES}</style></head>
 <body><div class="hub"><nav class="hub-nav"><p class="brand">${htmlEscape(HUB_BRAND)}</p>${nav}${renderMiniStatus(sidebar, timeZone, now)}</nav>
 <main class="hub-main"><div class="hub-content">${flash}${content}</div></main></div>
 <script>${REPORT_SCRIPT}${HUB_SCRIPT}${script}</script>
@@ -544,7 +547,7 @@ export const STATUS_SCRIPT = `
 
 // ---------------------------------------------------------------------------------------------- settings
 
-function connectionRow(name, engine, item) {
+export function connectionRow(name, engine, item) {
   if (!item) return `<dt>${htmlEscape(name)}</dt><dd><span class="muted">Not checked</span></dd>`;
   const stale = item.configuredMissing && item.configured ? ` <span class="badge badge-warn" data-conn="stale-config" title="config points at ${htmlEscape(item.configured)}, which does not exist">config path missing</span>` : '';
   const where = item.path ? `<br><span class="muted mono" title="${htmlEscape((item.searched || []).join('\n'))}">${htmlEscape(item.path)}${item.source === 'config' ? ' (from config)' : ''}</span>${stale}` : '';
@@ -567,44 +570,51 @@ function engineBadge(item) {
   return '<span class="badge badge-warn" data-engine-state="disconnected">Not connected</span>';
 }
 
+// Codex reasoning effort for the scoring model: the efforts the registry lists for it, or the CLI default.
+function effortSelect(settings) {
+  const entry = (settings.catalog || []).find(item => item.id === settings.models.codex);
+  const efforts = entry?.efforts || [];
+  const current = settings.reasoningEffort || '';
+  const options = [`<option value=""${current ? '' : ' selected'}>CLI default</option>`, ...efforts.map(effort => `<option value="${htmlEscape(effort)}"${effort === current ? ' selected' : ''}>${htmlEscape(effort)}</option>`)].join('');
+  return `<label class="field"><span>Reasoning Effort</span><select name="reasoningEffort" class="control-input">${options}</select></label>`;
+}
+
 function modelSelect(engine, settings, availability = null) {
   const choices = settings.modelChoices[engine] || [];
   const current = settings.models[engine] || '';
   const listed = choices.some(choice => choice.value === current);
-  const marks = engine === 'claude' && availability?.models ? availability.models : {};
+  const marks = availability?.models || {};
   // A model the plan refused is labelled and disabled; the configured one stays selectable so Save works.
   const options = choices.map(choice => {
     const mark = marks[modelKey(choice.value)];
-    const label = mark ? `${choice.label} (unavailable on ${planLabel(mark.plan || availability?.plan)})` : choice.label;
+    const label = mark ? `${choice.label} (${mark.kind === 'unknown_model' ? 'unknown model' : `unavailable on ${planLabel(mark.plan || availability?.plan)}`})` : choice.label;
     return `<option value="${htmlEscape(choice.value)}"${choice.value === current ? ' selected' : ''}${mark && choice.value !== current ? ' disabled data-unavailable="1"' : mark ? ' data-unavailable="1"' : ''}>${htmlEscape(label)}</option>`;
   }).join('');
   return `<div class="model-group" data-engine="${engine}"${engine === settings.engine ? '' : ' hidden'}>
       <label class="field"><span>Scoring Model</span><select name="model_${engine}" class="model-select control-input">${options}<option value="__custom__"${listed ? '' : ' selected'}>Custom…</option></select></label>
-      <label class="field model-custom"${listed ? ' hidden' : ''}><span>Custom model name</span><input type="text" name="modelCustom_${engine}" class="control-input" value="${listed ? '' : htmlEscape(current)}" placeholder="${engine === 'codex' ? 'gpt-5.6-sol' : 'claude-fable-5'}"></label>
+      <label class="field model-custom"${listed ? ' hidden' : ''}><span>Custom model name</span><input type="text" name="modelCustom_${engine}" class="control-input" value="${listed ? '' : htmlEscape(current)}" placeholder="${htmlEscape(settings.modelChoices[engine]?.[0]?.value || '')}"></label>
+      ${engine === 'codex' ? effortSelect(settings) : ''}
     </div>`;
 }
 
-export function settingsPage({ settings, connections = null, timeZone, coverLetter = null, modelAvailability = null }) {
+export function settingsPage({ settings, connections = null, timeZone, coverLetter = null, modelAvailability = null, modelView = null }) {
   const levels = ['high', 'medium', 'low'].map(level => `<label class="check"><input type="checkbox" name="acceptedMatchLevels" value="${level}"${settings.acceptedMatchLevels.includes(level) ? ' checked' : ''}> ${level.charAt(0).toUpperCase()}${level.slice(1)}</label>`).join('');
-  const planBadge = engine => (connections?.[engine]?.plan ? ` <span class="badge badge-muted" data-plan="${engine}">${htmlEscape(planLabel(connections[engine].plan))}</span>` : '');
-  const engines = settings.engines.map(engine => `<label><input type="radio" name="engine" value="${engine.id}"${engine.id === settings.engine ? ' checked' : ''} data-connected="${connections?.[engine.id]?.connected ? 'yes' : 'no'}"> ${htmlEscape(engine.label)} ${engineBadge(connections?.[engine.id])}${planBadge(engine.id)}</label>`).join('');
-  const marks = Object.values(modelAvailability?.models || {});
-  const ladderStatus = `<p class="form-foot" id="ladder-status">Current plan: ${connections?.claude?.plan ? htmlEscape(planLabel(connections.claude.plan)) : 'unknown'} · ${marks.length ? `unavailable: ${marks.map(mark => `${htmlEscape(mark.model)} (since ${htmlEscape(formatLocalDateTime(mark.detectedAt, timeZone))})`).join(', ')}` : 'no model marked unavailable'}${marks.length ? '; marks clear when the plan changes or after 7 days' : ''}</p>`;
+  const engines = settings.engines.map(engine => `<label><input type="radio" name="engine" value="${engine.id}"${engine.id === settings.engine ? ' checked' : ''} data-connected="${connections?.[engine.id]?.connected ? 'yes' : 'no'}"> ${htmlEscape(engine.label)} ${engineBadge(connections?.[engine.id])}</label>`).join('');
   const refresh = '<form class="inline" method="post" action="/settings/connections/refresh"><button class="btn secondary small" type="submit">Refresh</button></form>';
-  const checked = connections?.checkedAt ? `<p class="form-foot">Checked ${htmlEscape(formatLocalDateTime(connections.checkedAt, timeZone))}; refreshed every minute. The hub never signs in for you. ${refresh}</p>` : `<p class="form-foot">The hub never signs in for you. ${refresh}</p>`;
+  const checked = connections?.checkedAt ? `<p class="form-foot">Checked ${htmlEscape(formatLocalDateTime(connections.checkedAt, timeZone))}; refreshed every minute. The hub never signs in for you.</p>` : '<p class="form-foot">The hub never signs in for you.</p>';
+  const scoringControls = `<div class="field"><span>Engine</span><div class="radio-row">${engines}</div><p class="engine-warning" id="engine-warning" hidden>This engine is not connected on this Mac; the nightly run will keep local scores (unreviewed) until it is signed in. You can still save.</p></div>
+      ${settings.engines.map(engine => modelSelect(engine.id, settings, modelAvailability)).join('')}`;
+  const subscriptions = modelView ? subscriptionSection(modelView, { timeZone, connectionRow, refresh, checked }) : '';
+  const assignments = modelView ? assignmentsFieldset(modelView, { scoringControls, fallbackChecked: settings.fallbackEngine === 'codex' }) : `<fieldset class="group"><legend>Model assignments</legend>${scoringControls}</fieldset>`;
   return `<h1 class="hub-title">Settings</h1>
-  <article class="card"><h2>Connections</h2><dl class="conn">${connectionRow('Claude', 'claude', connections?.claude)}${connectionRow('Codex', 'codex', connections?.codex)}</dl>${checked}</article>
+  ${subscriptions}
   <article class="card"><form method="post" action="/settings" id="settings-form">
+    ${assignments}
     <fieldset class="group"><legend>Matching</legend>
       <label class="field"><span>Minimum Match Score (0–100)</span><input type="number" name="minimumMatchScore" class="control-input" min="0" max="100" step="1" value="${Number(settings.minimumMatchScore)}" required></label>
       <div class="field"><span>Accepted Match Levels</span>${levels}</div>
       <label class="field"><span>Max Reviewed Per Run (0 = no limit)</span><input type="number" name="maxReviewedPerRun" class="control-input" min="0" max="5000" step="1" value="${Number(settings.maxReviewedPerRun ?? 120)}" required></label>
-      <label class="field"><span>Model Ladder (tried in order when a model hits its weekly limit or is not on the plan)</span><input type="text" name="modelLadder" class="control-input" value="${htmlEscape(settings.modelLadder || 'fable, opus')}" placeholder="fable, opus"></label>
-      ${ladderStatus}
-      <input type="hidden" name="quotaPresent" value="1">
-      <div class="field"><label class="check"><input type="checkbox" name="fallbackEngine" value="codex"${settings.fallbackEngine === 'codex' ? ' checked' : ''}> Fall Back to Codex on a Weekly Account Limit (only when Codex is signed in)</label></div>
-      <div class="field"><span>Engine</span><div class="radio-row">${engines}</div><p class="engine-warning" id="engine-warning" hidden>This engine is not connected on this Mac; the nightly run will keep local scores (unreviewed) until it is signed in. You can still save.</p></div>
-      ${settings.engines.map(engine => modelSelect(engine.id, settings, modelAvailability)).join('')}
+      ${modelView ? ladderEditor(modelView) : ''}
     </fieldset>
     <fieldset class="group"><legend>Reports</legend>
       <div class="field"><label class="check"><input type="checkbox" name="xlsxRequired"${settings.xlsxRequired ? ' checked' : ''}> Require XLSX Workbook (fail the run when it cannot be written)</label></div>
@@ -619,7 +629,7 @@ export function settingsPage({ settings, connections = null, timeZone, coverLett
     <button class="btn" type="submit">Save</button>
     <p class="form-foot">Changes apply to the next run.</p>
   </form>
-  <form method="post" action="/settings/models/recheck" class="inline"><button class="btn secondary small" type="submit" title="Forget every unavailable-model mark; the next call tries the configured model again">Re-check Models</button></form></article>
+  <form method="post" action="/settings/models/recheck" class="inline"><button class="btn secondary small" type="submit" title="Forget every not-on-plan and unknown-model mark; the next call tries those models again">Re-check Models</button></form></article>
   ${coverLetter ? coverLetterSettingsSection({ ...coverLetter, timeZone }) : ''}`;
 }
 

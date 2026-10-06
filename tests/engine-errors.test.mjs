@@ -45,7 +45,7 @@ test('humanizeEngineError gives one sentence per class and never the raw text', 
   assert.deepEqual(humanizeEngineError(new AuthExpiredError('x')), { kind: 'auth_expired', message: AUTH_EXPIRED_MESSAGE, codexSuggested: true, notice: 'x' });
   const quota = humanizeEngineError(cliFailure("You've reached your Fable limit. Your Fable limit resets at 9am (America/Chicago)."), { now: NOW });
   assert.equal(quota.kind, 'modelWeeklyLimit');
-  assert.match(quota.message, /^Claude subscription Fable weekly limit reached/);
+  assert.match(quota.message, /^Claude subscription claude-fable-5-1 weekly limit reached/);
   const plain = humanizeEngineError(cliFailure('Unexpected token in JSON at position 0'));
   assert.equal(plain.message, 'Generation failed (Unexpected token in JSON at position 0); details in the hub log');
   assert.equal(plain.codexSuggested, false);

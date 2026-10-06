@@ -1,0 +1,126 @@
+// The model registry: the single place that names models. Every call (scoring, supplemental review, the
+// cover-letter draft and editor passes) resolves its model here and passes the full id to the CLI;
+// aliases are accepted on input (config, older files) and mapped to the entry they name.
+//
+// Entries: { provider: 'anthropic' | 'openai', id, label, alias, efforts?, isDefault? }. The defaults
+// were checked against the CLIs installed on the owner's Mac (Claude Code 2.1.292: the binary's model
+// table and its alias defaults; codex-cli 0.153.0: `codex debug models`), not taken on faith.
+// config.models.catalog replaces the defaults; the older hub.modelChoices lists are migrated.
+import { normalizeModelName } from './shared.mjs';
+
+export const PROVIDERS = ['anthropic', 'openai'];
+export const ENGINE_PROVIDER = { claude: 'anthropic', codex: 'openai' };
+export const PROVIDER_ENGINE = { anthropic: 'claude', openai: 'codex' };
+export const PROVIDER_LABELS = { anthropic: 'Claude', openai: 'ChatGPT' };
+
+export const DEFAULT_CATALOG = [
+  { provider: 'anthropic', id: 'claude-fable-5-1', label: 'Claude Fable 5.1', alias: 'fable', isDefault: true },
+  { provider: 'anthropic', id: 'claude-opus-5-5', label: 'Claude Opus 5.5', alias: 'opus' },
+  { provider: 'anthropic', id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', alias: 'sonnet' },
+  { provider: 'anthropic', id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', alias: 'haiku' },
+  { provider: 'openai', id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', alias: null, efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'], isDefault: true },
+  { provider: 'openai', id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', alias: null, efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] },
+  { provider: 'openai', id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', alias: null, efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
+  { provider: 'openai', id: 'gpt-5.5', label: 'GPT-5.5', alias: null, efforts: ['low', 'medium', 'high', 'xhigh'] },
+  { provider: 'openai', id: 'gpt-6-astra', label: 'GPT-6 Astra', alias: null, efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] },
+];
+
+// The ladder the quota policy walks when a model hits its weekly limit (unchanged behaviour: Fable, then Opus).
+export const DEFAULT_LADDER_ALIASES = ['fable', 'opus'];
+
+const ID_PATTERN = /^[a-z0-9][a-z0-9._\-]{0,63}(\[1m\])?$/i;
+
+function cleanEntry(raw, fallbackProvider = null) {
+  if (!raw || typeof raw !== 'object') return null;
+  const provider = PROVIDERS.includes(String(raw.provider || '').toLowerCase()) ? String(raw.provider).toLowerCase() : fallbackProvider;
+  const id = String(raw.id || '').trim();
+  if (!provider || !ID_PATTERN.test(id)) return null;
+  const alias = raw.alias ? String(raw.alias).trim().toLowerCase() : null;
+  const efforts = provider === 'openai' && Array.isArray(raw.efforts) ? raw.efforts.map(item => String(item).trim().toLowerCase()).filter(Boolean) : undefined;
+  return { provider, id, label: String(raw.label || id).trim() || id, alias: alias || null, ...(efforts ? { efforts } : {}), ...(raw.isDefault ? { isDefault: true } : {}) };
+}
+
+// The registry for a config: config.models.catalog when present; otherwise the defaults plus whatever the
+// older hub.modelChoices listed (aliases fold into the entry they name, other names become entries).
+export function normalizeCatalog(config = {}) {
+  const explicit = Array.isArray(config?.models?.catalog) ? config.models.catalog.map(entry => cleanEntry(entry)).filter(Boolean) : null;
+  if (explicit?.length) return dedupe(explicit);
+  const catalog = DEFAULT_CATALOG.map(entry => ({ ...entry, ...(entry.efforts ? { efforts: [...entry.efforts] } : {}) }));
+  const legacy = config?.hub?.modelChoices;
+  if (legacy && typeof legacy === 'object') {
+    for (const [engine, list] of Object.entries(legacy)) {
+      const provider = ENGINE_PROVIDER[engine];
+      if (!provider || !Array.isArray(list)) continue;
+      for (const item of list) {
+        const value = typeof item === 'string' ? item : item?.value;
+        if (!value || findModel(catalog, value, provider)) continue;
+        const entry = cleanEntry({ provider, id: value, label: typeof item === 'object' && item?.label ? item.label : value }, provider);
+        if (entry) catalog.push(entry);
+      }
+    }
+  }
+  return dedupe(catalog);
+}
+
+function dedupe(entries) {
+  const seen = new Set();
+  return entries.filter(entry => {
+    const key = `${entry.provider}:${entry.id.toLowerCase()}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+// The entry a name refers to: its full id, its alias, or a dated / [1m] variant of its id
+// ("claude-haiku-4-5-20251001" → claude-haiku-4-5). Null for a name the registry does not know.
+export function findModel(catalog, value, provider = null) {
+  const name = normalizeModelName(value);
+  if (!name) return null;
+  const pool = (catalog || DEFAULT_CATALOG).filter(entry => !provider || entry.provider === provider);
+  return pool.find(entry => entry.id.toLowerCase() === name)
+    || pool.find(entry => entry.alias && entry.alias === name)
+    || pool.find(entry => name.startsWith(`${entry.id.toLowerCase()}-`) && /^-\d{6,8}$/.test(name.slice(entry.id.length)))
+    || null;
+}
+
+// The full id to pass to the CLI for a configured name; an unknown name (a custom model) passes through.
+export function canonicalModelId(value, provider = null, catalog = DEFAULT_CATALOG) {
+  const entry = findModel(catalog, value, provider);
+  return entry ? entry.id : (value == null || value === '' ? null : String(value).trim());
+}
+
+export function defaultModelId(engineId, catalog = DEFAULT_CATALOG) {
+  const provider = ENGINE_PROVIDER[engineId];
+  if (!provider) return null;
+  const pool = catalog.filter(entry => entry.provider === provider);
+  return (pool.find(entry => entry.isDefault) || pool[0] || DEFAULT_CATALOG.find(entry => entry.provider === provider && entry.isDefault))?.id || null;
+}
+
+export function defaultLadder(catalog = DEFAULT_CATALOG) {
+  return DEFAULT_LADDER_ALIASES.map(alias => canonicalModelId(alias, 'anthropic', catalog)).filter(Boolean);
+}
+
+export function providerModels(catalog, provider) {
+  return (catalog || DEFAULT_CATALOG).filter(entry => entry.provider === provider);
+}
+
+// Ladder from the Settings form: every step must be a registry model of the given provider, no step may
+// repeat, and at least one is required. Returns { ladder, errors }.
+export function validateLadder(values, { catalog = DEFAULT_CATALOG, provider = 'anthropic' } = {}) {
+  const raw = (Array.isArray(values) ? values : String(values ?? '').split(',')).map(item => String(item).trim()).filter(Boolean);
+  const errors = [];
+  const ladder = [];
+  for (const value of raw) {
+    const entry = findModel(catalog, value, provider);
+    if (!entry) {
+      const elsewhere = findModel(catalog, value);
+      errors.push(elsewhere ? `${value} is a ${PROVIDER_LABELS[elsewhere.provider]} model; the ladder only takes ${PROVIDER_LABELS[provider]} models` : `${value} is not in the model registry`);
+      continue;
+    }
+    if (ladder.includes(entry.id)) { errors.push(`${entry.id} appears twice in the ladder`); continue; }
+    ladder.push(entry.id);
+  }
+  if (!raw.length) errors.push('The model ladder needs at least one model');
+  return { ladder, errors };
+}

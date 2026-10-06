@@ -18,7 +18,7 @@ import { enrichJob, enrichmentWarningMessage } from './enrich.mjs';
 import { evaluateJob, isEligible } from './match.mjs';
 import { annotateEligibility, summarizeExclusions } from './eligibility.mjs';
 import { applySubscriptionMatching, isSemanticCandidate, localFallbackJob, summarizeScoringModel } from './subscription-match.mjs';
-import { normalizeEngineId } from './engines/index.mjs';
+import { normalizeEngineId, resolveModel } from './engines/index.mjs';
 import { buildHtml, writeReports, writeWarningsFile } from './report.mjs';
 import { clearDeferred, deferredStatus, expireDeferred, isJobSeen, markDeferred, markJobSeen, normalizeState, pruneSeen, releaseRecentBaselines } from './state.mjs';
 import { ageBasisInstant, datePrecisionSummary, freshnessInstant, isUndated } from './posting-fields.mjs';
@@ -32,7 +32,7 @@ import { holdsToExactWindow, resolveCompanyName } from './posting-fields.mjs';
 import { describeConnections } from './engines/index.mjs';
 import { describeQuota, normalizeQuotaPolicy } from './engines/quota.mjs';
 import { AUTH_EXPIRED_MESSAGE, AUTH_EXPIRED_NOTIFICATION, classifyEngineError } from './engines/engine-errors.mjs';
-import { availabilityPath, markModelUnavailable, pruneAvailability, readAvailability, unavailableModelNames, writeAvailability } from './engines/model-availability.mjs';
+import { availabilityPath, markModelUnavailable, markModelUsed, markWeeklyLimit, pruneAvailability, pruneLimits, readAvailability, unavailableModelNames, writeAvailability } from './engines/model-availability.mjs';
 
 const execFileAsync = promisify(execFile);
 const REPORT_PAYLOAD_PREFIX = 'report-payload-';
@@ -501,7 +501,7 @@ export function summarizeQuota(events, policy, config, deferredCount = 0) {
 function resolveModelFor(config) {
   const semantic = config.semanticMatching || {};
   const engineId = normalizeEngineId(semantic.engine || 'claude') || 'claude';
-  return semantic.models?.[engineId] || semantic.model || (engineId === 'claude' ? 'fable' : null);
+  return resolveModel(semantic, engineId);
 }
 
 // A report banner only for an account-wide refusal (or a ladder that ran out), never for a wait that
@@ -781,10 +781,14 @@ async function runPipeline(config, clock, options = {}) {
       quotaEvents,
       now: () => new Date(),
       plan: observedPlan,
+      // A redacted copy of the last successful envelope (usage and modelUsage only) for fixture recording.
+      envelopeLog: path.join(config.root, 'state', 'logs', 'claude-envelope-last.json'),
       unavailableModels: unavailableModelNames(availability),
       markUnavailable: (model, info) => { markModelUnavailable(availability, model, info); availabilityChanged = true; },
-      recordUsage: (purpose, usage) => {
+      recordUsage: (purpose, usage, info = {}) => {
         if (usage?.parseEmpty) usageParseEmpty += 1;
+        // A successful call: the model is available, and the id the CLI reported is its resolved id.
+        if (info.model) { markModelUsed(availability, info.model, { resolvedId: info.scoringModel, at: new Date().toISOString() }); availabilityChanged = true; }
         runUsage.push(...usageEntries(usage, { purpose, at: new Date().toISOString(), source: 'nightly' }));
       },
       onAuth: ({ engine: engineId, plan }) => {
@@ -807,6 +811,12 @@ async function runPipeline(config, clock, options = {}) {
   const quotaDeferred = evaluated.filter(job => job.quotaDeferred);
   for (const job of quotaDeferred) markDeferred(state, job, now.toISOString());
   evaluated = evaluated.filter(job => !job.quotaDeferred);
+  // Weekly limits the run hit are shown on Settings until their reset time.
+  for (const event of quotaEvents.filter(item => item.kind === 'modelWeeklyLimit' && item.model)) {
+    markWeeklyLimit(availability, event.model, { at: event.at, resetsAt: event.resetsAt, notice: event.message || null });
+    availabilityChanged = true;
+  }
+  if (pruneLimits(availability, { now }).length) availabilityChanged = true;
   if (availabilityChanged) await writeAvailability(availabilityFile, availability);
   // A successful call whose usage could not be read is reported, never counted as zero.
   if (usageParseEmpty) warnings.push(usageParseEmptyWarning(usageParseEmpty));

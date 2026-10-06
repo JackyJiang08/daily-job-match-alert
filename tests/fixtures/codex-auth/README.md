@@ -1,0 +1,1 @@
+Fake ~/.codex/auth.json files for tests. Every token, id, and claim is invented (Jane Doe placeholders); the id_token payloads only mirror the claim names the codex CLI writes ("https://api.openai.com/auth".chatgpt_plan_type).

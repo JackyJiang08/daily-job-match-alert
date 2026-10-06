@@ -9,7 +9,7 @@ import path from 'node:path';
 import { localDate } from '../time-format.mjs';
 
 export const USAGE_RETENTION_DAYS = 35;
-export const USAGE_PURPOSES = ['review', 'supplemental', 'editor', 'letter'];
+export const USAGE_PURPOSES = ['review', 'supplemental', 'editor', 'letter', 'test'];
 
 const number = value => (Number.isFinite(Number(value)) ? Number(value) : 0);
 

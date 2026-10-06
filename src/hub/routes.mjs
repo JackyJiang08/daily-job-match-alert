@@ -8,7 +8,7 @@ import { HubLockedError } from './config-file.mjs';
 import { parseMultipart } from './multipart.mjs';
 import {
   HubInputError, annotateConnections, assertDate, buildStatusView, claudeAuthView, clearModelAvailability, configuredCliCommands, desktopCopyPath, desktopWorkbookPath, listReportSummaries, loadTracksView, modelAvailabilityView, readErrorReport,
-  readReportPayload, readSettings, resumeAtsBoard, saveCliPath, saveSettings, selectResumeVersion, setTrackEnabled, sidebarSummary, uploadResumePdf,
+  readReportPayload, readSettings, resumeAtsBoard, saveCliPath, saveSettings, selectResumeVersion, setTrackEnabled, sidebarSummary, uploadResumePdf, ModelTestBusyError, savePlan, testModel,
 } from './services.mjs';
 import { localDate } from '../time-format.mjs';
 import { LETTER_SCRIPT, ONECLICK_SCRIPT, SAMPLE_TRACK_SCRIPT, letterPanel, lettersPage, trackLabelOf } from './letter-views.mjs';
@@ -20,6 +20,10 @@ import { AuthExpiredError, EngineError, humanizeEngineError } from '../engines/e
 import { LetterInputError } from '../cover-letter/store.mjs';
 import { displayCompanyName } from '../posting-fields.mjs';
 import { REPORTS_SCRIPT, SETTINGS_SCRIPT, STATUS_SCRIPT, renderHubPage, reportsPage, resumesPage, settingsPage, statusPage } from './views.mjs';
+import { modelSettingsView } from './model-settings.mjs';
+import { MODEL_SETTINGS_SCRIPT } from './model-settings-views.mjs';
+import { availabilityPath, normalizeAvailability, pruneAvailability, pruneLimits, readAvailability } from '../engines/model-availability.mjs';
+import { readUsage, usagePath } from '../engines/usage.mjs';
 
 const MAXIMUM_BODY_BYTES = 6 * 1024 * 1024;
 const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
@@ -168,7 +172,14 @@ export function createHubHandler(ctx) {
     // Opening Settings counts as reviewing a plan change.
     ctx.planReviewedAt = ctx.now().toISOString();
     const modelAvailability = await modelAvailabilityView(ctx, connections?.claude?.plan || null);
-    await page(response, 200, { active: 'settings', title: 'Settings', content: settingsPage({ settings, connections, timeZone, modelAvailability, coverLetter: { profile: readiness.profile, readiness } }), script: SETTINGS_SCRIPT + SAMPLE_TRACK_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
+    // Plans, model status, stage assignments, and seven days of usage for the subscription section.
+    const record = await readAvailability(availabilityPath(ctx.root), ctx.io).catch(() => normalizeAvailability(null));
+    // The same pruning the runs apply: marks from another plan or older than 7 days, and limits past reset.
+    pruneAvailability(record, { now: ctx.now(), plan: connections?.claude?.plan || null });
+    pruneLimits(record, { now: ctx.now() });
+    const usage = await readUsage(usagePath(ctx.root), ctx.io).catch(() => ({ entries: [] }));
+    const modelView = modelSettingsView({ config, settings, connections, record, usage: { entries: usage.entries, options: { now: ctx.now(), timeZone, days: 7 } }, now: ctx.now(), timeZone });
+    await page(response, 200, { active: 'settings', title: 'Settings', content: settingsPage({ settings, connections, timeZone, modelAvailability, modelView, coverLetter: { profile: readiness.profile, readiness } }), script: SETTINGS_SCRIPT + SAMPLE_TRACK_SCRIPT + MODEL_SETTINGS_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
   }
 
   // Read-only pass-through of the Desktop folder's own files: the HTML report and the workbook.
@@ -255,6 +266,22 @@ export function createHubHandler(ctx) {
       case '/settings': {
         await saveSettings(ctx, fields);
         redirect(response, '/settings', 'Settings saved to config.json');
+        return;
+      }
+      case '/settings/plans': {
+        const saved = await savePlan(ctx, fields);
+        redirect(response, '/settings', saved.plan ? `Saved the ${saved.provider === 'claude' ? 'Claude' : 'ChatGPT'} plan as ${saved.plan} (manual)` : `Cleared the manual ${saved.provider === 'claude' ? 'Claude' : 'ChatGPT'} plan`);
+        return;
+      }
+      case '/settings/models/test': {
+        try {
+          const result = await testModel(ctx, await ctx.loadConfig(), fields);
+          if (result.ok) redirect(response, '/settings', `${result.model} answered${result.resolvedId ? `; the CLI reported ${result.resolvedId}` : ''}`);
+          else redirect(response, '/settings', `${result.model}: ${result.message}`, 'error');
+        } catch (error) {
+          if (error instanceof ModelTestBusyError) { redirect(response, '/settings', error.message, 'error'); return; }
+          throw error;
+        }
         return;
       }
       case '/settings/models/recheck': {

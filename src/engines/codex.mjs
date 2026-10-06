@@ -8,6 +8,8 @@
 // The final message is read from the --output-last-message file (the JSONL stream is the fallback), then
 // parsed and validated strictly; anything else propagates to the orchestrator's retry / supplemental /
 // local_fallback chain.
+import { chatgptPlanFromAuthFile } from './chatgpt-plan.mjs';
+import { DEFAULT_CATALOG, canonicalModelId, defaultModelId } from './catalog.mjs';
 import { codexUsageFromJsonl } from './usage.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -15,7 +17,7 @@ import { extractResults, isMissingCommand, modelMatchesConfiguration, run, subsc
 import { errorSummary } from '../warnings.mjs';
 import { INSTALL_HINTS, resolveCliCommand } from './cli-path.mjs';
 
-export const CODEX_DEFAULT_MODEL = 'gpt-5.6-sol';
+export const CODEX_DEFAULT_MODEL = defaultModelId('codex');
 
 // Allow-list: only a ChatGPT (subscription) login is accepted. API-key logins and logged-out states
 // fall back to local scoring with a plain-language reason.
@@ -60,6 +62,16 @@ export async function verifyCodexSubscription(options = {}) {
   return verdict;
 }
 
+// "0.153.0" from `codex --version`, or null; the probe never fails on it.
+async function cliVersion(runner, command) {
+  try {
+    const result = await runner(command, ['--version'], { timeoutMs: 15_000, env: subscriptionEnvironment() });
+    return /(\d+\.\d+\.\d+)/.exec(`${result.stdout || ''} ${result.stderr || ''}`)?.[1] || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function describeCodexConnection(options = {}) {
   const runner = options.runner || run;
   const resolver = options.resolveCommand || resolveCliCommand;
@@ -70,9 +82,14 @@ export async function describeCodexConnection(options = {}) {
     const status = await loginStatus(runner, resolution.command);
     const verdict = assessCodexLoginStatus(status.text, status.exitCode);
     if (!verdict.accepted) return { installed: true, connected: false, detail: null, hint: 'codex login', reason: verdict.reason, ...location };
-    // `codex login status` names no plan today; an optional "(plan)" or "plan: x" suffix is read when present.
-    const plan = /ChatGPT\s*\(([^)]+)\)|\bplan[:=]\s*([a-z0-9_-]+)/i.exec(status.text || '');
-    return { installed: true, connected: true, detail: plan ? `Codex · ChatGPT · ${(plan[1] || plan[2]).trim()}` : 'Codex · ChatGPT', plan: plan ? String(plan[1] || plan[2]).trim().toLowerCase() : null, hint: null, reason: null, ...location };
+    // `codex login status` names no plan today; an optional "(plan)" or "plan: x" suffix is read when present,
+    // else the plan claim in ~/.codex/auth.json is decoded locally (see chatgpt-plan.mjs).
+    const printed = /ChatGPT\s*\(([^)]+)\)|\bplan[:=]\s*([a-z0-9_-]+)/i.exec(status.text || '');
+    const fromFile = printed ? null : await (options.readChatgptPlan || chatgptPlanFromAuthFile)({ homedir: options.homedir, codexHome: options.codexHome, io: options.io });
+    const planName = printed ? String(printed[1] || printed[2]).trim().toLowerCase() : fromFile?.plan || null;
+    const planSource = printed ? 'login status' : fromFile ? 'auth.json' : null;
+    const version = await cliVersion(runner, resolution.command);
+    return { installed: true, connected: true, detail: planName ? `Codex · ChatGPT · ${planName}` : 'Codex · ChatGPT', plan: planName, planSource, version, hint: null, reason: null, ...location };
   } catch (error) {
     if (isMissingCommand(error)) return { installed: false, connected: false, detail: null, hint: INSTALL_HINTS.codex, reason: 'Codex CLI was not found on this Mac', ...location, path: null, source: 'missing' };
     return { installed: true, connected: false, detail: null, hint: 'codex login', reason: errorSummary(error), ...location };
@@ -128,7 +145,11 @@ export function parseCodexOutput(lastMessage, jsonl, configuredModel, effort = n
 }
 
 export function createCodexEngine(options = {}) {
-  const model = options.model || CODEX_DEFAULT_MODEL;
+  const model = canonicalModelId(options.model || CODEX_DEFAULT_MODEL, 'openai', Array.isArray(options.catalog) ? options.catalog : DEFAULT_CATALOG);
+  // A reasoning effort set in Settings reaches the CLI as its documented config override; none means the
+  // CLI's own default (model_reasoning_effort in ~/.codex/config.toml), as before.
+  const effort = /^[a-z]{2,10}$/.test(String(options.reasoningEffort || '')) ? String(options.reasoningEffort) : null;
+  const effortArgs = effort ? ['-c', `model_reasoning_effort="${effort}"`] : [];
   const runner = options.runner || run;
   const io = options.io || fs;
   let command = null;
@@ -149,6 +170,7 @@ export function createCodexEngine(options = {}) {
       const args = [
         'exec', '--ephemeral', '--skip-git-repo-check', '--sandbox', 'read-only', '--cd', directory, '--color', 'never',
         '--json', '--output-schema', schemaPath, '--output-last-message', lastMessagePath, '--model', model,
+        ...effortArgs,
       ];
       try {
         const result = await runner(await commandOf(), args, {
@@ -166,7 +188,7 @@ export function createCodexEngine(options = {}) {
       const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const schemaPath = path.join(directory, `schema-${stamp}.json`);
       const lastMessagePath = path.join(directory, `last-${stamp}.txt`);
-      const args = ['exec', '--ephemeral', '--skip-git-repo-check', '--sandbox', 'read-only', '--cd', directory, '--color', 'never', '--json', '--output-last-message', lastMessagePath, '--model', model];
+      const args = ['exec', '--ephemeral', '--skip-git-repo-check', '--sandbox', 'read-only', '--cd', directory, '--color', 'never', '--json', '--output-last-message', lastMessagePath, '--model', model, ...effortArgs];
       if (context.schema) {
         await io.writeFile(schemaPath, JSON.stringify(context.schema));
         args.push('--output-schema', schemaPath);

@@ -1,4 +1,7 @@
 // Claude Code subscription engine: `claude --print` with a JSON schema, allow-listed claude.ai login.
+import fsPromises from 'node:fs/promises';
+import path from 'node:path';
+import { DEFAULT_CATALOG, canonicalModelId, defaultModelId, providerModels } from './catalog.mjs';
 import { claudeUsageFromEnvelope } from './usage.mjs';
 import { compareVersions, extractResults, isMissingCommand, modelMatchesConfiguration, normalizeModelName, parseSemanticVersion, run, subscriptionEnvironment } from './shared.mjs';
 import { errorSummary } from '../warnings.mjs';
@@ -7,9 +10,9 @@ import { AuthExpiredError, isAuthExpiredText, unwrapCliEnvelope } from './engine
 
 // Subscription flags used below were validated against this installed Claude Code release.
 export const MINIMUM_CLAUDE_CODE_VERSION = '2.1.250';
-export const CLAUDE_DEFAULT_MODEL = 'fable';
-// Aliases accepted by `claude --model`; each expands to the prefix of the canonical model family.
-export const CLAUDE_MODEL_ALIASES = { fable: 'claude-fable', opus: 'claude-opus', sonnet: 'claude-sonnet', haiku: 'claude-haiku' };
+// The default model and the aliases `claude --model` accepts both come from the model registry.
+export const CLAUDE_DEFAULT_MODEL = defaultModelId('claude');
+export const CLAUDE_MODEL_ALIASES = Object.fromEntries(providerModels(DEFAULT_CATALOG, 'anthropic').filter(entry => entry.alias).map(entry => [entry.alias, entry.id]));
 
 export function parseClaudeCodeVersion(value) {
   return parseSemanticVersion(value);
@@ -85,6 +88,25 @@ export function assertNotErrorEnvelope(parsed) {
   return parsed;
 }
 
+// The last successful envelope, kept for recording test fixtures: only the bookkeeping fields (type,
+// subtype, turn count, durations, stop reason, usage, modelUsage) are written. The model's answer
+// (result, structured_output) and every identifier (session_id, uuid) are dropped.
+const ENVELOPE_FIELDS = ['type', 'subtype', 'is_error', 'num_turns', 'duration_ms', 'duration_api_ms', 'stop_reason', 'terminal_reason', 'usage', 'modelUsage', 'total_cost_usd', 'fast_mode_state'];
+export function redactEnvelope(parsed) {
+  return Object.fromEntries(ENVELOPE_FIELDS.filter(field => Object.hasOwn(parsed || {}, field)).map(field => [field, parsed[field]]));
+}
+
+function captureEnvelope(file, stdout, io) {
+  if (!file) return;
+  try {
+    const envelope = redactEnvelope(JSON.parse(String(stdout).trim()));
+    const writer = io || fsPromises;
+    writer.mkdir(path.dirname(file), { recursive: true })
+      .then(() => writer.writeFile(file, `${JSON.stringify({ capturedAt: new Date().toISOString(), envelope }, null, 2)}\n`))
+      .catch(() => {});
+  } catch {}
+}
+
 export function parseStructuredOutput(raw) {
   const parsed = assertNotErrorEnvelope(JSON.parse(raw.trim()));
   return { results: extractResults(parsed).results, scoringModel: extractScoringModel(parsed), usage: claudeUsageFromEnvelope(parsed) };
@@ -154,7 +176,12 @@ export async function describeClaudeConnection(options = {}) {
     const verdict = assessClaudeAuthStatus(status);
     if (!verdict.accepted) return { installed: true, connected: false, detail: null, hint: 'claude auth login --claudeai', reason: verdict.reason, ...location };
     const plan = status.subscriptionType ? String(status.subscriptionType).charAt(0).toUpperCase() + String(status.subscriptionType).slice(1) : 'Subscription';
-    return { installed: true, connected: true, detail: `Claude · ${plan} · ${status.authMethod}`, plan: status.subscriptionType ? String(status.subscriptionType).toLowerCase() : null, hint: null, reason: null, ...location };
+    let version = null;
+    try {
+      const printed = await runner(resolution.command, ['--version'], { timeoutMs: 15_000, env: subscriptionEnvironment() });
+      version = parseClaudeCodeVersion(`${printed.stdout || ''} ${printed.stderr || ''}`)?.join('.') || null;
+    } catch {}
+    return { installed: true, connected: true, detail: `Claude · ${plan} · ${status.authMethod}`, plan: status.subscriptionType ? String(status.subscriptionType).toLowerCase() : null, planSource: status.subscriptionType ? 'auth status' : null, version, hint: null, reason: null, ...location };
   } catch (error) {
     if (isMissingCommand(error)) return { installed: false, connected: false, detail: null, hint: INSTALL_HINTS.claude, reason: 'Claude Code CLI was not found on this Mac', ...location, path: null, source: 'missing' };
     return { installed: true, connected: false, detail: null, hint: 'claude auth login --claudeai', reason: errorSummary(error), ...location };
@@ -162,7 +189,8 @@ export async function describeClaudeConnection(options = {}) {
 }
 
 export function createClaudeEngine(options = {}) {
-  const model = options.model || CLAUDE_DEFAULT_MODEL;
+  // The CLI always receives the registry's full id, even when a config still says "fable".
+  const model = canonicalModelId(options.model || CLAUDE_DEFAULT_MODEL, 'anthropic', Array.isArray(options.catalog) ? options.catalog : DEFAULT_CATALOG);
   const runner = options.runner || run;
   let command = null;
   const commandOf = async () => { command = command || await resolvedCommand(options); return command; };
@@ -188,7 +216,9 @@ export function createClaudeEngine(options = {}) {
       } catch (error) {
         throw unwrapCliFailure(error);
       }
-      return parseStructuredOutput(result.stdout);
+      const parsed = parseStructuredOutput(result.stdout);
+      captureEnvelope(options.envelopeLog, result.stdout, options.io);
+      return parsed;
     },
     // One structured call for free-form generation (cover letters); same flags, auth, and env scrubbing.
     async generateText(prompt, context = {}) {

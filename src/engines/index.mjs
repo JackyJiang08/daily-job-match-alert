@@ -2,6 +2,7 @@
 //   id, label, model, verifyAuth(), reviewBatch(prompt, schema, { tempDirectory }), describeModel(),
 //   modelMatches(actual), describeConnection()
 // Only subscription CLIs exist here; API-backed engines are intentionally unavailable.
+import { DEFAULT_CATALOG, ENGINE_PROVIDER, canonicalModelId, defaultModelId, findModel } from './catalog.mjs';
 import { CLAUDE_DEFAULT_MODEL, createClaudeEngine, describeClaudeConnection } from './claude.mjs';
 import { CODEX_DEFAULT_MODEL, createCodexEngine, describeCodexConnection } from './codex.mjs';
 import { createFakeEngine } from './fake.mjs';
@@ -21,16 +22,19 @@ export function normalizeEngineId(value) {
 // The active model: an explicit per-engine entry wins, then the legacy single `model` key when it was
 // written for this engine (it always describes the active engine, and a Claude alias never names a
 // Codex model), then the engine default.
-const CLAUDE_LOOKING = /^(fable|opus|sonnet|haiku)$|^claude-/i;
-
+// The result is always the registry's full id (an alias such as "opus" becomes claude-opus-5-5); a name
+// the registry does not know (a custom model) passes through unchanged.
 export function resolveModel(semantic = {}, engineId = normalizeEngineId(semantic.engine)) {
+  const catalog = Array.isArray(semantic.catalog) ? semantic.catalog : DEFAULT_CATALOG;
+  const provider = ENGINE_PROVIDER[engineId] || null;
   const perEngine = semantic.models && typeof semantic.models === 'object' ? semantic.models[engineId] : null;
-  if (perEngine) return String(perEngine);
+  if (perEngine) return canonicalModelId(perEngine, provider, catalog);
   if (semantic.model && normalizeEngineId(semantic.engine) === engineId) {
     const model = String(semantic.model);
-    if (engineId === 'claude' || !CLAUDE_LOOKING.test(model)) return model;
+    const anthropic = findModel(catalog, model, 'anthropic') || /^claude-/i.test(model);
+    if (engineId === 'claude' || !anthropic) return canonicalModelId(model, provider, catalog);
   }
-  return ENGINE_DEFAULT_MODELS[engineId] || null;
+  return defaultModelId(engineId, catalog) || ENGINE_DEFAULT_MODELS[engineId] || null;
 }
 
 export function createEngine(engineId, options = {}) {

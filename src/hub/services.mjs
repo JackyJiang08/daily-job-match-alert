@@ -2,20 +2,23 @@
 // writes only config.json (through config-file.mjs, under the run lock) and the hub's own private
 // directory (uploaded PDFs, hub-state.json, run logs). Every filesystem call goes through ctx.io so
 // tests can point the hub at a temporary project.
+import { DEFAULT_CATALOG, ENGINE_PROVIDER, PROVIDER_ENGINE, canonicalModelId, defaultModelId, findModel, normalizeCatalog, providerModels, validateLadder } from '../engines/catalog.mjs';
 import path from 'node:path';
 import { enabledResumeTracks, normalizeResumeConfig } from '../config.mjs';
 import { TRACK_ID_PATTERN, defaultTrackLabel } from '../resume-tracks.mjs';
 import { REPORT_TITLE } from '../report.mjs';
 import { resolveFrom } from '../utils.mjs';
 import { OVERDUE_GRACE_MS, localDate } from '../time-format.mjs';
-import { ENGINE_DEFAULT_MODELS, ENGINE_IDS, ENGINE_LABELS, normalizeEngineId, resolveModel } from '../engines/index.mjs';
+import { ENGINE_DEFAULT_MODELS, ENGINE_IDS, ENGINE_LABELS, createEngine, normalizeEngineId, resolveModel } from '../engines/index.mjs';
 import { readConfigFile, updateConfigFile } from './config-file.mjs';
 import { readLockStatus } from './run.mjs';
 import { boardLabel, readRegistry, resumeBoard, writeRegistry } from '../collectors/ats-boards.mjs';
 import { builtinSources } from '../collectors/catalog.mjs';
-import { availabilityPath, pruneAvailability, readAvailability, writeAvailability } from '../engines/model-availability.mjs';
+import { availabilityPath, markModelUnavailable, markModelUsed, markWeeklyLimit, pruneAvailability, readAvailability, writeAvailability } from '../engines/model-availability.mjs';
+import { classifyEngineError, humanizeEngineError } from '../engines/engine-errors.mjs';
 import { planLabel } from '../engines/quota.mjs';
-import { readUsage, usagePath, usageWindow } from '../engines/usage.mjs';
+import { planView } from '../engines/plans.mjs';
+import { appendUsage, readUsage, usageEntries, usagePath, usageWindow } from '../engines/usage.mjs';
 import { describeQuota, normalizeQuotaPolicy } from '../engines/quota.mjs';
 import { HubLockedError } from './config-file.mjs';
 import { acquireRunLock, releaseRunLock } from '../lock.mjs';
@@ -26,17 +29,6 @@ export const MAXIMUM_PDF_BYTES = 5 * 1024 * 1024;
 export const KEEP_PDF_VERSIONS = 5;
 const PAYLOAD_PATTERN = /^report-payload-(\d{4}-\d{2}-\d{2})\.json$/;
 const MODEL_PATTERN = /^[a-z0-9][a-z0-9._\-]{0,63}(\[1m\])?$/i;
-export const DEFAULT_MODEL_CHOICES = {
-  claude: [
-    { value: 'fable', label: 'Fable (recommended)' },
-    { value: 'opus', label: 'Opus' },
-    { value: 'sonnet', label: 'Sonnet' },
-    { value: 'haiku', label: 'Haiku' },
-  ],
-  codex: [
-    { value: 'gpt-5.6-sol', label: 'gpt-5.6-sol (Codex default)' },
-  ],
-};
 const MATCH_LEVELS = ['high', 'medium', 'low'];
 
 export class HubInputError extends Error {
@@ -400,12 +392,33 @@ export async function markModelUnavailableInHub(ctx, model, info) {
   });
 }
 
+// Re-check Models forgets the not-on-plan and unknown-model marks; weekly limits (which clear at their
+// reset time) and the last-used history stay.
 export async function clearModelAvailability(ctx) {
   return withRunLock(ctx, async () => {
     const file = availabilityPath(ctx.root);
-    await writeAvailability(file, { version: 1, models: {} }, ctx.io);
+    const record = await readAvailability(file, ctx.io);
+    record.models = {};
+    await writeAvailability(file, record, ctx.io);
     return { cleared: true };
   });
+}
+
+// Any other change to the availability record from the hub, under the run lock. While the nightly run
+// holds the lock the update is skipped (the run writes the same file); the caller logs nothing secret.
+export async function updateAvailabilityInHub(ctx, mutate) {
+  try {
+    return await withRunLock(ctx, async () => {
+      const file = availabilityPath(ctx.root);
+      const record = await readAvailability(file, ctx.io);
+      mutate(record);
+      await writeAvailability(file, record, ctx.io);
+      return record;
+    });
+  } catch (error) {
+    if (error instanceof HubLockedError) return null;
+    throw error;
+  }
 }
 
 // Whether the most recent scheduled slot was missed: "due now" inside the grace period, "overdue" after it.
@@ -460,6 +473,16 @@ export async function sidebarSummary(ctx, config) {
     waitingOnQuota: waitingOnQuota(ctx, latest),
     claudeAuth: claudeAuthView(ctx, latest),
     plans: await currentPlans(ctx, config),
+    // Two lines for the sidebar: "Claude Max → Pro Oct 26" and "ChatGPT Plus".
+    planLines: await sidebarPlanLines(ctx, config, now, timeZone),
+  };
+}
+
+async function sidebarPlanLines(ctx, config, now, timeZone) {
+  const plans = await currentPlans(ctx, config);
+  return {
+    claude: planView('claude', { detected: plans.claude, config, now, timeZone }),
+    chatgpt: planView('chatgpt', { detected: plans.codex, config, now, timeZone }),
   };
 }
 
@@ -551,8 +574,9 @@ export function quotaView(ctx, config, latest, state) {
   return {
     lastEvent: last ? { ...last, description: describeQuota(last, { timeZone }) } : null,
     effectiveEngine: runQuota?.effectiveEngine || (normalizeEngineId(config.semanticMatching?.engine || 'claude') || 'claude'),
-    effectiveModel: runQuota ? runQuota.effectiveModel : (resolveModel(config.semanticMatching || {}, normalizeEngineId(config.semanticMatching?.engine || 'claude') || 'claude') || null),
-    configuredModel: runQuota?.configuredModel || resolveModel(config.semanticMatching || {}, normalizeEngineId(config.semanticMatching?.engine || 'claude') || 'claude') || null,
+    // Payloads written before the registry stored aliases ("opus"); they are shown as registry ids.
+    effectiveModel: runQuota ? (runQuota.effectiveModel ? canonicalModelId(runQuota.effectiveModel, null, DEFAULT_CATALOG) : null) : (resolveModel(config.semanticMatching || {}, normalizeEngineId(config.semanticMatching?.engine || 'claude') || 'claude') || null),
+    configuredModel: runQuota?.configuredModel ? canonicalModelId(runQuota.configuredModel, null, DEFAULT_CATALOG) : resolveModel(config.semanticMatching || {}, normalizeEngineId(config.semanticMatching?.engine || 'claude') || 'claude') || null,
     deferredCount: Object.keys(state?.deferred && typeof state.deferred === 'object' ? state.deferred : {}).length,
     deferredByQuota: runQuota?.deferredByQuota || 0,
     budgetAlert: latest?.meta?.budgetAlert || null,
@@ -624,15 +648,10 @@ export async function readErrorReport(ctx, config, name) {
 
 // ---------------------------------------------------------------------------------------------- settings
 
-function normalizeChoices(raw) {
+// The model dropdowns list the registry: full ids, with the alias the CLI also accepts in brackets.
+function choicesFromCatalog(catalog) {
   const choices = {};
-  for (const engine of ENGINE_IDS) {
-    const list = Array.isArray(raw?.[engine]) ? raw[engine] : DEFAULT_MODEL_CHOICES[engine];
-    choices[engine] = list
-      .map(item => (typeof item === 'string' ? { value: item, label: item } : { value: String(item?.value || ''), label: String(item?.label || item?.value || '') }))
-      .filter(item => item.value);
-    if (!choices[engine].length) choices[engine] = DEFAULT_MODEL_CHOICES[engine];
-  }
+  for (const engine of ENGINE_IDS) choices[engine] = providerModels(catalog, ENGINE_PROVIDER[engine]).map(entry => ({ value: entry.id, label: entry.alias ? `${entry.id} (${entry.alias})` : entry.id }));
   return choices;
 }
 
@@ -640,26 +659,29 @@ export async function readSettings(ctx) {
   const { config } = await readConfigFile(ctx.configPath, ctx.io);
   const semantic = config.semanticMatching && typeof config.semanticMatching === 'object' ? config.semanticMatching : {};
   const engine = normalizeEngineId(semantic.engine) === 'codex' ? 'codex' : 'claude';
+  const catalog = normalizeCatalog(config);
   const models = {};
-  for (const id of ENGINE_IDS) models[id] = resolveModel(semantic, id) || ENGINE_DEFAULT_MODELS[id];
+  for (const id of ENGINE_IDS) models[id] = resolveModel({ ...semantic, catalog }, id) || ENGINE_DEFAULT_MODELS[id];
   return {
     minimumMatchScore: config.minimumMatchScore ?? 60,
     maxReviewedPerRun: semantic.maxReviewedPerRun == null ? 120 : Number(semantic.maxReviewedPerRun),
-    modelLadder: normalizeQuotaPolicy(semantic.quotaPolicy).modelLadder.join(', '),
+    modelLadder: normalizeQuotaPolicy({ ...(semantic.quotaPolicy || {}), catalog }).modelLadder.join(', '),
+    reasoningEffort: semantic.reasoningEffort ? String(semantic.reasoningEffort) : '',
+    catalog,
     fallbackEngine: normalizeQuotaPolicy(semantic.quotaPolicy).fallbackEngine,
     acceptedMatchLevels: Array.isArray(semantic.acceptedMatchLevels) ? semantic.acceptedMatchLevels : ['high'],
     engine,
     engines: ENGINE_IDS.map(id => ({ id, label: ENGINE_LABELS[id] })),
     model: models[engine],
     models,
-    modelChoices: normalizeChoices(config.hub?.modelChoices),
+    modelChoices: choicesFromCatalog(catalog),
     xlsxRequired: config.reports?.xlsx?.required === true,
     editorReview: config.coverLetter?.editorReview !== false,
     hubPort: Number(config.hub?.port || 4747),
   };
 }
 
-export function validateSettings(form) {
+export function validateSettings(form, { catalog = DEFAULT_CATALOG } = {}) {
   const errors = [];
   const minimumMatchScore = Number(form.minimumMatchScore);
   if (!Number.isInteger(minimumMatchScore) || minimumMatchScore < 0 || minimumMatchScore > 100) errors.push('Minimum match score must be a whole number from 0 to 100');
@@ -673,8 +695,10 @@ export function validateSettings(form) {
   // The form carries one <select> per engine plus an optional custom box; "__custom__" selects the box.
   const selected = String(form[`model_${modelKey}`] ?? form.model ?? '').trim();
   const custom = String(form[`modelCustom_${modelKey}`] ?? form.modelCustom ?? '').trim();
-  const model = selected === '__custom__' ? custom : selected;
-  if (!MODEL_PATTERN.test(model)) errors.push(engine === 'codex' ? 'Model must be a Codex model name such as gpt-5.6-sol' : 'Model must be a Claude Code alias (fable, opus, sonnet, haiku) or a full model name such as claude-fable-5');
+  // Stored as the registry's full id (an alias from an older client maps to its entry); a custom name stays as typed.
+  const typed = selected === '__custom__' ? custom : selected;
+  const model = MODEL_PATTERN.test(typed) ? canonicalModelId(typed, ENGINE_PROVIDER[modelKey] || null, catalog) : typed;
+  if (!MODEL_PATTERN.test(model)) errors.push(`Model must be a registry id such as ${defaultModelId(engine === 'codex' ? 'codex' : 'claude', catalog)} or a custom model name`);
   const hubPort = Number(form.hubPort);
   if (!Number.isInteger(hubPort) || hubPort < 1024 || hubPort > 65535) errors.push('Hub port must be a whole number from 1024 to 65535');
   // Optional: a form without the field leaves semanticMatching.maxReviewedPerRun untouched; 0 means no limit.
@@ -682,15 +706,31 @@ export function validateSettings(form) {
   const maxReviewedPerRun = budgetGiven ? Number(form.maxReviewedPerRun) : null;
   if (budgetGiven && (!Number.isInteger(maxReviewedPerRun) || maxReviewedPerRun < 0 || maxReviewedPerRun > 5000)) errors.push('Max reviewed per run must be a whole number from 0 (no limit) to 5000');
   // Quota policy fields are optional too; quotaPresent marks a form that carries the fallback checkbox.
-  const ladderGiven = form.modelLadder != null && String(form.modelLadder).trim() !== '';
-  const modelLadder = ladderGiven ? String(form.modelLadder).split(',').map(item => item.trim()).filter(Boolean) : null;
-  if (modelLadder && (!modelLadder.length || modelLadder.some(item => !MODEL_PATTERN.test(item)))) errors.push('Model ladder must be a comma-separated list of Claude model names such as fable, opus');
+  // The ladder comes from the reorderable list (one modelLadder value per checked row, in order; ladderPresent
+  // marks the form) or, from older callers, a comma-separated string. Every step must be a Claude model in
+  // the registry, with no repeats and at least one step.
+  const ladderListed = form.ladderPresent != null;
+  const ladderGiven = ladderListed || (form.modelLadder != null && String(form.modelLadder).trim() !== '');
+  let modelLadder = null;
+  if (ladderGiven) {
+    const checked = ladderListed ? [].concat(form.modelLadder ?? []).map(String) : String(form.modelLadder);
+    const result = validateLadder(checked, { catalog, provider: 'anthropic' });
+    errors.push(...result.errors);
+    modelLadder = result.ladder;
+  }
+  // Reasoning effort only applies to a Codex scoring model, and only an effort the registry lists for it.
+  const effortGiven = form.reasoningEffort != null;
+  const reasoningEffort = effortGiven ? String(form.reasoningEffort).trim().toLowerCase() : undefined;
+  if (effortGiven && reasoningEffort && engine === 'codex') {
+    const entry = findModel(catalog, model, 'openai');
+    if (entry?.efforts && !entry.efforts.includes(reasoningEffort)) errors.push(`${entry.id} accepts the efforts ${entry.efforts.join(', ')}`);
+  }
   const fallbackEngine = form.quotaPresent != null ? ((form.fallbackEngine === 'on' || form.fallbackEngine === 'true' || form.fallbackEngine === 'codex' || form.fallbackEngine === true) ? 'codex' : null) : undefined;
   const xlsxRequired = form.xlsxRequired === 'on' || form.xlsxRequired === 'true' || form.xlsxRequired === true;
   // Only the settings form carries the flag; a form without it (older callers) leaves the config value alone.
   const editorReview = form.editorReviewPresent != null ? (form.editorReview === 'on' || form.editorReview === 'true' || form.editorReview === true) : null;
   if (errors.length) throw new HubInputError(errors.join('; '));
-  return { minimumMatchScore, acceptedMatchLevels: MATCH_LEVELS.filter(level => levels.includes(level)), engine, model, xlsxRequired, editorReview, hubPort, maxReviewedPerRun, modelLadder, fallbackEngine };
+  return { minimumMatchScore, acceptedMatchLevels: MATCH_LEVELS.filter(level => levels.includes(level)), engine, model, xlsxRequired, editorReview, hubPort, maxReviewedPerRun, modelLadder, fallbackEngine, reasoningEffort };
 }
 
 // "Save this path to config": pins the resolved binary as semanticMatching.<engine>Command.
@@ -719,7 +759,8 @@ export function configuredCliCommands(config) {
 }
 
 export async function saveSettings(ctx, form) {
-  const settings = validateSettings(form);
+  const { config: current } = await readConfigFile(ctx.configPath, ctx.io);
+  const settings = validateSettings(form, { catalog: normalizeCatalog(current) });
   await updateConfigFile(ctx.configPath, config => {
     config.minimumMatchScore = settings.minimumMatchScore;
     config.semanticMatching = config.semanticMatching && typeof config.semanticMatching === 'object' ? config.semanticMatching : {};
@@ -732,6 +773,10 @@ export async function saveSettings(ctx, form) {
     }
     if (settings.engine) config.semanticMatching.engine = settings.engine;
     config.semanticMatching.model = settings.model;
+    if (settings.reasoningEffort !== undefined) {
+      if (settings.reasoningEffort && (settings.engine || normalizeEngineId(config.semanticMatching.engine)) === 'codex') config.semanticMatching.reasoningEffort = settings.reasoningEffort;
+      else delete config.semanticMatching.reasoningEffort;
+    }
     const activeEngine = settings.engine || normalizeEngineId(config.semanticMatching.engine);
     if (ENGINE_IDS.includes(activeEngine)) {
       config.semanticMatching.models = config.semanticMatching.models && typeof config.semanticMatching.models === 'object' ? config.semanticMatching.models : {};
@@ -752,3 +797,85 @@ export async function saveSettings(ctx, form) {
 }
 
 export { enabledResumeTracks, resolveFrom };
+
+// ---- Settings: manual plans and the per-model Test button
+
+// config.plans.<claude|chatgpt>.manual; an empty value clears it.
+export async function savePlan(ctx, form) {
+  const provider = String(form.provider || '').trim();
+  if (!['claude', 'chatgpt'].includes(provider)) throw new HubInputError('Plan provider must be claude or chatgpt');
+  const value = String(form.plan || '').trim().toLowerCase();
+  if (value && !/^[a-z][a-z0-9_-]{0,31}$/.test(value)) throw new HubInputError('A plan name is one word such as plus, pro, or max');
+  await updateConfigFile(ctx.configPath, config => {
+    config.plans = config.plans && typeof config.plans === 'object' ? config.plans : {};
+    config.plans[provider] = config.plans[provider] && typeof config.plans[provider] === 'object' ? config.plans[provider] : {};
+    if (value) config.plans[provider].manual = value;
+    else delete config.plans[provider].manual;
+    return true;
+  }, { fs: ctx.io, pidAlive: ctx.pidAlive });
+  return { provider, plan: value || null };
+}
+
+export const TEST_PROMPT = 'Reply with OK';
+
+export class ModelTestBusyError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'ModelTestBusyError';
+    this.code = 'MODEL_TEST_BUSY';
+    this.status = 409;
+  }
+}
+
+// One short fixed prompt to one registry model, on request only (never in bulk). Refused while a cover
+// letter is generating or the nightly run (or anything else) holds the run lock; the lock is held for the
+// call so the availability file is not written twice. A success marks the model Available with the id
+// the CLI reported; a refusal becomes Not on plan, Unknown model, or Weekly limit; anything else is
+// reported without a mark.
+export async function testModel(ctx, config, form) {
+  if (String(form.confirm || '') !== '1') throw new HubInputError('Confirm the test call first');
+  const catalog = normalizeCatalog(config);
+  const entry = findModel(catalog, String(form.model || ''));
+  if (!entry) throw new HubInputError('Pick a model from the registry to test');
+  if (ctx.letterJobs?.busy?.()) throw new ModelTestBusyError('A cover letter is generating; test the model after it finishes');
+  const lock = await acquireRunLock(ctx.runManager.lockPath, { pidAlive: ctx.pidAlive });
+  if (!lock.acquired) throw new ModelTestBusyError(`The nightly run holds the run lock${lock.pid ? ` (PID ${lock.pid})` : ''}; test the model after it finishes`);
+  const now = () => ctx.now().toISOString();
+  const file = availabilityPath(ctx.root);
+  try {
+    const engineId = PROVIDER_ENGINE[entry.provider];
+    const engine = ctx.makeTestEngine
+      ? ctx.makeTestEngine({ engine: engineId, model: entry.id })
+      : createEngine(engineId, { ...(config.semanticMatching || {}), model: entry.id, homedir: ctx.homedir });
+    const record = await readAvailability(file, ctx.io);
+    try {
+      const response = await engine.generateText(TEST_PROMPT, { timeoutMs: 120_000 });
+      const resolvedId = response?.usage?.models?.length
+        ? [...response.usage.models].sort((a, b) => (b.output - a.output) || (b.input - a.input))[0].model
+        : response?.scoringModel || null;
+      markModelUsed(record, entry.id, { resolvedId, at: now() });
+      await writeAvailability(file, record, ctx.io);
+      if (response?.usage?.models?.length) await appendUsage(usagePath(ctx.root), usageEntries(response.usage, { purpose: 'test', at: now(), source: 'hub' }), { now: ctx.now(), io: ctx.io }).catch(() => {});
+      if (engineId === 'claude') ctx.authState?.clear?.();
+      return { ok: true, model: entry.id, resolvedId, state: 'available' };
+    } catch (error) {
+      const verdict = classifyEngineError(error, { now: ctx.now() });
+      console.error(`[model-test] ${entry.id} failed: ${String(error?.raw || error?.message || error).slice(0, 500)}`);
+      if (verdict?.kind === 'model_unavailable') {
+        markModelUnavailable(record, entry.id, { plan: null, at: now(), notice: verdict.notice, kind: verdict.reason || 'not_on_plan' });
+        await writeAvailability(file, record, ctx.io);
+        return { ok: false, model: entry.id, state: verdict.reason || 'not_on_plan', message: humanizeEngineError(error).message };
+      }
+      if (verdict?.kind === 'modelWeeklyLimit') {
+        markWeeklyLimit(record, entry.id, { at: now(), resetsAt: verdict.quota?.resetsAt || null, notice: verdict.notice });
+        await writeAvailability(file, record, ctx.io);
+        return { ok: false, model: entry.id, state: 'weekly_limit', message: humanizeEngineError(error).message };
+      }
+      if (verdict?.kind === 'auth_expired') ctx.authState?.expire?.(verdict.notice);
+      return { ok: false, model: entry.id, state: null, message: humanizeEngineError(error).message };
+    }
+  } finally {
+    await releaseRunLock(lock);
+  }
+}
+

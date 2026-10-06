@@ -23,11 +23,11 @@ function candidate(index) {
   return { url: `https://example.com/jobs/${index}`, title: `Analyst ${index}`, company: 'Acme', description: 'x', bestScore: 50, scores: { data: 50 }, scoreDetails: { data: { roleRelevance: 25 } }, blockers: [], reasons: [], gaps: [] };
 }
 function okResponse(batch, model) {
-  return { results: batch.map(job => ({ id: job.semanticId, roleType: 'new_grad', scores: { data: 80 }, recommendedTrack: 'data', matchLevel: 'high', reasons: ['fit'], gaps: [], blockers: [] })), scoringModel: `claude-${model}-5` };
+  return { results: batch.map(job => ({ id: job.semanticId, roleType: 'new_grad', scores: { data: 80 }, recommendedTrack: 'data', matchLevel: 'high', reasons: ['fit'], gaps: [], blockers: [] })), scoringModel: model };
 }
 
 // The matcher with a scripted fake engine; `refuse` names the models the plan rejects.
-async function runMatcher({ jobs, refuse = [], plan = 'pro', policy = {}, unavailableModels = [], ladder = ['fable', 'opus', 'sonnet'] }) {
+async function runMatcher({ jobs, refuse = [], plan = 'pro', policy = {}, unavailableModels = [], ladder = ['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5'] }) {
   const spy = [];
   const warnings = [];
   const quotaEvents = [];
@@ -39,7 +39,7 @@ async function runMatcher({ jobs, refuse = [], plan = 'pro', policy = {}, unavai
       id, label: `${id} engine`, model,
       async verifyAuth() { return { loggedIn: true, authMethod: 'claude.ai', subscriptionType: plan }; },
       async reviewBatch(prompt) {
-        if (refuse.includes(model)) throw cliFailure(`The model claude-${model}-5 is not available on your plan.`);
+        if (refuse.includes(model)) throw cliFailure(`The model ${model} is not available on your plan.`);
         const ids = [...prompt.matchAll(/"id": "([a-f0-9]{16})"/g)].map(match => match[1]);
         return okResponse(ids.map(semanticId => ({ semanticId })), model);
       },
@@ -48,7 +48,7 @@ async function runMatcher({ jobs, refuse = [], plan = 'pro', policy = {}, unavai
     };
   };
   const evaluated = await applySubscriptionMatching(jobs, RESUMES, {}, {
-    engine: 'claude', model: 'fable', batchSize: 2, warnings, quotaEvents, quotaPolicy: { modelLadder: ladder, ...policy },
+    engine: 'claude', model: 'claude-fable-5-1', batchSize: 2, warnings, quotaEvents, quotaPolicy: { modelLadder: ladder, ...policy },
     makeEngine, now: () => NOW, sleep: async () => {}, retryDelayMs: 0, fallbackConnected: async () => false,
     unavailableModels, markUnavailable: (model, info) => { marks.push({ model, ...info }); }, onAuth: info => { auths.push(info); },
   });
@@ -74,50 +74,50 @@ test('plan-gated refusals from the recorded fixture classify as model_unavailabl
 
 test('a plan-gated model steps the ladder down for that very call, is marked with plan and time, and the run reports the plan it saw', async () => {
   const jobs = [candidate(1), candidate(2), candidate(3)];
-  const run = await runMatcher({ jobs, refuse: ['fable'] });
-  assert.deepEqual(run.spy, ['fable', 'opus'], 'one step down, taken at once');
+  const run = await runMatcher({ jobs, refuse: ['claude-fable-5-1'] });
+  assert.deepEqual(run.spy, ['claude-fable-5-1', 'claude-opus-5-5'], 'one step down, taken at once');
   assert.equal(run.evaluated.filter(job => job.semanticReviewed).length, 3, 'the refused batch is scored by the next model, nothing is deferred');
-  assert.deepEqual([...new Set(run.evaluated.map(job => job.scoringModel))], ['claude-opus-5']);
-  assert.deepEqual(run.marks, [{ model: 'fable', plan: 'pro', notice: 'The model claude-fable-5 is not available on your plan.', at: NOW.toISOString() }]);
-  assert.deepEqual([run.quotaEvents[0].kind, run.quotaEvents[0].action, run.quotaEvents[0].detail, run.quotaEvents[0].model, run.quotaEvents[0].plan], ['model_unavailable', 'downgraded', 'switched to opus', 'fable', 'pro']);
+  assert.deepEqual([...new Set(run.evaluated.map(job => job.scoringModel))], ['claude-opus-5-5']);
+  assert.deepEqual(run.marks, [{ model: 'claude-fable-5-1', plan: 'pro', notice: 'The model claude-fable-5-1 is not available on your plan.', at: NOW.toISOString(), kind: 'not_on_plan' }]);
+  assert.deepEqual([run.quotaEvents[0].kind, run.quotaEvents[0].action, run.quotaEvents[0].detail, run.quotaEvents[0].model, run.quotaEvents[0].plan], ['model_unavailable', 'downgraded', 'switched to claude-opus-5-5', 'claude-fable-5-1', 'pro']);
   const info = run.warnings.find(warning => /not available on Pro/.test(warning.message));
   assert.equal(info.level, 'info');
-  assert.equal(info.message, 'fable is not available on Pro; continuing with opus');
+  assert.equal(info.message, 'claude-fable-5-1 is not available on Pro; continuing with claude-opus-5-5');
   assert.equal(run.warnings.some(warning => /MODEL MISMATCH/.test(warning.message)), false);
-  assert.equal(run.warnings.find(warning => /scored by opus/.test(warning.message)).message, 'scored by opus: fable unavailable on Pro');
+  assert.equal(run.warnings.find(warning => /scored by claude-opus-5-5/.test(warning.message)).message, 'scored by claude-opus-5-5: claude-fable-5-1 unavailable on Pro');
   assert.deepEqual(run.auths, [{ engine: 'claude', plan: 'pro', status: { loggedIn: true, authMethod: 'claude.ai', subscriptionType: 'pro' } }]);
 
   // Two rungs refused in a row: both are marked, the third scores.
-  const twice = await runMatcher({ jobs, refuse: ['fable', 'opus'] });
-  assert.deepEqual(twice.spy, ['fable', 'opus', 'sonnet']);
-  assert.deepEqual(twice.marks.map(mark => mark.model), ['fable', 'opus']);
-  assert.equal(twice.evaluated.every(job => job.scoringModel === 'claude-sonnet-5'), true);
+  const twice = await runMatcher({ jobs, refuse: ['claude-fable-5-1', 'claude-opus-5-5'] });
+  assert.deepEqual(twice.spy, ['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5']);
+  assert.deepEqual(twice.marks.map(mark => mark.model), ['claude-fable-5-1', 'claude-opus-5-5']);
+  assert.equal(twice.evaluated.every(job => job.scoringModel === 'claude-sonnet-5-5'), true);
 
   // Nothing left on the ladder: that batch uses the local fallback with a plain warning; no deferral.
-  const bottom = await runMatcher({ jobs, refuse: ['fable'], ladder: ['fable'] });
+  const bottom = await runMatcher({ jobs, refuse: ['claude-fable-5-1'], ladder: ['claude-fable-5-1'] });
   assert.equal(bottom.evaluated.every(job => job.scoringEngine === 'local_fallback'), true);
   assert.equal(bottom.evaluated.some(job => job.quotaDeferred), false);
   assert.equal(bottom.quotaEvents[0].action, 'local-fallback');
-  assert.match(bottom.warnings.find(warning => /no model is left/.test(warning.message)).message, /fable is not available on Pro and no model is left on the ladder; 2 jobs used local fallback/);
+  assert.match(bottom.warnings.find(warning => /no model is left/.test(warning.message)).message, /claude-fable-5-1 is not available on Pro and no model is left on the ladder; 2 jobs used local fallback/);
 });
 
 test('models marked unavailable are skipped before the first call; the skip is audited as a plan note, never a mismatch', async () => {
   const jobs = [candidate(1), candidate(2)];
-  const run = await runMatcher({ jobs, unavailableModels: ['fable'], plan: 'pro' });
-  assert.deepEqual(run.spy, ['opus'], 'fable is never tried');
+  const run = await runMatcher({ jobs, unavailableModels: ['claude-fable-5-1'], plan: 'pro' });
+  assert.deepEqual(run.spy, ['claude-opus-5-5'], 'claude-fable-5-1 is never tried');
   assert.equal(run.marks.length, 0, 'no new mark: nothing was refused');
-  assert.deepEqual([run.quotaEvents[0].kind, run.quotaEvents[0].action, run.quotaEvents[0].detail], ['model_unavailable', 'skipped', 'switched to opus (marked unavailable earlier)']);
+  assert.deepEqual([run.quotaEvents[0].kind, run.quotaEvents[0].action, run.quotaEvents[0].detail], ['model_unavailable', 'skipped', 'switched to claude-opus-5-5 (marked unavailable earlier)']);
   assert.equal(run.warnings.some(warning => /MODEL MISMATCH/.test(warning.message)), false);
-  assert.equal(run.evaluated.every(job => job.scoringModel === 'claude-opus-5'), true);
-  const both = await runMatcher({ jobs, unavailableModels: ['fable', 'opus'] });
-  assert.deepEqual(both.spy, ['sonnet']);
-  const all = await runMatcher({ jobs, unavailableModels: ['fable', 'opus', 'sonnet'] });
-  assert.deepEqual(all.spy, ['fable'], 'every rung marked: the preferred model is tried again, which is the retry');
+  assert.equal(run.evaluated.every(job => job.scoringModel === 'claude-opus-5-5'), true);
+  const both = await runMatcher({ jobs, unavailableModels: ['claude-fable-5-1', 'claude-opus-5-5'] });
+  assert.deepEqual(both.spy, ['claude-sonnet-5-5']);
+  const all = await runMatcher({ jobs, unavailableModels: ['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5'] });
+  assert.deepEqual(all.spy, ['claude-fable-5-1'], 'every rung marked: the preferred model is tried again, which is the retry');
   // A weekly limit on the way down also skips marked rungs.
-  assert.equal(nextAvailableModel(['fable', 'opus', 'sonnet'], 'fable', new Set(['opus'])), 'sonnet');
-  assert.equal(nextAvailableModel(['fable', 'opus'], 'fable', ['opus']), null);
-  assert.equal(firstAvailableModel('fable', ['fable', 'opus'], []), 'fable');
-  assert.equal(firstAvailableModel('claude-fable-5', ['fable', 'opus'], ['fable']), 'opus', 'aliases normalize');
+  assert.equal(nextAvailableModel(['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5'], 'claude-fable-5-1', new Set(['claude-opus-5-5'])), 'claude-sonnet-5-5');
+  assert.equal(nextAvailableModel(['claude-fable-5-1', 'claude-opus-5-5'], 'claude-fable-5-1', ['claude-opus-5-5']), null);
+  assert.equal(firstAvailableModel('claude-fable-5-1', ['claude-fable-5-1', 'claude-opus-5-5'], []), 'claude-fable-5-1');
+  assert.equal(firstAvailableModel('claude-fable-5-1', ['claude-fable-5-1', 'claude-opus-5-5'], ['claude-fable-5-1']), 'claude-opus-5-5', 'aliases normalize');
 });
 
 test('a mark lasts until the plan changes or seven days pass, then that model is tried once more; the file round-trips', async () => {
@@ -126,29 +126,29 @@ test('a mark lasts until the plan changes or seven days pass, then that model is
     const file = availabilityPath(root);
     assert.equal(file, path.join(root, 'state', 'model-availability.json'));
     const record = await readAvailability(file);
-    assert.deepEqual(record, { version: 1, models: {} }, 'a missing file is an empty record');
-    markModelUnavailable(record, 'claude-fable-5', { plan: 'pro', at: NOW.toISOString(), notice: 'The model claude-fable-5 is not available on your plan.' });
-    assert.deepEqual(record.models.fable, { model: 'fable', plan: 'pro', detectedAt: NOW.toISOString(), notice: 'The model claude-fable-5 is not available on your plan.' });
+    assert.deepEqual(record, { version: 2, models: {}, limits: {}, seen: {} }, 'a missing file is an empty record');
+    markModelUnavailable(record, 'claude-fable-5-1', { plan: 'pro', at: NOW.toISOString(), notice: 'The model claude-fable-5-1 is not available on your plan.' });
+    assert.deepEqual(record.models['claude-fable-5-1'], { model: 'claude-fable-5-1', plan: 'pro', detectedAt: NOW.toISOString(), notice: 'The model claude-fable-5-1 is not available on your plan.', kind: 'not_on_plan' });
     await writeAvailability(file, record);
     const reread = await readAvailability(file);
-    assert.deepEqual(unavailableModelNames(reread), ['fable']);
+    assert.deepEqual(unavailableModelNames(reread), ['claude-fable-5-1']);
 
     // Same plan, six days later: still skipped.
     assert.deepEqual(pruneAvailability(reread, { now: new Date(NOW.getTime() + 6 * 86_400_000), plan: 'pro' }), []);
-    assert.deepEqual(unavailableModelNames(reread), ['fable']);
-    // Seven days: the mark is dropped, so the next call tries fable again (and re-marks it on a refusal).
+    assert.deepEqual(unavailableModelNames(reread), ['claude-fable-5-1']);
+    // Seven days: the mark is dropped, so the next call tries claude-fable-5-1 again (and re-marks it on a refusal).
     assert.equal(RETRY_AFTER_DAYS, 7);
     const aged = pruneAvailability(reread, { now: new Date(NOW.getTime() + 7 * 86_400_000), plan: 'pro' });
-    assert.deepEqual(aged.map(item => [item.model, item.reason]), [['fable', 'retry after 7 days']]);
+    assert.deepEqual(aged.map(item => [item.model, item.reason]), [['claude-fable-5-1', 'retry after 7 days']]);
     assert.deepEqual(unavailableModelNames(reread), []);
     // A plan change drops the mark at once.
-    const upgraded = normalizeAvailability({ version: 1, models: { fable: { model: 'fable', plan: 'pro', detectedAt: NOW.toISOString() } } });
+    const upgraded = normalizeAvailability({ version: 1, models: { 'claude-fable-5-1': { model: 'claude-fable-5-1', plan: 'pro', detectedAt: NOW.toISOString() } } });
     assert.deepEqual(pruneAvailability(upgraded, { now: NOW, plan: 'max' }).map(item => item.reason), ['plan changed to max']);
     assert.deepEqual(unavailableModelNames(upgraded), []);
     // No plan observed: the mark stays until it ages out.
-    const unknown = normalizeAvailability({ models: { fable: { model: 'fable', plan: 'pro', detectedAt: NOW.toISOString() } } });
+    const unknown = normalizeAvailability({ models: { 'claude-fable-5-1': { model: 'claude-fable-5-1', plan: 'pro', detectedAt: NOW.toISOString() } } });
     assert.deepEqual(pruneAvailability(unknown, { now: NOW, plan: null }), []);
-    assert.deepEqual(normalizeAvailability({ models: { junk: { model: '', detectedAt: 'nope' } } }), { version: 1, models: {} }, 'garbage entries are dropped');
+    assert.deepEqual(normalizeAvailability({ models: { junk: { model: '', detectedAt: 'nope' } } }), { version: 2, models: {}, limits: {}, seen: {} }, 'garbage entries are dropped');
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
