@@ -44,9 +44,9 @@ function modelTable(card, { timeZone, testable }) {
     const test = testable
       ? `<form class="inline" method="post" action="/settings/models/test" data-test-model="${htmlEscape(model.id)}"><input type="hidden" name="model" value="${htmlEscape(model.id)}"><input type="hidden" name="confirm" value="1"><button class="btn secondary small" type="submit">Test</button></form>`
       : '';
-    return `<tr data-model="${htmlEscape(model.id)}"><td>${htmlEscape(model.label)}${aliasTag(model.alias)}</td><td class="mono">${htmlEscape(model.id)}${resolved}</td><td>${statusBadge(model.status, model.statusText)}</td><td>${model.status.lastUsedAt ? htmlEscape(formatLocalDateTime(model.status.lastUsedAt, timeZone)) : '<span class="muted">Never</span>'}</td><td>${used}</td><td>${test}</td></tr>`;
+    return `<tr data-model="${htmlEscape(model.id)}"><td>${htmlEscape(model.label)}${aliasTag(model.alias)}</td><td class="mono">${htmlEscape(model.id)}${resolved}</td><td>${statusBadge(model.status, model.statusText)}${test ? `<div class="test-cell">${test}</div>` : ''}</td><td>${model.status.lastUsedAt ? htmlEscape(formatLocalDateTime(model.status.lastUsedAt, timeZone)) : '<span class="muted">Never</span>'}</td><td>${used}</td></tr>`;
   }).join('');
-  return `<article class="card model-card" data-provider="${card.provider}"><h3>${htmlEscape(card.name)} models</h3><div class="table-scroll"><table class="plain models-table"><tr><th>Model</th><th>Full ID</th><th>Status</th><th>Last used</th><th>Used by</th><th></th></tr>${rows}</table></div></article>`;
+  return `<article class="card model-card" data-provider="${card.provider}"><h3>${htmlEscape(card.name)} models</h3><div class="table-scroll"><table class="plain models-table"><tr><th>Model</th><th>Full ID</th><th>Status</th><th>Last used</th><th>Used by</th></tr>${rows}</table></div></article>`;
 }
 
 // The two plan cards, each with its model table beneath; stacked on narrow screens.
@@ -96,6 +96,11 @@ export const MODEL_SETTINGS_STYLES = `
 .small-input{width:8em;min-height:28px;padding:3px 7px}
 .alias{color:var(--ink-3);font-size:var(--fs-meta);font-weight:400}
 .models-table td,.models-table th,.assignments td,.assignments th{font-size:var(--fs-body);vertical-align:top}
+.models-table{min-width:520px}
+.test-cell{margin-top:6px}
+.assignments{min-width:760px}
+.models-table td.mono,.assignments td .mono,.ladder .mono{white-space:nowrap}
+.chain .step{white-space:nowrap}
 .stage{display:inline-block;font-size:var(--fs-meta);border:1px solid var(--line-2);border-radius:var(--radius-sm);padding:0 6px;margin:1px 0;color:var(--ink-2)}
 .stage.primary{border-color:var(--accent);color:var(--accent)}
 .badge-muted{background:var(--line);color:var(--ink-2)}
