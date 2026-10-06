@@ -282,25 +282,27 @@ export function dedupeByFinalUrl(jobs) {
   return { jobs: [...kept.values()], dropped };
 }
 
-// Adds this run's reviewed count to state.reviewTotals. The first time, the total starts from the day
-// payloads still on disk (90 days), so "all time" means everything the pipeline still has a record of.
-export async function bumpReviewTotals(config, state, count, now = new Date()) {
-  if (!state.reviewTotals || !Number.isFinite(Number(state.reviewTotals.count))) {
-    let seed = 0;
-    let since = null;
-    let names = [];
-    try { names = await fs.readdir(path.join(config.root, 'state')); } catch {}
-    for (const name of names.filter(item => item.startsWith(REPORT_PAYLOAD_PREFIX) && item.endsWith('.json')).sort()) {
-      try {
-        const payload = JSON.parse(await fs.readFile(path.join(config.root, 'state', name), 'utf8'));
-        seed += Array.isArray(payload?.reviewed) ? payload.reviewed.length : 0;
-        since = since || name.slice(REPORT_PAYLOAD_PREFIX.length, -'.json'.length);
-      } catch {}
-    }
-    state.reviewTotals = { count: seed, since: since || now.toISOString().slice(0, 10) };
+// Reviewed postings over the last `days` application dates, counted from the stored day payloads (the
+// same 90 days the payloads are kept for): the other days' stored totals plus today's merged total. No
+// longer history is kept, so the Run Summary says "last 90 days", not "all time".
+export function usageParseEmptyWarning(count) {
+  return createWarning('llm', 'usage log', `usage parse empty: ${Number(count)} successful Claude call(s) returned no readable modelUsage; their tokens are not counted in the usage log`);
+}
+
+export const REVIEWED_WINDOW_DAYS = 90;
+export async function reviewedInLastDays(config, date, todayCount, now = new Date(), days = REVIEWED_WINDOW_DAYS) {
+  const cutoff = new Date(now.getTime() - Number(days) * 24 * 60 * 60 * 1000).getTime();
+  let total = Number(todayCount || 0);
+  for (const other of await listReportPayloadDates(config)) {
+    if (other === date) continue;
+    const timestamp = new Date(`${other}T23:59:59Z`).getTime();
+    if (!Number.isFinite(timestamp) || timestamp < cutoff) continue;
+    try {
+      const payload = JSON.parse(await fs.readFile(reportPayloadPath(config, other), 'utf8'));
+      total += Array.isArray(payload?.reviewed) ? payload.reviewed.length : 0;
+    } catch {}
   }
-  state.reviewTotals.count = Number(state.reviewTotals.count) + Number(count || 0);
-  return state.reviewTotals.count;
+  return total;
 }
 
 function statePathFor(config) {
@@ -770,6 +772,7 @@ async function runPipeline(config, clock, options = {}) {
   if (droppedMarks.length) warnings.push(createWarning('llm', 'model availability', `retrying ${droppedMarks.map(item => `${item.model} (${item.reason})`).join(', ')}`, 'info'));
   let availabilityChanged = droppedMarks.length > 0;
   const runUsage = [];
+  let usageParseEmpty = 0;
   let planChange = null;
   try {
     evaluated = await applySubscriptionMatching(budget.jobs, resumes, prefs, {
@@ -780,7 +783,10 @@ async function runPipeline(config, clock, options = {}) {
       plan: observedPlan,
       unavailableModels: unavailableModelNames(availability),
       markUnavailable: (model, info) => { markModelUnavailable(availability, model, info); availabilityChanged = true; },
-      recordUsage: (purpose, usage) => { runUsage.push(...usageEntries(usage, { purpose, at: new Date().toISOString(), source: 'nightly' })); },
+      recordUsage: (purpose, usage) => {
+        if (usage?.parseEmpty) usageParseEmpty += 1;
+        runUsage.push(...usageEntries(usage, { purpose, at: new Date().toISOString(), source: 'nightly' }));
+      },
       onAuth: ({ engine: engineId, plan }) => {
         // The plan the CLI reports is remembered; a change gets a notification, a warning, and a banner.
         const change = recordObservedPlan(state, engineId, plan, now);
@@ -802,6 +808,8 @@ async function runPipeline(config, clock, options = {}) {
   for (const job of quotaDeferred) markDeferred(state, job, now.toISOString());
   evaluated = evaluated.filter(job => !job.quotaDeferred);
   if (availabilityChanged) await writeAvailability(availabilityFile, availability);
+  // A successful call whose usage could not be read is reported, never counted as zero.
+  if (usageParseEmpty) warnings.push(usageParseEmptyWarning(usageParseEmpty));
   try {
     await appendUsage(usagePath(config.root), runUsage, { now });
   } catch (error) {
@@ -855,9 +863,10 @@ async function runPipeline(config, clock, options = {}) {
   const runsToday = Number(previous?.meta?.runsToday || 0) + 1;
   // How this run was started (the launchd dispatcher and the hub set the variable; a bare `npm run run` is manual).
   const trigger = ['scheduled', 'catchup', 'manual'].includes(process.env.DAILY_JOB_MATCH_ALERT_TRIGGER) ? process.env.DAILY_JOB_MATCH_ALERT_TRIGGER : 'manual';
-  // Run Summary: this run's reviewed postings, and the running total across runs (seeded once from the
-  // stored day payloads).
-  const reviewedAllTime = await bumpReviewTotals(config, state, evaluated.length, now);
+  // Run Summary: this run's reviewed postings, and the total over the 90 days of stored payloads. The
+  // counter an earlier version kept in state was seeded from the same payloads, so it is dropped.
+  const reviewedLast90Days = await reviewedInLastDays(config, date, reviewed.length, now);
+  delete state.reviewTotals;
   const meta = {
     generatedAt: now.toISOString(), date, applicationDate: date, runDate, timeZone, lookbackHours: config.lookbackHours,
     minimumMatchScore: config.minimumMatchScore, resumeSync, resumeTracks, collectedCount: collected.length,
@@ -865,7 +874,7 @@ async function runPipeline(config, clock, options = {}) {
     newCount: reviewed.length, newThisRun: enriched.length, reviewedCount: reviewed.length, matchCount: matches.length,
     candidateCount: budget.candidateCount, candidateInWindowCount: budget.inWindowCount, candidateUndatedCount: budget.undatedCount, reviewedThisRun: budget.reviewedCount, deferredCount: budget.deferred.length, expiredBacklogCount, undatedAbandonedCount: budget.abandoned.length, maxReviewedPerRun: budget.limit,
     datePrecision: datePrecisionSummary(reviewed),
-    reviewedInRun: evaluated.length, reviewedAllTime,
+    reviewedInRun: evaluated.length, reviewedLast90Days,
     prefilter: { titleExcluded: prefiltered.titleExcluded, locationExcludedCount: prefiltered.locationExcluded.length, titleExcludedCount: prefiltered.titleExcluded.length, bySource: prefiltered.bySource },
     earlyCareerCount: locallyEvaluated.filter(job => job.earlyCareer).length,
     usage: summarizeUsage(runUsage),

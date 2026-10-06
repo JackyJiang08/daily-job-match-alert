@@ -182,7 +182,7 @@ const summaryValues = [
   ['Last updated at', asDate(payload.meta.lastUpdatedAt || payload.meta.generatedAt)],
   ['Lookback hours', payload.meta.lookbackHours],
   ['Reviewed jobs (this run)', payload.meta.reviewedInRun ?? payload.meta.reviewedCount],
-  ['Reviewed (all time)', payload.meta.reviewedAllTime ?? 'not recorded'],
+  ['Reviewed (last 90 days)', payload.meta.reviewedLast90Days ?? 'not recorded'],
   ['High matches', jobs.length],
   ['Excluded: location outside US', Number(payload.meta.eligibilityExclusions?.location || 0)],
   ['Excluded: graduation window', Number(payload.meta.eligibilityExclusions?.graduation || 0)],

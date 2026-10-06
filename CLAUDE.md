@@ -126,7 +126,13 @@ disabled; do not expand them unless a task says so.
   + prefilterExcludeTitleTerms (head of, vice president, VP, account manager,
   sales, technician, nurse, driver, mechanic) + excludeLevelSuffixes (II, III,
   IV, standalone uppercase) are skipped; uncurated sources (ATS boards, HN,
-  RemoteOK) must also name a preferences.titleFamilies term (whole words);
+  RemoteOK) must also name a preferences.titleFamilies term (whole words; the
+  last word of a family term also takes common endings: engineer →
+  engineering, developer → development, statistic → statistician; acronyms
+  and exclusions stay strict). A title with a prefilterExcludeOverrides
+  phrase (new grad, early career, university, graduate program, 2027,
+  rotational, associate product manager) is exempt from the "manager" and
+  level-suffix exclusions only;
   curated lists and alert emails skip the family check. A location
   assessLocation() calls non-US is skipped too. Skipped postings are not marked
   seen. meta.prefilter feeds the Run Details "Prefilter" row (per-source counts
@@ -143,9 +149,13 @@ disabled; do not expand them unless a task says so.
   letters tag letter / editor; entries go to state/usage.json (35 days, re-read
   and appended by both writers). meta.usage → Run Details "Subscription usage";
   the Quota card shows 7 days by model, by purpose, and per night. Fixtures:
-  tests/fixtures/usage/. Run Summary: "Reviewed jobs (this run)" (meta.
-  reviewedInRun) and "Reviewed (all time)" (state.reviewTotals, seeded once
-  from the stored day payloads).
+  tests/fixtures/usage/ (the Claude one is SYNTHETIC, from field names). A
+  successful Claude reply with empty or unreadable modelUsage is never stored
+  as zero: usage.parseEmpty → one "usage parse empty" warning per run (hub
+  letters log it). Run Summary: "Reviewed jobs (this run)" (meta.
+  reviewedInRun) and "Reviewed (last 90 days)" (meta.reviewedLast90Days,
+  from the stored day payloads; no longer history exists, so no all-time
+  claim).
 - Review budget: config.semanticMatching.maxReviewedPerRun (default 120,
   0 = no limit) caps the local candidates sent to the engine per run. Ranking
   is freshness first (postings inside lookbackHours, then the backlog, then

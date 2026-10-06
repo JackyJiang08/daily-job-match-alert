@@ -17,26 +17,32 @@ function emptyTotals() {
   return { calls: 0, input: 0, output: 0, cacheRead: 0, cacheCreation: 0, reasoning: 0 };
 }
 
-// [{ model, input, output, cacheRead, cacheCreation, reasoning }] from a Claude result envelope. When
-// modelUsage is empty (an error envelope) but the session total is not, the total is kept under the
-// model the envelope names, or "unknown".
+const TOKEN_FIELDS = ['inputTokens', 'outputTokens', 'cacheReadInputTokens', 'cacheCreationInputTokens'];
+
+// [{ model, input, output, cacheRead, cacheCreation, reasoning }] from a Claude result envelope. An entry
+// counts only when it carries at least one numeric token field and a non-zero total; anything else is
+// unreadable, never recorded as zero. When no entry is readable but the session total is, the total is
+// kept under the model the envelope names, or "unknown". `parseEmpty` marks a reply with no readable
+// usage at all, so the caller can warn instead of counting nothing silently.
 export function claudeUsageFromEnvelope(parsed) {
   const models = [];
-  const perModel = parsed?.modelUsage && typeof parsed.modelUsage === 'object' ? parsed.modelUsage : {};
+  const perModel = parsed?.modelUsage && typeof parsed.modelUsage === 'object' && !Array.isArray(parsed.modelUsage) ? parsed.modelUsage : {};
   for (const [id, stats] of Object.entries(perModel)) {
-    if (!id) continue;
-    models.push({
+    if (!id || !stats || typeof stats !== 'object') continue;
+    if (!TOKEN_FIELDS.some(field => Number.isFinite(Number(stats[field])) && stats[field] !== null && stats[field] !== '')) continue;
+    const entry = {
       model: id,
-      input: number(stats?.inputTokens), output: number(stats?.outputTokens),
-      cacheRead: number(stats?.cacheReadInputTokens), cacheCreation: number(stats?.cacheCreationInputTokens), reasoning: 0,
-    });
+      input: number(stats.inputTokens), output: number(stats.outputTokens),
+      cacheRead: number(stats.cacheReadInputTokens), cacheCreation: number(stats.cacheCreationInputTokens), reasoning: 0,
+    };
+    if (entry.input + entry.output + entry.cacheRead + entry.cacheCreation > 0) models.push(entry);
   }
   if (!models.length && parsed?.usage && typeof parsed.usage === 'object') {
     const usage = parsed.usage;
     const total = { input: number(usage.input_tokens), output: number(usage.output_tokens), cacheRead: number(usage.cache_read_input_tokens), cacheCreation: number(usage.cache_creation_input_tokens), reasoning: number(usage.output_tokens_details?.thinking_tokens) };
     if (total.input + total.output + total.cacheRead + total.cacheCreation > 0) models.push({ model: typeof parsed.model === 'string' && parsed.model ? parsed.model : 'unknown', ...total });
   }
-  return { engine: 'claude', effort: null, models };
+  return { engine: 'claude', effort: null, models, parseEmpty: models.length === 0 };
 }
 
 function eventsOf(jsonl) {

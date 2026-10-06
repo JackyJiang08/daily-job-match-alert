@@ -16,11 +16,17 @@ import { ATS_SOURCE_KIND } from './collectors/ats-boards.mjs';
 export const DEFAULT_TITLE_FAMILIES = [
   'data', 'analytics', 'analyst', 'scientist', 'machine learning', 'ML', 'AI', 'quantitative', 'quant',
   'business intelligence', 'BI', 'data engineer', 'software engineer', 'developer', 'product analyst',
-  'research', 'insights', 'decision',
+  'research', 'insights', 'decision', 'statistic', 'actuarial', 'consultant', 'strategist',
+  'forward deployed engineer', 'solutions engineer', 'associate product manager',
 ];
 export const DEFAULT_ELIGIBILITY_EXCLUDES = ['senior', 'staff', 'principal', 'lead', 'manager', 'director'];
 export const DEFAULT_PREFILTER_EXCLUDES = ['head of', 'vice president', 'VP', 'account manager', 'sales', 'technician', 'nurse', 'driver', 'mechanic'];
 export const DEFAULT_LEVEL_SUFFIXES = ['II', 'III', 'IV'];
+// Wording that marks a posting as early career even when its title carries "Manager" or a level suffix
+// ("Software Engineer II, Early Career", "Associate Product Manager, 2027"). Only those two exclusions
+// stand down; every other one (sales, director, senior, ...) still applies.
+export const DEFAULT_EXCLUDE_OVERRIDES = ['new grad', 'early career', 'university', 'graduate program', '2027', 'rotational', 'associate product manager'];
+const OVERRIDABLE_EXCLUDES = new Set(['manager']);
 
 // Sources a person already curated for early-career roles only face the exclusion list.
 const CURATED_SOURCE_KINDS = new Set(['public_github_list', 'official_email_alert', 'official_email_alert_via_himalaya', 'career_ops_scan']);
@@ -38,6 +44,25 @@ function phrasePattern(term) {
   return new RegExp(`(?<![A-Za-z0-9])${words.join('[\\s/-]+')}(?![A-Za-z0-9])`, 'i');
 }
 
+// The last word of a family term also matches its common endings: engineer → engineers / engineering,
+// developer → development / developers, statistic → statistics / statistical / statistician, research →
+// researcher. Acronyms ("AI", "ML", "BI") and two-letter words stay whole-word, so "AI" never matches
+// "Retail". A word ending in "-eer" keeps its stem, so "engineer" never shrinks to "engine".
+function lastWordWithEndings(word) {
+  const lower = word.toLowerCase();
+  if (word.length <= 2 || /^[A-Z0-9]+$/.test(word)) return escapeRegExp(word);
+  if (lower.endsWith('eer')) return `${escapeRegExp(word)}(?:s|ing|ed)?`;
+  if (lower.endsWith('er')) return `${escapeRegExp(word.slice(0, -2))}(?:er|ers|ment|ments|ing|ed)`;
+  return `${escapeRegExp(word)}(?:s|es|al|ally|ian|ians|ics|ical|ing|ed|er|ers)?`;
+}
+
+function familyPattern(term) {
+  const words = String(term || '').trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return null;
+  const body = [...words.slice(0, -1).map(escapeRegExp), lastWordWithEndings(words[words.length - 1])];
+  return new RegExp(`(?<![A-Za-z0-9])${body.join('[\\s/-]+')}(?![A-Za-z0-9])`, 'i');
+}
+
 // A level suffix is a standalone uppercase roman numeral ("Data Analyst II", "Engineer III, Platform").
 function suffixPattern(suffix) {
   const text = String(suffix || '').trim();
@@ -53,8 +78,10 @@ export function prefilterSettings(preferences = {}) {
   const families = listOr(preferences.titleFamilies, DEFAULT_TITLE_FAMILIES);
   const excludes = [...new Set([...listOr(preferences.excludeTitleTerms, DEFAULT_ELIGIBILITY_EXCLUDES), ...listOr(preferences.prefilterExcludeTitleTerms, DEFAULT_PREFILTER_EXCLUDES)])];
   const suffixes = listOr(preferences.excludeLevelSuffixes, DEFAULT_LEVEL_SUFFIXES);
+  const overrides = listOr(preferences.prefilterExcludeOverrides, DEFAULT_EXCLUDE_OVERRIDES);
   return {
-    families: families.map(term => ({ term, pattern: phrasePattern(term) })).filter(item => item.pattern),
+    overrides: overrides.map(term => ({ term, pattern: phrasePattern(term) })).filter(item => item.pattern),
+    families: families.map(term => ({ term, pattern: familyPattern(term) })).filter(item => item.pattern),
     excludes: excludes.map(term => ({ term, pattern: phrasePattern(term) })).filter(item => item.pattern),
     suffixes: suffixes.map(term => ({ term, pattern: suffixPattern(term) })).filter(item => item.pattern),
   };
@@ -67,12 +94,22 @@ export function requiresTitleFamily(job) {
 
 // null when the title passes, else the rule that dropped it ("exclude: technician", "level suffix: II",
 // "no title family").
+// The exclusion a title hits, or null. An early-career override word in the title lifts the "manager" and
+// level-suffix exclusions only.
+export function exclusionRule(title, settings) {
+  const text = String(title || '');
+  const overridden = (settings.overrides || []).some(item => item.pattern.test(text));
+  const exclusion = settings.excludes.find(item => item.pattern.test(text) && !(overridden && OVERRIDABLE_EXCLUDES.has(item.term.trim().toLowerCase())));
+  if (exclusion) return `exclude: ${exclusion.term}`;
+  const suffix = overridden ? null : settings.suffixes.find(item => item.pattern.test(text));
+  if (suffix) return `level suffix: ${suffix.term}`;
+  return null;
+}
+
 export function titleRule(job, settings) {
   const title = String(job?.title || '');
-  const exclusion = settings.excludes.find(item => item.pattern.test(title));
-  if (exclusion) return `exclude: ${exclusion.term}`;
-  const suffix = settings.suffixes.find(item => item.pattern.test(title));
-  if (suffix) return `level suffix: ${suffix.term}`;
+  const excluded = exclusionRule(title, settings);
+  if (excluded) return excluded;
   if (requiresTitleFamily(job) && !settings.families.some(item => item.pattern.test(title))) return 'no title family';
   return null;
 }
@@ -124,8 +161,7 @@ export function detectEarlyCareer(job, preferences = {}) {
   const title = String(job?.title || '');
   if (!title || job?.roleType === 'internship' || INTERN.test(title)) return { level: null, signal: null };
   const settings = prefilterSettings(preferences);
-  const senior = settings.excludes.some(item => item.pattern.test(title)) || settings.suffixes.some(item => item.pattern.test(title));
-  if (senior) return { level: null, signal: null };
+  if (exclusionRule(title, settings)) return { level: null, signal: null };
   const titleSignal = ENTRY_TITLE.exec(title)?.[0] || (LEVEL_ONE.test(title) ? 'level I' : null) || (ANALYST.test(title) ? 'analyst' : null);
   const jdSignal = NEW_GRAD_JD.exec(String(job?.description || ''))?.[0] || null;
   if (titleSignal && jdSignal) return { level: 'new_grad', signal: `${titleSignal}; JD: ${jdSignal}` };

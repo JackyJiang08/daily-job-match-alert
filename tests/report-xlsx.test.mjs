@@ -248,25 +248,26 @@ test('Run Summary lists the hard-filter exclusion counts and the Gaps column car
   }
 });
 
-test('Run Summary counts this run\'s reviewed postings and the all-time total on separate rows', async () => {
+test('Run Summary counts this run\'s reviewed postings and the last-90-days total on separate rows', async () => {
   const payload = {
-    meta: { applicationDate: '2026-10-05', date: '2026-10-05', generatedAt: '2026-10-06T01:00:00Z', lookbackHours: 24, reviewedCount: 57, reviewedInRun: 12, reviewedAllTime: 3480, minimumMatchScore: 60, scoringModel: 'local_only', resumeTracks: [{ id: 'data', label: 'Data' }], warnings: [] },
+    meta: { applicationDate: '2026-10-05', date: '2026-10-05', generatedAt: '2026-10-06T01:00:00Z', lookbackHours: 24, reviewedCount: 57, reviewedInRun: 12, reviewedLast90Days: 3480, minimumMatchScore: 60, scoringModel: 'local_only', resumeTracks: [{ id: 'data', label: 'Data' }], warnings: [] },
     matches: [], reviewed: [],
   };
   const { workbook, directory } = await buildWorkbook(payload, 'reviewed-counts');
   try {
     const rows = summaryRowsOf(workbook);
     assert.equal(rows['Reviewed jobs (this run)'], 12, 'this run, not the day\'s merged total of 57');
-    assert.equal(rows['Reviewed (all time)'], 3480);
+    assert.equal(rows['Reviewed (last 90 days)'], 3480);
+    assert.equal(Object.hasOwn(rows, 'Reviewed (all time)'), false, 'no all-time claim without an all-time record');
     assert.equal(Object.hasOwn(rows, 'Reviewed jobs'), false);
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }
-  const legacy = await buildWorkbook({ ...payload, meta: { ...payload.meta, reviewedInRun: undefined, reviewedAllTime: undefined } }, 'reviewed-legacy');
+  const legacy = await buildWorkbook({ ...payload, meta: { ...payload.meta, reviewedInRun: undefined, reviewedLast90Days: undefined } }, 'reviewed-legacy');
   try {
     const rows = summaryRowsOf(legacy.workbook);
     assert.equal(rows['Reviewed jobs (this run)'], 57, 'an older payload falls back to its stored count');
-    assert.equal(rows['Reviewed (all time)'], 'not recorded');
+    assert.equal(rows['Reviewed (last 90 days)'], 'not recorded');
   } finally {
     await fs.rm(legacy.directory, { recursive: true, force: true });
   }

@@ -1,5 +1,5 @@
 {
-  "note": "Envelope recorded from state/logs/hub.err.log (Claude Code 2.1.289, print mode, --output-format json); identifiers zeroed. That recording was an error envelope with an empty modelUsage, so the success fields and the per-model entries were filled in with the field set the 2.1.292 binary writes (inputTokens, outputTokens, cacheReadInputTokens, cacheCreationInputTokens, webSearchRequests, costUSD, contextWindow, maxOutputTokens).",
+  "note": "SYNTHETIC: not a recorded successful reply. The envelope skeleton comes from a real error envelope in state/logs/hub.err.log (Claude Code 2.1.289, print mode, --output-format json; identifiers zeroed), whose modelUsage was empty. The success fields, the token numbers, and the two modelUsage entries were written by hand using the field set the 2.1.292 binary emits (inputTokens, outputTokens, cacheReadInputTokens, cacheCreationInputTokens, webSearchRequests, costUSD, contextWindow, maxOutputTokens). Replace with a recorded reply when one is captured.",
   "envelope": {
     "duration_api_ms": 40102,
     "stop_reason": "stop_sequence",

@@ -10,12 +10,13 @@ import { DEFAULT_PREFILTER_EXCLUDES, DEFAULT_TITLE_FAMILIES, detectEarlyCareer, 
 import { USAGE_RETENTION_DAYS, appendUsage, claudeUsageFromEnvelope, codexUsageFromJsonl, describeTotals, readUsage, summarizeUsage, usageEntries, usagePath, usageWindow } from '../src/engines/usage.mjs';
 import { parseStructuredOutput } from '../src/engines/claude.mjs';
 import { parseCodexOutput } from '../src/engines/codex.mjs';
-import { applyReviewBudget, bumpReviewTotals } from '../src/index.mjs';
+import { applyReviewBudget, reviewedInLastDays, usageParseEmptyWarning } from '../src/index.mjs';
 import { applySubscriptionMatching } from '../src/subscription-match.mjs';
 import { buildHtml, runDetailsView } from '../src/report.mjs';
 
 const fixtures = new URL('./fixtures/usage/', import.meta.url);
-const claudeFixture = JSON.parse(await fs.readFile(new URL('claude-result.json', fixtures), 'utf8'));
+// Synthetic: written from the CLI's field names, not a recorded successful reply (see its note).
+const claudeFixture = JSON.parse(await fs.readFile(new URL('claude-result.synthetic.json', fixtures), 'utf8'));
 const codexExec = await fs.readFile(new URL('codex-exec.jsonl', fixtures), 'utf8');
 const codexRollout = await fs.readFile(new URL('codex-rollout.jsonl', fixtures), 'utf8');
 const NOW = new Date('2026-10-06T01:00:00Z');
@@ -123,8 +124,9 @@ test('full-time early-career titles are marked entry_level, a new-grad signal in
 
 test('Claude usage is read from the recorded result envelope and summed by the full model id, never an alias', () => {
   const usage = claudeUsageFromEnvelope(claudeFixture.envelope);
+  assert.match(claudeFixture.note, /^SYNTHETIC/);
   assert.deepEqual(usage, {
-    engine: 'claude', effort: null,
+    engine: 'claude', effort: null, parseEmpty: false,
     models: [
       { model: 'claude-fable-5-1', input: 18, output: 3874, cacheRead: 14120, cacheCreation: 9312, reasoning: 0 },
       { model: 'claude-haiku-4-5-20251001', input: 412, output: 23, cacheRead: 0, cacheCreation: 0, reasoning: 0 },
@@ -210,7 +212,7 @@ test('the matcher tags review and supplemental calls; the usage file keeps 35 da
   }
 });
 
-test('Run Details shows this run\'s usage totals by model and purpose; the all-time review total seeds from the stored payloads once', async () => {
+test('Run Details shows this run\'s usage totals by model and purpose; the reviewed total covers the stored payloads of the last 90 days', async () => {
   const at = NOW.toISOString();
   const usage = summarizeUsage([...usageEntries(claudeUsageFromEnvelope(claudeFixture.envelope), { purpose: 'review', at }), ...usageEntries(codexUsageFromJsonl(codexExec, { model: 'gpt-6-astra', effort: 'medium' }), { purpose: 'supplemental', at })]);
   const meta = { date: '2026-10-05', resumeTracks: [], warnings: [], usage };
@@ -230,11 +232,97 @@ test('Run Details shows this run\'s usage totals by model and purpose; the all-t
     await fs.mkdir(path.join(root, 'state'), { recursive: true });
     await fs.writeFile(path.join(root, 'state', 'report-payload-2026-10-03.json'), JSON.stringify({ meta: {}, reviewed: [{}, {}, {}] }));
     await fs.writeFile(path.join(root, 'state', 'report-payload-2026-10-04.json'), JSON.stringify({ meta: {}, reviewed: [{}, {}] }));
-    const state = {};
-    assert.equal(await bumpReviewTotals({ root }, state, 4, NOW), 9, 'seeded with 5 from the payloads, plus this run');
-    assert.deepEqual(state.reviewTotals, { count: 9, since: '2026-10-03' });
-    assert.equal(await bumpReviewTotals({ root }, state, 6, NOW), 15, 'later runs only add');
+    await fs.writeFile(path.join(root, 'state', 'report-payload-2026-10-05.json'), JSON.stringify({ meta: {}, reviewed: [{}] }));
+    await fs.writeFile(path.join(root, 'state', 'report-payload-2026-06-01.json'), JSON.stringify({ meta: {}, reviewed: [{}, {}, {}, {}] }));
+    const config = { root };
+    assert.equal(await reviewedInLastDays(config, '2026-10-05', 7, NOW), 12, 'Oct 3 + Oct 4 from disk, today from the merged total (7), not today\'s stale file; June is past 90 days');
+    assert.equal(await reviewedInLastDays(config, '2026-10-05', 7, NOW), 12, 'a rerun recomputes, it never accumulates');
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
+});
+
+test('family terms accept common word endings, while exclusions and short acronyms stay whole-word', () => {
+  const settings = prefilterSettings({});
+  for (const title of ['Software Engineering Intern', 'Software Development Engineer', 'Data Engineering Intern', 'Machine Learning Engineering Intern', 'Statistician', 'Statistical Programmer Intern']) {
+    assert.equal(titleRule(ats(title), settings), null, title);
+  }
+  // Each ending is accepted by the term itself, not by some other family word in the title.
+  const only = term => prefilterSettings({ titleFamilies: [term], excludeTitleTerms: [], prefilterExcludeTitleTerms: [], excludeLevelSuffixes: [] });
+  assert.equal(titleRule(ats('Platform Engineering'), only('engineer')), null, 'engineer → engineering');
+  assert.equal(titleRule(ats('Engineers Rotation'), only('engineer')), null);
+  assert.equal(titleRule(ats('Game Engine Programmer'), only('engineer')), 'no title family', 'engineer never shrinks to engine');
+  assert.equal(titleRule(ats('Product Development Rotation'), only('developer')), null, 'developer → development');
+  assert.equal(titleRule(ats('Developers Program'), only('developer')), null);
+  for (const title of ['Statistics Intern', 'Statistical Analyst', 'Statistician']) assert.equal(titleRule(ats(title), only('statistic')), null, title);
+  assert.equal(titleRule(ats('Retail Merchandiser'), only('AI')), 'no title family', '"AI" stays whole-word');
+  assert.equal(titleRule(ats('Business Intelligence Developer'), only('BI')), 'no title family', '"BI" does not grow into a word');
+  assert.equal(titleRule(listed('Software Engineer, Leading Edge'), prefilterSettings({})), null, '"lead" exclusion does not take endings');
+  assert.equal(titleRule(listed('Team Lead, Data'), prefilterSettings({})), 'exclude: lead');
+});
+
+test('the default families include the added roles', () => {
+  for (const term of ['statistic', 'actuarial', 'consultant', 'strategist', 'forward deployed engineer', 'solutions engineer', 'associate product manager']) assert.ok(DEFAULT_TITLE_FAMILIES.includes(term), term);
+  const settings = prefilterSettings({});
+  for (const title of ['Actuarial Analyst Intern', 'Technology Consultant, New Grad', 'Growth Strategist', 'Forward Deployed Engineer', 'Solutions Engineer']) assert.equal(titleRule(ats(title), settings), null, title);
+});
+
+test('early-career wording overrides only the manager and level-suffix exclusions', () => {
+  const settings = prefilterSettings({});
+  assert.equal(titleRule(ats('Software Engineer II, Early Career'), settings), null);
+  assert.equal(titleRule(ats('Associate Product Manager, 2027'), settings), null);
+  assert.equal(titleRule(ats('Associate Product Manager'), settings), null, 'the title itself is an override');
+  assert.equal(titleRule(ats('Analytics Manager, University Graduate'), settings), null);
+  assert.equal(titleRule(ats('Product Manager, University Graduate'), settings), 'no title family', 'the override lifts manager, the family check still applies');
+  assert.equal(titleRule(ats('Data Scientist III, Rotational Program'), settings), null);
+  assert.equal(titleRule(ats('Associate Director, Data'), settings), 'exclude: director', 'director is not overridable');
+  assert.equal(titleRule(ats('Data Analyst II'), settings), 'level suffix: II', 'no override word, the suffix still excludes');
+  assert.equal(titleRule(ats('Sales Engineer, New Grad'), settings), 'exclude: sales', 'other exclusions still apply');
+  assert.equal(titleRule(ats('Senior Data Scientist, Early Career'), settings), 'exclude: senior');
+  assert.equal(titleRule(ats('Product Manager'), settings), 'exclude: manager');
+  // Configurable; an empty list turns the exception off.
+  assert.equal(titleRule(ats('Software Engineer II, Early Career'), prefilterSettings({ prefilterExcludeOverrides: [] })), 'level suffix: II');
+  assert.equal(titleRule(ats('Data Analyst II, Launchpad'), prefilterSettings({ prefilterExcludeOverrides: ['launchpad'] })), null);
+  // Postings let through by an override never appear in the Run Details drop list.
+  const result = prefilterJobs([ats('Software Engineer II, Early Career'), ats('Associate Product Manager, 2027'), ats('Associate Director, Data'), ats('Data Analyst II')], {});
+  assert.deepEqual(result.jobs.map(job => job.title), ['Software Engineer II, Early Career', 'Associate Product Manager, 2027']);
+  assert.deepEqual(result.titleExcluded.map(item => [item.title, item.rule]), [['Associate Director, Data', 'exclude: director'], ['Data Analyst II', 'level suffix: II']]);
+  // The same exception applies to early-career recognition.
+  assert.equal(detectEarlyCareer({ title: 'Software Engineer II, Early Career' }).level, 'entry_level');
+});
+
+test('a successful Claude reply with empty or unreadable modelUsage raises "usage parse empty" instead of recording zeros', async () => {
+  for (const envelope of [
+    { type: 'result', is_error: false, structured_output: { results: [] }, modelUsage: {} },
+    { type: 'result', is_error: false, structured_output: { results: [] } },
+    { type: 'result', is_error: false, structured_output: { results: [] }, modelUsage: 'garbage' },
+    { type: 'result', is_error: false, structured_output: { results: [] }, modelUsage: { 'claude-fable-5-1': { tokens: 'n/a' } } },
+    { type: 'result', is_error: false, structured_output: { results: [] }, modelUsage: { 'claude-fable-5-1': { inputTokens: 0, outputTokens: 0 } } },
+  ]) {
+    const usage = claudeUsageFromEnvelope(envelope);
+    assert.deepEqual([usage.models, usage.parseEmpty], [[], true], JSON.stringify(envelope.modelUsage));
+    assert.deepEqual(usageEntries(usage, { purpose: 'review', at: NOW.toISOString() }), [], 'nothing is stored as zero');
+  }
+  assert.equal(claudeUsageFromEnvelope(claudeFixture.envelope).parseEmpty, false);
+
+  // The matcher hands empty usage to the recorder; the nightly run counts it and adds one warning.
+  const warnings = [];
+  let empties = 0;
+  const recordUsage = usage => { if (usage?.parseEmpty) empties += 1; };
+  const makeEngine = (id, model) => ({
+    id, label: id, model,
+    async verifyAuth() {},
+    async reviewBatch(prompt) {
+      const ids = [...prompt.matchAll(/"id": "([a-f0-9]{16})"/g)].map(match => match[1]);
+      return { results: ids.map(job => ({ id: job, roleType: 'new_grad', scores: { data: 80 }, recommendedTrack: 'data', matchLevel: 'high', reasons: ['fit'], gaps: [], blockers: [] })), scoringModel: 'claude-fable-5-1', usage: claudeUsageFromEnvelope({ modelUsage: {} }) };
+    },
+    modelMatches() { return true; },
+    describeModel() { return { engine: id, model }; },
+  });
+  const jobs = [1, 2, 3].map(index => ({ url: `https://example.com/jobs/${index}`, title: `Analyst ${index}`, company: 'Acme', description: 'x', bestScore: 50, scores: { data: 50 }, scoreDetails: { data: { roleRelevance: 25 } }, blockers: [], reasons: [], gaps: [] }));
+  await applySubscriptionMatching(jobs, [{ id: 'data', label: 'Data', text: 'resume' }], {}, { engine: 'claude', model: 'fable', batchSize: 2, warnings, quotaEvents: [], makeEngine, now: () => NOW, sleep: async () => {}, retryDelayMs: 0, recordUsage: (purpose, usage) => recordUsage(usage) });
+  assert.equal(empties, 2, 'both successful batches reported empty usage to the recorder');
+  const warning = usageParseEmptyWarning(empties);
+  assert.equal(warning.message, 'usage parse empty: 2 successful Claude call(s) returned no readable modelUsage; their tokens are not counted in the usage log');
+  assert.notEqual(warning.level, 'info', 'a warning, not an info line');
 });

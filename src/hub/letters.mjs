@@ -60,6 +60,7 @@ function withUsageRecording(ctx, engine) {
   wrapped.recordsUsage = true;
   wrapped.generateText = async (prompt, context) => {
     const response = await engine.generateText(prompt, context);
+    if (response?.usage?.parseEmpty) console.error(`[cover-letter] usage parse empty: a successful ${engine.id} call returned no readable modelUsage; it is not counted in the usage log`);
     if (response?.usage?.models?.length) {
       const purpose = String(prompt || '').startsWith('EDITOR REVIEW') ? 'editor' : 'letter';
       const entries = usageEntries(response.usage, { purpose, at: ctx.now().toISOString(), source: 'hub' });
