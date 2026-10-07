@@ -43,7 +43,28 @@ export async function reviewCoverLetter({ engine, paragraphs, inputs, tempDirect
   return { notes, adopted, paragraphs: adopted ? revised.paragraphs : paragraphs, revisionIssues: adopted ? revised.issues : [], model: response.scoringModel || null };
 }
 
-export async function generateCoverLetter({ engine, inputs, review = true, io = fs, tempRoot = os.tmpdir() }) {
+// The editor pass may use its own engines (the Cover letter editor stage and its fallback chain): each is
+// tried in order, and a step that fails hands over to the next with a note naming both. Without a list
+// the draft's engine also edits.
+async function reviewWithChain({ engines, paragraphs, inputs, tempDirectory }) {
+  const notes = [];
+  let lastError = null;
+  for (let index = 0; index < engines.length; index += 1) {
+    const engine = engines[index];
+    try {
+      const edited = await reviewCoverLetter({ engine, paragraphs, inputs, tempDirectory });
+      return { ...edited, engine, handoffNotes: notes };
+    } catch (error) {
+      lastError = error;
+      const next = engines[index + 1];
+      if (!next) break;
+      notes.push(`Editor: ${engine.model || engine.id} failed (${String(error?.notice || error?.message || error).split('\n')[0].slice(0, 120)}); reviewed with ${next.model || next.id}`);
+    }
+  }
+  throw lastError;
+}
+
+export async function generateCoverLetter({ engine, reviewEngines = null, inputs, review = true, io = fs, tempRoot = os.tmpdir() }) {
   const samples = selectSamples(inputs.samples || [], inputs.track?.id || null);
   return withTempDirectory(io, tempRoot, async tempDirectory => {
     const prompt = buildCoverLetterPrompt({ ...inputs, samples });
@@ -54,10 +75,16 @@ export async function generateCoverLetter({ engine, inputs, review = true, io = 
     let editorNotes = [];
     let reviewed = false;
     let revisionAdopted = false;
+    let reviewModel = null;
+    let reviewEngineId = null;
+    let handoffNotes = [];
     if (review && draft.ok) {
-      const edited = await reviewCoverLetter({ engine, paragraphs, inputs, tempDirectory });
+      const edited = await reviewWithChain({ engines: reviewEngines?.length ? reviewEngines : [engine], paragraphs, inputs, tempDirectory });
       reviewed = true;
       editorNotes = edited.notes;
+      handoffNotes = edited.handoffNotes;
+      reviewModel = edited.model || edited.engine?.model || null;
+      reviewEngineId = edited.engine?.id || null;
       if (edited.adopted) {
         revisionAdopted = true;
         paragraphs = edited.paragraphs;
@@ -69,7 +96,8 @@ export async function generateCoverLetter({ engine, inputs, review = true, io = 
     return {
       paragraphs, issues, wordCount: words, ok: draft.ok,
       engine: engine.id, engineLabel: engine.label, model: response.scoringModel || engine.model || 'unknown',
-      reviewed, editorNotes, revisionAdopted,
+      reviewed, editorNotes: [...handoffNotes, ...editorNotes], revisionAdopted,
+      reviewEngine: reviewEngineId, reviewModel,
       samplesUsed: samples.map(sample => ({ name: sample.originalName || sample.file, track: sample.track || null })),
     };
   });

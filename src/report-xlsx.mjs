@@ -169,6 +169,14 @@ workbook.creator = 'Daily Job Match Alert';
 workbook.created = asDate(payload.meta?.generatedAt) || new Date();
 workbook.calcProperties.fullCalcOnLoad = true;
 
+// "claude · claude-opus-5-5: 12; codex · gpt-5.6-sol: 3" (plus local scores), or a note for older payloads.
+function scoredByModelText(counts) {
+  if (!counts) return 'not recorded';
+  const parts = (counts.scoredByModel || []).map(item => `${item.label}: ${item.count}`);
+  if (counts.localScores) parts.push(`local scores (unreviewed): ${counts.localScores}`);
+  return parts.length ? parts.join('; ') : 'none';
+}
+
 const summary = workbook.addWorksheet('Run Summary', { views: [{ showGridLines: false }] });
 const matches = workbook.addWorksheet('Matches', { views: [{ state: 'frozen', ySplit: 1, showGridLines: false }] });
 const notes = workbook.addWorksheet('Notes', { views: [{ showGridLines: false }] });
@@ -181,7 +189,10 @@ const summaryValues = [
   ['Update today', `#${Number(payload.meta.runsToday || 1)}`],
   ['Last updated at', asDate(payload.meta.lastUpdatedAt || payload.meta.generatedAt)],
   ['Lookback hours', payload.meta.lookbackHours],
-  ['Reviewed jobs (this run)', payload.meta.reviewedInRun ?? payload.meta.reviewedCount],
+  ['Scored by model (this run)', scoredByModelText(payload.meta.runCounts)],
+  ['Deferred', payload.meta.runCounts ? payload.meta.runCounts.deferred.budget + payload.meta.runCounts.deferred.quota : 'not recorded'],
+  ['Prefiltered out', payload.meta.runCounts ? payload.meta.runCounts.prefilteredOut.title + payload.meta.runCounts.prefilteredOut.location : 'not recorded'],
+  ['Expired', payload.meta.runCounts ? payload.meta.runCounts.expired : 'not recorded'],
   ['Reviewed (last 90 days)', payload.meta.reviewedLast90Days ?? 'not recorded'],
   ['High matches', jobs.length],
   ['Excluded: location outside US', Number(payload.meta.eligibilityExclusions?.location || 0)],

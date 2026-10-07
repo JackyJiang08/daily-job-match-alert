@@ -93,7 +93,7 @@ export const DEFAULT_QUOTA_PATTERNS = {
 export const DEFAULT_QUOTA_POLICY = {
   fiveHourLimit: { retryIntervalMs: 10 * 60 * 1000, maxWaitMs: 90 * 60 * 1000 },
   modelLadder: defaultLadder(),
-  fallbackEngine: null,
+  fallbackEngine: 'codex',
   patterns: {},
 };
 
@@ -115,7 +115,9 @@ export function normalizeQuotaPolicy(raw = {}) {
       maxWaitMs: Math.max(0, Number(fiveHour.maxWaitMs ?? DEFAULT_QUOTA_POLICY.fiveHourLimit.maxWaitMs) || 0),
     },
     modelLadder: ladder.length ? ladder : [...DEFAULT_QUOTA_POLICY.modelLadder],
-    fallbackEngine: String(policy.fallbackEngine || '').toLowerCase() === 'codex' ? 'codex' : null,
+    // Unset means on: a weekly account limit hands the run to Codex when Codex is signed in (the matcher
+    // checks the connection). An explicit null or false in config.json turns it off.
+    fallbackEngine: policy.fallbackEngine === undefined ? 'codex' : String(policy.fallbackEngine || '').toLowerCase() === 'codex' ? 'codex' : null,
     patterns,
   };
 }

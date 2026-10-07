@@ -22,6 +22,9 @@ export const DEFAULT_TITLE_FAMILIES = [
 export const DEFAULT_ELIGIBILITY_EXCLUDES = ['senior', 'staff', 'principal', 'lead', 'manager', 'director'];
 export const DEFAULT_PREFILTER_EXCLUDES = ['head of', 'vice president', 'VP', 'account manager', 'sales', 'technician', 'nurse', 'driver', 'mechanic'];
 export const DEFAULT_LEVEL_SUFFIXES = ['II', 'III', 'IV'];
+// Gender markers German, Austrian, Swiss, and French postings put in the title: (m/w/d), (f/m/d), (w/m/d),
+// (m/f/d), (d/m/w), (h/f), (f/h), (m/w), (w/m), with optional spaces or an x/i/* for diverse.
+export const NON_US_TITLE_MARKER = /\(\s*(?:[mwfdhxi*]\s*\/\s*){1,3}[mwfdhxi*]\s*\)/i;
 // Wording that marks a posting as early career even when its title carries "Manager" or a level suffix
 // ("Software Engineer II, Early Career", "Associate Product Manager, 2027"). Only those two exclusions
 // stand down; every other one (sales, director, senior, ...) still applies.
@@ -134,6 +137,13 @@ export function prefilterJobs(jobs, preferences = {}) {
       count(job.source, 'title');
       continue;
     }
+    // European job titles carry a gender marker ("(m/w/d)", "(f/m/d)", "(h/f)"): the posting is not in the US.
+    const marker = NON_US_TITLE_MARKER.exec(String(job.title || ''))?.[0];
+    if (marker) {
+      locationExcluded.push({ company: job.company || '', title: job.title || '', source: job.source || '', rule: `title marker: ${marker}`, url: job.url });
+      count(job.source, 'location');
+      continue;
+    }
     const location = job.location ? assessLocation(job.location) : { verdict: 'unverified' };
     if (location.verdict === 'non_us') {
       locationExcluded.push({ company: job.company || '', title: job.title || '', source: job.source || '', rule: `location: ${location.marker}`, url: job.url });
@@ -151,12 +161,13 @@ export function prefilterJobs(jobs, preferences = {}) {
 const ENTRY_TITLE = /(?<![A-Za-z0-9])(?:associate|junior|jr\.?|graduate|university|early[\s-]+career|entry(?:[\s-]+level)?|rotational)(?![A-Za-z0-9])/i;
 const LEVEL_ONE = /(?<![A-Za-z0-9])I(?![A-Za-z0-9])(?!\s*(?:\/|&))/;
 const ANALYST = /(?<![A-Za-z0-9])analyst(?![A-Za-z0-9])/i;
-const NEW_GRAD_JD = /(?<![A-Za-z0-9])(?:0\s*[-–]\s*2\s*(?:\+\s*)?years?|recent(?:ly)?\s+graduate[ds]?|class\s+of\s+2027|new[\s-]+grad(?:uate)?s?)(?![A-Za-z0-9])/i;
+const NEW_GRAD_JD = /(?<![A-Za-z0-9])(?:0\s*(?:[-–]|to)\s*2\s*(?:\+\s*)?years?|recent(?:ly)?\s+graduate[ds]?|class\s+of\s+2027|new[\s-]+grad(?:uate)?s?)(?![A-Za-z0-9])/i;
 const INTERN = /(?<![A-Za-z0-9])(?:intern(?:ship)?s?|co[\s-]?op)(?![A-Za-z0-9])/i;
 
-// 'new_grad' when the title reads entry level (or is a plain Analyst) and the description names an early-
-// career signal; 'entry_level' for the title alone; null otherwise. Internships are left to their own
-// role type, and a senior word or level suffix in the title rules a posting out.
+// 'new_grad' when the description (read after enrichment) names an early-career signal ("0-2 years",
+// "0 to 2 years", "recent graduate(s)", "Class of 2027", "new grad(uate)s"); 'entry_level' when only the
+// title reads entry level (level I, Associate, Junior, ..., or a plain Analyst); null otherwise. Internships
+// are left to their own role type, and a senior word or level suffix in the title rules a posting out.
 export function detectEarlyCareer(job, preferences = {}) {
   const title = String(job?.title || '');
   if (!title || job?.roleType === 'internship' || INTERN.test(title)) return { level: null, signal: null };
@@ -164,7 +175,7 @@ export function detectEarlyCareer(job, preferences = {}) {
   if (exclusionRule(title, settings)) return { level: null, signal: null };
   const titleSignal = ENTRY_TITLE.exec(title)?.[0] || (LEVEL_ONE.test(title) ? 'level I' : null) || (ANALYST.test(title) ? 'analyst' : null);
   const jdSignal = NEW_GRAD_JD.exec(String(job?.description || ''))?.[0] || null;
-  if (titleSignal && jdSignal) return { level: 'new_grad', signal: `${titleSignal}; JD: ${jdSignal}` };
+  if (jdSignal) return { level: 'new_grad', signal: titleSignal ? `${titleSignal}; JD: ${jdSignal}` : `JD: ${jdSignal}` };
   if (titleSignal) return { level: 'entry_level', signal: titleSignal };
   return { level: null, signal: null };
 }

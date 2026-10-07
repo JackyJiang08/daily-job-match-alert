@@ -1,5 +1,6 @@
 const INTERN = /\b(intern(ship)?|co[- ]?op|summer analyst)\b/i;
-const NEW_GRAD = /\b(new grad(uate)?|graduate program|university grad(uate)?|campus hire|early career|recent graduate)\b/i;
+// Plurals count too ("new grads", "new graduates", "recent graduates").
+const NEW_GRAD = /\b(new grad(uate)?s?|graduate program|university grad(uate)?s?|campus hire|early career|recent graduates?)\b/i;
 const ENTRY = /\b(entry[- ]level|junior|associate|engineer i\b|scientist i\b|analyst i\b|level 1|0\s*[-–]\s*3 years?)\b/i;
 
 export function classifyRole(job) {

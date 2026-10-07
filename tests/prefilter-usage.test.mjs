@@ -6,6 +6,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { classifyRole } from '../src/classify.mjs';
 import { DEFAULT_PREFILTER_EXCLUDES, DEFAULT_TITLE_FAMILIES, detectEarlyCareer, isEarlyCareerPriority, prefilterJobs, prefilterSettings, titleRule } from '../src/prefilter.mjs';
 import { USAGE_RETENTION_DAYS, appendUsage, claudeUsageFromEnvelope, codexUsageFromJsonl, describeTotals, readUsage, summarizeUsage, usageEntries, usagePath, usageWindow } from '../src/engines/usage.mjs';
 import { parseStructuredOutput } from '../src/engines/claude.mjs';
@@ -78,7 +79,7 @@ test('a known non-US location is dropped before enrichment, counted per source, 
   ]);
 
   const meta = { date: '2026-10-05', timeZone: 'America/Chicago', lookbackHours: 24, resumeTracks: [{ id: 'data', label: 'Data' }], warnings: [], prefilter: { titleExcluded: result.titleExcluded, titleExcludedCount: 2, locationExcludedCount: 1, bySource: result.bySource } };
-  const row = runDetailsView([], meta, meta.resumeTracks).rows.find(item => item.term === 'Prefilter');
+  const row = runDetailsView([], meta, meta.resumeTracks).rows.find(item => item.term === 'Prefiltered out');
   assert.equal(row.detail, '2 skipped by title · 1 skipped by a non-US location (before enrichment)');
   assert.deepEqual(row.items, ['Example Corp (Greenhouse): title 1 · location 1', 'Zapply Internships 2027: title 1 · location 0']);
   const html = buildHtml([], meta);
@@ -105,7 +106,16 @@ test('full-time early-career titles are marked entry_level, a new-grad signal in
   assert.equal(early('Associate Data Scientist', 'Open to the Class of 2027.').level, 'new_grad');
   assert.equal(early('Business Analyst', 'Ideal for a recent graduate.').level, 'new_grad');
   assert.equal(early('Analyst', 'Our new grad program').level, 'new_grad');
-  assert.equal(early('Decision Scientist', 'Ideal for a recent graduate.').level, null, 'the JD only promotes a title that already reads early career');
+  // A JD signal read after enrichment promotes on its own, plurals and "0 to 2" included, unless the title is senior.
+  assert.deepEqual(early('Decision Scientist', 'Ideal for recent graduates.'), { level: 'new_grad', signal: 'JD: recent graduates' });
+  assert.equal(early('Data Engineer', 'We hire new grads every fall.').level, 'new_grad');
+  assert.equal(early('Data Engineer', 'Open to new graduates.').level, 'new_grad');
+  assert.equal(early('Software Engineer', '0 to 2 years of experience').level, 'new_grad');
+  assert.equal(early('Data Scientist', 'Class of 2027 candidates').level, 'new_grad');
+  assert.equal(early('Senior Data Scientist', 'Mentor recent graduates.').level, null, 'a senior title is never promoted');
+  assert.equal(early('Data Scientist', 'Five years of experience').level, null);
+  assert.equal(classifyRole({ title: 'Software Engineer', description: 'Hiring new grads and recent graduates' }), 'new_grad', 'classify.mjs matches the plurals too');
+  assert.equal(classifyRole({ title: 'Software Engineer', description: 'Open to new graduates' }), 'new_grad');
 
   // Same freshness bucket: internships and recognised early-career roles rank ahead of the rest, by score among themselves.
   const base = (url, bestScore, extra = {}) => ({ url, title: 'x', bestScore, postedAt: '2026-10-05T20:00:00Z', postedAtPrecision: 'datetime', scoreDetails: { data: { roleRelevance: 25 } }, blockers: [], ...extra });
@@ -336,3 +346,19 @@ test('"product manager" is a default family; the manager exclusion still drops i
   assert.equal(titleRule(ats('Senior Product Manager'), settings), 'exclude: senior');
   assert.equal(titleRule(ats('Product Manager, Payments'), settings), 'exclude: manager');
 });
+
+test('a European gender marker in the title rules the posting out as non-US before enrichment', () => {
+  const jobs = ['Data Scientist (m/w/d)', 'Data Analyst (f/m/d)', 'Werkstudent Data Engineering (w/m/d)', 'Data Engineer (H/F)', 'Machine Learning Engineer (m/f/d) - Berlin', 'Data Analyst I/II', 'ML Engineer (C/C++)', 'Data Analyst (Remote)']
+    .map((title, index) => listed(title, { url: `https://example.com/jobs/${index}`, location: '' }));
+  const result = prefilterJobs(jobs, {});
+  assert.deepEqual(result.locationExcluded.map(item => [item.title, item.rule]), [
+    ['Data Scientist (m/w/d)', 'title marker: (m/w/d)'],
+    ['Data Analyst (f/m/d)', 'title marker: (f/m/d)'],
+    ['Werkstudent Data Engineering (w/m/d)', 'title marker: (w/m/d)'],
+    ['Data Engineer (H/F)', 'title marker: (H/F)'],
+    ['Machine Learning Engineer (m/f/d) - Berlin', 'title marker: (m/f/d)'],
+  ]);
+  assert.deepEqual(result.jobs.map(job => job.title), ['ML Engineer (C/C++)', 'Data Analyst (Remote)'], '"I/II" fails as a level suffix, the others pass');
+  assert.equal(result.bySource[0].location, 5);
+});
+

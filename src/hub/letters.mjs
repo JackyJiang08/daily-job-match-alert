@@ -1,5 +1,7 @@
 // Hub-side cover-letter flow: locate the posting in a day payload, gather the private material and the
 // chosen resume track, run the engine, validate, then assemble, render, and store the letter.
+import { STAGE_LABELS, stageAssignments, stageChain } from '../engines/assignments.mjs';
+import { normalizeCatalog } from '../engines/catalog.mjs';
 import path from 'node:path';
 import { enabledResumeTracks } from '../config.mjs';
 import { createEngine, normalizeEngineId, resolveModel } from '../engines/index.mjs';
@@ -9,7 +11,7 @@ import { graduationTerms } from '../cover-letter/compose.mjs';
 import { renderLetterPdf } from '../cover-letter/pdf.mjs';
 import { LetterInputError } from '../cover-letter/store.mjs';
 import { sha256 } from '../utils.mjs';
-import { HubInputError, currentPlans, markModelUnavailableInHub, modelAvailabilityView, readReportPayload, updateAvailabilityInHub } from './services.mjs';
+import { HubInputError, configuredCliCommands, currentPlans, markModelUnavailableInHub, modelAvailabilityView, readReportPayload, updateAvailabilityInHub } from './services.mjs';
 import { firstAvailableModel, markModelUsed, markWeeklyLimit, nextAvailableModel } from '../engines/model-availability.mjs';
 import { planLabel } from '../engines/quota.mjs';
 import { appendUsage, usageEntries, usagePath } from '../engines/usage.mjs';
@@ -77,12 +79,66 @@ export function letterEngineFor(ctx, config, choice = {}) {
   return withUsageRecording(ctx, buildLetterEngine(ctx, config, choice));
 }
 
-function buildLetterEngine(ctx, config, { engine: engineOverride = null, model: modelOverride = null } = {}) {
+// A test hub (ctx.letterEngine set) never builds a real engine: it gets ctx.makeLetterEngine's fake for the
+// choice, or the one fixed fake. The stage's effort reaches Codex as its reasoning effort.
+function buildLetterEngine(ctx, config, { engine: engineOverride = null, model: modelOverride = null, effort = null } = {}) {
   if (ctx.letterEngine && !engineOverride && !modelOverride) return ctx.letterEngine;
   const semantic = config.semanticMatching || {};
   const engineId = normalizeEngineId(engineOverride || semantic.engine || 'claude') || 'claude';
-  if (ctx.letterEngine && ctx.makeLetterEngine) return ctx.makeLetterEngine({ engine: engineId, model: modelOverride || resolveModel(semantic, engineId) });
-  return createEngine(engineId, { ...semantic, model: modelOverride || resolveModel(semantic, engineId), allowPlaceholder: true, homedir: ctx.homedir });
+  const model = modelOverride || resolveModel(semantic, engineId);
+  if (ctx.letterEngine) return ctx.makeLetterEngine ? ctx.makeLetterEngine({ engine: engineId, model, effort }) : ctx.letterEngine;
+  return createEngine(engineId, { ...semantic, model, reasoningEffort: engineId === 'codex' ? effort : null, allowPlaceholder: true, homedir: ctx.homedir });
+}
+
+async function codexConnected(ctx, config) {
+  try {
+    const status = await ctx.connections.status({ commands: configuredCliCommands(config) });
+    return status?.codex?.connected === true;
+  } catch {
+    return false;
+  }
+}
+
+// The engines a letter stage will try, in order: its assignment, then its fallback chain. Codex steps drop
+// out while Codex is not connected (the note goes to Editor notes). A config that scores with local_only
+// and names no letter assignment keeps the placeholder engine ({} = the legacy default).
+export async function letterStagePlan(ctx, config, stage, override = null) {
+  const assignments = stageAssignments(config);
+  const assignment = assignments[stage];
+  const label = STAGE_LABELS[stage];
+  let entries;
+  if (override === 'codex') entries = [{ engine: 'codex', model: assignment?.engine === 'codex' ? assignment.model : resolveModel(config.semanticMatching || {}, 'codex'), effort: assignment?.engine === 'codex' ? assignment.effort : null }];
+  else if (override === 'claude') entries = [{ engine: 'claude', model: resolveModel(config.semanticMatching || {}, 'claude'), effort: null }];
+  else entries = assignment?.engine ? stageChain(assignment, normalizeCatalog(config)) : [{}];
+  const notes = [];
+  if (entries.some(entry => entry.engine === 'codex') && !(await codexConnected(ctx, config))) {
+    const usable = entries.filter(entry => entry.engine !== 'codex');
+    if (usable.length) {
+      notes.push(`${label}: Codex is not connected; used ${usable[0].model} from the fallback chain`);
+      entries = usable;
+    }
+  }
+  return { stage, entries, notes };
+}
+
+// Runs the draft through each entry of its chain: a Claude entry gets the quota policy (ladder, limits); a
+// failure hands over to the next entry with a note. A login or input problem stops at once.
+async function withStageChain(ctx, config, plan, attempt) {
+  const notes = [];
+  let lastError = null;
+  for (let index = 0; index < plan.entries.length; index += 1) {
+    const entry = plan.entries[index];
+    try {
+      const outcome = await withQuotaPolicy(ctx, config, entry, attempt);
+      return { ...outcome, chainNotes: notes };
+    } catch (error) {
+      lastError = error;
+      const next = plan.entries[index + 1];
+      if (!next || error instanceof AuthExpiredError || error instanceof HubInputError || error?.status === 400) throw error;
+      notes.push(`${STAGE_LABELS[plan.stage]}: ${entry.model || entry.engine} failed (${String(error?.message || error).split('\n')[0].slice(0, 120)}); used ${next.model}`);
+    }
+  }
+  throw lastError;
 }
 
 // Runs one generation attempt; on a model weekly limit it steps down the model ladder once and notes
@@ -191,8 +247,15 @@ export async function generateLetter(ctx, { date, jobId, trackId, company, engin
   const engineId = engineChoice ? (normalizeEngineId(engineChoice) || null) : null;
   if (engineChoice && !engineId) throw new HubInputError('Engine must be claude or codex');
   const salutationCompany = String(company || '').trim() || letterCompanyFor(job).name;
-  const generated = await withQuotaPolicy(ctx, config, engineId ? { engine: engineId } : {}, engine => generateCoverLetter({ engine, inputs: { playbook, samples, track, resumeText: text, job, graduation, company: salutationCompany }, review, io: ctx.io }));
-  const result = generated.downgradeNote ? { ...generated.result, editorNotes: [generated.downgradeNote, ...(generated.result.editorNotes || [])], downgradeNote: generated.downgradeNote } : generated.result;
+  // Draft and editor run on their own stage assignments (Settings → Task assignments).
+  const draftPlan = await letterStagePlan(ctx, config, 'letterDraft', engineId);
+  const editorPlan = review ? await letterStagePlan(ctx, config, 'letterEditor') : null;
+  // An editor stage with no assignment of its own (the local_only placeholder) reviews with whichever engine
+  // wrote the draft, including a ladder step it moved to.
+  const reviewEngines = editorPlan && editorPlan.entries.some(entry => entry.engine) ? editorPlan.entries.map(entry => letterEngineFor(ctx, config, entry)) : null;
+  const generated = await withStageChain(ctx, config, draftPlan, engine => generateCoverLetter({ engine, reviewEngines, inputs: { playbook, samples, track, resumeText: text, job, graduation, company: salutationCompany }, review, io: ctx.io }));
+  const leading = [...draftPlan.notes, ...(editorPlan?.notes || []), ...generated.chainNotes, ...(generated.downgradeNote ? [generated.downgradeNote] : [])];
+  const result = { ...generated.result, editorNotes: [...leading, ...(generated.result.editorNotes || [])], ...(generated.downgradeNote ? { downgradeNote: generated.downgradeNote } : {}) };
   return {
     ...result,
     jobId: id,
@@ -247,7 +310,8 @@ export async function saveLetter(ctx, { date, jobId, trackId, company, paragraph
   }
   const pdfPath = path.join(saved.directory, pdfFileName);
   // A first render past one page asks the same engine for a 15 percent trim before smaller layouts are tried.
-  const letterEngine = letterEngineFor(ctx, config, engine === 'codex' ? { engine: 'codex' } : {});
+  const condensePlan = await letterStagePlan(ctx, config, 'letterDraft', engine === 'codex' ? 'codex' : null);
+  const letterEngine = letterEngineFor(ctx, config, condensePlan.entries[0] || {});
   const condense = (currentParagraphs, pages) => condenseCoverLetter({ engine: letterEngine, paragraphs: currentParagraphs, pages, io: ctx.io });
   const pdf = await (ctx.renderPdf || renderLetterPdf)(letter, pdfPath, { chromeCommand: ctx.chromeCommand ?? (config.hub?.chromeCommand || null), io: ctx.io, condense });
   const finalParagraphs = Array.isArray(pdf.paragraphs) && pdf.paragraphs.length ? pdf.paragraphs : body;

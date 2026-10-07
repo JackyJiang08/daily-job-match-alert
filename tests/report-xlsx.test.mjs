@@ -248,26 +248,28 @@ test('Run Summary lists the hard-filter exclusion counts and the Gaps column car
   }
 });
 
-test('Run Summary counts this run\'s reviewed postings and the last-90-days total on separate rows', async () => {
+test('Run Summary breaks the run down by scoring model, deferred, prefiltered out, and expired, beside the last-90-days total', async () => {
+  const runCounts = { scoredByModel: [{ label: 'claude · claude-opus-5-5', count: 9 }, { label: 'codex · gpt-5.6-sol', count: 3 }], localScores: 2, deferred: { budget: 4, quota: 96 }, prefilteredOut: { title: 30, location: 5 }, expired: 7 };
   const payload = {
-    meta: { applicationDate: '2026-10-05', date: '2026-10-05', generatedAt: '2026-10-06T01:00:00Z', lookbackHours: 24, reviewedCount: 57, reviewedInRun: 12, reviewedLast90Days: 3480, minimumMatchScore: 60, scoringModel: 'local_only', resumeTracks: [{ id: 'data', label: 'Data' }], warnings: [] },
+    meta: { applicationDate: '2026-10-07', date: '2026-10-07', generatedAt: '2026-10-08T01:00:00Z', lookbackHours: 24, reviewedCount: 57, reviewedInRun: 12, reviewedLast90Days: 3480, runCounts, minimumMatchScore: 60, scoringModel: 'local_only', resumeTracks: [{ id: 'data', label: 'Data' }], warnings: [] },
     matches: [], reviewed: [],
   };
-  const { workbook, directory } = await buildWorkbook(payload, 'reviewed-counts');
+  const { workbook, directory } = await buildWorkbook(payload, 'run-counts');
   try {
     const rows = summaryRowsOf(workbook);
-    assert.equal(rows['Reviewed jobs (this run)'], 12, 'this run, not the day\'s merged total of 57');
+    assert.equal(rows['Scored by model (this run)'], 'claude · claude-opus-5-5: 9; codex · gpt-5.6-sol: 3; local scores (unreviewed): 2');
+    assert.equal(rows.Deferred, 100);
+    assert.equal(rows['Prefiltered out'], 35);
+    assert.equal(rows.Expired, 7);
     assert.equal(rows['Reviewed (last 90 days)'], 3480);
-    assert.equal(Object.hasOwn(rows, 'Reviewed (all time)'), false, 'no all-time claim without an all-time record');
-    assert.equal(Object.hasOwn(rows, 'Reviewed jobs'), false);
+    assert.equal(Object.hasOwn(rows, 'Reviewed jobs (this run)'), false, 'the old single count is gone');
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }
-  const legacy = await buildWorkbook({ ...payload, meta: { ...payload.meta, reviewedInRun: undefined, reviewedLast90Days: undefined } }, 'reviewed-legacy');
+  const legacy = await buildWorkbook({ ...payload, meta: { ...payload.meta, runCounts: undefined, reviewedLast90Days: undefined } }, 'run-counts-legacy');
   try {
     const rows = summaryRowsOf(legacy.workbook);
-    assert.equal(rows['Reviewed jobs (this run)'], 57, 'an older payload falls back to its stored count');
-    assert.equal(rows['Reviewed (last 90 days)'], 'not recorded');
+    assert.deepEqual([rows['Scored by model (this run)'], rows.Deferred, rows['Prefiltered out'], rows.Expired, rows['Reviewed (last 90 days)']], ['not recorded', 'not recorded', 'not recorded', 'not recorded', 'not recorded'], 'an older payload says so instead of guessing');
   } finally {
     await fs.rm(legacy.directory, { recursive: true, force: true });
   }

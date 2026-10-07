@@ -158,8 +158,10 @@ test('an account weekly limit defers every remaining posting, or hands the run t
   // The notice names no model, so the next ladder model is tried first; its refusal settles it as the account limit.
   assert.deepEqual(deferredRun.quotaEvents.map(event => [event.kind, event.action, event.detail]), [
     ['ambiguousWeeklyLimit', 'probed', 'claude-opus-5-5 was refused too: weekly account limit'],
-    ['accountWeeklyLimit', 'deferred', 'no fallback engine configured'],
-  ]);
+    ['accountWeeklyLimit', 'deferred', 'codex fallback is not connected'],
+  ], 'the Codex fallback is on by default, so an unconnected Codex is what stops it');
+  const off = await runWithScript({ jobs, policy: { fallbackEngine: null }, script: () => { throw new Error('claude exited 1: you have reached your weekly usage limit'); } });
+  assert.equal(off.quotaEvents.at(-1).detail, 'no fallback engine configured', 'an explicit null turns it off');
 
   const offButNotConnected = await runWithScript({ jobs, policy: { fallbackEngine: 'codex' }, fallbackConnected: async () => false, script: () => { throw new Error('claude exited 1: you have reached your weekly usage limit'); } });
   assert.equal(offButNotConnected.evaluated.every(job => job.quotaDeferred), true);

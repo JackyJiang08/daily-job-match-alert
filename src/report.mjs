@@ -193,11 +193,19 @@ export function runDetailsView(jobs, meta, tracks) {
   if (meta.droppedAfterPreciseTimestamps != null) {
     rows.push({ term: 'Freshness check', detail: `dropped ${Number(meta.droppedAfterPreciseTimestamps)} postings after precise timestamps` });
   }
+  if (meta.runCounts) {
+    const counts = meta.runCounts;
+    const scored = counts.scoredByModel || [];
+    const total = scored.reduce((sum, item) => sum + item.count, 0);
+    rows.push({ term: 'Scored by model (this run)', detail: `${total} scored${counts.localScores ? ` · ${counts.localScores} kept local scores (unreviewed)` : ''}`, items: scored.map(item => `${item.label}: ${item.count}`) });
+    rows.push({ term: 'Deferred', detail: `${counts.deferred.budget + counts.deferred.quota} (review budget ${counts.deferred.budget} · quota ${counts.deferred.quota})` });
+    rows.push({ term: 'Expired', detail: `${counts.expired} backlog posting(s) past the grace period, not scored` });
+  }
   if (meta.prefilter) {
     const prefilter = meta.prefilter;
     const dropped = Array.isArray(prefilter.titleExcluded) ? prefilter.titleExcluded : [];
     rows.push({
-      term: 'Prefilter',
+      term: 'Prefiltered out',
       detail: `${Number(prefilter.titleExcludedCount ?? dropped.length)} skipped by title · ${Number(prefilter.locationExcludedCount || 0)} skipped by a non-US location (before enrichment)`,
       items: (prefilter.bySource || []).map(entry => `${entry.source}: title ${Number(entry.title || 0)} · location ${Number(entry.location || 0)}`),
       folded: dropped.length ? { id: 'prefilter-titles', summary: `Show ${dropped.length} postings skipped by title`, items: dropped.map(item => `${item.company || 'Unknown company'} · ${item.title || 'Untitled'} · ${item.source || 'unknown source'} · ${item.rule}`) } : null,
@@ -303,8 +311,8 @@ export function buildReportView(jobs, meta, options = {}) {
     dateLabel: readableDate(meta.date),
     matchLabel: matchLabel(jobs.length),
     masthead: embedded
-      ? { title: readableDate(meta.date), subtitle: mastheadSubtitle(jobs, meta, { withDate: false }) }
-      : { title: REPORT_TITLE, subtitle: mastheadSubtitle(jobs, meta) },
+      ? { title: readableDate(meta.date), subtitle: mastheadSubtitle(jobs, meta, { withDate: false }), note: meta.quotaNote || null }
+      : { title: REPORT_TITLE, subtitle: mastheadSubtitle(jobs, meta), note: meta.quotaNote || null },
     toolbar: { roleTypes, tracks, quiet: jobs.length < 5, total: jobs.length },
     banner: meta.authExpired ? `${meta.authExpired.message}${meta.authExpired.deferred ? ` ${meta.authExpired.deferred} posting(s) were deferred to the next run and are not lost.` : ''}` : (meta.quota?.banner || null),
     cards,

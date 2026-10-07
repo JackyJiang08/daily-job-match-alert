@@ -198,7 +198,7 @@ function footLine(record, engineLabel) {
 
 export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, readiness, existing, engineLabel, confirmCompany = false, companyUncertain = false }) {
   const trackOptions = tracks.map(track => `<option value="${htmlEscape(track.id)}"${track.id === selectedTrack ? ' selected' : ''}>${htmlEscape(track.label)}${track.id === job.recommendedTrack ? ' (recommended)' : ''}</option>`).join('');
-  const notReady = readiness.ready ? '' : `<div class="flash error">Add your contact block and a playbook under <a href="/settings#cover-letters">Settings → Cover Letters</a> first (missing: ${htmlEscape(readiness.missing.join(', '))}).</div>`;
+  const notReady = readiness.ready ? '' : `<div class="flash error">Add your contact block and a playbook under <a href="/settings?tab=letters#cover-letters">Settings → Cover Letters</a> first (missing: ${htmlEscape(readiness.missing.join(', '))}).</div>`;
   const record = existing?.record || null;
   const paragraphs = record?.paragraphs || [];
   const issues = (record?.issues || []).map(issue => `<li data-kind="${htmlEscape(issue.kind)}">${htmlEscape(issue.message)}</li>`).join('');

@@ -169,7 +169,7 @@ test('each CLI refusal maps to its status badge; weekly limits clear at reset, s
   assert.equal(statusText(limited, 'America/Chicago'), 'Weekly limit until Oct 7, 2026, 9:00 AM', 'the reset time the CLI gave');
   markWeeklyLimit(record, 'claude-sonnet-5-5', { at: NOW.toISOString(), resetsAt: null });
   assert.equal(statusText(modelStatus(record, 'claude-sonnet-5-5', { now: NOW }), 'America/Chicago'), 'Weekly limit since Oct 6, 2026, 5:00 PM', 'no reset time: when it was seen');
-  assert.equal(statusText(modelStatus(record, 'claude-fable-5-1', { now: NOW }), 'America/Chicago'), 'Not on plan (Pro)');
+  assert.equal(statusText(modelStatus(record, 'claude-fable-5-1', { now: NOW }), 'America/Chicago'), 'Unavailable on Pro');
   assert.equal(modelStatus(record, 'claude-haiku-4-5', { now: NOW }).state, 'not_verified');
   // A weekly limit lifts by itself at its reset time; one without a reset time after 7 days.
   assert.equal(modelStatus(record, 'claude-opus-5-5', { now: new Date('2026-10-07T14:00:01Z') }).state, 'not_verified');

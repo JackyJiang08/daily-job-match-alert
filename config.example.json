@@ -21,7 +21,7 @@
     "quotaPolicy": {
       "fiveHourLimit": { "retryIntervalMs": 600000, "maxWaitMs": 5400000 },
       "modelLadder": ["claude-fable-5-1", "claude-opus-5-5"],
-      "fallbackEngine": null,
+      "fallbackEngine": "codex",
       "patternsNote": "Optional regex overrides per class (fiveHourLimit, modelWeeklyLimit, accountWeeklyLimit, notQuota, genericLimit, authExpired, modelUnavailable, unknownModel); see src/engines/quota.mjs for the recorded defaults."
     },
     "timeoutMs": 600000
@@ -41,6 +41,11 @@
     "chromeCommand": ""
   },
   "models": {
+    "assignmentsNote": "Cover letter draft and editor each pick an engine, model, and (Codex) effort, with a fallback chain of registry ids. Omitted stages default to codex / gpt-5.6-sol at medium (draft) and high (editor), falling back to claude-opus-5-5; a Codex step is skipped while Codex is not connected. Scoring (and Supplemental, which follows it) stays in semanticMatching; its fallback chain is quotaPolicy.modelLadder plus fallbackEngine.",
+    "assignments": {
+      "letterDraft": { "engine": "codex", "model": "gpt-5.6-sol", "effort": "medium", "fallback": ["claude-opus-5-5"] },
+      "letterEditor": { "engine": "codex", "model": "gpt-5.6-sol", "effort": "high", "fallback": ["claude-opus-5-5"] }
+    },
     "catalogNote": "The model registry: every model the hub may call, by full id. The CLI receives the id; alias is the shorthand the CLI also accepts; efforts apply to Codex models only. Omit to use the defaults in src/engines/catalog.mjs (checked against Claude Code 2.1.292 and codex-cli 0.153.0); an older hub.modelChoices list is migrated automatically.",
     "catalog": [
       { "provider": "anthropic", "id": "claude-fable-5-1", "label": "Claude Fable 5.1", "alias": "fable", "isDefault": true },

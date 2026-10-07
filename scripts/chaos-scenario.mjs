@@ -250,6 +250,8 @@ const scenarios = {
       engine: 'claude_subscription',
       claudeCommand: '/usr/bin/false',
       model: 'fable',
+      // Never hand a chaos run to the real Codex CLI on this machine.
+      quotaPolicy: { fallbackEngine: null },
       required: true,
       batchSize: 6,
       acceptedMatchLevels: ['high'],
@@ -423,7 +425,7 @@ scenarios['fable-weekly-limit'] = async function fableWeeklyLimit() {
   const directory = await prepareDirectory('fable-weekly-limit');
   await addFixtureEmail(directory, 'demo-new-grad-alert.eml');
   const config = baseConfig(directory);
-  config.semanticMatching = { engine: 'claude', claudeCommand: path.join(projectDirectory, 'scripts', 'chaos', 'fake-claude.sh'), models: { claude: 'fable' }, required: true, batchSize: 6, acceptedMatchLevels: ['high'], timeoutMs: 30_000, quotaPolicy: { modelLadder: ['fable', 'opus'] } };
+  config.semanticMatching = { engine: 'claude', claudeCommand: path.join(projectDirectory, 'scripts', 'chaos', 'fake-claude.sh'), models: { claude: 'fable' }, required: true, batchSize: 6, acceptedMatchLevels: ['high'], timeoutMs: 30_000, quotaPolicy: { fallbackEngine: null, modelLadder: ['fable', 'opus'] } };
   const run = await runPipeline(await writeConfig(directory, config), NOW, { FAKE_CLAUDE_MODE: 'fable-weekly-limit' });
   const artifacts = await assertDesktopArtifacts(config, run);
   assert.equal(run.exitCode, 0, `fable-weekly-limit run exited ${run.exitCode}`);
@@ -451,7 +453,7 @@ scenarios['fable-unnamed-limit'] = async function fableUnnamedLimit() {
   const directory = await prepareDirectory('fable-unnamed-limit');
   await addFixtureEmail(directory, 'demo-new-grad-alert.eml');
   const config = baseConfig(directory);
-  config.semanticMatching = { engine: 'claude', claudeCommand: path.join(projectDirectory, 'scripts', 'chaos', 'fake-claude.sh'), models: { claude: 'fable' }, required: true, batchSize: 6, acceptedMatchLevels: ['high'], timeoutMs: 30_000, quotaPolicy: { modelLadder: ['fable', 'opus'] } };
+  config.semanticMatching = { engine: 'claude', claudeCommand: path.join(projectDirectory, 'scripts', 'chaos', 'fake-claude.sh'), models: { claude: 'fable' }, required: true, batchSize: 6, acceptedMatchLevels: ['high'], timeoutMs: 30_000, quotaPolicy: { fallbackEngine: null, modelLadder: ['fable', 'opus'] } };
   const configPath = await writeConfig(directory, config);
   const callsFile = path.join(directory, 'claude-calls.txt');
   const run = await runPipeline(configPath, NOW, { FAKE_CLAUDE_MODE: 'fable-unnamed-limit', FAKE_CLAUDE_CALLS: callsFile });
@@ -487,7 +489,7 @@ scenarios['account-limit'] = async function accountLimit() {
   const directory = await prepareDirectory('account-limit');
   await addFixtureEmail(directory, 'demo-new-grad-alert.eml');
   const config = baseConfig(directory);
-  config.semanticMatching = { engine: 'claude', claudeCommand: path.join(projectDirectory, 'scripts', 'chaos', 'fake-claude.sh'), models: { claude: 'fable' }, required: true, batchSize: 6, acceptedMatchLevels: ['high'], timeoutMs: 30_000 };
+  config.semanticMatching = { engine: 'claude', claudeCommand: path.join(projectDirectory, 'scripts', 'chaos', 'fake-claude.sh'), models: { claude: 'fable' }, required: true, quotaPolicy: { fallbackEngine: null }, batchSize: 6, acceptedMatchLevels: ['high'], timeoutMs: 30_000 };
   const run = await runPipeline(await writeConfig(directory, config), NOW, { FAKE_CLAUDE_MODE: 'account-limit' });
   const artifacts = await assertDesktopArtifacts(config, run);
   assert.equal(run.exitCode, 0, `account-limit run exited ${run.exitCode}`);

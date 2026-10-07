@@ -423,9 +423,10 @@ test('Settings groups the fields, writes only its keys, preserves the rest and t
   const root = await prepareProject();
   const hub = await startHub(root);
   try {
-    const page = await hub.request('GET', '/settings');
-    assert.match(page.text, /<fieldset class="group" id="model-assignments"><legend>Model assignments<\/legend>[\s\S]*?Scoring Model[\s\S]*?<\/fieldset>/, 'the scoring engine and model sit in the Scoring row');
-    assert.match(page.text, /<fieldset class="group"><legend>Matching<\/legend>[\s\S]*?Minimum Match Score \(0–100\)[\s\S]*?Accepted Match Levels[\s\S]*?value="high" checked> High[\s\S]*?value="medium"> Medium[\s\S]*?value="low"> Low[\s\S]*?Model Ladder[\s\S]*?<\/fieldset>/);
+    const page = await hub.request('GET', '/settings?tab=pipeline');
+    assert.match(page.text, /<nav class="tabs" aria-label="Settings sections"><a href="\/settings\?tab=models">Subscriptions &amp; Models<\/a><a href="\/settings\?tab=pipeline" aria-current="page" class="active">Pipeline<\/a><a href="\/settings\?tab=letters">Cover Letters<\/a><\/nav>/);
+    assert.match(page.text, /<fieldset class="group"><legend>Matching<\/legend>[\s\S]*?Minimum Match Score \(0–100\)[\s\S]*?Accepted Match Levels[\s\S]*?value="high" checked> High[\s\S]*?value="medium"> Medium[\s\S]*?value="low"> Low[\s\S]*?Max Reviewed Per Run[\s\S]*?<\/fieldset>/);
+    assert.doesNotMatch(page.text.split('<script>')[0], /Model Ladder|name="model_|Cover Letters<\/legend>/, 'models and cover letters live on their own tabs');
     assert.match(page.text, /<legend>Reports<\/legend>[\s\S]*?Require XLSX Workbook/);
     assert.match(page.text, /<legend>Hub<\/legend>[\s\S]*?<span>Port/);
     assert.match(page.text, /<p class="form-foot">Changes apply to the next run\.<\/p>/);
@@ -463,7 +464,7 @@ test('Settings groups the fields, writes only its keys, preserves the rest and t
     const budgeted = await hub.form('/settings', { minimumMatchScore: '60', acceptedMatchLevels: 'high', model: 'fable', hubPort: '4747', maxReviewedPerRun: '40' });
     assert.equal(budgeted.status, 303);
     assert.equal((await readConfig(root)).semanticMatching.maxReviewedPerRun, 40);
-    assert.match((await hub.request('GET', '/settings')).text, /name="maxReviewedPerRun"[^>]*value="40"/);
+    assert.match((await hub.request('GET', '/settings?tab=pipeline')).text, /name="maxReviewedPerRun"[^>]*value="40"/);
     const unlimited = await hub.form('/settings', { minimumMatchScore: '60', acceptedMatchLevels: 'high', model: 'fable', hubPort: '4747', maxReviewedPerRun: '0' });
     assert.equal(unlimited.status, 303);
     assert.equal((await readConfig(root)).semanticMatching.maxReviewedPerRun, 0);
@@ -651,7 +652,7 @@ test('the Quota card shows the last limit event, the model in effect, and the de
     assert.match(page.text, /<dt>Last limit event<\/dt><dd id="quota-last">Claude subscription claude-fable-5-1 weekly limit reached; expected to reset Aug 29, 2026, 9:00 AM · Aug 26, 2026, 8:02 PM · <span class="badge badge-warn" data-badge="quota-action">downgraded<\/span> <span class="muted">switched to opus<\/span> <span class="muted">\(nightly run\)<\/span><\/dd>/);
     assert.match(page.text, /<dt>Model in effect<\/dt><dd id="quota-model">claude · claude-opus-5-5 <span class="badge badge-warn" data-badge="downgraded">downgraded from claude-fable-5-1<\/span><\/dd>/, 'aliases stored by an older run are shown as registry ids');
     assert.match(page.text, /<dt>Deferred postings<\/dt><dd id="quota-deferred">2 waiting for the next run<\/dd>/);
-    assert.match(page.text, /<dt>Policy<\/dt><dd>Ladder claude-fable-5-1 → claude-opus-5-5 · no engine fallback<\/dd>/);
+    assert.match(page.text, /<dt>Policy<\/dt><dd>Ladder claude-fable-5-1 → claude-opus-5-5 · Codex fallback on<\/dd>/);
     assert.doesNotMatch(page.text, /\bUTC\b/);
     assert.doesNotMatch(page.text, /<dt>Candidates vs budget<\/dt>/, 'no history yet, no row');
     const withHistory = JSON.parse(await fs.readFile(statePath, 'utf8'));
@@ -667,34 +668,30 @@ test('the Quota card shows the last limit event, the model in effect, and the de
     hub.ctx.quotaLog.record({ kind: 'accountWeeklyLimit', at: '2026-08-27T13:00:00Z', action: 'refused', source: 'cover-letter', engine: 'claude', model: 'fable' });
     assert.match((await hub.request('GET', '/status')).text, /<dd id="quota-last">Claude subscription weekly account limit reached · Aug 27, 2026, 8:00 AM · <span class="badge badge-warn" data-badge="quota-action">refused<\/span> <span class="muted">\(cover-letter\)<\/span><\/dd>/);
 
-    const settings = await hub.request('GET', '/settings');
-    const ladder = /<ol class="ladder" id="ladder-list">([\s\S]*?)<\/ol>/.exec(settings.text)[1];
-    assert.deepEqual([...ladder.matchAll(/data-id="([^"]+)"/g)].map(match => match[1]), ['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-4-5'], 'ladder steps first, in order, then the other Claude models');
-    assert.deepEqual([...ladder.matchAll(/name="modelLadder" value="([^"]+)" checked/g)].map(match => match[1]), ['claude-fable-5-1', 'claude-opus-5-5']);
-    assert.match(ladder, /<span class="mono">claude-fable-5-1<\/span> <span class="alias">fable<\/span>/, 'full id first, alias as a grey label');
-    assert.match(settings.text, /<input type="checkbox" name="fallbackEngine" value="codex"> End the chain with Codex on a weekly account limit/);
-    // Reordered by drag: the form sends the checked rows in on-screen order.
-    const saved = await hub.form('/settings', { minimumMatchScore: '60', acceptedMatchLevels: 'high', model: 'fable', hubPort: '4747', ladderPresent: '1', modelLadder: ['claude-opus-5-5', 'claude-fable-5-1', 'claude-sonnet-5-5'], quotaPresent: '1', fallbackEngine: 'codex' });
+    // The Scoring row's fallback chain is the model ladder, with an optional ChatGPT model at its end.
+    const assign = fields => hub.form('/settings/assignments', { assignmentsPresent: '1', scoring_engine: 'claude', scoring_model: 'claude-fable-5-1', ...fields });
+    const saved = await assign({ fallback_scoring: ['claude-sonnet-5-5', 'claude-opus-5-5', 'gpt-5.6-sol'] });
     assert.equal(saved.status, 303);
-    const config = await readConfig(root);
-    assert.deepEqual(config.semanticMatching.quotaPolicy, { modelLadder: ['claude-opus-5-5', 'claude-fable-5-1', 'claude-sonnet-5-5'], fallbackEngine: 'codex' });
-    const resaved = await hub.request('GET', '/settings');
-    assert.deepEqual([.../<ol class="ladder" id="ladder-list">([\s\S]*?)<\/ol>/.exec(resaved.text)[1].matchAll(/name="modelLadder" value="([^"]+)" checked/g)].map(match => match[1]), ['claude-opus-5-5', 'claude-fable-5-1', 'claude-sonnet-5-5']);
-    assert.match(resaved.text, /name="fallbackEngine" value="codex" checked/);
-    const off = await hub.form('/settings', { minimumMatchScore: '60', acceptedMatchLevels: 'high', model: 'fable', hubPort: '4747', quotaPresent: '1' });
-    assert.equal(off.status, 303);
-    assert.deepEqual((await readConfig(root)).semanticMatching.quotaPolicy, { modelLadder: ['claude-opus-5-5', 'claude-fable-5-1', 'claude-sonnet-5-5'], fallbackEngine: null }, 'an unchecked box switches the fallback off; a form without the ladder leaves it alone');
-    // Validation: Claude models only, no repeats, at least one step; nothing is written on failure.
-    const wrongProvider = await hub.form('/settings', { minimumMatchScore: '60', acceptedMatchLevels: 'high', model: 'fable', hubPort: '4747', ladderPresent: '1', modelLadder: ['claude-fable-5-1', 'gpt-5.5'] });
-    assert.match(decodeURIComponent(wrongProvider.headers.location), /error=gpt-5\.5 is a ChatGPT model; the ladder only takes Claude models/);
-    const repeated = await hub.form('/settings', { minimumMatchScore: '60', acceptedMatchLevels: 'high', model: 'fable', hubPort: '4747', ladderPresent: '1', modelLadder: ['claude-fable-5-1', 'claude-fable-5-1'] });
-    assert.match(decodeURIComponent(repeated.headers.location), /error=claude-fable-5-1 appears twice in the ladder/);
-    const empty = await hub.form('/settings', { minimumMatchScore: '60', acceptedMatchLevels: 'high', model: 'fable', hubPort: '4747', ladderPresent: '1' });
-    assert.match(decodeURIComponent(empty.headers.location), /error=The model ladder needs at least one model/);
-    const unknown = await hub.form('/settings', { minimumMatchScore: '60', acceptedMatchLevels: 'high', model: 'fable', hubPort: '4747', modelLadder: 'fable, not-a-model' });
-    assert.match(decodeURIComponent(unknown.headers.location), /error=not-a-model is not in the model registry/, 'an older comma-separated form is validated the same way');
-    assert.deepEqual((await readConfig(root)).semanticMatching.quotaPolicy.modelLadder, ['claude-opus-5-5', 'claude-fable-5-1', 'claude-sonnet-5-5']);
-    assert.match((await hub.request('GET', '/status')).text, /<dt>Policy<\/dt><dd>Ladder claude-opus-5-5 → claude-fable-5-1 → claude-sonnet-5-5 · no engine fallback<\/dd>/);
+    assert.match(decodeURIComponent(saved.headers.location), /tab=models#assignments-form&notice=Task assignments saved|notice=Task assignments saved/);
+    let config = await readConfig(root);
+    assert.deepEqual(config.semanticMatching.quotaPolicy, { modelLadder: ['claude-fable-5-1', 'claude-sonnet-5-5', 'claude-opus-5-5'], fallbackEngine: 'codex' });
+    assert.equal(config.semanticMatching.engine, 'claude');
+    const scoringRow = /<tr data-stage="scoring">([\s\S]*?)<\/tr>/.exec((await hub.request('GET', '/settings')).text)[1];
+    assert.deepEqual([...scoringRow.matchAll(/<li class="tag[^"]*" data-id="([^"]+)"/g)].map(match => match[1]), ['claude-sonnet-5-5', 'claude-opus-5-5', 'gpt-5.6-sol'], 'the chain shows as tags in order');
+    assert.match(scoringRow, /<input type="hidden" name="fallback_scoring" value="claude-sonnet-5-5"><button type="button" class="tag-x" aria-label="Remove claude-sonnet-5-5">×<\/button>/);
+    // Removing the ChatGPT tag switches the account-limit hand-off off; the ladder stays.
+    await assign({ fallback_scoring: ['claude-opus-5-5'] });
+    config = await readConfig(root);
+    assert.deepEqual(config.semanticMatching.quotaPolicy, { modelLadder: ['claude-fable-5-1', 'claude-opus-5-5'], fallbackEngine: null });
+    // Validation: registry models only, no repeats, ChatGPT only as the single last step; nothing written on failure.
+    const errorOf = async fields => decodeURIComponent((await assign(fields)).headers.location);
+    assert.match(await errorOf({ fallback_scoring: ['gpt-5.6-sol', 'claude-opus-5-5'] }), /Scoring: the ChatGPT model must be the last step of the chain/);
+    assert.match(await errorOf({ fallback_scoring: ['gpt-5.6-sol', 'gpt-5.5'] }), /Scoring: only one ChatGPT model can end the chain/);
+    assert.match(await errorOf({ fallback_scoring: ['claude-opus-5-5', 'claude-opus-5-5'] }), /Scoring: claude-opus-5-5 appears twice in the chain/);
+    assert.match(await errorOf({ fallback_scoring: ['claude-opus-9'] }), /Scoring: claude-opus-9 is not in the model registry/);
+    assert.match(await errorOf({ scoring_model: 'gpt-5.5' }), /Scoring: gpt-5\.5 is not a Claude model in the registry/);
+    assert.deepEqual((await readConfig(root)).semanticMatching.quotaPolicy.modelLadder, ['claude-fable-5-1', 'claude-opus-5-5']);
+    assert.match((await hub.request('GET', '/status')).text, /<dt>Policy<\/dt><dd>Ladder claude-fable-5-1 → claude-opus-5-5 · no engine fallback<\/dd>/);
 
     const reports = await hub.request('GET', '/reports');
     assert.match(reports.text, /\.datelist \.month\{[^}]*font-size:11px;font-weight:700;letter-spacing:\.06em;text-transform:uppercase;color:var\(--ink-2\)\}/, 'month headings: bold, one step darker, same size, no background change or rule');
@@ -811,65 +808,6 @@ test('/desktop serves the Desktop HTML and workbook read-only, and refuses anyth
   }
 });
 
-test('Settings offers an engine choice with a model dropdown per engine, a custom entry, and cached connections', async () => {
-  const root = await prepareProject();
-  const hub = await startHub(root);
-  try {
-    const page = await hub.request('GET', '/settings');
-    assert.doesNotMatch(page.text, /Only these values are written/);
-    assert.match(page.text, /<article class="card plan-card" data-provider="anthropic">[\s\S]*?<dl class="conn"><dt>Claude<\/dt><dd><span class="badge badge-good" data-conn="connected">Connected<\/span> Claude · Max · claude\.ai<\/dd><\/dl>/, 'the connection sits on the Claude plan card');
-    assert.match(page.text, /<article class="card plan-card" data-provider="openai">[\s\S]*?<dl class="conn"><dt>Codex<\/dt><dd><span class="badge badge-warn" data-conn="disconnected">Not connected<\/span> <span class="muted">Sign in from a terminal: <code>codex login<\/code><\/span>/);
-    assert.match(page.text, /Checked Aug 27, 2026, 7:00 AM; refreshed every minute\. The hub never signs in for you\./);
-    assert.match(page.text, /<span>Engine<\/span><div class="radio-row"><label><input type="radio" name="engine" value="claude" checked data-connected="yes"> Claude subscription <span class="badge badge-good" data-engine-state="connected">Connected<\/span><\/label><label><input type="radio" name="engine" value="codex" data-connected="no"> ChatGPT subscription via Codex <span class="badge badge-warn" data-engine-state="disconnected">Not connected<\/span><\/label><\/div><p class="engine-warning" id="engine-warning" hidden>/);
-    assert.match(page.text, /<select name="model_claude" class="model-select control-input">/);
-    assert.match(page.text, /<div class="model-group" data-engine="claude">\s*<label class="field"><span>Scoring Model<\/span><select name="model_claude" class="model-select control-input"><option value="claude-fable-5-1" selected>claude-fable-5-1 \(fable\)<\/option><option value="claude-opus-5-5">claude-opus-5-5 \(opus\)<\/option><option value="claude-sonnet-5-5">claude-sonnet-5-5 \(sonnet\)<\/option><option value="claude-haiku-4-5">claude-haiku-4-5 \(haiku\)<\/option><option value="__custom__">Custom…<\/option><\/select><\/label>\s*<label class="field model-custom" hidden>/);
-    assert.match(page.text, /<div class="model-group" data-engine="codex" hidden>\s*<label class="field"><span>Scoring Model<\/span><select name="model_codex" class="model-select control-input"><option value="gpt-5\.6-sol" selected>gpt-5\.6-sol<\/option><option value="gpt-5\.6-terra">gpt-5\.6-terra<\/option><option value="gpt-5\.6-luna">gpt-5\.6-luna<\/option><option value="gpt-5\.5">gpt-5\.5<\/option><option value="gpt-6-astra">gpt-6-astra<\/option><option value="__custom__">Custom…<\/option><\/select><\/label>\s*<label class="field model-custom" hidden>[\s\S]*?<\/label>\s*<label class="field"><span>Reasoning Effort<\/span><select name="reasoningEffort" class="control-input"><option value="" selected>CLI default<\/option><option value="low">low<\/option><option value="medium">medium<\/option><option value="high">high<\/option><option value="xhigh">xhigh<\/option><option value="max">max<\/option><option value="ultra">ultra<\/option><\/select>/, 'Codex lists the registry models and the efforts of the chosen one');
-    assert.match(page.text, /form\.querySelectorAll\('\.model-group'\)\.forEach/, 'the switch script is inlined');
-    await hub.request('GET', '/settings');
-    assert.equal(hub.connectionCalls.length, 1, 'connection probes are cached for a minute');
-    hub.clock.value = '2026-08-27T12:01:05Z';
-    await hub.request('GET', '/settings');
-    assert.equal(hub.connectionCalls.length, 2);
-
-    const saved = await hub.form('/settings', { minimumMatchScore: '70', acceptedMatchLevels: 'high', engine: 'codex', model_claude: 'opus', model_codex: '__custom__', modelCustom_codex: 'gpt-5.5-mini', hubPort: '4747' });
-    assert.equal(saved.status, 303);
-    assert.match(saved.headers.location, /notice=/);
-    const config = await readConfig(root);
-    assert.equal(config.semanticMatching.engine, 'codex');
-    assert.equal(config.semanticMatching.model, 'gpt-5.5-mini');
-    assert.deepEqual(config.semanticMatching.models, { codex: 'gpt-5.5-mini' });
-    assert.deepEqual(Object.keys(config.semanticMatching), ['engine', 'model', 'acceptedMatchLevels', 'batchSize', 'models']);
-    const after = await hub.request('GET', '/settings');
-    assert.match(after.text, /<input type="radio" name="engine" value="codex" checked data-connected="no">/);
-    assert.match(after.text, /<div class="model-group" data-engine="claude" hidden>/);
-    assert.match(after.text, /<div class="model-group" data-engine="codex">\s*<label class="field"><span>Scoring Model<\/span><select name="model_codex" class="model-select control-input"><option value="gpt-5\.6-sol">gpt-5\.6-sol<\/option>[\s\S]*?<option value="__custom__" selected>Custom…<\/option><\/select><\/label>\s*<label class="field model-custom"><span>Custom model name<\/span><input type="text" name="modelCustom_codex" class="control-input" value="gpt-5\.5-mini"/);
-    assert.match(after.text, /<select name="model_claude" class="model-select control-input"><option value="claude-fable-5-1" selected>/, 'the Claude choice was not written, so it keeps its default');
-
-    const back = await hub.form('/settings', { minimumMatchScore: '70', acceptedMatchLevels: 'high', engine: 'claude', model_claude: 'sonnet', model_codex: 'gpt-5.6-sol', hubPort: '4747' });
-    assert.equal(back.status, 303);
-    const again = await readConfig(root);
-    assert.equal(again.semanticMatching.engine, 'claude');
-    assert.equal(again.semanticMatching.model, 'claude-sonnet-5-5', 'an alias from an older form is stored as the registry id');
-    assert.deepEqual(again.semanticMatching.models, { codex: 'gpt-5.5-mini', claude: 'claude-sonnet-5-5' });
-
-    const bad = await hub.form('/settings', { minimumMatchScore: '70', acceptedMatchLevels: 'high', engine: 'openai_api', model_claude: 'fable', hubPort: '4747' });
-    assert.match(decodeURIComponent(bad.headers.location), /Engine must be claude or codex/);
-    const badModel = await hub.form('/settings', { minimumMatchScore: '70', acceptedMatchLevels: 'high', engine: 'codex', model_codex: '__custom__', modelCustom_codex: 'not a model!', hubPort: '4747' });
-    assert.match(decodeURIComponent(badModel.headers.location), /Model must be a registry id such as gpt-5\.6-sol or a custom model name/);
-    assert.equal((await readConfig(root)).semanticMatching.engine, 'claude');
-
-    const status = await hub.request('GET', '/status');
-    assert.match(status.text, /<dt>Engine<\/dt><dd>local_only<\/dd>/, 'the fixture payload predates meta.engine, so only the scoring model shows');
-    const payload = JSON.parse(await fs.readFile(path.join(root, 'state', 'report-payload-2026-08-27.json'), 'utf8'));
-    payload.meta.engine = 'codex';
-    payload.meta.scoringModel = 'gpt-5.6-sol';
-    await fs.writeFile(path.join(root, 'state', 'report-payload-2026-08-27.json'), JSON.stringify(payload));
-    assert.match((await hub.request('GET', '/status')).text, /<dt>Engine<\/dt><dd>codex · gpt-5\.6-sol<\/dd>/);
-  } finally {
-    await hub.close();
-    await fs.rm(root, { recursive: true, force: true });
-  }
-});
 
 test('Connections shows the resolved CLI path, a not-found message with the install command, and saves a path to config', async () => {
   const root = await prepareProject();
@@ -884,7 +822,6 @@ test('Connections shows the resolved CLI path, a not-found message with the inst
     assert.match(page.text, /<dt>Claude<\/dt><dd><span class="badge badge-good" data-conn="connected">Connected<\/span> Claude · Max · claude\.ai<br><span class="muted mono" title="\/usr\/bin\/claude\n\/Users\/me\/\.local\/bin\/claude">\/Users\/me\/\.local\/bin\/claude<\/span> <form class="inline" method="post" action="\/settings\/cli-path"><input type="hidden" name="engine" value="claude"><input type="hidden" name="path" value="\/Users\/me\/\.local\/bin\/claude"><button class="btn secondary small" type="submit">Save This Path to Config<\/button><\/form><\/dd>/);
     assert.match(page.text, /<dt>Codex<\/dt><dd><span class="badge badge-muted" data-conn="missing">Not found on this Mac<\/span> <span class="muted">Install with <code>npm i -g @openai\/codex<\/code>; config points at <code>\/nowhere\/codex<\/code><\/span><br><span class="muted" title="[^"]*">Searched PATH, ~\/\.local\/bin, \/opt\/homebrew\/bin, \/usr\/local\/bin, ~\/\.npm-global\/bin, and nvm\.<\/span><\/dd>/);
     assert.doesNotMatch(page.text, /Not installed/);
-    assert.match(page.text, /value="codex" data-connected="no"> ChatGPT subscription via Codex <span class="badge badge-muted" data-engine-state="missing">Not found<\/span>/);
 
     const binary = path.join(root, 'claude-bin');
     await fs.writeFile(binary, '#!/bin/sh\n');
@@ -936,94 +873,6 @@ test('the multipart parser keeps binary bodies intact and reads quoted filenames
   assert.throws(() => parseMultipart(body, 'text/plain'), /boundary is missing/);
 });
 
-test('Settings shows both plans with their source and scheduled change, every registry model with its status, the stages that use it, and the fallback chains', async () => {
-  const root = await prepareProject();
-  await fs.writeFile(path.join(root, 'state', 'model-availability.json'), JSON.stringify({
-    version: 2,
-    models: {
-      'claude-fable-5-1': { model: 'claude-fable-5-1', plan: 'max', detectedAt: '2026-08-26T12:00:00.000Z', notice: 'The model claude-fable-5-1 is not available on your plan.', kind: 'not_on_plan' },
-      'claude-sonnet-5-5': { model: 'claude-sonnet-5-5', plan: null, detectedAt: '2026-08-26T13:00:00.000Z', notice: "Unknown model 'claude-sonnet-5-5'", kind: 'unknown_model' },
-    },
-    limits: { 'claude-opus-5-5': { model: 'claude-opus-5-5', at: '2026-08-26T14:00:00.000Z', resetsAt: '2026-08-29T14:00:00.000Z' } },
-    seen: { 'claude-haiku-4-5': { resolvedId: 'claude-haiku-4-5-20251001', lastUsedAt: '2026-08-26T20:00:00.000Z' }, 'gpt-5.6-terra': { resolvedId: 'gpt-5.6-terra', lastUsedAt: '2026-08-26T20:00:00.000Z' }, 'claude-sonnet-5-5': { resolvedId: 'claude-sonnet-5-6', lastUsedAt: '2026-08-26T21:00:00.000Z' } },
-  }));
-  await fs.writeFile(path.join(root, 'state', 'usage.json'), JSON.stringify({ version: 1, entries: [
-    { at: '2026-08-27T01:10:00Z', purpose: 'review', source: 'nightly', engine: 'claude', effort: null, model: 'claude-haiku-4-5-20251001', input: 1200, output: 300, cacheRead: 0, cacheCreation: 0, reasoning: 0 },
-  ] }));
-  const config = JSON.parse(await fs.readFile(path.join(root, 'config.json'), 'utf8'));
-  config.plans = { claude: { scheduledChange: { plan: 'pro', effectiveDate: '2026-09-01' } } };
-  await fs.writeFile(path.join(root, 'config.json'), JSON.stringify(config, null, 2));
-  const hub = await startHub(root, {
-    connections: {
-      claude: { installed: true, connected: true, detail: 'Claude · Max · claude.ai', hint: null, reason: null, plan: 'max', planSource: 'auth status', version: '2.1.292', path: '/Users/me/.local/bin/claude', source: 'extra' },
-      codex: { installed: true, connected: true, detail: 'Codex · ChatGPT · plus', hint: null, reason: null, plan: 'plus', planSource: 'auth.json', version: '0.153.0', path: '/opt/homebrew/bin/codex', source: 'path' },
-    },
-  });
-  try {
-    assert.match((await hub.request('GET', '/reports')).text, /<b>Plan<\/b><span data-plan="claude">Claude Max → Pro Sep 1<\/span><br><span data-plan="chatgpt">ChatGPT Plus<\/span><\/div>/, 'two sidebar lines, the scheduled change included');
-    const page = (await hub.request('GET', '/settings')).text;
-    const markup = page.split('<script>')[0];
-    // Plan cards: big plan name, source, scheduled change, CLI path and version, 7-day usage.
-    assert.match(markup, /<section class="plan-grid" id="subscriptions"><div class="plan-column"><article class="card plan-card" data-provider="anthropic">/);
-    assert.match(markup, /<p class="plan-name" data-plan-name="claude">Max <span class="badge badge-muted" data-plan-source="auto" title="read from auth status">auto<\/span><\/p>\s*<p class="plan-change" data-plan-pending="2026-09-01">Switches to Pro on Sep 1, 2026<\/p>/);
-    assert.match(markup, /<p class="plan-name" data-plan-name="chatgpt">Plus <span class="badge badge-muted" data-plan-source="auto" title="read from auth\.json">auto<\/span><\/p>/);
-    assert.match(markup, /\/Users\/me\/\.local\/bin\/claude[\s\S]*?Claude CLI 2\.1\.292/);
-    assert.match(markup, /Codex CLI 0\.153\.0/);
-    assert.match(markup, /<p class="plan-usage" data-plan-usage="claude"><span class="muted">Last 7 days:<\/span> 1\.2k in · 300 out \(1 call\)<\/p>/);
-    assert.match(markup, /<p class="plan-usage" data-plan-usage="codex"><span class="muted">Last 7 days:<\/span> —<\/p>/);
-    assert.match(page, /@media \(max-width:900px\)\{\.plan-grid\{grid-template-columns:1fr\}\}/, 'the cards stack on narrow screens');
-    // Model tables: full ids, alias as a grey label, a colored status per model, last use, stages, Test.
-    const row = id => new RegExp(`<tr data-model="${id.replace(/\./g, '\\.')}">([\\s\\S]*?)<\\/tr>`).exec(markup)?.[1] || '';
-    assert.match(row('claude-fable-5-1'), /^<td>Claude Fable 5\.1 <span class="alias">fable<\/span><\/td><td class="mono">claude-fable-5-1<\/td><td><span class="badge badge-bad" data-model-state="not_on_plan">Not on plan \(Max\)<\/span><div class="test-cell">[\s\S]*?<\/div><\/td><td><span class="muted">Never<\/span><\/td><td><span class="stage primary">Scoring<\/span> <span class="stage primary">Supplemental<\/span> <span class="stage primary">Cover letter draft<\/span> <span class="stage primary">Cover letter editor<\/span><\/td>/);
-    assert.match(row('claude-opus-5-5'), /<span class="badge badge-warn" data-model-state="weekly_limit">Weekly limit until Aug 29, 2026, 9:00 AM<\/span>/);
-    assert.match(row('claude-opus-5-5'), /<span class="stage">Scoring<\/span>/, 'a ladder step is listed under the stages whose chain uses it');
-    assert.match(row('claude-sonnet-5-5'), /<span class="badge badge-bad" data-model-state="unknown_model">Unknown model<\/span>/);
-    assert.match(row('claude-sonnet-5-5'), /<td class="mono">claude-sonnet-5-5<br><span class="new-version" data-new-version="claude-sonnet-5-6" title="[^"]*">New version: claude-sonnet-5-6<\/span><\/td>/, 'the alias ran a newer release than the registry id');
-    assert.doesNotMatch(row('claude-haiku-4-5'), /New version/, 'a dated snapshot of the same id is not a new version');
-    assert.doesNotMatch(row('gpt-5.6-terra'), /New version|resolved/);
-    assert.match(row('claude-haiku-4-5'), /<td class="mono">claude-haiku-4-5<br><span class="muted mono" title="[^"]*">resolved claude-haiku-4-5-20251001<\/span><\/td><td><span class="badge badge-good" data-model-state="available">Available<\/span><div class="test-cell">[\s\S]*?<\/div><\/td><td>Aug 26, 2026, 3:00 PM<\/td>/);
-    assert.match(row('gpt-5.6-sol'), /<span class="badge badge-muted" data-model-state="not_verified">Not verified<\/span>/);
-    assert.match(row('gpt-5.6-sol'), /<form class="inline" method="post" action="\/settings\/models\/test" data-test-model="gpt-5\.6-sol"><input type="hidden" name="model" value="gpt-5\.6-sol"><input type="hidden" name="confirm" value="1"><button class="btn secondary small" type="submit">Test<\/button><\/form>/);
-    // Model assignments: one row per stage; blocked steps are greyed with the reason; Prescreen is reserved.
-    const stage = name => new RegExp(`<tr data-stage="${name}"[^>]*>([\\s\\S]*?)<\\/tr>`).exec(markup)?.[1] || '';
-    assert.match(stage('scoring'), /^<th scope="row">Scoring<\/th><td>claude<\/td><td><span class="mono">claude-fable-5-1<\/span><\/td><td><span class="muted">—<\/span><\/td><td><span class="chain"><span class="step off" data-step="claude-fable-5-1">claude-fable-5-1 <span class="why">· Not on plan \(Max\)<\/span><\/span><span class="arrow" aria-hidden="true">→<\/span><span class="step off" data-step="claude-opus-5-5" title="weekly limit or not on plan">claude-opus-5-5 <span class="why">· Weekly limit until Aug 29, 2026, 9:00 AM<\/span><\/span><\/span>/);
-    assert.match(stage('supplemental'), /Same engine and model as Scoring/);
-    assert.match(stage('letterDraft'), /data-step="gpt-5\.6-sol" title="Codex, on request \(Generate with Codex\)">gpt-5\.6-sol<\/span>/);
-    assert.match(stage('letterEditor'), /Cover letter editor/);
-    assert.match(stage('prescreen'), /<td><span class="muted">local<\/span><\/td>[\s\S]*Local title and location rules; no model/);
-    // The scoring dropdown: a refused model stays selectable when configured, an unknown one is disabled.
-    assert.match(markup, /<option value="claude-fable-5-1" selected data-unavailable="1">claude-fable-5-1 \(fable\) \(unavailable on Max\)<\/option>/);
-    assert.match(markup, /<option value="claude-sonnet-5-5" disabled data-unavailable="1">claude-sonnet-5-5 \(sonnet\) \(unknown model\)<\/option>/);
-    assert.match((await hub.request('GET', '/status')).text, /data-badge="unavailable-models">unavailable: claude-fable-5-1, claude-sonnet-5-5<\/span>/);
-
-    // Re-check Models forgets the not-on-plan and unknown-model marks; weekly limits and last use stay.
-    const cleared = await hub.form('/settings/models/recheck', {});
-    assert.equal(cleared.status, 303);
-    const record = JSON.parse(await fs.readFile(path.join(root, 'state', 'model-availability.json'), 'utf8'));
-    assert.deepEqual([Object.keys(record.models), Object.keys(record.limits), Object.keys(record.seen)], [[], ['claude-opus-5-5'], ['claude-haiku-4-5', 'gpt-5.6-terra', 'claude-sonnet-5-5']]);
-    assert.match((await hub.request('GET', '/settings')).text.split('<script>')[0], /<tr data-model="claude-fable-5-1">[\s\S]*?data-model-state="not_verified"/);
-    assert.equal((await hub.form('/settings/models/recheck', {}, { origin: 'http://evil.example' })).status, 403);
-
-    // A manual plan overrides the detected one and is labelled manual; an empty value clears it.
-    assert.equal((await hub.form('/settings/plans', { provider: 'chatgpt', plan: 'Pro' })).status, 303);
-    assert.equal((await readConfig(root)).plans.chatgpt.manual, 'pro');
-    hub.ctx.connections.reset?.();
-    assert.match((await hub.request('GET', '/settings')).text, /<p class="plan-name" data-plan-name="chatgpt">Pro <span class="badge badge-muted" data-plan-source="manual"/);
-    assert.match(decodeURIComponent((await hub.form('/settings/plans', { provider: 'chatgpt', plan: 'not a plan!' })).headers.location), /error=A plan name is one word/);
-    assert.equal((await hub.form('/settings/plans', { provider: 'chatgpt', plan: '' })).status, 303);
-    assert.equal((await readConfig(root)).plans.chatgpt.manual, undefined);
-
-    // From the effective date on (local time), the card and the sidebar read Pro with no config change.
-    hub.clock.value = '2026-09-01T05:30:00Z';
-    assert.match((await hub.request('GET', '/reports')).text, /<span data-plan="claude">Claude Pro<\/span>/);
-    const switched = (await hub.request('GET', '/settings')).text;
-    assert.match(switched, /<p class="plan-name" data-plan-name="claude">Pro <span class="badge badge-muted" data-plan-source="manual"/, 'the CLI still says max, so the scheduled value is the owner\'s (manual)');
-    assert.doesNotMatch(switched, /data-plan-pending/);
-  } finally {
-    await hub.close();
-    await fs.rm(root, { recursive: true, force: true });
-  }
-});
 
 test('a plan change raises a Status banner with a Review Settings link, adds the login-refresh hint when the session also looks expired, and is announced once by the hub probe', async () => {
   const root = await prepareProject();
@@ -1123,9 +972,9 @@ test('Test sends one short prompt to one model through a fake engine, updates it
     assert.match(decodeURIComponent(ok.headers.location), /notice=claude-haiku-4-5 answered; the CLI reported claude-haiku-4-5-20260901/);
     assert.deepEqual(calls, [{ engine: 'claude', model: 'claude-haiku-4-5', prompt: 'Reply with OK' }], 'one fixed prompt, one model, the full id');
     const haiku = await status('claude-haiku-4-5');
-    assert.match(haiku, /resolved claude-haiku-4-5-20260901/);
+    assert.match(haiku, /<td><span class="mono">claude-haiku-4-5-20260901<\/span><\/td>/, 'the current version is the id the CLI reported (a dated snapshot, not a new version)');
     assert.match(haiku, /data-model-state="available">Available/);
-    assert.match(haiku, /<td>Aug 27, 2026, 7:00 AM<\/td>/, 'last used is the test time');
+    assert.match(haiku, /<td class="nowrap" title="Aug 27, 2026, 7:00 AM">Aug 27, 7:00 AM<\/td>/, 'last used is the test time');
     const usage = JSON.parse(await fs.readFile(path.join(root, 'state', 'usage.json'), 'utf8'));
     assert.deepEqual(usage.entries.map(entry => [entry.purpose, entry.model, entry.source]), [['test', 'claude-haiku-4-5-20260901', 'hub']]);
 
@@ -1155,6 +1004,116 @@ test('Test sends one short prompt to one model through a fake engine, updates it
     assert.equal((await hub.form('/settings/models/test', { model: 'claude-haiku-4-5', confirm: '1' }, { origin: 'http://evil.example' })).status, 403);
     const settings = (await hub.request('GET', '/settings')).text;
     assert.match(settings, /window\.confirm\('Send one short test prompt/, 'the page asks before sending');
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('Subscriptions & Models shows each plan with source and detection time, 7-day tokens per model, the last limit with its reset, compact model tables, and the task assignments', async () => {
+  const root = await prepareProject();
+  await fs.writeFile(path.join(root, 'state', 'model-availability.json'), JSON.stringify({
+    version: 2,
+    models: { 'claude-fable-5-1': { model: 'claude-fable-5-1', plan: 'max', detectedAt: '2026-08-26T12:00:00.000Z', kind: 'not_on_plan' } },
+    limits: { 'claude-opus-5-5': { model: 'claude-opus-5-5', at: '2026-08-27T01:02:00.000Z', resetsAt: '2026-08-29T14:00:00.000Z' } },
+    seen: {
+      'claude-haiku-4-5': { resolvedId: 'claude-haiku-4-5-20251001', lastUsedAt: '2026-08-26T20:00:00.000Z' },
+      'claude-sonnet-5-5': { resolvedId: 'claude-sonnet-5-6', lastUsedAt: '2026-08-26T21:00:00.000Z' },
+      'gpt-5.6-sol': { resolvedId: 'gpt-5.6-sol', lastUsedAt: '2026-08-26T22:00:00.000Z' },
+    },
+  }));
+  await fs.writeFile(path.join(root, 'state', 'usage.json'), JSON.stringify({ version: 1, entries: [
+    { at: '2026-08-27T01:10:00Z', purpose: 'review', source: 'nightly', engine: 'claude', effort: null, model: 'claude-opus-5-5', input: 2, output: 3849, cacheRead: 4208, cacheCreation: 18722, reasoning: 0 },
+    { at: '2026-08-26T15:00:00Z', purpose: 'letter', source: 'hub', engine: 'codex', effort: 'medium', model: 'gpt-5.6-sol', input: 5000, output: 300, cacheRead: 0, cacheCreation: 0, reasoning: 0 },
+  ] }));
+  const payloadPath = path.join(root, 'state', 'report-payload-2026-08-27.json');
+  const payload = JSON.parse(await fs.readFile(payloadPath, 'utf8'));
+  payload.meta.quota = { events: [{ kind: 'modelWeeklyLimit', model: 'claude-opus-5-5', resetsAt: '2026-08-29T14:00:00.000Z', at: '2026-08-27T01:02:00Z', action: 'downgraded', detail: 'switched to claude-sonnet-5-5', engine: 'claude' }] };
+  await fs.writeFile(payloadPath, JSON.stringify(payload));
+  const config = JSON.parse(await fs.readFile(path.join(root, 'config.json'), 'utf8'));
+  config.semanticMatching = { ...config.semanticMatching, engine: 'claude', models: { claude: 'fable' } };
+  config.plans = { claude: { scheduledChange: { plan: 'pro', effectiveDate: '2026-09-01' } } };
+  await fs.writeFile(path.join(root, 'config.json'), JSON.stringify(config, null, 2));
+  const hub = await startHub(root, {
+    connections: {
+      claude: { installed: true, connected: true, detail: 'Claude · Max · claude.ai', hint: null, reason: null, plan: 'max', planSource: 'auth status', version: '2.1.292', path: '/Users/me/.local/bin/claude', source: 'extra' },
+      codex: { installed: true, connected: true, detail: 'Codex · ChatGPT · plus', hint: null, reason: null, plan: 'plus', planSource: 'auth.json', version: '0.153.0', path: '/opt/homebrew/bin/codex', source: 'path' },
+    },
+  });
+  try {
+    assert.match((await hub.request('GET', '/reports')).text, /<b>Plan<\/b><span data-plan="claude">Claude Max → Pro Sep 1<\/span><br><span data-plan="chatgpt">ChatGPT Plus<\/span><\/div>/);
+    const page = (await hub.request('GET', '/settings')).text;
+    const markup = page.split('<script>')[0];
+    assert.match(markup, /<a href="\/settings\?tab=models" aria-current="page" class="active">Subscriptions &amp; Models<\/a>/, 'the default tab');
+    // Subscriptions: plan, source and detection time, scheduled change, CLI, tokens per model, last limit.
+    const claudeCard = /<article class="card sub-card" data-provider="anthropic">([\s\S]*?)<\/article>/.exec(markup)[1];
+    assert.match(claudeCard, /<p class="plan-name" data-plan-name="claude">Max <span class="badge badge-muted" data-plan-source="auto">auto<\/span><\/p>\s*<p class="plan-meta">Detected automatically from auth status · checked Aug 27, 2026, 7:00 AM<\/p>\s*<p class="plan-change" data-plan-pending="2026-09-01">Switches to Pro on Sep 1, 2026<\/p>/);
+    assert.match(claudeCard, /<dt>CLI<\/dt><dd>Claude CLI 2\.1\.292<\/dd>/);
+    assert.match(claudeCard, /<dd data-plan-usage="claude"><ul class="plain-list sub-usage"><li><span class="mono">claude-opus-5-5<\/span> 23k in · 3\.8k out<\/li><\/ul><\/dd>/);
+    assert.match(claudeCard, /<dd data-last-limit="claude">Claude subscription claude-opus-5-5 weekly limit reached; expected to reset Aug 29, 2026, 9:00 AM <span class="muted">· Aug 26, 2026, 8:02 PM · downgraded<\/span><br><span class="muted">Expected to reset Aug 29, 2026, 9:00 AM<\/span><\/dd>/);
+    const chatgptCard = /<article class="card sub-card" data-provider="openai">([\s\S]*?)<\/article>/.exec(markup)[1];
+    assert.match(chatgptCard, /<p class="plan-name" data-plan-name="chatgpt">Plus <span class="badge badge-muted" data-plan-source="auto">auto<\/span><\/p>\s*<p class="plan-meta">Detected automatically from auth\.json · checked/);
+    assert.match(chatgptCard, /<dd data-plan-usage="codex">[\s\S]*?gpt-5\.6-sol<\/span> 5\.0k in · 300 out/);
+    assert.match(chatgptCard, /<dd data-last-limit="codex"><span class="muted">None recorded<\/span><\/dd>/);
+    // Models: current version (and a newer release), availability on this plan, last use, stages; unused models fold.
+    const row = id => new RegExp(`<tr data-model="${id.replace(/\./g, '\\.')}">([\\s\\S]*?)<\\/tr>`).exec(markup)?.[1] || '';
+    assert.match(row('claude-fable-5-1'), /<td><span class="mono">claude-fable-5-1<\/span><br><span class="alias">fable<\/span> · <form class="inline test-form"[\s\S]*?<\/form><\/td><td><span class="muted">—<\/span><\/td><td><span class="badge badge-bad" data-model-state="not_on_plan">Unavailable on Max<\/span><\/td><td class="nowrap" title=""><span class="muted">Never<\/span><\/td><td><span class="stage primary" title="Scoring">Scoring<\/span><\/td>/);
+    assert.match(row('claude-opus-5-5'), /<span class="stage" title="Scoring \(fallback\)">Scoring<\/span> <span class="stage" title="Cover letter draft \(fallback\)">Letter draft<\/span> <span class="stage" title="Cover letter editor \(fallback\)">Letter editor<\/span>/, 'the ladder step and both letter fallbacks');
+    assert.match(row('claude-opus-5-5'), /<span class="badge badge-warn" data-model-state="weekly_limit">Weekly limit until Aug 29, 2026, 9:00 AM<\/span>/);
+    assert.match(row('claude-sonnet-5-5'), /<td><span class="mono">claude-sonnet-5-6<\/span><br><span class="new-version" data-new-version="claude-sonnet-5-6">New version: claude-sonnet-5-6<\/span><\/td>/);
+    assert.match(row('claude-haiku-4-5'), /<td><span class="mono">claude-haiku-4-5-20251001<\/span><\/td><td><span class="badge badge-good" data-model-state="available">Available<\/span><\/td>/);
+    assert.match(row('gpt-5.6-sol'), /<td><span class="mono">gpt-5\.6-sol<\/span><br><form class="inline test-form" method="post" action="\/settings\/models\/test" data-test-model="gpt-5\.6-sol">[\s\S]*?<button class="link-button" type="submit"[^>]*>Test<\/button><\/form><\/td>/, 'Test is an inline secondary action in the model cell');
+    const openaiModels = /<article class="card model-card" data-provider="openai">([\s\S]*?)<\/article>/.exec(markup)[1];
+    assert.match(openaiModels, /<details class="all-models"><summary>Show all models \(4 more\)<\/summary>[\s\S]*?data-model="gpt-5\.6-terra"[\s\S]*?data-model="gpt-6-astra"[\s\S]*?<\/details>/);
+    assert.equal((/<\/table><\/div><details/.exec(openaiModels) ? openaiModels.split('<details')[0] : '').includes('gpt-5.6-terra'), false, 'unused models are only in the folded list');
+    assert.match(markup, /<form method="post" action="\/settings\/models\/recheck" class="inline"><button class="link-button" type="submit"[^>]*>Re-check Models<\/button><\/form>/);
+    // Task assignments: inline engine, model, and effort; chains as tags; blocked steps greyed with the reason.
+    const stage = name => new RegExp(`<tr data-stage="${name}"[^>]*>([\\s\\S]*?)<\\/tr>`).exec(markup)?.[1] || '';
+    assert.match(stage('scoring'), /<select name="scoring_engine"[^>]*><option value="claude" selected>claude<\/option><option value="codex">codex<\/option><\/select>/);
+    assert.match(stage('scoring'), /<option value="claude-fable-5-1" data-provider="anthropic" data-efforts="" selected>claude-fable-5-1 \(fable\)<\/option>/);
+    assert.match(stage('scoring'), /<select name="scoring_effort"[^>]* disabled>/, 'effort applies to Codex only');
+    assert.match(stage('scoring'), /<span class="tag head off"><span class="mono">claude-fable-5-1<\/span> <span class="why">· Unavailable on Max<\/span><\/span><span class="arrow" aria-hidden="true">→<\/span><ol class="chain-tags"><li class="tag off" data-id="claude-opus-5-5"><span class="mono">claude-opus-5-5<\/span> <span class="why">· Weekly limit until Aug 29, 2026, 9:00 AM<\/span><input type="hidden" name="fallback_scoring" value="claude-opus-5-5">[\s\S]*?<li class="tag" data-id="gpt-5\.6-sol">/, 'the ladder, then Codex for a weekly account limit (on by default)');
+    assert.match(stage('supplemental'), /Follows Scoring \(claude · <span class="mono">claude-fable-5-1<\/span>\)/);
+    assert.match(stage('letterDraft'), /<option value="codex" selected>codex<\/option>[\s\S]*?<option value="gpt-5\.6-sol" data-provider="openai" data-efforts="low medium high xhigh max ultra" selected>[\s\S]*?<select name="letterDraft_effort"[^>]*><option value="">CLI default<\/option><option value="low">low<\/option><option value="medium" selected>medium<\/option>/, 'the draft default: codex, gpt-5.6-sol, medium');
+    assert.match(stage('letterDraft'), /<li class="tag off" data-id="claude-opus-5-5">/, 'falling back to the Claude ladder (opus)');
+    assert.match(stage('letterEditor'), /<option value="high" selected>high<\/option>/, 'the editor default: high');
+    assert.match(stage('letterEditor'), /<input type="checkbox" name="editorReview" checked> Run the editor pass/);
+    assert.match(stage('prescreen'), /Local title and location rules; no model[\s\S]*?Reserved for a future model step/);
+    assert.match(page, /@media \(max-width:1000px\)\{\.pair-grid\{grid-template-columns:1fr\}\}/, 'the pairs stack on narrow screens');
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('Task assignments save each letter stage on its own, validate engine, model, effort, and chain, and keep the editor switch', async () => {
+  const root = await prepareProject();
+  const hub = await startHub(root);
+  try {
+    const page = (await hub.request('GET', '/settings')).text.split('<script>')[0];
+    assert.match(page, /<tr data-stage="letterDraft"><th scope="row">Cover letter draft<\/th><td colspan="3"><span class="muted">Placeholder engine \(Scoring is local only\)<\/span>/, 'a local-only config keeps the placeholder until a letter stage is set');
+    const save = fields => hub.form('/settings/assignments', { assignmentsPresent: '1', editorReviewPresent: '1', ...fields });
+    const saved = await save({ letterDraft_engine: 'claude', letterDraft_model: 'claude-sonnet-5-5', fallback_letterDraft: ['gpt-5.6-terra'], letterEditor_engine: 'codex', letterEditor_model: 'gpt-5.6-terra', letterEditor_effort: 'xhigh' });
+    assert.equal(saved.status, 303);
+    let config = await readConfig(root);
+    assert.deepEqual(config.models.assignments, {
+      letterDraft: { engine: 'claude', model: 'claude-sonnet-5-5', effort: null, fallback: ['gpt-5.6-terra'] },
+      letterEditor: { engine: 'codex', model: 'gpt-5.6-terra', effort: 'xhigh', fallback: [] },
+    });
+    assert.equal(config.coverLetter.editorReview, false, 'the unchecked editor switch turns the pass off');
+    assert.equal(config.semanticMatching.engine, 'local_only', 'scoring is untouched when its row is not sent');
+    const after = (await hub.request('GET', '/settings')).text.split('<script>')[0];
+    assert.match(/<tr data-stage="letterEditor"[^>]*>([\s\S]*?)<\/tr>/.exec(after)[1], /<option value="xhigh" selected>xhigh<\/option>/);
+    assert.match(after, /<tr data-stage="letterEditor" class="stage-off">/, 'an editor that is off is dimmed');
+    const errorOf = async fields => decodeURIComponent((await save(fields)).headers.location);
+    assert.match(await errorOf({ letterDraft_engine: 'claude', letterDraft_model: 'claude-sonnet-5-5', letterDraft_effort: 'high' }), /Cover letter draft: reasoning effort applies to Codex models only/);
+    assert.match(await errorOf({ letterEditor_engine: 'codex', letterEditor_model: 'gpt-5.5', letterEditor_effort: 'ultra' }), /Cover letter editor: gpt-5\.5 accepts the efforts low, medium, high, xhigh/);
+    assert.match(await errorOf({ letterDraft_engine: 'codex', letterDraft_model: 'claude-opus-5-5' }), /Cover letter draft: claude-opus-5-5 is not a ChatGPT model in the registry/);
+    assert.match(await errorOf({ letterDraft_engine: 'claude', letterDraft_model: 'claude-opus-5-5', fallback_letterDraft: ['claude-opus-5-5'] }), /Cover letter draft: claude-opus-5-5 is already the stage's model/);
+    assert.match(await errorOf({ letterDraft_engine: 'claude', letterDraft_model: 'claude-opus-5-5', fallback_letterDraft: ['gpt-5.5', 'gpt-5.5'] }), /appears twice in the fallback chain/);
+    config = await readConfig(root);
+    assert.equal(config.models.assignments.letterDraft.model, 'claude-sonnet-5-5', 'nothing is written on a validation error');
+    assert.equal((await hub.form('/settings/assignments', { assignmentsPresent: '1' }, { origin: 'http://evil.example' })).status, 403);
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });

@@ -23,6 +23,7 @@ import { buildHtml, writeReports, writeWarningsFile } from './report.mjs';
 import { clearDeferred, deferredStatus, expireDeferred, isJobSeen, markDeferred, markJobSeen, normalizeState, pruneSeen, releaseRecentBaselines } from './state.mjs';
 import { ageBasisInstant, datePrecisionSummary, freshnessInstant, isUndated } from './posting-fields.mjs';
 import { detectEarlyCareer, isEarlyCareerPriority, prefilterJobs } from './prefilter.mjs';
+import { isZapplyLink, resolveZapplyLink } from './collectors/zapply.mjs';
 import { appendUsage, summarizeUsage, usageEntries, usagePath } from './engines/usage.mjs';
 import { appendQuotaNotices, quotaNoticesPath } from './engines/quota-notices.mjs';
 import { acquireRunLock, releaseRunLock } from './lock.mjs';
@@ -242,6 +243,25 @@ export async function collectAtsBoardSources(config, state, collectedJobs, { now
   return { jobs: polled.jobs, results: polled.results, registry };
 }
 
+// Replaces each Zapply link with the employer URL it redirects to; failures keep the Zapply link.
+export async function resolveZapplyJobs(jobs, { network = true, fetchImpl = undefined, concurrency = 3, userAgent, timeoutMs } = {}) {
+  const failures = [];
+  const resolved = await mapLimit(jobs, Math.max(1, concurrency), async job => {
+    if (!isZapplyLink(job.url)) return job;
+    const result = await resolveZapplyLink(job.url, { network, ...(fetchImpl ? { fetchImpl } : {}), ...(userAgent ? { userAgent } : {}), ...(timeoutMs ? { timeoutMs } : {}) });
+    if (!result.url) {
+      if (network) failures.push({ url: job.url, reason: result.reason });
+      return job;
+    }
+    return { ...job, url: result.url, originalUrl: job.url, zapplyUrl: job.url, zapplyResolvedVia: result.via };
+  });
+  return { jobs: resolved, failures };
+}
+
+export function dedupeByUrl(jobs) {
+  return dedupe(jobs);
+}
+
 function dedupe(jobs) {
   const found = new Map();
   for (const job of jobs) {
@@ -288,6 +308,38 @@ export function dedupeByFinalUrl(jobs) {
 // longer history is kept, so the Run Summary says "last 90 days", not "all time".
 export function usageParseEmptyWarning(count) {
   return createWarning('llm', 'usage log', `usage parse empty: ${Number(count)} successful Claude call(s) returned no readable modelUsage; their tokens are not counted in the usage log`);
+}
+
+// What happened to this run's postings, for the Run Summary and Run Details: scored by which engine and
+// model (local scores counted apart), deferred (budget and quota), prefiltered out, and expired.
+export function runCounts({ evaluated = [], budget = {}, quotaDeferred = [], prefiltered = {}, expiredBacklogCount = 0 }) {
+  const scored = new Map();
+  let local = 0;
+  for (const job of evaluated) {
+    if (job.semanticReviewed && job.scoringModel) {
+      const key = `${job.scoringEngine || 'claude'} · ${job.scoringModel}`;
+      scored.set(key, (scored.get(key) || 0) + 1);
+    } else if (job.matchLevel === 'unreviewed' || job.scoringEngine === 'local_fallback') local += 1;
+  }
+  return {
+    scoredByModel: [...scored.entries()].map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
+    localScores: local,
+    deferred: { budget: (budget.deferred || []).length, quota: quotaDeferred.length },
+    prefilteredOut: { title: (prefiltered.titleExcluded || []).length, location: (prefiltered.locationExcluded || []).length },
+    expired: Number(expiredBacklogCount || 0),
+  };
+}
+
+// One line for the report header when a quota limit touched the run: how many postings went unreviewed
+// because of it, and which engine or model took over. Null when nothing happened.
+export function quotaNote(quota, deferredByQuota = 0) {
+  const events = (quota?.events || []).filter(event => event.action !== 'skipped' || event.kind === 'modelWeeklyLimit');
+  if (!events.length) return null;
+  const takeover = [...events].reverse().find(event => event.action === 'fallback-engine' || event.action === 'downgraded');
+  const who = takeover ? String(takeover.detail || '').replace(/^switched to /, '').replace(/ \(.*\)$/, '') : null;
+  const limit = describeQuota([...events].reverse().find(event => event.kind !== 'model_unavailable') || events.at(-1));
+  if (deferredByQuota) return `Quota: ${limit}. ${deferredByQuota} posting(s) were not reviewed because of it and wait for the next run${who ? `; ${who} took over the rest` : '; no engine took over'}.`;
+  return `Quota: ${limit}. ${who ? `${who} took over` : 'The run continued'}; every posting was reviewed.`;
 }
 
 export const REVIEWED_WINDOW_DAYS = 90;
@@ -698,7 +750,18 @@ async function runPipeline(config, clock, options = {}) {
   if (prefiltered.titleExcluded.length || prefiltered.locationExcluded.length) {
     warnings.push(createWarning('collector', 'prefilter', `skipped ${prefiltered.titleExcluded.length} postings by title and ${prefiltered.locationExcluded.length} by a non-US location before enrichment`, 'info'));
   }
-  const unseenCandidates = prefiltered.jobs;
+  // Zapply list links are redirects: resolve them to the employer's posting before enrichment, so the
+  // ATS-aware fetchers see the real URL and a posting listed both ways dedupes on it. An employer URL that
+  // is already seen drops the Zapply copy too.
+  const zapply = await resolveZapplyJobs(prefiltered.jobs, { network: config.network.fetchDescriptions !== false, userAgent: config.network.userAgent, concurrency: Number(config.network.concurrency || 3), fetchImpl: options.fetchImpl });
+  if (zapply.failures.length) {
+    warnings.push(createWarning('collector', 'Zapply', `could not resolve ${zapply.failures.length} Zapply link(s) to the employer posting; they are fetched through Zapply as before (${zapply.failures.slice(0, 3).map(item => item.reason).join('; ')}${zapply.failures.length > 3 ? '; …' : ''})`));
+  }
+  const unseenCandidates = dedupe(zapply.jobs).filter(job => {
+    if (!job.zapplyUrl || !isJobSeen(state, job)) return true;
+    markJobSeen(state, { url: job.zapplyUrl, enrichment: 'zapply_resolved' }, now.toISOString());
+    return false;
+  });
   const stamped = unseenCandidates.map(job => ({
     ...job,
     originalUrl: job.originalUrl || job.url,
@@ -893,6 +956,8 @@ async function runPipeline(config, clock, options = {}) {
     candidateCount: budget.candidateCount, candidateInWindowCount: budget.inWindowCount, candidateUndatedCount: budget.undatedCount, reviewedThisRun: budget.reviewedCount, deferredCount: budget.deferred.length, expiredBacklogCount, undatedAbandonedCount: budget.abandoned.length, maxReviewedPerRun: budget.limit,
     datePrecision: datePrecisionSummary(reviewed),
     reviewedInRun: evaluated.length, reviewedLast90Days,
+    runCounts: runCounts({ evaluated, budget, quotaDeferred, prefiltered, expiredBacklogCount }),
+    quotaNote: quotaNote(quota, quotaDeferred.length),
     prefilter: { titleExcluded: prefiltered.titleExcluded, locationExcludedCount: prefiltered.locationExcluded.length, titleExcludedCount: prefiltered.titleExcluded.length, bySource: prefiltered.bySource },
     earlyCareerCount: locallyEvaluated.filter(job => job.earlyCareer).length,
     usage: summarizeUsage(runUsage),

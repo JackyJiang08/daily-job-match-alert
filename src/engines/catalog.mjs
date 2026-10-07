@@ -27,6 +27,8 @@ export const DEFAULT_CATALOG = [
 
 // The ladder the quota policy walks when a model hits its weekly limit (unchanged behaviour: Fable, then Opus).
 export const DEFAULT_LADDER_ALIASES = ['fable', 'opus'];
+// The Claude step cover letters fall back to when their Codex model cannot run.
+export const DEFAULT_LETTER_FALLBACK_ALIAS = 'opus';
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9._\-]{0,63}(\[1m\])?$/i;
 

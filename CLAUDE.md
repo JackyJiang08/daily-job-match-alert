@@ -112,6 +112,37 @@ disabled; do not expand them unless a task says so.
   it; every user-visible engine error goes through humanizeEngineError
   (auth sentence, quota sentence, or "Generation failed (<reason>); details
   in the hub log"); raw text only in the hub log.
+- Stage assignments (src/engines/assignments.mjs): stageAssignments(config) →
+  scoring (semanticMatching engine/model/reasoningEffort; fallback = ladder after
+  the model + the Codex model when quotaPolicy.fallbackEngine is codex, which is
+  ON when unset and still needs Codex signed in; explicit null turns it off),
+  supplemental (linked), letterDraft / letterEditor (config.models.assignments;
+  default codex / gpt-5.6-sol / medium and high, fallback claude-opus-5-5; a
+  local_only config without letter assignments keeps the placeholder engine),
+  prescreen (reserved). Letters: letterStagePlan drops Codex steps when Codex is
+  not connected (note in Editor notes), withStageChain hands the draft to the next
+  step on failure, generate.mjs reviewWithChain does the same for the editor.
+  Settings saves via POST /settings/assignments (validateAssignments).
+- Settings tabs (/settings?tab=models|pipeline|letters): Subscriptions & Models
+  (cards: plan + source + detection time, scheduled change, CLI, 7-day tokens per
+  model, last limit and reset; compact model tables, unused models under "Show
+  all models", inline Test; Task assignments with engine/model/effort selects and
+  editable fallback tags), Pipeline (matching, reports, hub; POST /settings with
+  no model leaves the model alone), Cover Letters (material). The old ladder
+  editor is gone: Scoring's chain is the ladder.
+- Zapply links (src/collectors/zapply.mjs): https://zapply.jobs/l/d/<slug> answers
+  301 then 302 to the employer posting (probed 2026-10-07; a gone listing
+  redirects to zapply.jobs/jobs). resolveZapplyJobs runs after the prefilter and
+  before enrichment (redirect: manual, ≤4 hops; offline or on error, greenhouse/
+  lever/ashby/sr slugs are decoded; Workday/Oracle/Amazon cannot be), keeps the
+  Zapply link as originalUrl, and dedupe merges it with the employer listing.
+- Run counts: meta.runCounts (scored by engine · model, local scores, deferred by
+  budget and quota, prefiltered out, expired) feed Run Details and the Run
+  Summary ("Reviewed jobs (this run)" is gone); meta.quotaNote is one header line
+  when a quota limit touched the run. Prefilter also drops titles with European
+  gender markers ((m/w/d), (f/m/d), (h/f), …) as non-US; detectEarlyCareer
+  promotes on JD signals alone (0-2 / 0 to 2 years, recent graduate(s), Class of
+  2027, new grad(uate)s) unless the title is senior; classify.mjs matches plurals.
 - Model registry (src/engines/catalog.mjs) is the only place that names
   models: config.models.catalog [{ provider anthropic|openai, id, label,
   alias, efforts (Codex only) }], defaulting to ids checked against Claude

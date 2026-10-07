@@ -2,6 +2,7 @@
 // writes only config.json (through config-file.mjs, under the run lock) and the hub's own private
 // directory (uploaded PDFs, hub-state.json, run logs). Every filesystem call goes through ctx.io so
 // tests can point the hub at a temporary project.
+import { LETTER_STAGES, validateLetterAssignment } from '../engines/assignments.mjs';
 import { DEFAULT_CATALOG, ENGINE_PROVIDER, PROVIDER_ENGINE, canonicalModelId, defaultModelId, findModel, normalizeCatalog, providerModels, validateLadder } from '../engines/catalog.mjs';
 import path from 'node:path';
 import { enabledResumeTracks, normalizeResumeConfig } from '../config.mjs';
@@ -699,8 +700,10 @@ export function validateSettings(form, { catalog = DEFAULT_CATALOG } = {}) {
   const custom = String(form[`modelCustom_${modelKey}`] ?? form.modelCustom ?? '').trim();
   // Stored as the registry's full id (an alias from an older client maps to its entry); a custom name stays as typed.
   const typed = selected === '__custom__' ? custom : selected;
-  const model = MODEL_PATTERN.test(typed) ? canonicalModelId(typed, ENGINE_PROVIDER[modelKey] || null, catalog) : typed;
-  if (!MODEL_PATTERN.test(model)) errors.push(`Model must be a registry id such as ${defaultModelId(engine === 'codex' ? 'codex' : 'claude', catalog)} or a custom model name`);
+  // The Pipeline tab carries no model at all; the model then stays as it is (Task assignments sets it).
+  const modelGiven = typed !== '' || engineGiven;
+  const model = !modelGiven ? undefined : MODEL_PATTERN.test(typed) ? canonicalModelId(typed, ENGINE_PROVIDER[modelKey] || null, catalog) : typed;
+  if (modelGiven && !MODEL_PATTERN.test(model || '')) errors.push(`Model must be a registry id such as ${defaultModelId(engine === 'codex' ? 'codex' : 'claude', catalog)} or a custom model name`);
   const hubPort = Number(form.hubPort);
   if (!Number.isInteger(hubPort) || hubPort < 1024 || hubPort > 65535) errors.push('Hub port must be a whole number from 1024 to 65535');
   // Optional: a form without the field leaves semanticMatching.maxReviewedPerRun untouched; 0 means no limit.
@@ -774,13 +777,13 @@ export async function saveSettings(ctx, form) {
       if (settings.fallbackEngine !== undefined) config.semanticMatching.quotaPolicy.fallbackEngine = settings.fallbackEngine;
     }
     if (settings.engine) config.semanticMatching.engine = settings.engine;
-    config.semanticMatching.model = settings.model;
+    if (settings.model !== undefined) config.semanticMatching.model = settings.model;
     if (settings.reasoningEffort !== undefined) {
       if (settings.reasoningEffort && (settings.engine || normalizeEngineId(config.semanticMatching.engine)) === 'codex') config.semanticMatching.reasoningEffort = settings.reasoningEffort;
       else delete config.semanticMatching.reasoningEffort;
     }
     const activeEngine = settings.engine || normalizeEngineId(config.semanticMatching.engine);
-    if (ENGINE_IDS.includes(activeEngine)) {
+    if (settings.model !== undefined && ENGINE_IDS.includes(activeEngine)) {
       config.semanticMatching.models = config.semanticMatching.models && typeof config.semanticMatching.models === 'object' ? config.semanticMatching.models : {};
       config.semanticMatching.models[activeEngine] = settings.model;
     }
@@ -879,5 +882,95 @@ export async function testModel(ctx, config, form) {
   } finally {
     await releaseRunLock(lock);
   }
+}
+
+// ---- Settings → Task assignments
+
+// Scoring: engine, model, effort, and a fallback chain that is the model ladder (Claude models after the
+// scoring model) with an optional ChatGPT model at the end for a weekly account limit. Cover letter draft
+// and editor: their own engine, model, effort, and chain. The editor pass switch rides along.
+export function validateAssignments(form, { catalog = DEFAULT_CATALOG } = {}) {
+  const errors = [];
+  const values = {};
+  const scoringEngine = normalizeEngineId(form.scoring_engine);
+  if (form.scoring_engine != null) {
+    if (!['claude', 'codex', 'local_only'].includes(scoringEngine)) errors.push('Scoring: engine must be claude or codex');
+    if (scoringEngine === 'local_only') values.scoring = { engine: 'local_only' };
+    else if (scoringEngine) {
+      const provider = ENGINE_PROVIDER[scoringEngine];
+      const entry = findModel(catalog, form.scoring_model, provider);
+      if (!entry) errors.push(`Scoring: ${form.scoring_model || 'the model'} is not a ${scoringEngine === 'codex' ? 'ChatGPT' : 'Claude'} model in the registry`);
+      const effort = form.scoring_effort ? String(form.scoring_effort).toLowerCase() : null;
+      if (effort && scoringEngine === 'codex' && entry?.efforts && !entry.efforts.includes(effort)) errors.push(`Scoring: ${entry.id} accepts the efforts ${entry.efforts.join(', ')}`);
+      const chain = [].concat(form.fallback_scoring ?? []).map(String).filter(Boolean);
+      const ladderSteps = [];
+      let codexStep = null;
+      for (const item of chain) {
+        const step = findModel(catalog, item);
+        if (!step) { errors.push(`Scoring: ${item} is not in the model registry`); continue; }
+        if (step.provider === 'openai') {
+          if (scoringEngine === 'codex') { errors.push('Scoring: on Codex the chain takes no ChatGPT fallback'); continue; }
+          if (codexStep) { errors.push('Scoring: only one ChatGPT model can end the chain'); continue; }
+          codexStep = step.id;
+          continue;
+        }
+        if (codexStep) { errors.push('Scoring: the ChatGPT model must be the last step of the chain'); continue; }
+        if (scoringEngine === 'codex') { errors.push('Scoring: on Codex the chain takes no Claude steps (the ladder is Claude only)'); continue; }
+        if (step.id === entry?.id || ladderSteps.includes(step.id)) { errors.push(`Scoring: ${step.id} appears twice in the chain`); continue; }
+        ladderSteps.push(step.id);
+      }
+      values.scoring = { engine: scoringEngine, model: entry?.id || null, effort: scoringEngine === 'codex' ? effort : null, ladder: scoringEngine === 'claude' && entry ? [entry.id, ...ladderSteps] : null, codexFallback: scoringEngine === 'claude' ? codexStep : undefined };
+    }
+  }
+  for (const stage of LETTER_STAGES) {
+    if (form[`${stage}_engine`] == null || form[`${stage}_placeholder`] != null) continue;
+    const result = validateLetterAssignment(stage, { engine: form[`${stage}_engine`], model: form[`${stage}_model`], effort: form[`${stage}_effort`], fallback: form[`fallback_${stage}`] }, { catalog });
+    errors.push(...result.errors);
+    values[stage] = result.value;
+  }
+  const editorReview = form.editorReviewPresent != null ? (form.editorReview === 'on' || form.editorReview === 'true' || form.editorReview === true) : null;
+  if (errors.length) throw new HubInputError(errors.join('; '));
+  return { ...values, editorReview };
+}
+
+export async function saveAssignments(ctx, form) {
+  const { config: current } = await readConfigFile(ctx.configPath, ctx.io);
+  const values = validateAssignments(form, { catalog: normalizeCatalog(current) });
+  await updateConfigFile(ctx.configPath, config => {
+    config.semanticMatching = config.semanticMatching && typeof config.semanticMatching === 'object' ? config.semanticMatching : {};
+    const semantic = config.semanticMatching;
+    if (values.scoring?.engine === 'local_only') semantic.engine = 'local_only';
+    else if (values.scoring) {
+      semantic.engine = values.scoring.engine;
+      semantic.model = values.scoring.model;
+      semantic.models = semantic.models && typeof semantic.models === 'object' ? semantic.models : {};
+      semantic.models[values.scoring.engine] = values.scoring.model;
+      if (values.scoring.effort) semantic.reasoningEffort = values.scoring.effort;
+      else delete semantic.reasoningEffort;
+      if (values.scoring.ladder || values.scoring.codexFallback !== undefined) {
+        semantic.quotaPolicy = semantic.quotaPolicy && typeof semantic.quotaPolicy === 'object' ? semantic.quotaPolicy : {};
+        if (values.scoring.ladder) semantic.quotaPolicy.modelLadder = values.scoring.ladder;
+        if (values.scoring.codexFallback !== undefined) {
+          semantic.quotaPolicy.fallbackEngine = values.scoring.codexFallback ? 'codex' : null;
+          if (values.scoring.codexFallback) {
+            semantic.models = semantic.models && typeof semantic.models === 'object' ? semantic.models : {};
+            semantic.models.codex = values.scoring.codexFallback;
+          }
+        }
+      }
+    }
+    for (const stage of LETTER_STAGES) {
+      if (!values[stage]) continue;
+      config.models = config.models && typeof config.models === 'object' ? config.models : {};
+      config.models.assignments = config.models.assignments && typeof config.models.assignments === 'object' ? config.models.assignments : {};
+      config.models.assignments[stage] = values[stage];
+    }
+    if (values.editorReview != null) {
+      config.coverLetter = config.coverLetter && typeof config.coverLetter === 'object' ? config.coverLetter : {};
+      config.coverLetter.editorReview = values.editorReview;
+    }
+    return true;
+  }, { fs: ctx.io, pidAlive: ctx.pidAlive });
+  return values;
 }
 

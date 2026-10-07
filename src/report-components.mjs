@@ -11,7 +11,10 @@ export const EXTERNAL_LINK = 'target="_blank" rel="noopener noreferrer"';
 export function renderMasthead(view) {
   const title = view.masthead?.title ?? view.title;
   const subtitle = view.masthead?.subtitle ?? `${view.dateLabel} · ${view.matchLabel}`;
-  return `<header class="masthead"><h1>${htmlEscape(title)}</h1><p class="sub">${htmlEscape(subtitle)}</p></header>`;
+  // A quota limit that touched the run gets one line under the subtitle: how many postings it held back and
+  // which engine or model took over.
+  const note = view.masthead?.note ? `<p class="sub quota-note" data-quota-note>${htmlEscape(view.masthead.note)}</p>` : '';
+  return `<header class="masthead"><h1>${htmlEscape(title)}</h1><p class="sub">${htmlEscape(subtitle)}</p>${note}</header>`;
 }
 
 function option(value, label, selected = false) {

@@ -8,7 +8,7 @@ import { HubLockedError } from './config-file.mjs';
 import { parseMultipart } from './multipart.mjs';
 import {
   HubInputError, annotateConnections, assertDate, buildStatusView, claudeAuthView, clearModelAvailability, configuredCliCommands, desktopCopyPath, desktopWorkbookPath, listReportSummaries, loadTracksView, modelAvailabilityView, readErrorReport,
-  readReportPayload, readSettings, resumeAtsBoard, saveCliPath, saveSettings, selectResumeVersion, setTrackEnabled, sidebarSummary, uploadResumePdf, ModelTestBusyError, savePlan, testModel,
+  readReportPayload, readSettings, resumeAtsBoard, saveAssignments, saveCliPath, saveSettings, selectResumeVersion, setTrackEnabled, sidebarSummary, uploadResumePdf, ModelTestBusyError, savePlan, testModel,
 } from './services.mjs';
 import { localDate } from '../time-format.mjs';
 import { LETTER_SCRIPT, ONECLICK_SCRIPT, SAMPLE_TRACK_SCRIPT, letterPanel, lettersPage, trackLabelOf } from './letter-views.mjs';
@@ -178,8 +178,11 @@ export function createHubHandler(ctx) {
     pruneAvailability(record, { now: ctx.now(), plan: connections?.claude?.plan || null });
     pruneLimits(record, { now: ctx.now() });
     const usage = await readUsage(usagePath(ctx.root), ctx.io).catch(() => ({ entries: [] }));
-    const modelView = modelSettingsView({ config, settings, connections, record, usage: { entries: usage.entries, options: { now: ctx.now(), timeZone, days: 7 } }, now: ctx.now(), timeZone });
-    await page(response, 200, { active: 'settings', title: 'Settings', content: settingsPage({ settings, connections, timeZone, modelAvailability, modelView, coverLetter: { profile: readiness.profile, readiness } }), script: SETTINGS_SCRIPT + SAMPLE_TRACK_SCRIPT + MODEL_SETTINGS_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
+    // Limit events for the subscription cards: the newest run's and this hub's own (cover letters).
+    const events = [...(latest?.meta?.quota?.events || []).map(event => ({ ...event, source: 'nightly run' })), ...(ctx.quotaLog?.last ? [{ ...ctx.quotaLog.last, source: ctx.quotaLog.last.source || 'hub' }] : [])];
+    const modelView = modelSettingsView({ config, settings, connections, record, events, usage: { entries: usage.entries, options: { now: ctx.now(), timeZone, days: 7 } }, now: ctx.now(), timeZone });
+    const tab = url.searchParams.get('tab') || 'models';
+    await page(response, 200, { active: 'settings', title: 'Settings', content: settingsPage({ settings, connections, timeZone, modelAvailability, modelView, tab, coverLetter: { profile: readiness.profile, readiness } }), script: SETTINGS_SCRIPT + SAMPLE_TRACK_SCRIPT + MODEL_SETTINGS_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
   }
 
   // Read-only pass-through of the Desktop folder's own files: the HTML report and the workbook.
@@ -265,7 +268,13 @@ export function createHubHandler(ctx) {
       }
       case '/settings': {
         await saveSettings(ctx, fields);
-        redirect(response, '/settings', 'Settings saved to config.json');
+        redirect(response, '/settings?tab=pipeline', 'Settings saved to config.json');
+        return;
+      }
+      case '/settings/assignments': {
+        await saveAssignments(ctx, fields);
+        ctx.connections?.reset?.();
+        redirect(response, '/settings?tab=models#assignments-form', 'Task assignments saved to config.json');
         return;
       }
       case '/settings/plans': {
@@ -349,17 +358,17 @@ export function createHubHandler(ctx) {
           const saved = await ctx.letterStore.saveSample(sample, { track: fields.sampleTrack || null });
           notes.push(`${saved.replaced ? 'replaced' : 'added'} sample ${saved.originalName}${saved.track ? ` as ${trackLabelOf(saved.track)}` : ''} (${saved.characters} characters)`);
         }
-        redirect(response, '/settings#cover-letters', notes.join('; '));
+        redirect(response, '/settings?tab=letters#cover-letters', notes.join('; '));
         return;
       }
       case '/settings/cover-letter/remove-playbook': {
         await ctx.letterStore.removePlaybook();
-        redirect(response, '/settings#cover-letters', 'Playbook removed');
+        redirect(response, '/settings?tab=letters#cover-letters', 'Playbook removed');
         return;
       }
       case '/settings/cover-letter/remove-sample': {
         await ctx.letterStore.removeSample(fields.file);
-        redirect(response, '/settings#cover-letters', 'Sample removed');
+        redirect(response, '/settings?tab=letters#cover-letters', 'Sample removed');
         return;
       }
       case '/settings/cover-letter/sample-track': {

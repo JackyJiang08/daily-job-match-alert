@@ -1,0 +1,29 @@
+{
+  "note": "Recorded 2026-10-07 by requesting each Zapply link with redirects disabled (curl -D -). The status codes, the two-hop pattern (301 adding a trailing slash, then 302 to the employer), and the URL shapes are verbatim; employer names, tenants, and job slugs are replaced with Example placeholders.",
+  "chains": {
+    "https://zapply.jobs/l/d/workday-examplecorp-examplecorp-jobs-R0240630?s=gh-new-grad-jobs-2027": [
+      { "status": 301, "location": "/l/d/workday-examplecorp-examplecorp-jobs-R0240630/?s=gh-new-grad-jobs-2027" },
+      { "status": 302, "location": "https://examplecorp.wd1.myworkdayjobs.com/examplecorp_jobs/job/McLean-VA/Data-Engineer_R0240630" }
+    ],
+    "https://zapply.jobs/l/d/greenhouse-exampleboard-8873383002?s=gh-new-grad-jobs-2027": [
+      { "status": 301, "location": "/l/d/greenhouse-exampleboard-8873383002/?s=gh-new-grad-jobs-2027" },
+      { "status": 302, "location": "https://boards.greenhouse.io/exampleboard/jobs/8873383002?gh_jid=8873383002" }
+    ],
+    "https://zapply.jobs/l/d/ashby-example-ai-2796d32a-9f7c-4008-a2c5-50dd53b0f2fe?s=gh-new-grad-jobs-2027": [
+      { "status": 301, "location": "/l/d/ashby-example-ai-2796d32a-9f7c-4008-a2c5-50dd53b0f2fe/?s=gh-new-grad-jobs-2027" },
+      { "status": 302, "location": "https://jobs.ashbyhq.com/example-ai/2796d32a-9f7c-4008-a2c5-50dd53b0f2fe/application" }
+    ],
+    "https://zapply.jobs/l/d/oracle-example-bank-210794467?s=gh-new-grad-jobs-2027": [
+      { "status": 301, "location": "/l/d/oracle-example-bank-210794467/?s=gh-new-grad-jobs-2027" },
+      { "status": 302, "location": "https://examplebank.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/210794467" }
+    ],
+    "https://zapply.jobs/l/d/sr-ExampleInc-744000153809000?s=gh-new-grad-jobs-2027": [
+      { "status": 301, "location": "/l/d/sr-ExampleInc-744000153809000/?s=gh-new-grad-jobs-2027" },
+      { "status": 302, "location": "https://jobs.smartrecruiters.com/ExampleInc/744000153809000" }
+    ],
+    "https://zapply.jobs/l/d/lever-example-ai-40a22216-c73b-4ec1-bfc1-dc0e1938eaba?s=gh-internships-2027": [
+      { "status": 301, "location": "/l/d/lever-example-ai-40a22216-c73b-4ec1-bfc1-dc0e1938eaba/?s=gh-internships-2027" },
+      { "status": 302, "location": "https://zapply.jobs/jobs" }
+    ]
+  }
+}
