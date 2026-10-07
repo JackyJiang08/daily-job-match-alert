@@ -6,12 +6,13 @@
 //   supplemental  linked to scoring (the same call path re-asks for omitted ids).
 //   letterDraft   config.models.assignments.letterDraft { engine, model, effort, fallback: [ids] }
 //   letterEditor  config.models.assignments.letterEditor (same shape)
-//   prescreen     reserved: local title and location rules, no model.
+//   prescreen     config.models.assignments.prescreen (same shape); default codex / the registry's lightest
+//                 ChatGPT model / low, no fallback (a failed prescreen falls back to the local order).
 //
 // Letter defaults: draft codex / gpt-5.6-sol / medium, editor codex / gpt-5.6-sol / high, both falling back
 // to the Claude ladder's Opus step. A config that scores with local_only and names no letter assignment
 // keeps the labelled placeholder engine, so demos and tests never call a model.
-import { DEFAULT_CATALOG, DEFAULT_LETTER_FALLBACK_ALIAS, ENGINE_PROVIDER, PROVIDER_ENGINE, canonicalModelId, defaultModelId, findModel, normalizeCatalog } from './catalog.mjs';
+import { DEFAULT_CATALOG, DEFAULT_LETTER_FALLBACK_ALIAS, ENGINE_PROVIDER, PROVIDER_ENGINE, canonicalModelId, defaultModelId, findModel, lightestModelId, normalizeCatalog } from './catalog.mjs';
 import { normalizeEngineId, resolveModel } from './index.mjs';
 import { normalizeQuotaPolicy } from './quota.mjs';
 import { modelKey } from './model-availability.mjs';
@@ -23,6 +24,10 @@ const DEFAULT_LETTER_EFFORTS = { letterDraft: 'medium', letterEditor: 'high' };
 
 export function defaultLetterAssignment(stage, catalog = DEFAULT_CATALOG) {
   return { engine: 'codex', model: defaultModelId('codex', catalog), effort: DEFAULT_LETTER_EFFORTS[stage], fallback: [canonicalModelId(DEFAULT_LETTER_FALLBACK_ALIAS, 'anthropic', catalog)] };
+}
+
+export function defaultPrescreenAssignment(catalog = DEFAULT_CATALOG) {
+  return { engine: 'codex', model: lightestModelId('openai', catalog), effort: 'low', fallback: [] };
 }
 
 function effortFor(engine, model, effort, catalog) {
@@ -44,7 +49,7 @@ function cleanFallback(list, primary, catalog) {
 }
 
 function normalizeLetter(raw, stage, catalog) {
-  const fallbackDefault = defaultLetterAssignment(stage, catalog);
+  const fallbackDefault = stage === 'prescreen' ? defaultPrescreenAssignment(catalog) : defaultLetterAssignment(stage, catalog);
   const engine = normalizeEngineId(raw?.engine);
   if (engine !== 'claude' && engine !== 'codex') return { ...fallbackDefault, source: 'default' };
   const provider = ENGINE_PROVIDER[engine];
@@ -76,7 +81,7 @@ export function stageAssignments(config = {}) {
     supplemental: { ...scoring, linked: 'scoring' },
     letterDraft: letter('letterDraft'),
     letterEditor: letter('letterEditor'),
-    prescreen: { engine: null, model: null, effort: null, fallback: [], reserved: true },
+    prescreen: raw.prescreen ? normalizeLetter(raw.prescreen, 'prescreen', catalog) : localOnly ? { engine: null, model: null, effort: null, fallback: [], source: 'placeholder' } : { ...defaultPrescreenAssignment(catalog), source: 'default' },
   };
 }
 

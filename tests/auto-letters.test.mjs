@@ -187,6 +187,8 @@ test('after a full run the report is on disk and the run lock released before th
     const config = {
       ...demo, outputDirectory: './out', sources: { ...demo.sources, emailFiles: { enabled: true, directory: './intake' }, atsBoards: { enabled: false } },
       semanticMatching: { engine: 'claude', claudeCommand: path.join(projectDirectory, 'scripts', 'chaos', 'fake-claude.sh'), models: { claude: 'fable' }, required: true, batchSize: 6, acceptedMatchLevels: ['high'], timeoutMs: 30_000, quotaPolicy: { fallbackEngine: null } },
+      // The prescreen would default to the signed-in Codex CLI; tests never call a real engine.
+      prescreen: { enabled: false },
     };
     const configPath = path.join(root, 'config.json');
     await fs.writeFile(configPath, JSON.stringify(config, null, 2));

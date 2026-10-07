@@ -6,6 +6,7 @@ import { formatCount, formatDateLabel, formatElapsed, formatLocalDateTime, forma
 import { planLabel } from '../engines/quota.mjs';
 import { USAGE_PURPOSES, describeTotals, formatTokens } from '../engines/usage.mjs';
 import { htmlEscape } from '../utils.mjs';
+import { describePrescreen, funnelText, recallText } from '../prescreen-text.mjs';
 import { LETTER_STYLES, autoLettersSettingsCard, coverLetterSettingsSection } from './letter-views.mjs';
 import { MODEL_SETTINGS_STYLES, assignmentsForm, settingsTabs, subscriptionsAndModels } from './model-settings-views.mjs';
 
@@ -504,6 +505,8 @@ export function statusPage({ status, timeZone }) {
   <article class="card"><h2>Runs</h2><dl class="kv">
     <dt>Last run</dt><dd>${lastRunLine}</dd>
     <dt>Engine</dt><dd>${lastRun.engine ? `${htmlEscape(lastRun.engine)}${lastRun.scoringModel ? ` · ${htmlEscape(lastRun.scoringModel)}` : ''}` : (lastRun.scoringModel ? htmlEscape(lastRun.scoringModel) : '—')}</dd>
+    ${lastRun.funnel ? `<dt>Funnel</dt><dd id="status-funnel">${htmlEscape(funnelText(lastRun.funnel))}${lastRun.stageUsage ? `<br><span class="muted">${htmlEscape(lastRun.stageUsage)}</span>` : ''}</dd>` : ''}
+    ${lastRun.prescreen ? `<dt>Prescreen</dt><dd id="status-prescreen">${htmlEscape(describePrescreen(lastRun.prescreen))}${lastRun.prescreenOverview?.mode === 'shadow' ? `<br><span class="muted">Shadow period: ${Number(lastRun.prescreenOverview.shadowRunsDone)} of ${Number(lastRun.prescreenOverview.shadowRuns)} nights · ${htmlEscape(recallText(lastRun.prescreenOverview.finalMatches, lastRun.prescreenOverview.lost))} · <a href="/settings?tab=pipeline#prescreen">Settings</a></span>` : ''}</dd>` : ''}
     ${lastRun.candidateCount != null ? `<dt>Review budget</dt><dd>${Number(lastRun.candidateCount)} candidates · ${Number(lastRun.reviewedThisRun || 0)} reviewed · ${Number(lastRun.deferredCount || 0)} deferred${Number(lastRun.maxReviewedPerRun) > 0 ? ` · limit ${Number(lastRun.maxReviewedPerRun)} per run` : ' · no limit'}</dd>` : ''}
     <dt>Next run</dt><dd>${nextRunLine}</dd>
     <dt>Lock</dt><dd id="lock-line">${lockLine}</dd>
@@ -602,6 +605,25 @@ function engineBadge(item) {
 
 // Settings in three tabs: Subscriptions & Models (subscription cards, model tables, task assignments),
 // Pipeline (matching, reports, hub), and Cover Letters (contact block, playbook, sample letters).
+// The prescreen: on/off, threshold, and the shadow period. Enforcing needs the owner's confirmation here
+// after the shadow nights; until then the checkbox is disabled and nothing is ever dropped.
+function prescreenSettingsCard(prescreen) {
+  if (!prescreen) return '';
+  const done = Number(prescreen.shadowRunsDone || 0);
+  const mode = prescreen.mode === 'enforced' ? '<span class="badge badge-good" data-badge="prescreen-enforced">Enforced</span>' : prescreen.mode === 'off' ? '<span class="badge badge-muted" data-badge="prescreen-off">Off</span>' : `<span class="badge badge-warn" data-badge="prescreen-shadow">Shadow</span> ${Math.min(done, prescreen.shadowRuns)} of ${Number(prescreen.shadowRuns)} nights`;
+  const recall = prescreen.finalMatches ? `${Math.round(prescreen.recall * 100)}% (${prescreen.lost} of ${prescreen.finalMatches} final matches would have been dropped)` : 'no final matches recorded yet';
+  const enforceNote = prescreen.canEnforce ? 'The shadow period is complete; check the recall above before enforcing.' : `Available after ${Number(prescreen.shadowRuns)} shadow nights (${done} done).`;
+  return `<article class="card" id="prescreen"><h2>Prescreen</h2>
+  <p class="muted">A light model scores every candidate against short resume digests before the final review. The final review's model, rubric, and thresholds do not change.</p>
+  <dl class="kv"><dt>Mode</dt><dd id="prescreen-mode">${mode}</dd><dt>Shadow recall</dt><dd id="prescreen-recall">${htmlEscape(recall)}</dd></dl>
+  <form method="post" action="/settings/prescreen" id="prescreen-form">
+    <div class="field"><label class="check"><input type="checkbox" name="enabled"${prescreen.enabled ? ' checked' : ''}> Run the prescreen</label></div>
+    <label class="field"><span>Prescreen Threshold (0–100)</span><input type="number" name="threshold" class="control-input" min="0" max="100" step="1" value="${Number(prescreen.threshold)}" required></label>
+    <div class="field"><label class="check"><input type="checkbox" name="enforce"${prescreen.enforce ? ' checked' : ''}${prescreen.canEnforce || prescreen.enforce ? '' : ' disabled'}> Enforce: skip postings below the threshold (marked seen, listed in Run Details)</label><span class="muted">${htmlEscape(enforceNote)}</span></div>
+    <button class="btn" type="submit">Save Prescreen</button>
+  </form></article>`;
+}
+
 export function settingsPage({ settings, connections = null, timeZone, coverLetter = null, modelView = null, tab = 'models' }) {
   const active = ['models', 'pipeline', 'letters'].includes(tab) ? tab : 'models';
   const head = `<h1 class="hub-title">Settings</h1>${settingsTabs(active)}`;
@@ -614,7 +636,7 @@ export function settingsPage({ settings, connections = null, timeZone, coverLett
     <fieldset class="group"><legend>Matching</legend>
       <label class="field"><span>Minimum Match Score (0–100)</span><input type="number" name="minimumMatchScore" class="control-input" min="0" max="100" step="1" value="${Number(settings.minimumMatchScore)}" required></label>
       <div class="field"><span>Accepted Match Levels</span>${levels}</div>
-      <label class="field"><span>Max Reviewed Per Run (0 = no limit)</span><input type="number" name="maxReviewedPerRun" class="control-input" min="0" max="5000" step="1" value="${Number(settings.maxReviewedPerRun ?? 120)}" required></label>
+      <label class="field"><span>Max Reviewed Per Run (0 = no limit)</span><input type="number" name="maxReviewedPerRun" class="control-input" min="0" max="5000" step="1" value="${Number(settings.maxReviewedPerRun ?? 60)}" required></label>
     </fieldset>
     <fieldset class="group"><legend>Reports</legend>
       <div class="field"><label class="check"><input type="checkbox" name="xlsxRequired"${settings.xlsxRequired ? ' checked' : ''}> Require XLSX Workbook (fail the run when it cannot be written)</label></div>
@@ -624,7 +646,8 @@ export function settingsPage({ settings, connections = null, timeZone, coverLett
     </fieldset>
     <button class="btn" type="submit">Save</button>
     <p class="form-foot">Changes apply to the next run.</p>
-  </form></article>`;
+  </form></article>
+  ${prescreenSettingsCard(settings.prescreen)}`;
   }
   const refresh = '<form class="inline" method="post" action="/settings/connections/refresh"><button class="btn secondary small" type="submit">Refresh</button></form>';
   const checked = connections?.checkedAt ? `<p class="form-foot">Checked ${htmlEscape(formatLocalDateTime(connections.checkedAt, timeZone))}; refreshed every minute. The hub never signs in for you.</p>` : '<p class="form-foot">The hub never signs in for you.</p>';

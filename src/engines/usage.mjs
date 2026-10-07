@@ -2,14 +2,14 @@
 // (the session total) and `modelUsage` keyed by the model id that actually ran ("claude-fable-5-1",
 // "claude-haiku-4-5-20251001"); the id is recorded verbatim, never folded into an alias. Codex `exec
 // --json` emits `turn.completed` events with `usage` (input_tokens, cached_input_tokens, output_tokens,
-// reasoning_output_tokens). Entries are stored per call, model, and purpose (review, supplemental,
+// reasoning_output_tokens). Entries are stored per call, model, and purpose (prescreen, review, supplemental,
 // editor, letter) in state/usage.json for 35 days; the hub's Quota card and Run Details summarise them.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { localDate } from '../time-format.mjs';
 
 export const USAGE_RETENTION_DAYS = 35;
-export const USAGE_PURPOSES = ['review', 'supplemental', 'editor', 'letter', 'test'];
+export const USAGE_PURPOSES = ['prescreen', 'review', 'supplemental', 'editor', 'letter', 'test'];
 
 const number = value => (Number.isFinite(Number(value)) ? Number(value) : 0);
 

@@ -1,5 +1,6 @@
 config.json
 resumes/*.md
+resumes/*.digest.md
 !resumes/*.example.md
 resumes/*.pdf
 intake/eml/*.eml

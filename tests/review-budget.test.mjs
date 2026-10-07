@@ -81,7 +81,7 @@ test('a limit of 0 means no limit and an absent limit means the default', () => 
   assert.equal(applyReviewBudget(jobs, state, 0, NOW).deferred.length, 0);
   assert.equal(applyReviewBudget(jobs, state, 0, NOW).limit, 0);
   assert.equal(applyReviewBudget(jobs, state, undefined, NOW).limit, DEFAULT_MAX_REVIEWED_PER_RUN);
-  assert.equal(applyReviewBudget(jobs, state, '', NOW).limit, 120);
+  assert.equal(applyReviewBudget(jobs, state, '', NOW).limit, 60);
   assert.equal(applyReviewBudget(jobs, state, 'abc', NOW).limit, 0, 'a non-number is treated as no limit');
   assert.equal(applyReviewBudget(jobs, state, undefined, NOW).deferred.length, 0);
   applyReviewBudget(jobs, state, 3, NOW);

@@ -53,7 +53,7 @@ export function modelSettingsView({ config = {}, settings = {}, connections = nu
   const stages = ['scoring', 'supplemental', 'letterDraft', 'letterEditor', 'prescreen'].map(stage => {
     const assignment = assignments[stage];
     const chain = stageChain(assignment, catalog).map(entry => step(catalog, record, entry, { now, timeZone, plan: planFor(ENGINE_PROVIDER[entry.engine])?.plan }));
-    return { stage, label: STAGE_LABELS[stage], ...assignment, chain, off: stage === 'letterEditor' && settings.editorReview === false };
+    return { stage, label: STAGE_LABELS[stage], ...assignment, chain, off: (stage === 'letterEditor' && settings.editorReview === false) || (stage === 'prescreen' && config.prescreen?.enabled === false) };
   });
   const usedBy = id => stages.filter(row => !row.reserved && !row.linked && !row.off && row.chain.some(item => modelKey(item.model) === modelKey(id)))
     .map(row => ({ stage: row.label, primary: modelKey(row.model) === modelKey(id) }));

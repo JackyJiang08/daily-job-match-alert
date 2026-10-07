@@ -137,7 +137,8 @@ disabled; do not expand them unless a task says so.
   supplemental (linked), letterDraft / letterEditor (config.models.assignments;
   default codex / gpt-5.6-sol / medium and high, fallback claude-opus-5-5; a
   local_only config without letter assignments keeps the placeholder engine),
-  prescreen (reserved). Letters: letterStagePlan drops Codex steps when Codex is
+  prescreen (config.models.assignments.prescreen; default codex / lightestModelId
+  ('openai') / low, no fallback; none for local_only). Letters: letterStagePlan drops Codex steps when Codex is
   not connected (note in Editor notes), withStageChain hands the draft to the next
   step on failure, generate.mjs reviewWithChain does the same for the editor.
   Settings saves via POST /settings/assignments (validateAssignments).
@@ -189,7 +190,7 @@ disabled; do not expand them unless a task says so.
   on the local date); every plan is labelled auto or manual.
 - Settings (src/hub/model-settings.mjs + model-settings-views.mjs): two plan
   cards with model tables, Model assignments (Scoring editable, Supplemental,
-  Cover letter draft/editor, reserved Prescreen) with fallback chains, the
+  Cover letter draft/editor, Prescreen) with fallback chains, the
   Model Ladder as a reorderable list (validateLadder: Claude registry models,
   no repeats, at least one), per-model Test (POST /settings/models/test: fake
   engine via ctx.makeTestEngine in tests; refused while the run lock is held
@@ -252,7 +253,22 @@ disabled; do not expand them unless a task says so.
   reviewedInRun) and "Reviewed (last 90 days)" (meta.reviewedLast90Days,
   from the stored day payloads; no longer history exists, so no all-time
   claim).
-- Review budget: config.semanticMatching.maxReviewedPerRun (default 120,
+- Prescreen (src/prescreen.mjs, src/resume-digest.mjs, src/prescreen-text.mjs):
+  prescreenStage runs between the local evaluation and applyReviewBudget. Resume
+  digests (~1,200 chars, extracted locally, resumes/{id}.digest.md with a sha256
+  header, rebuilt on hash change) + title/company/location/roleType/first 1,500
+  JD chars, 25 per call, schema { id, prescreenScore, bestTrack }, usage purpose
+  'prescreen'. config.prescreen { enabled, threshold 55, shadowRuns 3, enforce }:
+  shadow (default) drops nothing and records recall (final matches the threshold
+  would have lost) in state.prescreen { shadowRunsDone, history } and
+  meta.prescreen; enforced only when the owner sets enforce in Settings (POST
+  /settings/prescreen, refused before the shadow nights are done): below the
+  threshold → markJobSeen 'prescreened_out' (never deferred, folded list in Run
+  Details), the rest ranked by prescreen score inside the freshness buckets
+  (rankByPrescreen). Any failure → local order + warning. meta.funnel feeds Run
+  Details and Status. Tests and chaos set prescreen.enabled false (the default
+  would reach the signed-in Codex); options.prescreenEngine injects a fake.
+- Review budget: config.semanticMatching.maxReviewedPerRun (default 60,
   0 = no limit) caps the local candidates sent to the engine per run. Ranking
   is freshness first (postings inside lookbackHours, then the backlog, then
   undated postings), then local score with a deferral bonus inside a bucket.

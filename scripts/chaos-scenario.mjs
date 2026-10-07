@@ -51,6 +51,8 @@ function baseConfig(directory) {
     requireFullDescription: true,
     minimumDescriptionCharacters: 200,
     semanticMatching: { engine: 'local_only' },
+    // The prescreen defaults to the Codex CLI, which is signed in on this machine; chaos never reaches it.
+    prescreen: { enabled: false },
     reports: { xlsx: { enabled: true, required: false } },
     outputDirectory: path.join(directory, 'output'),
     resumes: {
@@ -506,6 +508,32 @@ scenarios['account-limit'] = async function accountLimit() {
   for (const entry of deferred) assert.ok(!Object.values(state.seen).some(seen => seen.url === entry.url), `${entry.url} was deferred but marked seen`);
   assert.match(await readWarningsFile(config, run) || '', /^\[llm \/ claude\] info: Claude subscription weekly account limit reached/m);
   return `all ${run.summary.meta.candidateCount} candidate(s) deferred, banner shown, report still written`;
+};
+
+// The prescreen engine cannot run (the Codex command exits at once): the run warns, keeps the local order
+// for the review budget, drops nothing, and the final review scores the postings as usual.
+scenarios['prescreen-unavailable'] = async function prescreenUnavailable() {
+  const directory = await prepareDirectory('prescreen-unavailable');
+  await addFixtureEmail(directory, 'demo-new-grad-alert.eml');
+  const config = baseConfig(directory);
+  config.semanticMatching = { engine: 'claude', claudeCommand: path.join(projectDirectory, 'scripts', 'chaos', 'fake-claude.sh'), codexCommand: '/usr/bin/false', models: { claude: 'fable' }, required: true, batchSize: 6, acceptedMatchLevels: ['high'], timeoutMs: 30_000, quotaPolicy: { fallbackEngine: null } };
+  config.prescreen = { enabled: true, threshold: 55, shadowRuns: 0, enforce: true };
+  config.models = { assignments: { prescreen: { engine: 'codex', model: 'gpt-5.6-luna', effort: 'low' } } };
+  const run = await runPipeline(await writeConfig(directory, config));
+  const artifacts = await assertDesktopArtifacts(config, run);
+  assert.equal(run.exitCode, 0, `prescreen-unavailable run exited ${run.exitCode}`);
+  const meta = run.summary.meta;
+  assert.equal(meta.prescreen.status, 'failed', 'the prescreen is reported as failed');
+  assert.ok(meta.candidateCount >= 1, 'the fixture must yield at least one candidate');
+  assert.ok(meta.matchCount >= 1, 'the final review still scored the postings');
+  assert.equal(meta.runCounts.prescreenedOut, 0, 'nothing is prescreened out when the prescreen failed');
+  assert.equal(meta.funnel.passed, meta.candidateCount, 'every candidate passes on to the review budget');
+  assert.ok(artifacts.warnings.some(warning => warning.source === 'prescreen' && /used the local order/.test(warning.message)), `no prescreen fallback warning: ${warningLines(artifacts.warnings).join(' | ')}`);
+  const state = JSON.parse(await fs.readFile(path.join(directory, 'state', 'state.json'), 'utf8'));
+  assert.ok(!Object.values(state.seen || {}).some(entry => entry.lastEnrichment === 'prescreened_out'), 'nothing was marked prescreened_out');
+  assert.equal(state.prescreen?.shadowRunsDone || 0, 0, 'a failed night does not count toward the shadow period');
+  assert.match(artifacts.html, /Prescreen<\/dt><dd>failed/);
+  return `prescreen failed, local order kept, ${meta.matchCount} match(es) from the final review, warning recorded`;
 };
 
 // Three nights over budget with a cap of one review per night: each night's fresh postings must be

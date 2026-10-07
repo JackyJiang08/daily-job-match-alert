@@ -20,10 +20,11 @@ import { availabilityPath, markModelUnavailable, markModelUsed, markWeeklyLimit,
 import { classifyEngineError, humanizeEngineError } from '../engines/engine-errors.mjs';
 import { planLabel } from '../engines/quota.mjs';
 import { planView } from '../engines/plans.mjs';
-import { appendUsage, readUsage, usageEntries, usagePath, usageWindow } from '../engines/usage.mjs';
+import { appendUsage, describeTotals, readUsage, usageEntries, usagePath, usageWindow } from '../engines/usage.mjs';
 import { quotaNoticesPath, readQuotaNotices } from '../engines/quota-notices.mjs';
 import { describeQuota, normalizeQuotaPolicy } from '../engines/quota.mjs';
 import { HubLockedError } from './config-file.mjs';
+import { prescreenOverview } from '../prescreen.mjs';
 import { acquireRunLock, releaseRunLock } from '../lock.mjs';
 
 export const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -510,6 +511,10 @@ export async function buildStatusView(ctx, config) {
     reviewedThisRun: latest?.meta?.reviewedThisRun ?? null,
     deferredCount: latest?.meta?.deferredCount ?? null,
     maxReviewedPerRun: latest?.meta?.maxReviewedPerRun ?? null,
+    funnel: latest?.meta?.funnel || null,
+    stageUsage: stageUsageLine(latest?.meta?.usage),
+    prescreen: latest?.meta?.prescreen || null,
+    prescreenOverview: prescreenOverview(config, state),
     runsToday: latest?.meta?.runsToday ?? null,
     complete: latest?.complete === true,
     lastSuccessfulRun: state.lastSuccessfulRun || null,
@@ -660,6 +665,13 @@ function choicesFromCatalog(catalog) {
   return choices;
 }
 
+// "prescreen 2 calls · 40k in · 3k out; review 3 calls · …" for the Status funnel.
+function stageUsageLine(usage) {
+  const byPurpose = usage?.byPurpose || {};
+  const parts = ['prescreen', 'review', 'supplemental'].filter(purpose => byPurpose[purpose]?.calls).map(purpose => `${purpose} ${describeTotals(byPurpose[purpose])}`);
+  return parts.length ? parts.join('; ') : null;
+}
+
 export async function readSettings(ctx) {
   const { config } = await readConfigFile(ctx.configPath, ctx.io);
   const semantic = config.semanticMatching && typeof config.semanticMatching === 'object' ? config.semanticMatching : {};
@@ -669,7 +681,7 @@ export async function readSettings(ctx) {
   for (const id of ENGINE_IDS) models[id] = resolveModel({ ...semantic, catalog }, id) || ENGINE_DEFAULT_MODELS[id];
   return {
     minimumMatchScore: config.minimumMatchScore ?? 60,
-    maxReviewedPerRun: semantic.maxReviewedPerRun == null ? 120 : Number(semantic.maxReviewedPerRun),
+    maxReviewedPerRun: semantic.maxReviewedPerRun == null ? 60 : Number(semantic.maxReviewedPerRun),
     modelLadder: normalizeQuotaPolicy({ ...(semantic.quotaPolicy || {}), catalog }).modelLadder.join(', '),
     reasoningEffort: semantic.reasoningEffort ? String(semantic.reasoningEffort) : '',
     catalog,
@@ -683,6 +695,7 @@ export async function readSettings(ctx) {
     xlsxRequired: config.reports?.xlsx?.required === true,
     editorReview: config.coverLetter?.editorReview !== false,
     autoLetters: autoLetterSettings(config),
+    prescreen: prescreenOverview(config, await readJson(ctx.io, path.join(ctx.root, 'state', 'state.json'), {}) || {}),
     hubPort: Number(config.hub?.port || 4747),
   };
 }
@@ -927,9 +940,10 @@ export function validateAssignments(form, { catalog = DEFAULT_CATALOG } = {}) {
       values.scoring = { engine: scoringEngine, model: entry?.id || null, effort: scoringEngine === 'codex' ? effort : null, ladder: scoringEngine === 'claude' && entry ? [entry.id, ...ladderSteps] : null, codexFallback: scoringEngine === 'claude' ? codexStep : undefined };
     }
   }
-  for (const stage of LETTER_STAGES) {
+  // The prescreen has no fallback chain: a failed prescreen keeps the local order for the night.
+  for (const stage of [...LETTER_STAGES, 'prescreen']) {
     if (form[`${stage}_engine`] == null || form[`${stage}_placeholder`] != null) continue;
-    const result = validateLetterAssignment(stage, { engine: form[`${stage}_engine`], model: form[`${stage}_model`], effort: form[`${stage}_effort`], fallback: form[`fallback_${stage}`] }, { catalog });
+    const result = validateLetterAssignment(stage, { engine: form[`${stage}_engine`], model: form[`${stage}_model`], effort: form[`${stage}_effort`], fallback: stage === 'prescreen' ? [] : form[`fallback_${stage}`] }, { catalog });
     errors.push(...result.errors);
     values[stage] = result.value;
   }
@@ -964,7 +978,7 @@ export async function saveAssignments(ctx, form) {
         }
       }
     }
-    for (const stage of LETTER_STAGES) {
+    for (const stage of [...LETTER_STAGES, 'prescreen']) {
       if (!values[stage]) continue;
       config.models = config.models && typeof config.models === 'object' ? config.models : {};
       config.models.assignments = config.models.assignments && typeof config.models.assignments === 'object' ? config.models.assignments : {};
@@ -995,6 +1009,24 @@ export async function autoLettersView(ctx) {
     pending: running ? (status.planned || []).map(item => item.jobId).filter(id => !finished.has(id)) : [],
     done: (status.generated || []).length + (status.failed || []).length, generatedList: status.generated || [], failedList: status.failed || [],
   };
+}
+
+// Pipeline tab: the prescreen switch, threshold, and the owner's confirmation that ends the shadow period.
+// Enforcing is refused until the shadow nights are done.
+export async function savePrescreen(ctx, form) {
+  const on = value => value === 'on' || value === 'true' || value === true;
+  const threshold = Number(form.threshold);
+  if (!Number.isInteger(threshold) || threshold < 0 || threshold > 100) throw new HubInputError('Prescreen threshold must be a whole number from 0 to 100');
+  const enabled = on(form.enabled);
+  const enforce = on(form.enforce);
+  const { config: current } = await readConfigFile(ctx.configPath, ctx.io);
+  const overview = prescreenOverview(current, await readJson(ctx.io, path.join(ctx.root, 'state', 'state.json'), {}) || {});
+  if (enforce && !overview.canEnforce) throw new HubInputError(`The prescreen can be enforced after ${overview.shadowRuns} shadow nights; ${overview.shadowRunsDone} done so far`);
+  await updateConfigFile(ctx.configPath, config => {
+    config.prescreen = { ...(config.prescreen && typeof config.prescreen === 'object' ? config.prescreen : {}), enabled, threshold, enforce };
+    return true;
+  }, { fs: ctx.io, pidAlive: ctx.pidAlive });
+  return { enabled, threshold, enforce };
 }
 
 export async function saveAutoLetters(ctx, form) {

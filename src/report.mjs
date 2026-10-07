@@ -12,6 +12,7 @@ import { formatLocalDateTime, formatLocalDay, formatLocalShort } from './time-fo
 import { normalizeLocation, sha256 } from './utils.mjs';
 import { companyIsUncertain, displayCompanyName, postedAtPrecision, unknownPostedLabel } from './posting-fields.mjs';
 import { describeQuota } from './engines/quota.mjs';
+import { describePrescreen, funnelText } from './prescreen-text.mjs';
 
 export const REPORT_TITLE = 'Daily Job Match Alert';
 export const WARNINGS_FILE_NAME = 'warnings.txt';
@@ -217,6 +218,20 @@ export function runDetailsView(jobs, meta, tracks) {
       detail: `${Number(prefilter.titleExcludedCount ?? dropped.length)} skipped by title · ${Number(prefilter.locationExcludedCount || 0)} skipped by a non-US location (before enrichment)`,
       items: (prefilter.bySource || []).map(entry => `${entry.source}: title ${Number(entry.title || 0)} · location ${Number(entry.location || 0)}`),
       folded: dropped.length ? { id: 'prefilter-titles', summary: `Show ${dropped.length} postings skipped by title`, items: dropped.map(item => `${item.company || 'Unknown company'} · ${item.title || 'Untitled'} · ${item.source || 'unknown source'} · ${item.rule}`) } : null,
+    });
+  }
+  if (meta.funnel) {
+    const byPurpose = meta.usage?.byPurpose || {};
+    rows.push({ term: 'Funnel', detail: funnelText(meta.funnel), items: ['prescreen', 'review', 'supplemental'].filter(purpose => byPurpose[purpose]?.calls).map(purpose => `${purpose}: ${describeTotals(byPurpose[purpose])}`) });
+  }
+  if (meta.prescreen) {
+    const prescreen = meta.prescreen;
+    const dropped = Array.isArray(prescreen.dropped) ? prescreen.dropped : [];
+    rows.push({
+      term: 'Prescreen',
+      detail: describePrescreen(prescreen),
+      items: (prescreen.lostTitles || []).map(item => `would have lost a final match: ${item.company || 'Unknown company'} · ${item.title || 'Untitled'} (prescreen ${item.score})`),
+      folded: dropped.length ? { id: 'prescreened-out', summary: `Show ${dropped.length} postings prescreened out`, items: dropped.map(item => `${item.title || 'Untitled'} · ${item.company || 'Unknown company'} · prescreen ${item.score}`) } : null,
     });
   }
   if (meta.usage?.total?.calls) {

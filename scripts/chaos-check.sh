@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs ten unattended-failure scenarios against isolated temporary configs and output
+# Runs twelve unattended-failure scenarios against isolated temporary configs and output
 # directories, then prints a summary. Never touches the real config.json, state/, or Desktop.
 #
 #   npm run chaos            run all scenarios and clean up
@@ -21,7 +21,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-scenarios=(baseline offline llm-down bad-input xlsx-recovery ats-500 review-cap fable-weekly-limit fable-unnamed-limit account-limit backlog-priority)
+scenarios=(baseline offline llm-down bad-input xlsx-recovery ats-500 review-cap fable-weekly-limit fable-unnamed-limit account-limit backlog-priority prescreen-unavailable)
 pass_count=0
 fail_count=0
 results=""

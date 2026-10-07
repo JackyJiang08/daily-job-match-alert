@@ -17,7 +17,7 @@
     "batchSize": 6,
     "maximumDescriptionCharacters": 7000,
     "acceptedMatchLevels": ["high"],
-    "maxReviewedPerRun": 120,
+    "maxReviewedPerRun": 60,
     "quotaPolicy": {
       "fiveHourLimit": { "retryIntervalMs": 600000, "maxWaitMs": 5400000 },
       "modelLadder": ["claude-fable-5-1", "claude-opus-5-5"],
@@ -25,6 +25,13 @@
       "patternsNote": "Optional regex overrides per class (fiveHourLimit, modelWeeklyLimit, accountWeeklyLimit, notQuota, genericLimit, authExpired, modelUnavailable, unknownModel); see src/engines/quota.mjs for the recorded defaults."
     },
     "timeoutMs": 600000
+  },
+  "prescreen": {
+    "enabled": true,
+    "threshold": 55,
+    "shadowRuns": 3,
+    "enforce": false,
+    "note": "Two-step scoring: the Prescreen stage (Settings > Task assignments; default codex / the lightest ChatGPT model / low) scores every candidate from the first 1,500 JD characters and the resume digests. The first shadowRuns nights drop nothing and report recall; enforce is set from Settings once they are done."
   },
   "reports": {
     "xlsx": {

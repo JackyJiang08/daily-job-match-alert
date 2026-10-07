@@ -13,7 +13,9 @@ test('older configs migrate: scoring keeps its engine, model, and ladder; letter
   assert.deepEqual({ ...owner.supplemental }, { ...owner.scoring, linked: 'scoring' });
   assert.deepEqual(owner.letterDraft, { engine: 'codex', model: 'gpt-5.6-sol', effort: 'medium', fallback: ['claude-opus-5-5'], source: 'default' });
   assert.deepEqual(owner.letterEditor, { engine: 'codex', model: 'gpt-5.6-sol', effort: 'high', fallback: ['claude-opus-5-5'], source: 'default' });
-  assert.equal(owner.prescreen.reserved, true);
+  assert.deepEqual(owner.prescreen, { engine: 'codex', model: 'gpt-5.6-luna', effort: 'low', fallback: [], source: 'default' }, 'the prescreen defaults to the lightest ChatGPT model at low effort');
+  assert.equal(stageAssignments({ semanticMatching: { engine: 'local_only' } }).prescreen.engine, null, 'local-only scoring has no prescreen');
+  assert.deepEqual(stageAssignments({ semanticMatching: { engine: 'claude' }, models: { assignments: { prescreen: { engine: 'claude', model: 'sonnet' } } } }).prescreen, { engine: 'claude', model: 'claude-sonnet-5-5', effort: null, fallback: [], source: 'config' }, 'Settings can move it to Claude Sonnet');
   assert.deepEqual(stageChain(owner.letterDraft), [{ engine: 'codex', model: 'gpt-5.6-sol', effort: 'medium' }, { engine: 'claude', model: 'claude-opus-5-5', effort: null }]);
   // The Codex fallback can be switched off explicitly.
   assert.deepEqual(stageAssignments({ semanticMatching: { engine: 'claude', quotaPolicy: { fallbackEngine: null } } }).scoring.fallback, ['claude-opus-5-5']);
@@ -37,7 +39,7 @@ test('the run breakdown counts scoring by engine and model, deferrals by cause, 
     { semanticReviewed: false, scoringEngine: 'local_fallback', matchLevel: 'unreviewed' },
   ];
   const counts = runCounts({ evaluated, budget: { deferred: [{}, {}] }, quotaDeferred: [{}, {}, {}], prefiltered: { titleExcluded: [{}, {}, {}, {}], locationExcluded: [{}] }, expiredBacklogCount: 6 });
-  assert.deepEqual(counts, { scoredByModel: [{ label: 'claude · claude-opus-5-5', count: 2 }, { label: 'codex · gpt-5.6-sol', count: 1 }], localScores: 1, deferred: { budget: 2, quota: 3 }, prefilteredOut: { title: 4, location: 1 }, expired: 6 });
+  assert.deepEqual(counts, { scoredByModel: [{ label: 'claude · claude-opus-5-5', count: 2 }, { label: 'codex · gpt-5.6-sol', count: 1 }], localScores: 1, deferred: { budget: 2, quota: 3 }, prescreenedOut: 0, prefilteredOut: { title: 4, location: 1 }, expired: 6 });
   const rows = runDetailsView([], { date: '2026-10-07', resumeTracks: [], warnings: [], runCounts: counts, prefilter: { titleExcluded: [], titleExcludedCount: 4, locationExcludedCount: 1, bySource: [] } }, []).rows;
   const byTerm = Object.fromEntries(rows.map(row => [row.term, row]));
   assert.equal(byTerm['Scored by model (this run)'].detail, '3 scored · 1 kept local scores (unreviewed)');

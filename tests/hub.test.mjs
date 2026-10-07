@@ -431,7 +431,7 @@ test('Settings groups the fields, writes only its keys, preserves the rest and t
     assert.match(page.text, /<legend>Hub<\/legend>[\s\S]*?<span>Port/);
     assert.match(page.text, /<p class="form-foot">Changes apply to the next run\.<\/p>/);
     assert.match(page.text, /name="minimumMatchScore"[^>]*value="70"/);
-    assert.match(page.text, /<span>Max Reviewed Per Run \(0 = no limit\)<\/span><input type="number" name="maxReviewedPerRun" class="control-input" min="0" max="5000" step="1" value="120" required>/, 'the default budget is shown when config has none');
+    assert.match(page.text, /<span>Max Reviewed Per Run \(0 = no limit\)<\/span><input type="number" name="maxReviewedPerRun" class="control-input" min="0" max="5000" step="1" value="60" required>/, 'the default budget is shown when config has none');
     const saved = await hub.form('/settings', { minimumMatchScore: '75', acceptedMatchLevels: 'high', model: 'claude-fable-5', xlsxRequired: 'on', hubPort: '5000' });
     assert.equal(saved.status, 303);
     assert.match(saved.headers.location, /notice=/);
@@ -1064,7 +1064,7 @@ test('Subscriptions & Models shows each plan with source and detection time, 7-d
     assert.match(row('claude-haiku-4-5'), /<td><span class="mono">claude-haiku-4-5-20251001<\/span><\/td><td><span class="badge badge-good" data-model-state="available">Available<\/span><\/td>/);
     assert.match(row('gpt-5.6-sol'), /<td><span class="mono">gpt-5\.6-sol<\/span><br><form class="inline test-form" method="post" action="\/settings\/models\/test" data-test-model="gpt-5\.6-sol">[\s\S]*?<button class="link-button" type="submit"[^>]*>Test<\/button><\/form><\/td>/, 'Test is an inline secondary action in the model cell');
     const openaiModels = /<article class="card model-card" data-provider="openai">([\s\S]*?)<\/article>/.exec(markup)[1];
-    assert.match(openaiModels, /<details class="all-models"><summary>Show all models \(4 more\)<\/summary>[\s\S]*?data-model="gpt-5\.6-terra"[\s\S]*?data-model="gpt-6-astra"[\s\S]*?<\/details>/);
+    assert.match(openaiModels, /<details class="all-models"><summary>Show all models \(3 more\)<\/summary>[\s\S]*?data-model="gpt-5\.6-terra"[\s\S]*?data-model="gpt-6-astra"[\s\S]*?<\/details>/);
     assert.equal((/<\/table><\/div><details/.exec(openaiModels) ? openaiModels.split('<details')[0] : '').includes('gpt-5.6-terra'), false, 'unused models are only in the folded list');
     assert.match(markup, /<form method="post" action="\/settings\/models\/recheck" class="inline"><button class="link-button" type="submit"[^>]*>Re-check Models<\/button><\/form>/);
     // Task assignments: inline engine, model, and effort; chains as tags; blocked steps greyed with the reason.
@@ -1078,7 +1078,8 @@ test('Subscriptions & Models shows each plan with source and detection time, 7-d
     assert.match(stage('letterDraft'), /<li class="tag off" data-id="claude-opus-5-5">/, 'falling back to the Claude ladder (opus)');
     assert.match(stage('letterEditor'), /<option value="high" selected>high<\/option>/, 'the editor default: high');
     assert.match(stage('letterEditor'), /<input type="checkbox" name="editorReview" checked> Run the editor pass/);
-    assert.match(stage('prescreen'), /Local title and location rules; no model[\s\S]*?Reserved for a future model step/);
+    assert.match(row('gpt-5.6-luna'), /<span class="stage primary" title="Prescreen">Prescreen<\/span>/, 'the lightest ChatGPT model is the prescreen default');
+    assert.match(stage('prescreen'), /<option value="codex" selected>codex<\/option>[\s\S]*?<option value="gpt-5\.6-luna"[^>]* selected>[\s\S]*?<option value="low" selected>low<\/option>[\s\S]*?None: on failure the local order is kept/, 'the prescreen default: codex, the lightest model, low, no chain');
     assert.match(page, /@media \(max-width:1000px\)\{\.pair-grid\{grid-template-columns:1fr\}\}/, 'the pairs stack on narrow screens');
   } finally {
     await hub.close();

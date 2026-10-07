@@ -27,6 +27,7 @@ import { isZapplyLink, resolveZapplyLink } from './collectors/zapply.mjs';
 import { appendUsage, summarizeUsage, usageEntries, usagePath } from './engines/usage.mjs';
 import { appendQuotaNotices, quotaNoticesPath } from './engines/quota-notices.mjs';
 import { acquireRunLock, releaseRunLock } from './lock.mjs';
+import { finishPrescreen, prescreenStage } from './prescreen.mjs';
 import { canonicalUrl, dateWithOffset, htmlEscape, mapLimit, normalizeLocation, resolveFrom, sha256 } from './utils.mjs';
 import { createWarning, errorSummary } from './warnings.mjs';
 import { formatLocalDateTime } from './time-format.mjs';
@@ -39,7 +40,7 @@ import { availabilityPath, markModelUnavailable, markModelUsed, markWeeklyLimit,
 const execFileAsync = promisify(execFile);
 const REPORT_PAYLOAD_PREFIX = 'report-payload-';
 const REPORT_PAYLOAD_PATTERN = /^report-payload-(\d{4}-\d{2}-\d{2})\.json$/;
-export const DEFAULT_MAX_REVIEWED_PER_RUN = 120;
+export const DEFAULT_MAX_REVIEWED_PER_RUN = 60;
 // A deferred posting may wait this long beyond the lookback window before it leaves the backlog unscored.
 export const DEFAULT_DEFERRAL_GRACE_HOURS = 24;
 // Nights in a row the in-window candidates must exceed the budget before the report says so.
@@ -311,8 +312,8 @@ export function usageParseEmptyWarning(count) {
 }
 
 // What happened to this run's postings, for the Run Summary and Run Details: scored by which engine and
-// model (local scores counted apart), deferred (budget and quota), prefiltered out, and expired.
-export function runCounts({ evaluated = [], budget = {}, quotaDeferred = [], prefiltered = {}, expiredBacklogCount = 0 }) {
+// model (local scores counted apart), deferred (budget and quota), prefiltered and prescreened out, and expired.
+export function runCounts({ evaluated = [], budget = {}, quotaDeferred = [], prefiltered = {}, expiredBacklogCount = 0, prescreenedOut = 0 }) {
   const scored = new Map();
   let local = 0;
   for (const job of evaluated) {
@@ -325,6 +326,7 @@ export function runCounts({ evaluated = [], budget = {}, quotaDeferred = [], pre
     scoredByModel: [...scored.entries()].map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
     localScores: local,
     deferred: { budget: (budget.deferred || []).length, quota: quotaDeferred.length },
+    prescreenedOut: Number(prescreenedOut || 0),
     prefilteredOut: { title: (prefiltered.titleExcluded || []).length, location: (prefiltered.locationExcluded || []).length },
     expired: Number(expiredBacklogCount || 0),
   };
@@ -613,17 +615,19 @@ export function applyBacklogExpiry(jobs, state, now = new Date(), maxAgeHours = 
 // then local best score with a bonus per deferral, and a twice-deferred posting ahead of its bucket-mates.
 // An undated posting that misses the budget for the third night running is not deferred again: it is
 // marked seen and reported as abandoned. Non-candidates (no role relevance or a hard blocker) never reach
-// the engine and pass through as-is.
-export function applyReviewBudget(jobs, state, configuredLimit, now = new Date(), { lookbackHours = 24, timeZone = null, undatedNights = UNDATED_DEFERRAL_NIGHTS } = {}) {
+// the engine and pass through as-is. With `rankByPrescreen` (an enforced prescreen), the prescreen score
+// takes the local score's place inside each freshness bucket.
+export function applyReviewBudget(jobs, state, configuredLimit, now = new Date(), { lookbackHours = 24, timeZone = null, undatedNights = UNDATED_DEFERRAL_NIGHTS, rankByPrescreen = false } = {}) {
   const limit = configuredLimit == null || configuredLimit === '' ? DEFAULT_MAX_REVIEWED_PER_RUN : Math.max(0, Math.floor(Number(configuredLimit)) || 0);
   const candidates = jobs.filter(isSemanticCandidate);
   const others = jobs.filter(job => !isSemanticCandidate(job));
+  const rankScore = job => (rankByPrescreen && Number.isFinite(job.prescreenScore) ? job.prescreenScore : Number(job.bestScore) || 0);
   const ranked = candidates
     .map(job => ({ job, deferredCount: deferredStatus(state, job).deferredCount, bucket: freshnessBucket(job, now, lookbackHours, timeZone) }))
     .sort((a, b) => (a.bucket - b.bucket)
       || (Number(b.deferredCount >= 2) - Number(a.deferredCount >= 2))
       || (Number(isEarlyCareerPriority(b.job)) - Number(isEarlyCareerPriority(a.job)))
-      || ((Number(b.job.bestScore) || 0) + 10 * b.deferredCount) - ((Number(a.job.bestScore) || 0) + 10 * a.deferredCount));
+      || (rankScore(b.job) + 10 * b.deferredCount) - (rankScore(a.job) + 10 * a.deferredCount));
   const kept = limit > 0 ? ranked.slice(0, limit) : ranked;
   const missed = limit > 0 ? ranked.slice(limit) : [];
   const abandoned = missed.filter(entry => entry.bucket === 2 && entry.deferredCount >= Number(undatedNights));
@@ -815,9 +819,15 @@ async function runPipeline(config, clock, options = {}) {
     const early = detectEarlyCareer(evaluated, prefs);
     return early.level ? { ...evaluated, earlyCareer: early.level, earlyCareerSignal: early.signal } : evaluated;
   });
-  // Review budget: tonight's postings first (freshness bucket), then local score; the rest are deferred
-  // (not marked seen) and come back next run while they are still inside the grace period.
-  const budget = applyReviewBudget(locallyEvaluated, state, config.semanticMatching?.maxReviewedPerRun, now, { lookbackHours: config.lookbackHours, timeZone: config.timeZone });
+  // Prescreen: a light model scores every candidate against the resume digests. In shadow mode nothing is
+  // dropped; once enforced, postings under the threshold are marked seen (prescreened_out) here and never
+  // reach the budget, so they are never deferred. A failed prescreen keeps the local order.
+  const prescreen = await prescreenStage(locallyEvaluated, { config, state, resumes, tracks: resumeTracks, date, now, warnings, makeEngine: options.prescreenEngine || null });
+  if (prescreen.meta.status === 'ok' && prescreen.dropped.length) warnings.push(createWarning('llm', 'prescreen', `prescreened out ${prescreen.dropped.length} postings below ${prescreen.meta.threshold}; they are marked seen and listed in Run Details`, 'info'));
+  // Review budget: tonight's postings first (freshness bucket), then local score (prescreen score when the
+  // prescreen is enforced); the rest are deferred (not marked seen) and come back next run while they are
+  // still inside the grace period.
+  const budget = applyReviewBudget(prescreen.jobs, state, config.semanticMatching?.maxReviewedPerRun, now, { lookbackHours: config.lookbackHours, timeZone: config.timeZone, rankByPrescreen: prescreen.meta.status === 'ok' && prescreen.meta.mode === 'enforced' });
   if (budget.abandoned.length) warnings.push(createWarning('llm', 'review budget', `stopped carrying ${budget.abandoned.length} undated postings after ${UNDATED_DEFERRAL_NIGHTS} nights without a posting date (not scored)`, 'info'));
   debug.reviewBudget = { kept: budget.ranking.filter(item => item.kept).map(item => ({ url: item.url, bucket: item.bucket, bestScore: item.bestScore, deferredCount: item.deferredCount })), deferred: budget.ranking.filter(item => !item.kept && !item.abandoned).map(item => ({ url: item.url, bucket: item.bucket, bestScore: item.bestScore, deferredCount: item.deferredCount })), abandoned: budget.abandoned.map(job => job.url), expired: [...staleBacklog.urls, ...backlog.expired.map(job => job.url)] };
   if (budget.deferred.length) {
@@ -836,7 +846,7 @@ async function runPipeline(config, clock, options = {}) {
   if (droppedMarks.length) warnings.push(createWarning('llm', 'model availability', `retrying ${droppedMarks.map(item => `${item.model} (${item.reason})`).join(', ')}`, 'info'));
   // Weekly limits still running are skipped from the first call; expired ones are dropped first.
   let availabilityChanged = droppedMarks.length > 0 || pruneLimits(availability, { now }).length > 0;
-  const runUsage = [];
+  const runUsage = [...prescreen.usage];
   let usageParseEmpty = 0;
   let planChange = null;
   try {
@@ -947,6 +957,9 @@ async function runPipeline(config, clock, options = {}) {
   // Run Summary: this run's reviewed postings, and the total over the 90 days of stored payloads. The
   // counter an earlier version kept in state was seeded from the same payloads, so it is dropped.
   const reviewedLast90Days = await reviewedInLastDays(config, date, reviewed.length, now);
+  // Prescreen recall: of this run's final matches, how many the threshold would have dropped.
+  const runMatches = evaluated.filter(job => isEligible(job, config));
+  const prescreenMeta = finishPrescreen(prescreen.meta, state, { matches: runMatches, date, now });
   delete state.reviewTotals;
   const meta = {
     generatedAt: now.toISOString(), date, applicationDate: date, runDate, timeZone, lookbackHours: config.lookbackHours,
@@ -956,11 +969,18 @@ async function runPipeline(config, clock, options = {}) {
     candidateCount: budget.candidateCount, candidateInWindowCount: budget.inWindowCount, candidateUndatedCount: budget.undatedCount, reviewedThisRun: budget.reviewedCount, deferredCount: budget.deferred.length, expiredBacklogCount, undatedAbandonedCount: budget.abandoned.length, maxReviewedPerRun: budget.limit,
     datePrecision: datePrecisionSummary(reviewed),
     reviewedInRun: evaluated.length, reviewedLast90Days,
-    runCounts: runCounts({ evaluated, budget, quotaDeferred, prefiltered, expiredBacklogCount }),
+    runCounts: runCounts({ evaluated, budget, quotaDeferred, prefiltered, expiredBacklogCount, prescreenedOut: prescreen.dropped.length }),
     quotaNote: quotaNote(quota, quotaDeferred.length),
     prefilter: { titleExcluded: prefiltered.titleExcluded, locationExcludedCount: prefiltered.locationExcluded.length, titleExcludedCount: prefiltered.titleExcluded.length, bySource: prefiltered.bySource },
     earlyCareerCount: locallyEvaluated.filter(job => job.earlyCareer).length,
     usage: summarizeUsage(runUsage),
+    prescreen: prescreenMeta,
+    funnel: {
+      candidates: prescreen.meta.candidates ?? budget.candidateCount,
+      prescreened: prescreen.meta.status === 'ok' ? prescreen.meta.scored : 0,
+      passed: prescreen.meta.status === 'ok' ? (prescreen.meta.mode === 'enforced' ? prescreen.meta.passed : prescreen.meta.candidates) : budget.candidateCount,
+      reviewed: budget.reviewedCount, matched: runMatches.length,
+    },
     budgetAlert, budgetHistory: (state.budgetHistory || []).slice(-BUDGET_HISTORY_NIGHTS),
     droppedAfterPreciseTimestamps: freshness.dropped.length,
     quota,

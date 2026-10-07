@@ -8,7 +8,7 @@ import { HubLockedError } from './config-file.mjs';
 import { parseMultipart } from './multipart.mjs';
 import {
   HubInputError, annotateConnections, assertDate, buildStatusView, claudeAuthView, clearModelAvailability, configuredCliCommands, desktopCopyPath, desktopWorkbookPath, listReportSummaries, loadTracksView, modelAvailabilityView, readErrorReport,
-  autoLettersView, readReportPayload, readSettings, resumeAtsBoard, saveAssignments, saveAutoLetters, saveCliPath, saveSettings, selectResumeVersion, setTrackEnabled, sidebarSummary, uploadResumePdf, ModelTestBusyError, savePlan, testModel,
+  autoLettersView, readReportPayload, readSettings, resumeAtsBoard, saveAssignments, saveAutoLetters, savePrescreen, saveCliPath, saveSettings, selectResumeVersion, setTrackEnabled, sidebarSummary, uploadResumePdf, ModelTestBusyError, savePlan, testModel,
 } from './services.mjs';
 import { localDate } from '../time-format.mjs';
 import { LETTER_SCRIPT, ONECLICK_SCRIPT, SAMPLE_TRACK_SCRIPT, letterPanel, lettersPage, trackLabelOf } from './letter-views.mjs';
@@ -283,6 +283,11 @@ export function createHubHandler(ctx) {
       case '/settings/letters-auto': {
         const saved = await saveAutoLetters(ctx, fields);
         redirect(response, '/settings?tab=letters#auto-letters', saved.enabled ? `Automatic cover letters on: up to ${saved.maxPerRun} per run` : 'Automatic cover letters off');
+        return;
+      }
+      case '/settings/prescreen': {
+        const saved = await savePrescreen(ctx, fields);
+        redirect(response, '/settings?tab=pipeline#prescreen', !saved.enabled ? 'Prescreen off' : saved.enforce ? `Prescreen enforced: postings below ${saved.threshold} are skipped` : `Prescreen in shadow mode (threshold ${saved.threshold}); nothing is dropped`);
         return;
       }
       case '/settings/assignments': {

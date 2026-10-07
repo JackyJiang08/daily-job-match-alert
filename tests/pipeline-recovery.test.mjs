@@ -23,6 +23,8 @@ async function prepareProject() {
   const config = {
     lookbackHours: 24, timeZone: 'America/Chicago', minimumMatchScore: 20, requireFullDescription: true, minimumDescriptionCharacters: 200,
     semanticMatching: { engine: 'claude_subscription', claudeCommand: fakeClaude, required: true, batchSize: 6, acceptedMatchLevels: ['high'], timeoutMs: 30_000 },
+    // The prescreen would default to the signed-in Codex CLI; tests never call a real engine.
+    prescreen: { enabled: false },
     reports: { xlsx: { enabled: true, required: false } },
     outputDirectory: './output',
     resumes: { tracks: [{ id: 'data', label: 'Data', profile: './data-resume.md' }, { id: 'ai', label: 'AI', profile: './ai-resume.md' }] },

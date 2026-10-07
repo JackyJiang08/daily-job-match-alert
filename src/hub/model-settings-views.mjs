@@ -108,21 +108,21 @@ function engineSelect(row) {
 
 // The Task assignments form: one row per stage with inline engine, model, and effort, and the fallback
 // chain as editable tags. Scoring's chain is the model ladder (plus Codex on a weekly account limit);
-// Supplemental follows Scoring; Prescreen is reserved.
+// Supplemental follows Scoring; Prescreen has no chain (a failed prescreen keeps the local order).
 export function assignmentsForm(view, settings) {
   const { catalog } = view;
   const rows = view.stages.map(row => {
     const editable = ['scoring', 'letterDraft', 'letterEditor'].includes(row.stage);
-    if (row.reserved) return `<tr data-stage="prescreen"><th scope="row">${htmlEscape(row.label)}</th><td colspan="3"><span class="muted">Local title and location rules; no model</span></td><td><span class="muted">Reserved for a future model step</span></td></tr>`;
     if (row.linked) return `<tr data-stage="supplemental"><th scope="row">${htmlEscape(row.label)}</th><td colspan="3"><span class="muted">Follows Scoring (${htmlEscape(row.engine)} · <span class="mono">${htmlEscape(row.model || '—')}</span>)</span></td><td>${chainTags(row, catalog, false)}</td></tr>`;
     const editorSwitch = row.stage === 'letterEditor' ? `<label class="check small"><input type="checkbox" name="editorReview"${settings.editorReview ? ' checked' : ''}> Run the editor pass</label>` : '';
     if (row.engine === null) {
-      return `<tr data-stage="${row.stage}"><th scope="row">${htmlEscape(row.label)}${editorSwitch ? `<br>${editorSwitch}` : ''}</th><td colspan="3"><span class="muted">Placeholder engine (Scoring is local only)</span> ${engineSelect({ ...row, engine: 'local_only' })}<input type="hidden" name="${row.stage}_placeholder" value="1"></td><td><span class="muted">—</span></td></tr>`;
+      return `<tr data-stage="${row.stage}"><th scope="row">${htmlEscape(row.label)}${editorSwitch ? `<br>${editorSwitch}` : ''}</th><td colspan="3"><span class="muted">${row.stage === 'prescreen' ? 'No prescreen (Scoring is local only)' : 'Placeholder engine (Scoring is local only)'}</span> ${engineSelect({ ...row, engine: 'local_only' })}<input type="hidden" name="${row.stage}_placeholder" value="1"></td><td><span class="muted">—</span></td></tr>`;
     }
     const model = `<select name="${row.stage}_model" class="control-input model-select" aria-label="${htmlEscape(row.label)} model">${modelOptions(catalog, row.model)}</select>`;
     const effort = `<select name="${row.stage}_effort" class="control-input effort-select" aria-label="${htmlEscape(row.label)} effort"${row.engine === 'codex' ? '' : ' disabled'}>${effortOptions(catalog, row.model, row.effort)}</select>`;
     const editor = editorSwitch;
-    return `<tr data-stage="${row.stage}"${row.off ? ' class="stage-off"' : ''}><th scope="row">${htmlEscape(row.label)}${editor ? `<br>${editor}` : ''}</th><td>${engineSelect(row)}</td><td>${model}</td><td>${effort}</td><td>${editable ? chainTags(row, catalog, true) : ''}</td></tr>`;
+    const chain = row.stage === 'prescreen' ? `<span class="muted">None: on failure the local order is kept${row.off ? ' · prescreen off (<a href="/settings?tab=pipeline#prescreen">Pipeline</a>)' : ''}</span>` : editable ? chainTags(row, catalog, true) : '';
+    return `<tr data-stage="${row.stage}"${row.off ? ' class="stage-off"' : ''}><th scope="row">${htmlEscape(row.label)}${editor ? `<br>${editor}` : ''}</th><td>${engineSelect(row)}</td><td>${model}</td><td>${effort}</td><td>${chain}</td></tr>`;
   }).join('');
   return `<form method="post" action="/settings/assignments" id="assignments-form" class="card assignments-card">
     <h2>Task assignments</h2>
