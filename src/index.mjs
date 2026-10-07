@@ -24,6 +24,7 @@ import { clearDeferred, deferredStatus, expireDeferred, isJobSeen, markDeferred,
 import { ageBasisInstant, datePrecisionSummary, freshnessInstant, isUndated } from './posting-fields.mjs';
 import { detectEarlyCareer, isEarlyCareerPriority, prefilterJobs } from './prefilter.mjs';
 import { appendUsage, summarizeUsage, usageEntries, usagePath } from './engines/usage.mjs';
+import { appendQuotaNotices, quotaNoticesPath } from './engines/quota-notices.mjs';
 import { acquireRunLock, releaseRunLock } from './lock.mjs';
 import { canonicalUrl, dateWithOffset, htmlEscape, mapLimit, normalizeLocation, resolveFrom, sha256 } from './utils.mjs';
 import { createWarning, errorSummary } from './warnings.mjs';
@@ -770,7 +771,8 @@ async function runPipeline(config, clock, options = {}) {
   const observedPlan = state.observedPlans?.claude?.type || null;
   const droppedMarks = pruneAvailability(availability, { now, plan: observedPlan });
   if (droppedMarks.length) warnings.push(createWarning('llm', 'model availability', `retrying ${droppedMarks.map(item => `${item.model} (${item.reason})`).join(', ')}`, 'info'));
-  let availabilityChanged = droppedMarks.length > 0;
+  // Weekly limits still running are skipped from the first call; expired ones are dropped first.
+  let availabilityChanged = droppedMarks.length > 0 || pruneLimits(availability, { now }).length > 0;
   const runUsage = [];
   let usageParseEmpty = 0;
   let planChange = null;
@@ -784,6 +786,7 @@ async function runPipeline(config, clock, options = {}) {
       // A redacted copy of the last successful envelope (usage and modelUsage only) for fixture recording.
       envelopeLog: path.join(config.root, 'state', 'logs', 'claude-envelope-last.json'),
       unavailableModels: unavailableModelNames(availability),
+      limitedModels: Object.values(availability.limits || {}),
       markUnavailable: (model, info) => { markModelUnavailable(availability, model, info); availabilityChanged = true; },
       recordUsage: (purpose, usage, info = {}) => {
         if (usage?.parseEmpty) usageParseEmpty += 1;
@@ -812,12 +815,17 @@ async function runPipeline(config, clock, options = {}) {
   for (const job of quotaDeferred) markDeferred(state, job, now.toISOString());
   evaluated = evaluated.filter(job => !job.quotaDeferred);
   // Weekly limits the run hit are shown on Settings until their reset time.
-  for (const event of quotaEvents.filter(item => item.kind === 'modelWeeklyLimit' && item.model)) {
+  // Only limits this run actually met are recorded (a skip of an already recorded limit is not new).
+  for (const event of quotaEvents.filter(item => item.kind === 'modelWeeklyLimit' && item.model && item.action !== 'skipped')) {
     markWeeklyLimit(availability, event.model, { at: event.at, resetsAt: event.resetsAt, notice: event.message || null });
     availabilityChanged = true;
   }
   if (pruneLimits(availability, { now }).length) availabilityChanged = true;
   if (availabilityChanged) await writeAvailability(availabilityFile, availability);
+  // The CLI's own words for each limit event go to state/quota-notices.json for later calibration.
+  const notices = quotaEvents.filter(event => event.message && event.action !== 'skipped' && event.kind !== 'auth_expired')
+    .map(event => ({ at: event.at, source: 'nightly', kind: event.kind, model: event.model || null, engine: event.engine || null, action: event.action, text: event.message }));
+  await appendQuotaNotices(quotaNoticesPath(config.root), notices, { now }).catch(error => warnings.push(createWarning('llm', 'quota notices', `could not record the limit notices: ${errorSummary(error)}`, 'info')));
   // A successful call whose usage could not be read is reported, never counted as zero.
   if (usageParseEmpty) warnings.push(usageParseEmptyWarning(usageParseEmpty));
   try {

@@ -3,7 +3,10 @@
 # claude.ai subscription login, and answers `--print` calls according to FAKE_CLAUDE_MODE:
 #   fable-weekly-limit  refuse the Fable model (alias fable or the full id claude-fable-5-1) with the recorded
 #                       Fable weekly notice; score with any other model
+#   fable-unnamed-limit refuse the Fable model with the notice the 2026-10-06 nightly run really got, which
+#                       names no model ("You're out of usage credits. Switch to another model, ...")
 #   account-limit       refuse every scoring call with the recorded weekly account notice
+# FAKE_CLAUDE_CALLS, when set, is a file that receives one line per --print call naming the --model given.
 # Scoring answers are built from the job ids found in the prompt, so every posting gets a result.
 case "$1" in
   --version) echo "2.1.269 (Claude Code)"; exit 0 ;;
@@ -16,10 +19,16 @@ for arg in "$@"; do
   prev="$arg"
 done
 prompt=$(cat)
+if [ -n "${FAKE_CLAUDE_CALLS:-}" ]; then echo "$model" >> "$FAKE_CLAUDE_CALLS"; fi
 case "${FAKE_CLAUDE_MODE:-}" in
   account-limit)
     echo "you have reached your weekly usage limit. Lower-priority mode is offered again after your weekly limit resets.|$(( $(date +%s) + 3*86400 ))" >&2
     exit 1 ;;
+  fable-unnamed-limit)
+    if [ "$model" = "fable" ] || [ "$model" = "claude-fable-5-1" ]; then
+      echo "You're out of usage credits. Switch to another model, or manage usage credits at https://claude.ai/settings/usage?from=cc_cli_limit_message, to continue." >&2
+      exit 1
+    fi ;;
   fable-weekly-limit)
     if [ "$model" = "fable" ] || [ "$model" = "claude-fable-5-1" ]; then
       echo "You've reached your Fable limit. Your Fable limit resets at 9am (America/Chicago)." >&2

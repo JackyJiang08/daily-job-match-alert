@@ -51,7 +51,8 @@
     },
     {
       "notice": "you have reached your weekly usage limit",
-      "kind": "accountWeeklyLimit"
+      "kind": "ambiguousWeeklyLimit",
+      "note": "names no model: settled by trying the next ladder model"
     },
     {
       "notice": "Unexpected token in JSON at position 0",

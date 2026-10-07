@@ -443,6 +443,46 @@ scenarios['fable-weekly-limit'] = async function fableWeeklyLimit() {
 
 // Every scoring call is refused with the recorded weekly account notice: the report is still written with
 // a banner, and every candidate waits in the deferral queue instead of being lost or marked unreviewed.
+// The 2026-10-06 failure: Fable hit its own weekly limit, but the CLI's notice named no model, so the run
+// treated it as the account limit and deferred every posting. Now the next ladder model is asked first:
+// Opus answers, the run is scored by Opus with nothing deferred, the limit is recorded, and the next night
+// starts on Opus without asking Fable again.
+scenarios['fable-unnamed-limit'] = async function fableUnnamedLimit() {
+  const directory = await prepareDirectory('fable-unnamed-limit');
+  await addFixtureEmail(directory, 'demo-new-grad-alert.eml');
+  const config = baseConfig(directory);
+  config.semanticMatching = { engine: 'claude', claudeCommand: path.join(projectDirectory, 'scripts', 'chaos', 'fake-claude.sh'), models: { claude: 'fable' }, required: true, batchSize: 6, acceptedMatchLevels: ['high'], timeoutMs: 30_000, quotaPolicy: { modelLadder: ['fable', 'opus'] } };
+  const configPath = await writeConfig(directory, config);
+  const callsFile = path.join(directory, 'claude-calls.txt');
+  const run = await runPipeline(configPath, NOW, { FAKE_CLAUDE_MODE: 'fable-unnamed-limit', FAKE_CLAUDE_CALLS: callsFile });
+  const artifacts = await assertDesktopArtifacts(config, run);
+  assert.equal(run.exitCode, 0, `fable-unnamed-limit run exited ${run.exitCode}`);
+  assert.ok(run.summary.meta.matchCount >= 1, 'the postings were scored after the switch');
+  assert.equal(run.summary.meta.scoringModel, 'claude-opus-5-5', 'opus scored the run');
+  assert.equal(run.summary.meta.quota.deferredByQuota, 0, 'no posting was deferred');
+  assert.equal(run.summary.meta.deferredCount, 0);
+  assert.deepEqual(run.summary.meta.quota.events.map(event => [event.kind, event.model, event.action, event.settledFrom]), [['modelWeeklyLimit', 'claude-fable-5-1', 'downgraded', 'ambiguousWeeklyLimit']]);
+  assert.doesNotMatch(artifacts.html, /data-banner="quota"/, 'no account-limit banner');
+  assert.ok(!artifacts.warnings.some(warning => /MODEL MISMATCH|deferred to the next run/.test(warning.message)), warningLines(artifacts.warnings).join(' | '));
+  const record = JSON.parse(await fs.readFile(path.join(directory, 'state', 'model-availability.json'), 'utf8'));
+  const limit = record.limits['claude-fable-5-1'];
+  assert.equal(new Date(limit.resetsAt).getTime() - new Date(limit.at).getTime(), 7 * 24 * 60 * 60 * 1000, 'held for 7 days without a reset time');
+  const notices = JSON.parse(await fs.readFile(path.join(directory, 'state', 'quota-notices.json'), 'utf8')).notices;
+  assert.equal(notices[0].text, "You're out of usage credits. Switch to another model, or manage usage credits at https://claude.ai/settings/usage, to continue.");
+  assert.deepEqual((await fs.readFile(callsFile, 'utf8')).trim().split('\n'), ['fable', 'opus'], 'one refused call to fable, then opus');
+
+  // The next run (an hour later, with a new posting): fable's limit has not reset, so it is not asked at all.
+  await fs.writeFile(callsFile, '');
+  await addFixtureEmail(directory, 'sample.eml');
+  const second = await runPipeline(configPath, '2026-08-27T13:00:00Z', { FAKE_CLAUDE_MODE: 'fable-unnamed-limit', FAKE_CLAUDE_CALLS: callsFile });
+  assert.equal(second.exitCode, 0, `the next run exited ${second.exitCode}`);
+  const calls = (await fs.readFile(callsFile, 'utf8')).trim().split('\n').filter(Boolean);
+  assert.ok(calls.length >= 1 && calls.every(model => model === 'opus'), `the next run asked: ${calls.join(', ')} (candidates ${second.summary.meta.candidateCount}, collected ${second.summary.meta.collectedCount}, new ${second.summary.meta.newThisRun})`);
+  assert.deepEqual(second.summary.meta.quota.events.map(event => [event.kind, event.action]), [['modelWeeklyLimit', 'skipped']]);
+  assert.equal(second.summary.meta.quota.deferredByQuota, 0);
+  return `unnamed Fable notice: opus answered, run scored by opus (${run.summary.meta.matchCount} match(es)), nothing deferred; the next run skipped fable (${calls.length} opus call(s))`;
+};
+
 scenarios['account-limit'] = async function accountLimit() {
   const directory = await prepareDirectory('account-limit');
   await addFixtureEmail(directory, 'demo-new-grad-alert.eml');
@@ -454,7 +494,8 @@ scenarios['account-limit'] = async function accountLimit() {
   assert.equal(run.summary.meta.matchCount, 0, 'nothing was scored, so nothing is a match');
   assert.ok(run.summary.meta.candidateCount >= 1, 'the fixture must yield at least one candidate');
   assert.equal(run.summary.meta.quota.deferredByQuota, run.summary.meta.candidateCount, 'every candidate is deferred');
-  assert.deepEqual(run.summary.meta.quota.events.map(event => [event.kind, event.action]), [['accountWeeklyLimit', 'deferred']]);
+  // The notice names no model, so opus is asked first; its refusal settles it as the account limit.
+  assert.deepEqual(run.summary.meta.quota.events.map(event => [event.kind, event.action]), [['ambiguousWeeklyLimit', 'probed'], ['accountWeeklyLimit', 'deferred']]);
   assert.match(artifacts.html, /<div class="banner" data-banner="quota">Claude subscription weekly account limit reached; expected to reset [^<]*; \d+ posting\(s\) were deferred to the next run and are not lost<\/div>/);
   assert.doesNotMatch(artifacts.html, /data-badge="unreviewed"/, 'a refused posting is deferred, never unreviewed');
   const state = JSON.parse(await fs.readFile(path.join(directory, 'state', 'state.json'), 'utf8'));

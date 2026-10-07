@@ -15,6 +15,11 @@ import { compareVersions, isCredentialEnvironmentKey, normalizeModelName, run, s
 
 // The response schema is generated per run: one required integer score per enabled track id, so the
 // model has to score every resume, and the recommended track must be one of those ids.
+// Refusals that end a weekly window; a second one while probing after an ambiguous notice means the
+// account limit. An ambiguous limit settled as a model limit without a reset time is held for 7 days.
+const WEEKLY_KINDS = new Set(['ambiguousWeeklyLimit', 'modelWeeklyLimit', 'accountWeeklyLimit']);
+const WEEKLY_HOLD_MS = 7 * 24 * 60 * 60 * 1000;
+
 export function buildResultSchema(resumes) {
   const tracks = trackSummaries(resumes);
   if (!tracks.length) throw new Error('buildResultSchema needs at least one resume track');
@@ -212,16 +217,26 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
   const strategicModels = new Set();
   let downgradeNote = null;
   const deferredIds = new Set();
-  // Models the plan refused earlier (state/model-availability.json) are skipped before the first call.
+  // Models the plan refused earlier, and models whose weekly limit has not reset yet (both from
+  // state/model-availability.json), are skipped before the first call instead of being hit every night.
+  const limited = new Map([...(options.limitedModels || [])].map(item => [modelKey(item.model), item]));
   const unavailable = new Set([...(options.unavailableModels || [])].map(item => modelKey(item)));
+  const skip = () => new Set([...unavailable, ...limited.keys()]);
   let plan = options.plan || null;
-  const startModel = engineId === 'claude' && !options.engineInstance ? firstAvailableModel(preferredModel, policy.modelLadder, unavailable) : preferredModel;
+  const startModel = engineId === 'claude' && !options.engineInstance ? firstAvailableModel(preferredModel, policy.modelLadder, skip()) : preferredModel;
   let engine = options.engineInstance || makeEngine(engineId, startModel);
   let engineName = engineId;
   if (startModel !== normalizeModelName(preferredModel)) {
+    const preferred = normalizeModelName(preferredModel);
     strategicModels.add(startModel);
-    downgradeNote = `${normalizeModelName(preferredModel)} unavailable on ${planLabel(plan)}`;
-    quotaEvents.push({ kind: 'model_unavailable', model: normalizeModelName(preferredModel), plan, resetsAt: null, at: clock().toISOString(), action: 'skipped', detail: `switched to ${startModel} (marked unavailable earlier)`, engine: engineName, message: `${normalizeModelName(preferredModel)} is marked unavailable on ${planLabel(plan)}` });
+    const limit = limited.get(modelKey(preferred));
+    if (limit && !unavailable.has(modelKey(preferred))) {
+      downgradeNote = `${preferred} weekly limit`;
+      quotaEvents.push({ kind: 'modelWeeklyLimit', model: preferred, resetsAt: limit.resetsAt || null, at: clock().toISOString(), action: 'skipped', detail: `switched to ${startModel} (weekly limit recorded earlier)`, engine: engineName, message: limit.notice || `${preferred} weekly limit recorded earlier` });
+    } else {
+      downgradeNote = `${preferred} unavailable on ${planLabel(plan)}`;
+      quotaEvents.push({ kind: 'model_unavailable', model: preferred, plan, resetsAt: null, at: clock().toISOString(), action: 'skipped', detail: `switched to ${startModel} (marked unavailable earlier)`, engine: engineName, message: `${preferred} is marked unavailable on ${planLabel(plan)}` });
+    }
   }
 
   const tracks = resumeTrackList(resumes);
@@ -303,7 +318,8 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
       return { response: null, error: lastError };
     };
     const recordEvent = (quota, action, detail = null) => {
-      const event = { kind: quota.kind, model: quota.model || engine.model, resetsAt: quota.resetsAt, at: clock().toISOString(), action, detail, engine: engineName, message: quota.message };
+      // An account-wide limit belongs to no model.
+      const event = { kind: quota.kind, model: quota.kind === 'accountWeeklyLimit' ? null : quota.model || engine.model, resetsAt: quota.resetsAt, at: clock().toISOString(), action, detail, engine: engineName, message: quota.message };
       quotaEvents.push(event);
       return event;
     };
@@ -330,6 +346,8 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
     };
 
     const missingJobs = [];
+    // Set while the next ladder model retries a batch after an ambiguous weekly notice.
+    let probing = null;
     const batches = chunks(candidates, Number(options.batchSize || 6));
     let batchNumber = 0;
     for (let index = 0; index < batches.length; index += 1) {
@@ -348,7 +366,7 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
         const refused = engine.model;
         unavailable.add(modelKey(refused));
         if (typeof options.markUnavailable === 'function') await options.markUnavailable(refused, { plan, notice: engineNotice(error), at: clock().toISOString(), kind: classifyEngineError(error, { now: clock(), policy })?.reason || 'not_on_plan' });
-        const next = engineName === 'claude' ? nextAvailableModel(policy.modelLadder, refused, unavailable) : null;
+        const next = engineName === 'claude' ? nextAvailableModel(policy.modelLadder, refused, skip()) : null;
         if (next) {
           quotaEvents.push({ kind: 'model_unavailable', model: refused, plan, resetsAt: null, at: clock().toISOString(), action: 'downgraded', detail: `switched to ${next}`, engine: engineName, message: engineNotice(error) });
           downgradeNote = `${refused} unavailable on ${planLabel(plan)}`;
@@ -377,8 +395,29 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
           break;
         }
       }
+      // While the next model is being tried after an ambiguous notice, a second weekly refusal means the
+      // account itself is out: the first notice is recorded as probed, and the account path takes over.
+      if (probing && quota && WEEKLY_KINDS.has(quota.kind)) {
+        quotaEvents.push({ kind: 'ambiguousWeeklyLimit', model: probing.from, resetsAt: probing.quota.resetsAt || null, at: probing.at, action: 'probed', detail: `${engine.model} was refused too: weekly account limit`, engine: engineName, message: probing.quota.message });
+        quota = { ...quota, kind: 'accountWeeklyLimit', model: null, settledFrom: 'ambiguousWeeklyLimit' };
+        probing = null;
+      }
+      if (quota?.kind === 'ambiguousWeeklyLimit') {
+        const next = engineName === 'claude' ? nextAvailableModel(policy.modelLadder, engine.model, skip()) : null;
+        if (next) {
+          // Retry this very batch on the next ladder model; its answer settles which limit this was.
+          probing = { from: engine.model, quota, at: clock().toISOString() };
+          engine = makeEngine(engineName, next);
+          strategicModels.add(next);
+          index -= 1;
+          batchNumber -= 1;
+          continue;
+        }
+        // No other model to ask: the notice cannot be told apart from the account limit.
+        quota = { ...quota, kind: 'accountWeeklyLimit', settledFrom: 'ambiguousWeeklyLimit' };
+      }
       if (quota?.kind === 'modelWeeklyLimit') {
-        const next = nextAvailableModel(policy.modelLadder, engine.model, unavailable);
+        const next = nextAvailableModel(policy.modelLadder, engine.model, skip());
         if (next) {
           const reason = `${(quota.model || engine.model)} weekly limit`;
           recordEvent(quota, 'downgraded', `switched to ${next}`);
@@ -416,6 +455,16 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
         for (const job of batch) fallbackIds.add(job.semanticId);
         addWarning(options, `Batch ${batchNumber} failed twice; ${batch.length} jobs used local fallback: ${errorSummary(error)}`);
         continue;
+      }
+      if (probing) {
+        // The next model answered: the ambiguous notice was the first model's own weekly limit. It is kept
+        // until the reset time the CLI gave, or for seven days, and the rest of the run stays on this model.
+        const resetsAt = probing.quota.resetsAt || new Date(new Date(probing.at).getTime() + WEEKLY_HOLD_MS).toISOString();
+        quotaEvents.push({ kind: 'modelWeeklyLimit', model: probing.from, resetsAt, at: probing.at, action: 'downgraded', detail: `switched to ${engine.model} (the notice named no model; ${engine.model} answered)`, engine: engineName, message: probing.quota.message, settledFrom: 'ambiguousWeeklyLimit' });
+        downgradeNote = `${probing.from} weekly limit`;
+        limited.set(modelKey(probing.from), { model: probing.from, resetsAt });
+        addWarning(options, `${probing.from} weekly limit (the CLI notice named no model, and ${engine.model} answered); continuing with ${engine.model}`, 'info');
+        probing = null;
       }
       const validation = validateBatchResults(batch, response.results);
       allResults.push(...stampModel(validation.accepted, scoringModelFor(response)));

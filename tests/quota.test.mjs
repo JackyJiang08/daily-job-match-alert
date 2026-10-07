@@ -48,7 +48,7 @@ test('refusal texts classify into the three limit classes from the recorded fixt
   assert.equal(parseResetTime('resets in 45 minutes', now), '2026-09-19T10:45:00.000Z');
   assert.equal(parseResetTime('nothing here', now), null);
   const custom = normalizeQuotaPolicy({ patterns: { accountWeeklyLimit: ['tenant budget exhausted'] }, modelLadder: 'fable, opus, sonnet', fallbackEngine: 'codex', fiveHourLimit: { retryIntervalMs: 1000, maxWaitMs: 5000 } });
-  assert.equal(classifyQuotaError(new Error('tenant budget exhausted'), { policy: custom }).kind, 'accountWeeklyLimit');
+  assert.equal(classifyQuotaError(new Error('tenant budget exhausted'), { policy: custom }).kind, 'ambiguousWeeklyLimit', 'a custom weekly pattern that names no model is ambiguous too');
   assert.deepEqual(custom.modelLadder, ['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5'], 'aliases in an older config map to registry ids');
   assert.equal(custom.fallbackEngine, 'codex');
   assert.deepEqual(custom.fiveHourLimit, { retryIntervalMs: 1000, maxWaitMs: 5000 });
@@ -155,21 +155,26 @@ test('an account weekly limit defers every remaining posting, or hands the run t
   } });
   assert.deepEqual(deferredRun.evaluated.map(job => Boolean(job.quotaDeferred)), [false, false, true, true], 'the batch scored before the refusal is kept; the rest wait');
   assert.equal(deferredRun.evaluated[0].semanticReviewed, true);
-  assert.deepEqual([deferredRun.quotaEvents[0].kind, deferredRun.quotaEvents[0].action, deferredRun.quotaEvents[0].detail], ['accountWeeklyLimit', 'deferred', 'no fallback engine configured']);
+  // The notice names no model, so the next ladder model is tried first; its refusal settles it as the account limit.
+  assert.deepEqual(deferredRun.quotaEvents.map(event => [event.kind, event.action, event.detail]), [
+    ['ambiguousWeeklyLimit', 'probed', 'claude-opus-5-5 was refused too: weekly account limit'],
+    ['accountWeeklyLimit', 'deferred', 'no fallback engine configured'],
+  ]);
 
   const offButNotConnected = await runWithScript({ jobs, policy: { fallbackEngine: 'codex' }, fallbackConnected: async () => false, script: () => { throw new Error('claude exited 1: you have reached your weekly usage limit'); } });
   assert.equal(offButNotConnected.evaluated.every(job => job.quotaDeferred), true);
-  assert.equal(offButNotConnected.quotaEvents[0].detail, 'codex fallback is not connected');
+  assert.deepEqual(offButNotConnected.quotaEvents.map(event => event.action), ['probed', 'deferred']);
+  assert.equal(offButNotConnected.quotaEvents[1].detail, 'codex fallback is not connected');
 
   const spy = [];
   const codexRun = await runWithScript({ jobs, makeEngineSpy: spy, policy: { fallbackEngine: 'codex' }, fallbackConnected: async engine => engine === 'codex', script: ({ batch, id }) => {
     if (id === 'claude') throw new Error('claude exited 1: you have reached your weekly usage limit');
     return okResponse(batch, 'gpt-5.6-sol');
   } });
-  assert.deepEqual(spy.map(item => [item.id, item.model]), [['claude', 'claude-fable-5-1'], ['codex', 'gpt-5.6-sol']]);
+  assert.deepEqual(spy.map(item => [item.id, item.model]), [['claude', 'claude-fable-5-1'], ['claude', 'claude-opus-5-5'], ['codex', 'gpt-5.6-sol']], 'opus is asked before the account is declared out');
   assert.equal(codexRun.evaluated.every(job => job.semanticReviewed && job.scoringEngine === 'codex' && job.scoringModel === 'gpt-5.6-sol'), true);
   assert.equal(codexRun.evaluated.some(job => job.quotaDeferred), false);
-  assert.deepEqual([codexRun.quotaEvents[0].action, codexRun.quotaEvents[0].detail], ['fallback-engine', 'switched to codex']);
+  assert.deepEqual(codexRun.quotaEvents.map(event => [event.kind, event.action, event.detail]), [['ambiguousWeeklyLimit', 'probed', 'claude-opus-5-5 was refused too: weekly account limit'], ['accountWeeklyLimit', 'fallback-engine', 'switched to codex']]);
   assert.equal(codexRun.warnings.some(warning => /MODEL MISMATCH/.test(warning.message)), false);
   assert.match(codexRun.warnings.find(warning => /continuing with the codex engine/.test(warning.message)).message, /weekly account limit reached; continuing with the codex engine/);
 });

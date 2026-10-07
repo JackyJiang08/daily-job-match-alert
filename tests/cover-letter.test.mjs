@@ -1055,3 +1055,52 @@ test('cover-letter calls record their usage as letter and editor entries under t
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test('a cover letter follows the same weekly rule: an unnamed notice is settled by the next model, recorded, and skipped next time', async () => {
+  const root = await prepareProject();
+  const calls = [];
+  const refused = new Set(['claude-fable-5-1']);
+  const notice = "claude exited 1: You're out of usage credits. Switch to another model, or manage usage credits at https://claude.ai/settings/usage?from=cc_cli_limit_message, to continue.";
+  const engineFor = ({ engine = 'claude', model = 'claude-fable-5-1' } = {}) => ({
+    id: engine, label: 'Claude subscription', model,
+    async generateText(prompt) {
+      calls.push(model);
+      if (refused.has(model)) throw new Error(notice);
+      if (prompt.startsWith('EDITOR REVIEW')) return { output: { issues: [], revised_paragraphs: [] }, scoringModel: model };
+      return { output: { paragraphs: fiveParagraphs(100) }, scoringModel: model };
+    },
+  });
+  const hub = await startHub(root, { letterEngine: engineFor() });
+  hub.ctx.makeLetterEngine = engineFor;
+  const jobId = sha256('https://example.com/jobs/1').slice(0, 16);
+  try {
+    await hub.upload('/settings/cover-letter', PROFILE, [{ field: 'playbook', name: 'playbook.md', data: Buffer.from(`# Playbook\n${'Real evidence line. '.repeat(10)}`) }]);
+    const first = await hub.form('/letters/generate', { date: '2026-09-15', job: jobId, track: 'data', company: 'Acme' });
+    assert.equal(first.status, 200, first.text);
+    assert.equal(JSON.parse(first.text).downgradeNote, 'Generated with claude-opus-5-5: claude-fable-5-1 weekly limit');
+    assert.deepEqual(calls, ['claude-fable-5-1', 'claude-opus-5-5', 'claude-opus-5-5']);
+    const record = JSON.parse(await fs.readFile(path.join(root, 'state', 'model-availability.json'), 'utf8'));
+    assert.equal(record.limits['claude-fable-5-1'].resetsAt, '2026-09-22T15:00:00.000Z', 'no reset time in the notice: 7 days');
+    const notices = JSON.parse(await fs.readFile(path.join(root, 'state', 'quota-notices.json'), 'utf8')).notices;
+    assert.deepEqual(notices.map(item => [item.source, item.kind, item.action]), [['cover-letter', 'ambiguousWeeklyLimit', 'refused'], ['cover-letter', 'modelWeeklyLimit', 'settled']]);
+    assert.equal(notices.some(item => item.text.includes('?from=') || item.text.includes('exited 1')), false);
+
+    // The next letter skips fable while its limit runs.
+    calls.length = 0;
+    const second = await hub.form('/letters/generate', { date: '2026-09-15', job: jobId, track: 'data', company: 'Acme' });
+    assert.equal(JSON.parse(second.text).downgradeNote, 'Generated with claude-opus-5-5: claude-fable-5-1 weekly limit');
+    assert.deepEqual(calls, ['claude-opus-5-5', 'claude-opus-5-5'], 'fable is not asked again');
+
+    // Both models refused: the account limit, as a plain 429 sentence.
+    refused.add('claude-opus-5-5');
+    await fs.writeFile(path.join(root, 'state', 'model-availability.json'), JSON.stringify({ version: 2, models: {}, limits: {}, seen: {} }));
+    const out = await hub.form('/letters/generate', { date: '2026-09-15', job: jobId, track: 'data', company: 'Acme' });
+    assert.equal(out.status, 429);
+    assert.equal(JSON.parse(out.text).quota.kind, 'accountWeeklyLimit');
+    const status = (await hub.request('GET', '/status')).text;
+    assert.match(status, /<dt>CLI notices<\/dt><dd id="quota-notices"><ul class="plain-list notice-list"><li data-notice-kind="ambiguousWeeklyLimit">[\s\S]*?cover-letter · ambiguousWeeklyLimit · claude-opus-5-5 · refused<\/span><br><q>You&#39;re out of usage credits\. Switch to another model, or manage usage credits at https:\/\/claude\.ai\/settings\/usage, to continue\.<\/q><\/li>/, 'newest first, in the CLI\'s own (sanitized) words');
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

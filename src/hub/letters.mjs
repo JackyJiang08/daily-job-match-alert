@@ -13,6 +13,7 @@ import { HubInputError, currentPlans, markModelUnavailableInHub, modelAvailabili
 import { firstAvailableModel, markModelUsed, markWeeklyLimit, nextAvailableModel } from '../engines/model-availability.mjs';
 import { planLabel } from '../engines/quota.mjs';
 import { appendUsage, usageEntries, usagePath } from '../engines/usage.mjs';
+import { appendQuotaNotices, quotaNoticesPath } from '../engines/quota-notices.mjs';
 import { displayCompanyName } from '../posting-fields.mjs';
 import { QuotaError, classifyQuotaError, describeQuota, nextLadderModel, normalizeQuotaPolicy } from '../engines/quota.mjs';
 import { AuthExpiredError, EngineError, classifyEngineError, engineNotice, humanizeEngineError } from '../engines/engine-errors.mjs';
@@ -86,15 +87,27 @@ function buildLetterEngine(ctx, config, { engine: engineOverride = null, model: 
 
 // Runs one generation attempt; on a model weekly limit it steps down the model ladder once and notes
 // it, on any other quota refusal it throws a QuotaError the routes turn into a plain-language reply.
+const WEEKLY_QUOTA_KINDS = new Set(['ambiguousWeeklyLimit', 'modelWeeklyLimit', 'accountWeeklyLimit']);
+
+async function recordQuotaNotice(ctx, entry) {
+  await appendQuotaNotices(quotaNoticesPath(ctx.root), [{ at: ctx.now().toISOString(), source: 'cover-letter', ...entry }], { now: ctx.now(), io: ctx.io })
+    .catch(error => console.error(`[cover-letter] could not record the quota notice: ${error?.message || error}`));
+}
+
 async function withQuotaPolicy(ctx, config, engineChoice, attempt) {
   const policy = normalizeQuotaPolicy(config.semanticMatching?.quotaPolicy);
   const plans = await currentPlans(ctx, config);
   const availability = await modelAvailabilityView(ctx, plans.claude).catch(() => ({ unavailable: [] }));
   const configured = letterEngineFor(ctx, config, engineChoice);
-  // A model the plan refused earlier is skipped before the first call; the note names the step taken.
-  const startModel = configured.id === 'claude' ? firstAvailableModel(configured.model, policy.modelLadder, availability.unavailable) : configured.model;
+  // A model the plan refused earlier, or whose weekly limit has not reset, is skipped before the first
+  // call; the note names the step taken.
+  const limited = availability.limited || [];
+  const skipped = [...availability.unavailable, ...limited];
+  const startModel = configured.id === 'claude' ? firstAvailableModel(configured.model, policy.modelLadder, skipped) : configured.model;
   const first = startModel === configured.model ? configured : letterEngineFor(ctx, config, { ...engineChoice, engine: configured.id, model: startModel });
-  const startNote = startModel === configured.model ? null : `Generated with ${startModel}: ${configured.model} unavailable on ${planLabel(plans.claude)}`;
+  const startNote = startModel === configured.model ? null
+    : limited.includes(configured.model) && !availability.unavailable.includes(configured.model) ? `Generated with ${startModel}: ${configured.model} weekly limit`
+      : `Generated with ${startModel}: ${configured.model} unavailable on ${planLabel(plans.claude)}`;
   const settle = (engine, outcome) => { if (engine.id === 'claude') ctx.authState?.clear?.(); return outcome; };
   try {
     return settle(first, { result: await attempt(first), engine: first, downgradeNote: startNote });
@@ -128,22 +141,39 @@ async function withQuotaPolicy(ctx, config, engineChoice, attempt) {
       throw new EngineError(humanizeEngineError(error, { policy, timeZone: config.timeZone }).message, error);
     }
     ctx.quotaLog?.record?.({ ...quota, at: ctx.now().toISOString(), engine: first.id, model: first.model, source: 'cover-letter', action: 'refused' });
+    await recordQuotaNotice(ctx, { kind: quota.kind, model: quota.model || first.model, engine: first.id, action: 'refused', text: quota.message });
     if (quota.kind === 'modelWeeklyLimit') await updateAvailabilityInHub(ctx, record => markWeeklyLimit(record, quota.model || first.model, { at: ctx.now().toISOString(), resetsAt: quota.resetsAt, notice: quota.message })).catch(() => {});
-    const next = quota.kind === 'modelWeeklyLimit' ? nextLadderModel(policy, first.model) : null;
-    if (next && first.id === 'claude') {
+    // The same rule as the nightly run: a named model limit steps down the ladder; a weekly notice that
+    // names no model is settled by asking the next model, and only a second refusal is the account limit.
+    const weekly = quota.kind === 'modelWeeklyLimit' || quota.kind === 'ambiguousWeeklyLimit';
+    const next = weekly && first.id === 'claude' ? nextAvailableModel(policy.modelLadder, first.model, [...skipped, first.model]) : null;
+    if (next) {
       const fallback = letterEngineFor(ctx, config, { ...engineChoice, engine: first.id, model: next });
-      const note = `Generated with ${next}: ${quota.model || first.model} weekly limit`;
-      ctx.quotaLog?.record?.({ ...quota, at: ctx.now().toISOString(), engine: first.id, model: first.model, source: 'cover-letter', action: 'downgraded', detail: `switched to ${next}` });
+      const limitedModel = quota.kind === 'modelWeeklyLimit' ? quota.model || first.model : first.model;
+      const note = `Generated with ${next}: ${limitedModel} weekly limit`;
       try {
-        return settle(fallback, { result: await attempt(fallback), engine: fallback, downgradeNote: note });
+        const result = await attempt(fallback);
+        if (quota.kind === 'ambiguousWeeklyLimit') {
+          const resetsAt = quota.resetsAt || new Date(ctx.now().getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+          await updateAvailabilityInHub(ctx, record => markWeeklyLimit(record, first.model, { at: ctx.now().toISOString(), resetsAt, notice: quota.message })).catch(() => {});
+          await recordQuotaNotice(ctx, { kind: 'modelWeeklyLimit', model: first.model, engine: first.id, action: 'settled', text: `${quota.message} (no model named; ${next} answered)` });
+        }
+        ctx.quotaLog?.record?.({ ...quota, kind: 'modelWeeklyLimit', model: limitedModel, at: ctx.now().toISOString(), engine: first.id, source: 'cover-letter', action: 'downgraded', detail: `switched to ${next}` });
+        return settle(fallback, { result, engine: fallback, downgradeNote: note });
       } catch (secondError) {
         const secondVerdict = classifyEngineError(secondError, { policy });
         if (secondVerdict?.kind === 'auth_expired') { ctx.authState?.expire?.(secondVerdict.notice); throw new AuthExpiredError(secondVerdict.notice, secondError); }
         const again = classifyQuotaError(secondError, { policy });
         if (!again) { console.error(`[cover-letter] ${fallback.id} ${fallback.model} failed: ${String(secondError?.raw || secondError?.stack || secondError?.message || secondError)}`); throw new EngineError(humanizeEngineError(secondError, { policy, timeZone: config.timeZone }).message, secondError); }
-        throw new QuotaError(again, secondError);
+        await recordQuotaNotice(ctx, { kind: again.kind, model: again.model || fallback.model, engine: fallback.id, action: 'refused', text: again.message });
+        // Two models refused for a weekly window: the account itself is out.
+        const settled = WEEKLY_QUOTA_KINDS.has(again.kind) ? { ...again, kind: 'accountWeeklyLimit', model: null } : again;
+        ctx.quotaLog?.record?.({ ...settled, at: ctx.now().toISOString(), engine: fallback.id, source: 'cover-letter', action: 'refused' });
+        throw new QuotaError(settled, secondError);
       }
     }
+    // No other model to ask: an ambiguous notice cannot be told apart from the account limit.
+    if (quota.kind === 'ambiguousWeeklyLimit') throw new QuotaError({ ...quota, kind: 'accountWeeklyLimit', model: null }, error);
     throw new QuotaError(quota, error);
   }
 }

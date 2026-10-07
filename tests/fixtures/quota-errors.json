@@ -15,13 +15,13 @@
     },
     {
       "text": "claude exited 1: Usage limit reached|1790164800",
-      "kind": "accountWeeklyLimit",
-      "note": "generic notice whose reset is days away is read as the weekly window"
+      "kind": "ambiguousWeeklyLimit",
+      "note": "generic notice whose reset is days away is read as the weekly window; names no model: settled by trying the next ladder model"
     },
     {
       "text": "claude exited 1: Usage limit reached",
-      "kind": "accountWeeklyLimit",
-      "note": "generic notice with no reset time is read conservatively as the weekly window"
+      "kind": "ambiguousWeeklyLimit",
+      "note": "generic notice with no reset time is read conservatively as the weekly window; names no model: settled by trying the next ladder model"
     },
     {
       "text": "claude exited 1: five_hour limit reached, resets in 2 hours",
@@ -34,18 +34,19 @@
     },
     {
       "text": "claude exited 1: you have reached your weekly usage limit. Lower-priority mode is offered again after your weekly limit resets.",
-      "kind": "accountWeeklyLimit",
-      "note": "verbatim weekly notice"
+      "kind": "ambiguousWeeklyLimit",
+      "note": "verbatim weekly notice; names no model: settled by trying the next ladder model"
     },
     {
       "text": "claude exited 1: seven_day limit reached; resets_at 1790164800",
-      "kind": "accountWeeklyLimit",
-      "resetsAt": "2026-09-23T12:00:00.000Z"
+      "kind": "ambiguousWeeklyLimit",
+      "resetsAt": "2026-09-23T12:00:00.000Z",
+      "note": "names no model: settled by trying the next ladder model"
     },
     {
       "text": "claude exited 1: Your organization is out of usage credits. Contact your admin to add more.",
-      "kind": "accountWeeklyLimit",
-      "note": "credits exhausted is treated like the account window"
+      "kind": "ambiguousWeeklyLimit",
+      "note": "credits exhausted is treated like the account window; names no model: settled by trying the next ladder model"
     },
     {
       "text": "claude exited 1: You've reached your Fable limit. Your Fable limit resets at 9am (America/Chicago).",
@@ -90,6 +91,11 @@
     {
       "text": "claude timed out after 600000ms",
       "kind": null
+    },
+    {
+      "text": "claude exited 1: You're out of usage credits. Switch to another model, or manage usage credits at https://claude.ai/settings/usage?from=cc_cli_limit_message, to continue.",
+      "kind": "ambiguousWeeklyLimit",
+      "note": "verbatim notice from the 2026-10-06 nightly run (Claude Code 2.1.292), when the Fable weekly limit was hit and the run wrongly deferred every posting; names no model and gives no reset time"
     }
   ],
   "testClock": "2026-09-19T10:00:00Z",

@@ -81,11 +81,20 @@ disabled; do not expand them unless a task says so.
   `displayCompanyName` is applied at render time (cards, xlsx, letter panel).
 - Subscription quota (src/engines/quota.mjs): the CLI has no usage command, so
   refusal text is classified with a configurable regex table into fiveHourLimit
-  (wait 10 min up to 90 min, then defer), modelWeeklyLimit (step down
-  quotaPolicy.modelLadder, default fable → opus, audited as an info line, never
-  MODEL MISMATCH; next run starts on the preferred model), and
-  accountWeeklyLimit (defer everything, report banner; optional
-  quotaPolicy.fallbackEngine "codex" when Codex is signed in). Deferred
+  (wait 10 min up to 90 min, then defer), modelWeeklyLimit (the notice names
+  a model: step down quotaPolicy.modelLadder, default fable → opus, audited as
+  an info line, never MODEL MISMATCH), ambiguousWeeklyLimit (a weekly or
+  generic notice with a reset beyond five hours that names no model, e.g.
+  "You're out of usage credits. Switch to another model": the same batch is
+  retried on the next ladder model; an answer settles it as the first model's
+  limit, a second weekly refusal as the account's), and accountWeeklyLimit
+  (only via that second refusal or an empty ladder: defer everything, report
+  banner; optional quotaPolicy.fallbackEngine "codex" when Codex is signed in).
+  Model weekly limits are recorded in state/model-availability.json limits
+  until the reset time (7 days when the notice gave none) and the next run
+  starts on the next model without asking the limited one. The CLI's words
+  (sanitizeNotice: no command path, ids, e-mail, URL query; 300 chars) go to
+  state/quota-notices.json and the Quota card's CLI notices. Deferred
   postings use state.deferred (quotaDeferred), never unreviewed. Cover letters
   step down the same ladder (editor note + footer) and offer "Generate with
   Codex"; Status has a Quota card; Settings exposes the ladder and fallback.

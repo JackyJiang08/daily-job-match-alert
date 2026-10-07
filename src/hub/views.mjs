@@ -67,6 +67,8 @@ export const HUB_STYLES = `
 .kv dt{color:var(--ink-3)}
 .kv dd{margin:0;overflow-wrap:anywhere}
 .kv .plain-list{margin:2px 0;padding-left:16px;font-size:var(--fs-meta)}
+.notice-list li{margin:0 0 4px}
+.notice-list q{font-size:var(--fs-meta);color:var(--ink-2)}
 .kv code,.mono{font-family:var(--font-mono);font-size:var(--fs-meta)}
 .row{display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center;margin-top:var(--space-3)}
 .btn{display:inline-block;background:var(--accent);color:var(--accent-ink);border:0;border-radius:var(--radius-sm);padding:7px 13px;font:inherit;font-size:var(--fs-body);font-weight:650;cursor:pointer;text-decoration:none;line-height:1.3}
@@ -416,8 +418,17 @@ function quotaCard(quota, timeZone) {
     <dt>Deferred postings</dt><dd id="quota-deferred">${Number(quota.deferredCount || 0)} waiting for the next run${quota.deferredByQuota ? ` · ${Number(quota.deferredByQuota)} of them because of a limit` : ''}</dd>
     <dt>Policy</dt><dd>Ladder ${htmlEscape((quota.modelLadder || []).join(' → '))} · ${quota.fallbackEngine ? `Codex fallback on` : 'no engine fallback'}</dd>
     ${usageRows(quota.usage)}
+    ${noticeRows(quota.notices, timeZone)}
     ${quota.budgetHistory?.length ? `<dt>Candidates vs budget</dt><dd id="quota-history">${quota.budgetAlert ? `<span class="badge badge-warn" data-badge="budget-alert">Over budget ${Number(quota.budgetAlert.nights)} nights running</span> <span class="muted">Raise Max Reviewed Per Run or tighten the prefilter.</span><br>` : ''}<span class="mono">${quota.budgetHistory.map(entry => `${htmlEscape(entry.date)} ${Number(entry.inWindow)}/${Number(entry.limit) || '∞'}`).join(' · ')}</span> <span class="muted">(in-window candidates / budget, last ${quota.budgetHistory.length} nights${quota.expiredBacklogCount ? `; ${Number(quota.expiredBacklogCount)} backlog postings expired last run` : ''})</span></dd>` : ''}
   </dl></article>`;
+}
+
+// The CLI's own words for the latest limit events (sanitized, 300 characters), newest first, so the
+// classification can be checked against what the CLI actually said.
+function noticeRows(notices, timeZone) {
+  if (!notices?.length) return '';
+  const items = notices.map(notice => `<li data-notice-kind="${htmlEscape(notice.kind || '')}"><span class="muted">${htmlEscape(formatLocalDateTime(notice.at, timeZone))} · ${htmlEscape(notice.source)} · ${htmlEscape(notice.kind || 'unclassified')}${notice.model ? ` · ${htmlEscape(notice.model)}` : ''}${notice.action ? ` · ${htmlEscape(notice.action)}` : ''}</span><br><q>${htmlEscape(notice.text)}</q></li>`).join('');
+  return `<dt>CLI notices</dt><dd id="quota-notices"><ul class="plain-list notice-list">${items}</ul></dd>`;
 }
 
 // Subscription usage over the last seven nights: totals by full model id and by purpose, and one figure

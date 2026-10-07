@@ -14,11 +14,12 @@ import { readConfigFile, updateConfigFile } from './config-file.mjs';
 import { readLockStatus } from './run.mjs';
 import { boardLabel, readRegistry, resumeBoard, writeRegistry } from '../collectors/ats-boards.mjs';
 import { builtinSources } from '../collectors/catalog.mjs';
-import { availabilityPath, markModelUnavailable, markModelUsed, markWeeklyLimit, pruneAvailability, readAvailability, writeAvailability } from '../engines/model-availability.mjs';
+import { availabilityPath, markModelUnavailable, markModelUsed, markWeeklyLimit, pruneAvailability, pruneLimits, readAvailability, writeAvailability } from '../engines/model-availability.mjs';
 import { classifyEngineError, humanizeEngineError } from '../engines/engine-errors.mjs';
 import { planLabel } from '../engines/quota.mjs';
 import { planView } from '../engines/plans.mjs';
 import { appendUsage, readUsage, usageEntries, usagePath, usageWindow } from '../engines/usage.mjs';
+import { quotaNoticesPath, readQuotaNotices } from '../engines/quota-notices.mjs';
 import { describeQuota, normalizeQuotaPolicy } from '../engines/quota.mjs';
 import { HubLockedError } from './config-file.mjs';
 import { acquireRunLock, releaseRunLock } from '../lock.mjs';
@@ -372,7 +373,8 @@ export async function planChangeView(ctx, config, latest, plans) {
 export async function modelAvailabilityView(ctx, plan) {
   const record = await readAvailability(availabilityPath(ctx.root), ctx.io);
   pruneAvailability(record, { now: ctx.now(), plan });
-  return { models: record.models, unavailable: Object.keys(record.models), plan: plan || null };
+  pruneLimits(record, { now: ctx.now() });
+  return { models: record.models, unavailable: Object.keys(record.models), limited: Object.keys(record.limits || {}), plan: plan || null };
 }
 
 async function withRunLock(ctx, work) {
@@ -552,7 +554,7 @@ export async function buildStatusView(ctx, config) {
     days,
     errors,
     sources: await sourcesView(ctx, config, latest),
-    quota: { ...quotaView(ctx, config, latest, state), plans, modelAvailability: await modelAvailabilityView(ctx, plans.claude || state.observedPlans?.claude?.type || null), usage: usageWindow(await readUsage(usagePath(ctx.root), ctx.io).catch(() => ({ entries: [] })), { now: ctx.now(), timeZone: config.timeZone, days: 7 }) },
+    quota: { ...quotaView(ctx, config, latest, state), notices: (await readQuotaNotices(quotaNoticesPath(ctx.root), ctx.io).catch(() => [])).slice(-5).reverse(), plans, modelAvailability: await modelAvailabilityView(ctx, plans.claude || state.observedPlans?.claude?.type || null), usage: usageWindow(await readUsage(usagePath(ctx.root), ctx.io).catch(() => ({ entries: [] })), { now: ctx.now(), timeZone: config.timeZone, days: 7 }) },
     claudeAuth: claudeAuthView(ctx, latest),
     planChange: await planChangeView(ctx, config, latest, plans),
     outputDirectory: config.outputDirectory,

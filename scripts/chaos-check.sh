@@ -21,7 +21,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-scenarios=(baseline offline llm-down bad-input xlsx-recovery ats-500 review-cap fable-weekly-limit account-limit backlog-priority)
+scenarios=(baseline offline llm-down bad-input xlsx-recovery ats-500 review-cap fable-weekly-limit fable-unnamed-limit account-limit backlog-priority)
 pass_count=0
 fail_count=0
 results=""

@@ -180,20 +180,44 @@ export function modelNamed(text) {
 }
 
 // { kind, model, resetsAt, message } for a quota refusal, or null when the error is something else.
+// The CLI's notice as it is stored and shown: the "<path to claude> exited 1:" prefix (the path carries
+// the macOS user name), e-mail addresses, UUIDs and other long ids, organization and account ids, and URL
+// query strings are removed; the rest is kept verbatim up to `limit` characters.
+export function sanitizeNotice(text, limit = 300) {
+  let value = String(text || '');
+  // Whatever command ran (the CLI, or a wrapper script configured in its place), its path is dropped.
+  value = value.replace(/^\s*\S+\s+exited\s+-?\d+:\s*/i, '');
+  value = value.replace(/(?:\/Users|\/home)\/[^/\s]+/g, '~');
+  value = value.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[email]');
+  value = value.replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, '[id]');
+  value = value.replace(/\b(?:org|acct|account|user|organization)[-_:=]\s*[A-Za-z0-9_-]{6,}/gi, '[id]');
+  value = value.replace(/\b[0-9a-f]{24,}\b/gi, '[id]');
+  value = value.replace(/(https?:\/\/[^\s?#),]+)[?#][^\s),]*?([.;:!]?)(?=[\s),]|$)/gi, '$1$2');
+  value = value.replace(/\s+/g, ' ').trim();
+  return value.length > limit ? `${value.slice(0, limit - 1)}…` : value;
+}
+
 export function classifyQuotaError(error, { now = new Date(), policy = normalizeQuotaPolicy() } = {}) {
   const message = String(error?.message || error?.stderr || error || '').trim();
   if (!message) return null;
   const { patterns } = policy;
   if (patterns.notQuota.some(pattern => pattern.test(message))) return null;
   const resetsAt = parseResetTime(message, now);
-  const base = { message: message.slice(0, 500), resetsAt, model: modelNamed(message) };
+  const named = modelNamed(message);
+  // The stored text is the CLI's own notice, cut to 300 characters, with the CLI path and anything that
+  // could identify the account removed (see sanitizeNotice).
+  const base = { message: sanitizeNotice(message), resetsAt, model: named };
   if (patterns.modelWeeklyLimit.some(pattern => pattern.test(message))) return { kind: 'modelWeeklyLimit', ...base };
-  if (patterns.accountWeeklyLimit.some(pattern => pattern.test(message))) return { kind: 'accountWeeklyLimit', ...base };
+  // A weekly notice that names no model cannot tell a per-model limit from the account's: it is
+  // ambiguousWeeklyLimit, and the caller settles it by trying the next model on the ladder (a model that
+  // answers means the first one hit its own limit; a second refusal means the account is out).
+  if (patterns.accountWeeklyLimit.some(pattern => pattern.test(message))) return { kind: named ? 'modelWeeklyLimit' : 'ambiguousWeeklyLimit', ...base };
   if (patterns.fiveHourLimit.some(pattern => pattern.test(message))) return { kind: 'fiveHourLimit', ...base };
   if (patterns.genericLimit.some(pattern => pattern.test(message))) {
-    // A generic notice: the reset time decides; without one the conservative reading is the weekly window.
+    // A generic notice: a reset within five hours is the rolling window; anything longer is a weekly limit,
+    // per model when the notice names one, otherwise ambiguous.
     const withinFiveHours = resetsAt && new Date(resetsAt).getTime() - now.getTime() <= FIVE_HOURS_MS;
-    return { kind: withinFiveHours ? 'fiveHourLimit' : 'accountWeeklyLimit', ...base };
+    return { kind: withinFiveHours ? 'fiveHourLimit' : named ? 'modelWeeklyLimit' : 'ambiguousWeeklyLimit', ...base };
   }
   return null;
 }
@@ -208,7 +232,7 @@ export class QuotaError extends Error {
   }
 }
 
-export const QUOTA_LABELS = { fiveHourLimit: 'five-hour usage limit', modelWeeklyLimit: 'weekly model limit', accountWeeklyLimit: 'weekly account limit' };
+export const QUOTA_LABELS = { fiveHourLimit: 'five-hour usage limit', modelWeeklyLimit: 'weekly model limit', accountWeeklyLimit: 'weekly account limit', ambiguousWeeklyLimit: 'weekly limit (the notice names no model)' };
 
 // One plain sentence for reports, cards, and the panel.
 export function describeQuota(quota, { timeZone = 'America/Chicago' } = {}) {
