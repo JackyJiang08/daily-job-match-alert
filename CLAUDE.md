@@ -112,6 +112,24 @@ disabled; do not expand them unless a task says so.
   it; every user-visible engine error goes through humanizeEngineError
   (auth sentence, quota sentence, or "Generation failed (<reason>); details
   in the hub log"); raw text only in the hub log.
+- Automatic letters (src/auto-letters.mjs): main() runs runLettersPhase after
+  runPipeline returns and the run lock is released (Run Now too), under
+  state/.letters.lock, with a headless hub context (createHubContext; tests pass
+  options.lettersContext with fake engines). config.coverLetter.autoGenerate
+  { enabled true, maxPerRun 8 }; selection = this run's new matches
+  (summary.newMatchUrls) by score, skipping letters on file and uncertain
+  companies; generateLetter(strict) + saveLetter on the draft/editor stage
+  chains; a fully failed chain stops the pass with a warning. Off when the
+  draft stage is the local_only placeholder or material is incomplete. Status
+  in state/letters-auto.json (cards: "Letter generating…", manual one-click
+  and Test refused while the letters lock is held); outcome goes to
+  meta.autoLetters (Run Details, re-rendered HTML and warnings.txt; the xlsx is
+  left as written) and the Status card; usage entries are tagged
+  source 'auto-letters'. Letter records keep engine/model/effort for draft and
+  editor (passLine in the footer and Editor notes). The letters status line
+  goes to stderr: stdout is the run summary JSON that chaos parses.
+- Prefilter level ranges: LEVEL_ONE_RANGE ("I/II", "I-II", "I or II", "1/2",
+  "I - III") bypasses the II/III/IV suffix rule and reads as entry level.
 - Stage assignments (src/engines/assignments.mjs): stageAssignments(config) →
   scoring (semanticMatching engine/model/reasoningEffort; fallback = ladder after
   the model + the Codex model when quotaPolicy.fallbackEngine is codex, which is

@@ -98,6 +98,17 @@ function sampleRows(samples, timeZone) {
     </tr>`).join('')}</table></div>`;
 }
 
+// Settings → Cover Letters: whether letters are written automatically after each run, and how many.
+export function autoLettersSettingsCard(settings = {}) {
+  return `<article class="card" id="auto-letters"><h2>Automatic Letters</h2>
+    <form method="post" action="/settings/letters-auto" class="auto-letters-form">
+      <div class="field"><label class="check"><input type="checkbox" name="autoGenerate"${settings.enabled === false ? '' : ' checked'}> Write cover letters for new high matches after each run</label></div>
+      <label class="field"><span>Letters per run (best scores first; postings with a letter or an uncertain company are skipped)</span><input type="number" name="maxPerRun" class="control-input" min="0" max="50" step="1" value="${Number(settings.maxPerRun ?? 8)}" required></label>
+      <button class="btn" type="submit">Save</button>
+      <p class="form-foot">Uses the Cover letter draft and editor assignments under Subscriptions &amp; Models. The report is written first; letters follow.</p>
+    </form></article>`;
+}
+
 export function coverLetterSettingsSection({ profile, readiness, timeZone }) {
   const samples = profile.samples || [];
   const atLimit = samples.length >= MAX_SAMPLE_COUNT;
@@ -193,7 +204,14 @@ function countsLine(record) {
 function footLine(record, engineLabel) {
   if (!record) return `Engine: ${engineLabel}`;
   const samples = (record.samplesUsed || []).map(sample => `${sample.name}${sample.track ? ` (${trackLabelOf(sample.track)})` : ''}`).join(', ');
-  return `${samples ? `Samples used: ${samples} · ` : 'No samples used · '}Engine: ${record.engine}${record.model ? ` · ${record.model}` : ''}${record.pdf ? ` · PDF via ${record.pdf.renderer}` : ''}`;
+  return `${samples ? `Samples used: ${samples} · ` : 'No samples used · '}${passLine(record)}${record.pdf ? ` · PDF via ${record.pdf.renderer}` : ''}`;
+}
+
+// "Draft: codex · gpt-5.6-sol · medium effort · Editor: codex · gpt-5.6-sol · high effort"
+export function passLine(record) {
+  const pass = (engine, model, effort) => `${engine}${model ? ` · ${model}` : ''}${effort ? ` · ${effort} effort` : ''}`;
+  const draft = `${record.reviewEngine || record.reviewModel ? 'Draft' : 'Engine'}: ${pass(record.engine, record.model, record.effort)}`;
+  return record.reviewEngine || record.reviewModel ? `${draft} · Editor: ${pass(record.reviewEngine || record.engine, record.reviewModel, record.reviewEffort)}` : draft;
 }
 
 export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, readiness, existing, engineLabel, confirmCompany = false, companyUncertain = false }) {
@@ -239,7 +257,7 @@ export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, 
     <p class="muted" id="letter-empty"${paragraphs.length ? ' hidden' : ''}>No draft yet. Regenerate writes one with the selected track and company name.</p>
     <div id="paragraphs">${paragraphEditor(paragraphs)}</div>
     <ul class="issues" id="letter-issues">${issues}</ul>
-    <details class="notes" id="editor-notes"${notes ? '' : ' hidden'}><summary>Editor Notes</summary><ul class="issues" id="editor-notes-list">${notes}</ul></details>
+    <details class="notes" id="editor-notes"${notes || record?.reviewModel ? '' : ' hidden'}><summary>Editor Notes</summary>${record ? `<p class="muted notes-engine" id="notes-engine">${htmlEscape(passLine(record))}</p>` : ''}<ul class="issues" id="editor-notes-list">${notes}</ul></details>
     <p class="letter-foot" id="letter-foot">${htmlEscape(footLine(record, engineLabel))}</p>
   </article>`;
 }
@@ -357,6 +375,8 @@ export const LETTER_SCRIPT = `
 // every other button is disabled while one is generating, on this page or another.
 export const ONECLICK_SCRIPT = `
 (function () {
+  // While the automatic pass is writing letters, refresh the page every 30 seconds to pick them up.
+  if (document.querySelector('[data-autoletter]')) setTimeout(function () { window.location.reload(); }, 30000);
   var buttons = Array.prototype.slice.call(document.querySelectorAll('button[data-oneclick]'));
   if (!buttons.length) return;
   var BUSY_TITLE = 'Another cover letter is generating; wait for it to finish';

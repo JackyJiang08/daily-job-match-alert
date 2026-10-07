@@ -62,7 +62,7 @@ function renderAction(action) {
   const className = htmlEscape(action.className || 'btn secondary small');
   if (action.button) {
     const data = Object.entries(action.data || {}).map(([key, value]) => ` data-${htmlEscape(key)}="${htmlEscape(value)}"`).join('');
-    return `<button type="button" class="${className}"${data}>${htmlEscape(action.label)}</button>`;
+    return `<button type="button" class="${className}"${data}${action.disabled ? ' disabled' : ''}>${htmlEscape(action.label)}</button>`;
   }
   return `<a class="${className}" href="${htmlEscape(action.href)}"${action.newTab ? ` ${EXTERNAL_LINK}` : ''}>${htmlEscape(action.label)}</a>`;
 }

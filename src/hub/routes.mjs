@@ -8,7 +8,7 @@ import { HubLockedError } from './config-file.mjs';
 import { parseMultipart } from './multipart.mjs';
 import {
   HubInputError, annotateConnections, assertDate, buildStatusView, claudeAuthView, clearModelAvailability, configuredCliCommands, desktopCopyPath, desktopWorkbookPath, listReportSummaries, loadTracksView, modelAvailabilityView, readErrorReport,
-  readReportPayload, readSettings, resumeAtsBoard, saveAssignments, saveCliPath, saveSettings, selectResumeVersion, setTrackEnabled, sidebarSummary, uploadResumePdf, ModelTestBusyError, savePlan, testModel,
+  autoLettersView, readReportPayload, readSettings, resumeAtsBoard, saveAssignments, saveAutoLetters, saveCliPath, saveSettings, selectResumeVersion, setTrackEnabled, sidebarSummary, uploadResumePdf, ModelTestBusyError, savePlan, testModel,
 } from './services.mjs';
 import { localDate } from '../time-format.mjs';
 import { LETTER_SCRIPT, ONECLICK_SCRIPT, SAMPLE_TRACK_SCRIPT, letterPanel, lettersPage, trackLabelOf } from './letter-views.mjs';
@@ -130,9 +130,18 @@ export function createHubHandler(ctx) {
         return;
       }
       const lettersByJob = await ctx.letterStore.lettersByJob().catch(() => new Map());
+      // Postings the automatic letters pass is still working through (state/letters-auto.json).
+      const autoStatus = await autoLettersView(ctx);
+      const pending = new Set(autoStatus?.running ? autoStatus.pending : []);
       const decorate = job => {
         const id = jobIdOf(job);
         const letter = lettersByJob.get(id);
+        if (!letter && pending.has(id)) {
+          return { actions: [{ button: true, disabled: true, label: 'Letter generating…', data: { autoletter: '1', job: id } }], badges: [{ key: 'letter-generating', label: 'Letter generating…', tone: 'note', title: 'The automatic cover-letter pass after the nightly run is writing this letter' }] };
+        }
+        // Editor notes on a saved letter: a count, in a warning tone when one flags an unverified detail.
+        const notes = Array.isArray(letter?.editorNotes) ? letter.editorNotes : [];
+        const notesBadge = notes.length ? [{ key: 'letter-notes', label: `${notes.length} editor note${notes.length === 1 ? '' : 's'}`, tone: notes.some(note => /unverified detail/i.test(String(note))) ? 'warn' : 'note', title: notes.join('\n') }] : [];
         // A saved letter gets Open Letter plus a direct PDF download; the PDF link exists only once rendered.
         // Without one the card carries a one-click button that the page script drives (see ONECLICK_SCRIPT).
         const download = letter?.pdf && letter.pdfFileName ? [{ href: `/letters/${letter.date}/${letter.slug}/${encodeURIComponent(letter.pdfFileName)}`, label: 'Download PDF' }] : [];
@@ -140,7 +149,7 @@ export function createHubHandler(ctx) {
           actions: letter
             ? [{ href: `/letters/${letter.date}/${letter.slug}`, label: 'Open Letter' }, ...download]
             : [{ button: true, label: 'Generate Cover Letter', data: { oneclick: '1', date: selected, job: id } }],
-          badges: letter ? [{ key: 'letter-ready', label: 'Letter ready', tone: 'good', title: `Cover letter saved ${letter.savedAt || ''}` }] : [],
+          badges: letter ? [{ key: 'letter-ready', label: letter.source === 'auto' ? 'Letter ready (auto)' : 'Letter ready', tone: 'good', title: `Cover letter saved ${letter.savedAt || ''}` }, ...notesBadge] : [],
         };
       };
       reportBody = renderReportBody(buildReportView(payload.matches, { timeZone, ...payload.meta }, { embedded: true, decorate }));
@@ -271,6 +280,11 @@ export function createHubHandler(ctx) {
         redirect(response, '/settings?tab=pipeline', 'Settings saved to config.json');
         return;
       }
+      case '/settings/letters-auto': {
+        const saved = await saveAutoLetters(ctx, fields);
+        redirect(response, '/settings?tab=letters#auto-letters', saved.enabled ? `Automatic cover letters on: up to ${saved.maxPerRun} per run` : 'Automatic cover letters off');
+        return;
+      }
       case '/settings/assignments': {
         await saveAssignments(ctx, fields);
         ctx.connections?.reset?.();
@@ -317,6 +331,9 @@ export function createHubHandler(ctx) {
       }
       case '/letters/oneclick': {
         const date = assertDate(fields.date);
+        // The automatic pass after a run holds the letters lock; a manual letter waits for it.
+        const autoRunning = await autoLettersView(ctx);
+        if (autoRunning?.running) { json(response, 409, { error: `Automatic cover letters are being written (${autoRunning.done} of ${autoRunning.planned}); try again when they finish`, state: 'busy' }); return; }
         const readiness = await ctx.letterStore.readiness();
         if (!readiness.ready) throw new HubInputError(`Cover-letter material is incomplete (${readiness.missing.join(', ')}); upload it under Settings first`);
         const { job, id } = await findLetterJob(ctx, date, fields.job);

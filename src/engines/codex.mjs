@@ -157,6 +157,8 @@ export function createCodexEngine(options = {}) {
   return {
     id: 'codex',
     label: 'ChatGPT subscription via Codex',
+    // The reasoning effort this engine passes to the CLI (null = the CLI's default).
+    effort,
     model,
     async verifyAuth() {
       return verifyCodexSubscription({ ...options, runner });

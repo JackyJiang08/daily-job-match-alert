@@ -77,6 +77,7 @@ export async function generateCoverLetter({ engine, reviewEngines = null, inputs
     let revisionAdopted = false;
     let reviewModel = null;
     let reviewEngineId = null;
+    let reviewEffort = null;
     let handoffNotes = [];
     if (review && draft.ok) {
       const edited = await reviewWithChain({ engines: reviewEngines?.length ? reviewEngines : [engine], paragraphs, inputs, tempDirectory });
@@ -85,6 +86,7 @@ export async function generateCoverLetter({ engine, reviewEngines = null, inputs
       handoffNotes = edited.handoffNotes;
       reviewModel = edited.model || edited.engine?.model || null;
       reviewEngineId = edited.engine?.id || null;
+      reviewEffort = edited.engine?.effort || null;
       if (edited.adopted) {
         revisionAdopted = true;
         paragraphs = edited.paragraphs;
@@ -95,9 +97,9 @@ export async function generateCoverLetter({ engine, reviewEngines = null, inputs
     const words = validateParagraphs(paragraphs).wordCount;
     return {
       paragraphs, issues, wordCount: words, ok: draft.ok,
-      engine: engine.id, engineLabel: engine.label, model: response.scoringModel || engine.model || 'unknown',
+      engine: engine.id, engineLabel: engine.label, model: response.scoringModel || engine.model || 'unknown', effort: engine.effort || null,
       reviewed, editorNotes: [...handoffNotes, ...editorNotes], revisionAdopted,
-      reviewEngine: reviewEngineId, reviewModel,
+      reviewEngine: reviewEngineId, reviewModel, reviewEffort,
       samplesUsed: samples.map(sample => ({ name: sample.originalName || sample.file, track: sample.track || null })),
     };
   });

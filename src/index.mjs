@@ -1024,7 +1024,10 @@ async function runPipeline(config, clock, options = {}) {
     await markPayloadComplete(config, payload, state, now.toISOString());
   }
 
-  const summary = { meta, ...paths, ...(Object.keys(debug).length ? { debug } : {}) };
+  // This run's new matches, for the automatic cover letters that follow once the run lock is released.
+  const thisRun = new Set(evaluated.map(job => canonicalUrl(job.url) || job.url));
+  const newMatchUrls = matches.filter(job => thisRun.has(canonicalUrl(job.url) || job.url)).map(job => job.url);
+  const summary = { meta, ...paths, newMatchUrls, ...(Object.keys(debug).length ? { debug } : {}) };
   console.log(JSON.stringify(summary, null, 2));
   if (rendered.xlsxError) throw rendered.xlsxError;
   return summary;
@@ -1044,8 +1047,9 @@ export async function main(options = {}) {
     console.warn(`Daily Job Match Alert is already running with PID ${lock.pid}; this invocation will exit.`);
     return { skipped: true, reason: 'active_lock', pid: lock.pid };
   }
+  let summary;
   try {
-    return await runPipeline(config, clock, options);
+    summary = await runPipeline(config, clock, options);
   } finally {
     try {
       await releaseRunLock(lock);
@@ -1053,6 +1057,41 @@ export async function main(options = {}) {
       console.warn(`Could not release run lock; the next run will clear it as stale: ${errorSummary(error)}`);
     }
   }
+  // The report is on disk and the run lock is free: cover letters for the new matches follow under their own
+  // lock, so the report never waits for them (the same after Run Now).
+  if (summary && options.autoLetters !== false) {
+    try {
+      summary.autoLetters = await runLettersPhase(config, configPath, summary, options);
+    } catch (error) {
+      console.warn(`Automatic cover letters failed: ${errorSummary(error)}`);
+    }
+  }
+  return summary;
+}
+
+// Builds a headless hub context (no server) and runs the automatic letters pass; the outcome is added to
+// the day's payload, its HTML report, and warnings.txt (the workbook is left as written).
+export async function runLettersPhase(config, configPath, summary, options = {}) {
+  const { runAutoLetters } = await import('./auto-letters.mjs');
+  const ctx = options.lettersContext || (await import('./hub/server.mjs')).createHubContext({ configPath, now: options.lettersNow || (() => new Date()) });
+  const date = summary.meta.date;
+  const warnings = [];
+  const outcome = await runAutoLetters({
+    config, date, newMatchUrls: summary.newMatchUrls, ctx, lockOptions: options.lettersLockOptions, warnings,
+    updateReport: async autoLetters => {
+      const payload = await readReportPayload(config, date);
+      if (!payload) return;
+      payload.meta.autoLetters = autoLetters;
+      for (const warning of warnings) if (!payload.meta.warnings.some(item => warningTextEquals(item, warning))) payload.meta.warnings.push(warning);
+      await writeReportPayload(config, payload);
+      if (summary.htmlPath) await fs.writeFile(summary.htmlPath, buildHtml(payload.matches, payload.meta));
+      if (summary.runDirectory) await writeWarningsFile(summary.runDirectory, payload.meta);
+    },
+  });
+  // stderr: stdout carries the run summary as one JSON document.
+  if (outcome.state !== 'off') console.error(`Automatic cover letters: ${outcome.generated ?? 0} generated, ${outcome.failed ?? 0} failed${outcome.stopReason ? ` (${outcome.stopReason})` : ''}`);
+  else console.error(`Automatic cover letters skipped: ${outcome.reason}`);
+  return outcome;
 }
 
 async function fatalReportContext(argv) {

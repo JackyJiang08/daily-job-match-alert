@@ -1119,3 +1119,56 @@ test('Task assignments save each letter stage on its own, validate engine, model
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test('while the automatic pass writes letters, cards say so and manual letters wait; finished letters show their editor notes; Status and Settings cover the pass', async () => {
+  const root = await prepareProject();
+  const jobId = sha256('https://example.com/jobs/1').slice(0, 16);
+  await fs.writeFile(path.join(root, 'state', '.letters.lock'), '777\n');
+  await fs.writeFile(path.join(root, 'state', 'letters-auto.json'), JSON.stringify({
+    date: '2026-08-27', startedAt: '2026-08-27T11:55:00Z', finishedAt: null, state: 'running', pid: 777,
+    planned: [{ jobId, company: 'Acme', title: 'Data Analyst', bestScore: 82 }], current: jobId, generated: [], failed: [], skipped: { existing: 0, uncertain: 1, overLimit: 0 }, stopReason: null, usage: null,
+  }));
+  const hub = await startHub(root, { alivePids: [777] });
+  try {
+    const reports = (await hub.request('GET', '/reports/2026-08-27')).text;
+    assert.match(reports.split('<script>')[0], /<button type="button" class="btn secondary small" data-autoletter="1" data-job="[0-9a-f]{16}" disabled>Letter generating…<\/button>/);
+    assert.match(reports, /data-badge="letter-generating"[^>]*>Letter generating…<\/span>/);
+    assert.doesNotMatch(reports.split('<script>')[0], /data-oneclick/, 'no Generate button while the pass is on it');
+    const blocked = await hub.form('/letters/oneclick', { date: '2026-08-27', job: jobId });
+    assert.equal(blocked.status, 409);
+    assert.match(JSON.parse(blocked.text).error, /^Automatic cover letters are being written \(0 of 1\)/);
+    const status = (await hub.request('GET', '/status')).text;
+    assert.match(status, /<article class="card" id="auto-letters-card"><h2>Automatic Cover Letters<\/h2>[\s\S]*?<span class="badge badge-good" data-badge="letters-running">Running<\/span> 0 of 1 done/);
+    assert.match(status, /<dd id="auto-letters-counts">0 generated · 0 failed <span class="muted">\(skipped: 1 with an uncertain company\)<\/span><\/dd>/);
+    // Test is refused while the letters lock is held.
+    hub.ctx.makeTestEngine = () => { throw new Error('must not be built'); };
+    assert.match(decodeURIComponent((await hub.form('/settings/models/test', { model: 'claude-haiku-4-5', confirm: '1' })).headers.location), /error=Automatic cover letters hold the letters lock \(PID 777\)/);
+
+    // The pass finished: the letter is on the card with its editor notes, highlighted for an unverified detail.
+    hub.alivePids.delete(777);
+    await fs.rm(path.join(root, 'state', '.letters.lock'));
+    await fs.writeFile(path.join(root, 'state', 'letters-auto.json'), JSON.stringify({
+      date: '2026-08-27', startedAt: '2026-08-27T11:55:00Z', finishedAt: '2026-08-27T11:58:00Z', state: 'done', pid: 777,
+      planned: [{ jobId, company: 'Acme' }], current: null, generated: [{ jobId, company: 'Acme', engine: 'codex', model: 'gpt-5.6-sol', effort: 'medium', editorNotes: 2 }], failed: [], skipped: { existing: 0, uncertain: 0, overLimit: 0 }, stopReason: null,
+      usage: { byModel: {}, byPurpose: {}, total: { calls: 2, input: 900, output: 300, cacheRead: 0, cacheCreation: 0, reasoning: 0 } },
+    }));
+    await hub.ctx.letterStore.saveLetter({ date: '2026-08-27', company: 'Acme', markdown: '# Letter', meta: { jobId, company: 'Acme', source: 'auto', engine: 'codex', model: 'gpt-5.6-sol', effort: 'medium', editorNotes: ['unverified detail: the 40% figure', 'Tighten the close'], paragraphs: ['x'] } });
+    const after = (await hub.request('GET', '/reports/2026-08-27')).text;
+    assert.match(after, /data-badge="letter-ready"[^>]*>Letter ready \(auto\)<\/span><span class="badge badge-warn" data-badge="letter-notes" title="unverified detail: the 40% figure\nTighten the close">2 editor notes<\/span>/);
+    assert.match(after.split('<script>')[0], />Open Letter<\/a>/);
+    const done = (await hub.request('GET', '/status')).text;
+    assert.match(done, /data-badge="letters-done">Done<\/span>/);
+    assert.match(done, /<dd id="auto-letters-counts">1 generated · 0 failed<\/dd>[\s\S]*?<dt>Engines<\/dt><dd>codex · gpt-5\.6-sol \(medium\)<\/dd>[\s\S]*?<dt>Usage<\/dt><dd>900 in · 300 out \(2 calls\)<\/dd>/);
+
+    // Settings → Cover Letters exposes the switch and the per-run limit.
+    const settings = (await hub.request('GET', '/settings?tab=letters')).text;
+    assert.match(settings, /<article class="card" id="auto-letters"><h2>Automatic Letters<\/h2>[\s\S]*?<input type="checkbox" name="autoGenerate" checked> Write cover letters for new high matches after each run[\s\S]*?name="maxPerRun"[^>]*value="8"/);
+    const saved = await hub.form('/settings/letters-auto', { maxPerRun: '3' });
+    assert.equal(saved.status, 303);
+    assert.deepEqual((await readConfig(root)).coverLetter.autoGenerate, { enabled: false, maxPerRun: 3 });
+    assert.match(decodeURIComponent((await hub.form('/settings/letters-auto', { autoGenerate: 'on', maxPerRun: '99' })).headers.location), /error=Letters per run must be a whole number from 0 to 50/);
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

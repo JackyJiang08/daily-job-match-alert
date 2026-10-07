@@ -24,6 +24,11 @@ export const DEFAULT_PREFILTER_EXCLUDES = ['head of', 'vice president', 'VP', 'a
 export const DEFAULT_LEVEL_SUFFIXES = ['II', 'III', 'IV'];
 // Gender markers German, Austrian, Swiss, and French postings put in the title: (m/w/d), (f/m/d), (w/m/d),
 // (m/f/d), (d/m/w), (h/f), (f/h), (m/w), (w/m), with optional spaces or an x/i/* for diverse.
+// A level range that starts at one ("Data Analyst I/II", "Engineer I-II", "Scientist I or II", "Analyst
+// 1/2", "Level I - III"): the posting hires at level one too, so the II/III suffix rule does not apply to
+// it and it reads as entry level. A lone "II" or "III" is unaffected.
+export const LEVEL_ONE_RANGE = /(?<![A-Za-z0-9])(?:I|1)\s*(?:\/|-|–|—|&|\bor\b|\bto\b)\s*(?:II|III|IV|2|3|4)(?![A-Za-z0-9])/;
+
 export const NON_US_TITLE_MARKER = /\(\s*(?:[mwfdhxi*]\s*\/\s*){1,3}[mwfdhxi*]\s*\)/i;
 // Wording that marks a posting as early career even when its title carries "Manager" or a level suffix
 // ("Software Engineer II, Early Career", "Associate Product Manager, 2027"). Only those two exclusions
@@ -104,7 +109,8 @@ export function exclusionRule(title, settings) {
   const overridden = (settings.overrides || []).some(item => item.pattern.test(text));
   const exclusion = settings.excludes.find(item => item.pattern.test(text) && !(overridden && OVERRIDABLE_EXCLUDES.has(item.term.trim().toLowerCase())));
   if (exclusion) return `exclude: ${exclusion.term}`;
-  const suffix = overridden ? null : settings.suffixes.find(item => item.pattern.test(text));
+  const withoutRange = text.replace(new RegExp(LEVEL_ONE_RANGE.source, 'g'), ' ');
+  const suffix = overridden ? null : settings.suffixes.find(item => item.pattern.test(withoutRange));
   if (suffix) return `level suffix: ${suffix.term}`;
   return null;
 }
@@ -173,7 +179,8 @@ export function detectEarlyCareer(job, preferences = {}) {
   if (!title || job?.roleType === 'internship' || INTERN.test(title)) return { level: null, signal: null };
   const settings = prefilterSettings(preferences);
   if (exclusionRule(title, settings)) return { level: null, signal: null };
-  const titleSignal = ENTRY_TITLE.exec(title)?.[0] || (LEVEL_ONE.test(title) ? 'level I' : null) || (ANALYST.test(title) ? 'analyst' : null);
+  const range = LEVEL_ONE_RANGE.exec(title)?.[0];
+  const titleSignal = (range ? `level ${range.replace(/\s+/g, ' ')}` : null) || ENTRY_TITLE.exec(title)?.[0] || (LEVEL_ONE.test(title) ? 'level I' : null) || (ANALYST.test(title) ? 'analyst' : null);
   const jdSignal = NEW_GRAD_JD.exec(String(job?.description || ''))?.[0] || null;
   if (jdSignal) return { level: 'new_grad', signal: titleSignal ? `${titleSignal}; JD: ${jdSignal}` : `JD: ${jdSignal}` };
   if (titleSignal) return { level: 'entry_level', signal: titleSignal };

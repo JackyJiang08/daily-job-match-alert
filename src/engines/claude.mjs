@@ -203,6 +203,7 @@ export function createClaudeEngine(options = {}) {
   const commandOf = async () => { command = command || await resolvedCommand(options); return command; };
   return {
     id: 'claude',
+    effort: null,
     label: 'Claude subscription',
     model,
     async verifyAuth() {

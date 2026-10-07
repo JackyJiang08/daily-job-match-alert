@@ -34,7 +34,9 @@
   },
   "outputDirectory": "~/Desktop/Daily Job Match Alert",
   "coverLetter": {
-    "editorReview": true
+    "editorReview": true,
+    "autoGenerateNote": "After each run (and Run Now) letters are written for the run's new high matches, best scores first, skipping postings with a letter or an uncertain company, using the Cover letter draft and editor assignments. Off for a local-only config or incomplete material.",
+    "autoGenerate": { "enabled": true, "maxPerRun": 8 }
   },
   "hub": {
     "port": 4747,

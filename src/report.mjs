@@ -185,6 +185,14 @@ export function runDetailsView(jobs, meta, tracks) {
     counts.push(`${jobs.length} matched`);
     rows.push({ term: 'Postings', detail: counts.join(' · ') });
   }
+  if (meta.autoLetters) {
+    const auto = meta.autoLetters;
+    rows.push({
+      term: 'Automatic cover letters',
+      detail: `${Number(auto.generated || 0)} generated · ${Number(auto.failed || 0)} failed${auto.engines?.length ? ` · ${auto.engines.join('; ')}` : ''}${auto.usage?.calls ? ` · ${describeTotals(auto.usage)}` : ''}`,
+      items: [auto.stopReason, auto.skipped?.existing ? `${auto.skipped.existing} already had a letter` : null, auto.skipped?.uncertain ? `${auto.skipped.uncertain} skipped: company name uncertain` : null, auto.skipped?.overLimit ? `${auto.skipped.overLimit} over the per-run limit` : null].filter(Boolean),
+    });
+  }
   if (meta.authExpired) rows.push({ term: 'Claude login', detail: `${meta.authExpired.message}${meta.authExpired.deferred ? ` (${meta.authExpired.deferred} deferred)` : ''}` });
   if (meta.quota?.events?.length) {
     const events = meta.quota.events.map(event => `${describeQuota(event, { timeZone: meta.timeZone })}: ${event.action}${event.detail ? ` (${event.detail})` : ''}`);

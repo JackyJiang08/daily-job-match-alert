@@ -3,6 +3,7 @@
 // directory (uploaded PDFs, hub-state.json, run logs). Every filesystem call goes through ctx.io so
 // tests can point the hub at a temporary project.
 import { LETTER_STAGES, validateLetterAssignment } from '../engines/assignments.mjs';
+import { autoLetterSettings, autoLetterSummary, lettersLockPath, readLettersStatus } from '../auto-letters.mjs';
 import { DEFAULT_CATALOG, ENGINE_PROVIDER, PROVIDER_ENGINE, canonicalModelId, defaultModelId, findModel, normalizeCatalog, providerModels, validateLadder } from '../engines/catalog.mjs';
 import path from 'node:path';
 import { enabledResumeTracks, normalizeResumeConfig } from '../config.mjs';
@@ -555,6 +556,7 @@ export async function buildStatusView(ctx, config) {
     days,
     errors,
     sources: await sourcesView(ctx, config, latest),
+    autoLetters: { ...(await autoLettersView(ctx)), settings: autoLetterSettings(config) },
     quota: { ...quotaView(ctx, config, latest, state), notices: (await readQuotaNotices(quotaNoticesPath(ctx.root), ctx.io).catch(() => [])).slice(-5).reverse(), plans, modelAvailability: await modelAvailabilityView(ctx, plans.claude || state.observedPlans?.claude?.type || null), usage: usageWindow(await readUsage(usagePath(ctx.root), ctx.io).catch(() => ({ entries: [] })), { now: ctx.now(), timeZone: config.timeZone, days: 7 }) },
     claudeAuth: claudeAuthView(ctx, latest),
     planChange: await planChangeView(ctx, config, latest, plans),
@@ -680,6 +682,7 @@ export async function readSettings(ctx) {
     modelChoices: choicesFromCatalog(catalog),
     xlsxRequired: config.reports?.xlsx?.required === true,
     editorReview: config.coverLetter?.editorReview !== false,
+    autoLetters: autoLetterSettings(config),
     hubPort: Number(config.hub?.port || 4747),
   };
 }
@@ -843,6 +846,8 @@ export async function testModel(ctx, config, form) {
   const entry = findModel(catalog, String(form.model || ''));
   if (!entry) throw new HubInputError('Pick a model from the registry to test');
   if (ctx.letterJobs?.busy?.()) throw new ModelTestBusyError('A cover letter is generating; test the model after it finishes');
+  const lettersLock = await readLockStatus(lettersLockPath(ctx.root), ctx.pidAlive, ctx.io).catch(() => ({ locked: false }));
+  if (lettersLock.locked) throw new ModelTestBusyError(`Automatic cover letters hold the letters lock (PID ${lettersLock.pid}); test the model after they finish`);
   const lock = await acquireRunLock(ctx.runManager.lockPath, { pidAlive: ctx.pidAlive });
   if (!lock.acquired) throw new ModelTestBusyError(`The nightly run holds the run lock${lock.pid ? ` (PID ${lock.pid})` : ''}; test the model after it finishes`);
   const now = () => ctx.now().toISOString();
@@ -972,5 +977,35 @@ export async function saveAssignments(ctx, form) {
     return true;
   }, { fs: ctx.io, pidAlive: ctx.pidAlive });
   return values;
+}
+
+// ---- automatic cover letters (src/auto-letters.mjs)
+
+// The latest automatic pass: running (the letters lock is held by a live process) or finished, with the
+// postings still pending while it runs.
+export async function autoLettersView(ctx) {
+  const status = await readLettersStatus(ctx.root, ctx.io);
+  if (!status) return null;
+  const lock = await readLockStatus(lettersLockPath(ctx.root), ctx.pidAlive, ctx.io).catch(() => ({ locked: false }));
+  const running = status.state === 'running' && lock.locked;
+  const finished = new Set([...(status.generated || []), ...(status.failed || [])].map(item => item.jobId));
+  return {
+    ...autoLetterSummary(status), state: running ? 'running' : status.state === 'running' ? 'interrupted' : status.state, running,
+    current: running ? status.current : null,
+    pending: running ? (status.planned || []).map(item => item.jobId).filter(id => !finished.has(id)) : [],
+    done: (status.generated || []).length + (status.failed || []).length, generatedList: status.generated || [], failedList: status.failed || [],
+  };
+}
+
+export async function saveAutoLetters(ctx, form) {
+  const enabled = form.autoGenerate === 'on' || form.autoGenerate === 'true' || form.autoGenerate === true;
+  const max = Number(form.maxPerRun);
+  if (!Number.isInteger(max) || max < 0 || max > 50) throw new HubInputError('Letters per run must be a whole number from 0 to 50');
+  await updateConfigFile(ctx.configPath, config => {
+    config.coverLetter = config.coverLetter && typeof config.coverLetter === 'object' ? config.coverLetter : {};
+    config.coverLetter.autoGenerate = { enabled, maxPerRun: max };
+    return true;
+  }, { fs: ctx.io, pidAlive: ctx.pidAlive });
+  return { enabled, maxPerRun: max };
 }
 

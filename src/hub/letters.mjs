@@ -67,7 +67,7 @@ function withUsageRecording(ctx, engine) {
     await updateAvailabilityInHub(ctx, record => markModelUsed(record, engine.model, { resolvedId: response?.scoringModel || null, at: ctx.now().toISOString() })).catch(error => console.error(`[cover-letter] could not record model availability: ${error?.message || error}`));
     if (response?.usage?.models?.length) {
       const purpose = String(prompt || '').startsWith('EDITOR REVIEW') ? 'editor' : 'letter';
-      const entries = usageEntries(response.usage, { purpose, at: ctx.now().toISOString(), source: 'hub' });
+      const entries = usageEntries(response.usage, { purpose, at: ctx.now().toISOString(), source: ctx.usageSource || 'hub' });
       await appendUsage(usagePath(ctx.root), entries, { now: ctx.now(), io: ctx.io }).catch(error => console.error(`[cover-letter] could not record usage: ${error?.message || error}`));
     }
     return response;
@@ -234,7 +234,9 @@ async function withQuotaPolicy(ctx, config, engineChoice, attempt) {
   }
 }
 
-export async function generateLetter(ctx, { date, jobId, trackId, company, engine: engineChoice = null }) {
+// strict (automatic letters): a draft that does not parse into a valid letter counts as a failure of that
+// chain step, so the next step is tried; the manual panel keeps such a draft for editing.
+export async function generateLetter(ctx, { date, jobId, trackId, company, engine: engineChoice = null, strict = false }) {
   const config = await ctx.loadConfig();
   const readiness = await ctx.letterStore.readiness();
   if (!readiness.ready) throw new HubInputError(`Cover-letter material is incomplete (${readiness.missing.join(', ')}); upload it under Settings first`);
@@ -253,7 +255,11 @@ export async function generateLetter(ctx, { date, jobId, trackId, company, engin
   // An editor stage with no assignment of its own (the local_only placeholder) reviews with whichever engine
   // wrote the draft, including a ladder step it moved to.
   const reviewEngines = editorPlan && editorPlan.entries.some(entry => entry.engine) ? editorPlan.entries.map(entry => letterEngineFor(ctx, config, entry)) : null;
-  const generated = await withStageChain(ctx, config, draftPlan, engine => generateCoverLetter({ engine, reviewEngines, inputs: { playbook, samples, track, resumeText: text, job, graduation, company: salutationCompany }, review, io: ctx.io }));
+  const generated = await withStageChain(ctx, config, draftPlan, async engine => {
+    const result = await generateCoverLetter({ engine, reviewEngines, inputs: { playbook, samples, track, resumeText: text, job, graduation, company: salutationCompany }, review, io: ctx.io });
+    if (strict && (!result.ok || !result.paragraphs?.length)) throw new Error(`the draft from ${engine.model || engine.id} did not parse into a letter (${(result.issues || []).map(issue => issue.message || issue.kind || issue).slice(0, 2).join('; ') || 'no paragraphs'})`);
+    return result;
+  });
   const leading = [...draftPlan.notes, ...(editorPlan?.notes || []), ...generated.chainNotes, ...(generated.downgradeNote ? [generated.downgradeNote] : [])];
   const result = { ...generated.result, editorNotes: [...leading, ...(generated.result.editorNotes || [])], ...(generated.downgradeNote ? { downgradeNote: generated.downgradeNote } : {}) };
   return {
@@ -276,13 +282,14 @@ export async function oneClickLetter(ctx, { date, jobId, engine = null }) {
   const draft = await generateLetter(ctx, { date, jobId, trackId: null, company: company.name, engine });
   const saved = await saveLetter(ctx, {
     date, jobId, trackId: draft.track.id, company: draft.company, paragraphs: draft.paragraphs,
-    engine: draft.engine, model: draft.model, issues: draft.issues || [], editorNotes: draft.editorNotes || [], samplesUsed: draft.samplesUsed || [],
+    engine: draft.engine, model: draft.model, effort: draft.effort, reviewEngine: draft.reviewEngine, reviewModel: draft.reviewModel, reviewEffort: draft.reviewEffort,
+    issues: draft.issues || [], editorNotes: draft.editorNotes || [], samplesUsed: draft.samplesUsed || [],
   });
   return { downloadUrl: saved.downloadUrl, openUrl: `/letters/${date}/${saved.slug}`, pdf: saved.pdf, company: draft.company, track: draft.track, wordCount: saved.wordCount, engine: draft.engine, model: draft.model, downgradeNote: draft.downgradeNote || null };
 }
 
 // Persists edited paragraphs, renders the PDF, and records everything needed to reopen or re-download.
-export async function saveLetter(ctx, { date, jobId, trackId, company, paragraphs, engine, model, issues = [], editorNotes = [], samplesUsed = [] }) {
+export async function saveLetter(ctx, { date, jobId, trackId, company, paragraphs, engine, model, effort = null, reviewEngine = null, reviewModel = null, reviewEffort = null, source = 'manual', issues = [], editorNotes = [], samplesUsed = [] }) {
   const config = await ctx.loadConfig();
   const { profile } = await ctx.letterStore.readiness();
   if (!String(profile.name || '').trim()) throw new HubInputError('Add your name under Settings before downloading a letter');
@@ -301,7 +308,8 @@ export async function saveLetter(ctx, { date, jobId, trackId, company, paragraph
   try {
     saved = await ctx.letterStore.saveLetter({ date, company: companyName, markdown: letter.markdown, meta: {
       jobId: id, jobTitle: job.title, jobUrl: job.url, company: companyName, track: track.id, trackLabel: track.label,
-      engine: engine || 'unknown', model: model || 'unknown', paragraphs: body, issues, editorNotes, samplesUsed, wordCount: body.join(' ').split(/\s+/).filter(Boolean).length,
+      engine: engine || 'unknown', model: model || 'unknown', effort: effort || null, reviewEngine: reviewEngine || null, reviewModel: reviewModel || null, reviewEffort: reviewEffort || null, source,
+      paragraphs: body, issues, editorNotes, samplesUsed, wordCount: body.join(' ').split(/\s+/).filter(Boolean).length,
       pdfFileName, createdAt: now.toISOString(), timeZone,
     } });
   } catch (error) {

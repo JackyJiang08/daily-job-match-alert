@@ -358,7 +358,21 @@ test('a European gender marker in the title rules the posting out as non-US befo
     ['Data Engineer (H/F)', 'title marker: (H/F)'],
     ['Machine Learning Engineer (m/f/d) - Berlin', 'title marker: (m/f/d)'],
   ]);
-  assert.deepEqual(result.jobs.map(job => job.title), ['ML Engineer (C/C++)', 'Data Analyst (Remote)'], '"I/II" fails as a level suffix, the others pass');
+  assert.deepEqual(result.jobs.map(job => job.title), ['Data Analyst I/II', 'ML Engineer (C/C++)', 'Data Analyst (Remote)'], 'a level range starting at one is not a level suffix; the others pass too');
   assert.equal(result.bySource[0].location, 5);
+});
+
+test('a level range that starts at one is not excluded and reads as entry level; a lone II or III is still excluded', () => {
+  const settings = prefilterSettings({});
+  for (const title of ['Data Analyst I/II', 'Software Engineer I-II', 'Data Scientist I or II', 'Data Analyst 1/2', 'Machine Learning Engineer I - III', 'Data Engineer I–II, Platform']) {
+    assert.equal(titleRule(ats(title), settings), null, title);
+    assert.equal(detectEarlyCareer({ title }).level, 'entry_level', title);
+  }
+  assert.deepEqual(detectEarlyCareer({ title: 'Data Analyst I/II' }), { level: 'entry_level', signal: 'level I/II' });
+  assert.equal(detectEarlyCareer({ title: 'Data Analyst I or II', description: 'Open to recent graduates.' }).level, 'new_grad');
+  assert.equal(titleRule(ats('Data Analyst II'), settings), 'level suffix: II');
+  assert.equal(titleRule(ats('Data Engineer III'), settings), 'level suffix: III');
+  assert.equal(titleRule(ats('Data Analyst II/III'), settings), 'level suffix: II', 'a range above level one is still senior');
+  assert.equal(titleRule(ats('Senior Data Analyst I/II'), settings), 'exclude: senior', 'other exclusions still apply');
 });
 

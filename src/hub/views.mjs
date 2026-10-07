@@ -6,7 +6,7 @@ import { formatCount, formatDateLabel, formatElapsed, formatLocalDateTime, forma
 import { planLabel } from '../engines/quota.mjs';
 import { USAGE_PURPOSES, describeTotals, formatTokens } from '../engines/usage.mjs';
 import { htmlEscape } from '../utils.mjs';
-import { LETTER_STYLES, coverLetterSettingsSection } from './letter-views.mjs';
+import { LETTER_STYLES, autoLettersSettingsCard, coverLetterSettingsSection } from './letter-views.mjs';
 import { MODEL_SETTINGS_STYLES, assignmentsForm, settingsTabs, subscriptionsAndModels } from './model-settings-views.mjs';
 
 export const HUB_TITLE = 'Daily Job Match Alert Hub';
@@ -443,6 +443,25 @@ function usageRows(usage) {
   return `<dt>Usage (7 days)</dt><dd id="quota-usage">${htmlEscape(describeTotals(usage.total))}<ul class="plain-list">${models}</ul><ul class="plain-list">${purposes}</ul><span class="mono" id="quota-usage-nights">${nights}</span> <span class="muted">(input + output tokens per night)</span></dd>`;
 }
 
+// The automatic cover-letter pass after the latest run: running or finished, counts, engines, and usage.
+function autoLettersCard(auto, timeZone) {
+  if (!auto) return '';
+  const settings = auto.settings || {};
+  const config = `${settings.enabled === false ? 'Off' : `On · up to ${Number(settings.maxPerRun ?? 8)} per run`} <a href="/settings?tab=letters#auto-letters">Settings</a>`;
+  if (!auto.date) return `<article class="card" id="auto-letters-card"><h2>Automatic Cover Letters</h2><dl class="kv"><dt>Setting</dt><dd>${config}</dd><dt>Last pass</dt><dd><span class="muted">None yet</span></dd></dl></article>`;
+  const state = auto.running ? `<span class="badge badge-good" data-badge="letters-running">Running</span> ${Number(auto.done)} of ${Number(auto.planned)} done` : auto.state === 'stopped' ? '<span class="badge badge-warn" data-badge="letters-stopped">Stopped</span>' : auto.state === 'interrupted' ? '<span class="badge badge-warn" data-badge="letters-interrupted">Interrupted</span>' : '<span class="badge badge-muted" data-badge="letters-done">Done</span>';
+  const skipped = auto.skipped ? [auto.skipped.existing ? `${auto.skipped.existing} already had a letter` : '', auto.skipped.uncertain ? `${auto.skipped.uncertain} with an uncertain company` : '', auto.skipped.overLimit ? `${auto.skipped.overLimit} over the per-run limit` : ''].filter(Boolean).join(' · ') : '';
+  const usage = auto.usage?.calls ? describeTotals(auto.usage) : '—';
+  return `<article class="card" id="auto-letters-card"><h2>Automatic Cover Letters</h2><dl class="kv">
+    <dt>Setting</dt><dd>${config}</dd>
+    <dt>Last pass</dt><dd>${state} · ${htmlEscape(auto.date)} · ${htmlEscape(formatLocalDateTime(auto.finishedAt || auto.startedAt, timeZone))}</dd>
+    <dt>Letters</dt><dd id="auto-letters-counts">${Number(auto.generated)} generated · ${Number(auto.failed)} failed${skipped ? ` <span class="muted">(skipped: ${htmlEscape(skipped)})</span>` : ''}</dd>
+    <dt>Engines</dt><dd>${auto.engines?.length ? htmlEscape(auto.engines.join('; ')) : '<span class="muted">—</span>'}</dd>
+    <dt>Usage</dt><dd>${htmlEscape(usage)}</dd>
+    ${auto.stopReason ? `<dt>Stopped</dt><dd>${htmlEscape(auto.stopReason)}</dd>` : ''}
+  </dl></article>`;
+}
+
 function sourcesCard(rows, timeZone) {
   const body = rows.length
     ? `<table class="plain" id="sources-table"><tr><th>Source</th><th>Enabled</th><th>Last Success</th><th>New This Run</th><th>Status</th></tr>${rows.map(row => sourceRow(row, timeZone)).join('')}</table>`
@@ -506,6 +525,7 @@ export function statusPage({ status, timeZone }) {
     </div>
   </article>
   ${quotaCard(status.quota, timeZone)}
+  ${autoLettersCard(status.autoLetters, timeZone)}
   ${sourcesCard(status.sources || [], timeZone)}
   <article class="card"><h2>Warnings</h2><p class="muted">Last 7 report dates.</p>${status.days.length ? status.days.map(dayRow).join('') : '<p class="muted">No reports yet.</p>'}</article>
   <article class="card"><h2>Error Reports</h2>${errors}</article>`;
@@ -585,7 +605,7 @@ function engineBadge(item) {
 export function settingsPage({ settings, connections = null, timeZone, coverLetter = null, modelView = null, tab = 'models' }) {
   const active = ['models', 'pipeline', 'letters'].includes(tab) ? tab : 'models';
   const head = `<h1 class="hub-title">Settings</h1>${settingsTabs(active)}`;
-  if (active === 'letters') return `${head}${coverLetter ? coverLetterSettingsSection({ ...coverLetter, timeZone }) : '<p class="muted">Cover-letter material is not available.</p>'}`;
+  if (active === 'letters') return `${head}${autoLettersSettingsCard(settings.autoLetters)}${coverLetter ? coverLetterSettingsSection({ ...coverLetter, timeZone }) : '<p class="muted">Cover-letter material is not available.</p>'}`;
   if (active === 'pipeline') {
     const levels = ['high', 'medium', 'low'].map(level => `<label class="check"><input type="checkbox" name="acceptedMatchLevels" value="${level}"${settings.acceptedMatchLevels.includes(level) ? ' checked' : ''}> ${level.charAt(0).toUpperCase()}${level.slice(1)}</label>`).join('');
     return `${head}
