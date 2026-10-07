@@ -10,7 +10,7 @@ import { claudeUsageFromEnvelope } from '../src/engines/usage.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const capturePath = path.join(root, 'state', 'logs', 'claude-envelope-last.json');
-const synthetic = path.join(root, 'tests', 'fixtures', 'usage', 'claude-result.synthetic.json');
+const synthetic = path.join(root, 'tests', 'fixtures', 'usage', 'claude-result.json');
 const target = path.join(root, 'tests', 'fixtures', 'usage', 'claude-result.json');
 
 let capture;
@@ -30,7 +30,8 @@ const previous = JSON.parse(await fs.readFile(synthetic, 'utf8').catch(() => '{}
 const fixture = {
   note: `Recorded from a nightly run on ${capture.capturedAt} (state/logs/claude-envelope-last.json, Claude Code print mode, --output-format json). The capture keeps only bookkeeping fields; the model's answer and every session identifier were never written.`,
   envelope,
-  ...(previous.errorEnvelope ? { errorEnvelope: previous.errorEnvelope } : {}),
+  // The refusal envelope kept for the empty-usage case: structural fields and its notice text only.
+  ...(previous.errorEnvelope ? { errorEnvelope: { ...redactEnvelope(previous.errorEnvelope), ...(typeof previous.errorEnvelope.result === 'string' ? { result: previous.errorEnvelope.result } : {}), ...(previous.errorEnvelope.api_error_status ? { api_error_status: previous.errorEnvelope.api_error_status } : {}) } } : {}),
 };
 await fs.writeFile(target, `${JSON.stringify(fixture, null, 2)}\n`);
 console.log(`Wrote ${path.relative(root, target)}: models ${usage.models.map(item => item.model).join(', ')}`);

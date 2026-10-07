@@ -15,8 +15,8 @@ import { applySubscriptionMatching } from '../src/subscription-match.mjs';
 import { buildHtml, runDetailsView } from '../src/report.mjs';
 
 const fixtures = new URL('./fixtures/usage/', import.meta.url);
-// Synthetic: written from the CLI's field names, not a recorded successful reply (see its note).
-const claudeFixture = JSON.parse(await fs.readFile(new URL('claude-result.synthetic.json', fixtures), 'utf8'));
+// Recorded from the 2026-10-06 nightly run (see its note): usage and modelUsage only, no identifiers.
+const claudeFixture = JSON.parse(await fs.readFile(new URL('claude-result.json', fixtures), 'utf8'));
 const codexExec = await fs.readFile(new URL('codex-exec.jsonl', fixtures), 'utf8');
 const codexRollout = await fs.readFile(new URL('codex-rollout.jsonl', fixtures), 'utf8');
 const NOW = new Date('2026-10-06T01:00:00Z');
@@ -124,12 +124,11 @@ test('full-time early-career titles are marked entry_level, a new-grad signal in
 
 test('Claude usage is read from the recorded result envelope and summed by the full model id, never an alias', () => {
   const usage = claudeUsageFromEnvelope(claudeFixture.envelope);
-  assert.match(claudeFixture.note, /^SYNTHETIC/);
+  assert.match(claudeFixture.note, /^Recorded from a nightly run/);
   assert.deepEqual(usage, {
     engine: 'claude', effort: null, parseEmpty: false,
     models: [
-      { model: 'claude-fable-5-1', input: 18, output: 3874, cacheRead: 14120, cacheCreation: 9312, reasoning: 0 },
-      { model: 'claude-haiku-4-5-20251001', input: 412, output: 23, cacheRead: 0, cacheCreation: 0, reasoning: 0 },
+      { model: 'claude-fable-5-1', input: 2, output: 3849, cacheRead: 4208, cacheCreation: 18722, reasoning: 1674 },
     ],
   });
   // The structured-output path carries the same usage beside the results.
@@ -145,14 +144,18 @@ test('Claude usage is read from the recorded result envelope and summed by the f
   const entries = [
     ...usageEntries(usage, { purpose: 'review', at }),
     ...usageEntries(usage, { purpose: 'review', at }),
-    ...usageEntries(claudeUsageFromEnvelope({ modelUsage: { 'claude-fable-5-1[1m]': { inputTokens: 1, outputTokens: 2 } } }), { purpose: 'supplemental', at }),
+    ...usageEntries(claudeUsageFromEnvelope({ modelUsage: { 'claude-fable-5-1[1m]': { inputTokens: 1, outputTokens: 2 }, 'claude-haiku-4-5-20251001': { inputTokens: 412, outputTokens: 23 } } }), { purpose: 'supplemental', at }),
   ];
   const summary = summarizeUsage(entries);
   assert.deepEqual(Object.keys(summary.byModel).sort(), ['claude-fable-5-1', 'claude-fable-5-1[1m]', 'claude-haiku-4-5-20251001'], 'ids stay distinct and verbatim');
-  assert.deepEqual(summary.byModel['claude-fable-5-1'], { calls: 2, input: 36, output: 7748, cacheRead: 28240, cacheCreation: 18624, reasoning: 0, engine: 'claude', effort: null });
+  assert.deepEqual(summary.byModel['claude-fable-5-1'], { calls: 2, input: 4, output: 7698, cacheRead: 8416, cacheCreation: 37444, reasoning: 3348, engine: 'claude', effort: null });
   assert.deepEqual(Object.keys(summary.byPurpose).sort(), ['review', 'supplemental']);
-  assert.equal(summary.total.calls, 5);
-  assert.equal(describeTotals(summary.byModel['claude-fable-5-1']), '36 in · 7.7k out · 28k cache read · 19k cache write (2 calls)');
+  assert.equal(summary.total.calls, 4);
+  assert.equal(describeTotals(summary.byModel['claude-fable-5-1']), '4 in · 7.7k out · 8.4k cache read · 37k cache write · 3.3k reasoning (2 calls)');
+  // The recording carries no identifier of any kind.
+  const recorded = JSON.stringify(claudeFixture);
+  assert.doesNotMatch(recorded, /session_id|"uuid"|\/Users\/|@[a-z0-9-]+\.[a-z]{2,}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  assert.deepEqual(Object.keys(claudeFixture.envelope).sort(), ['duration_api_ms', 'duration_ms', 'fast_mode_state', 'is_error', 'modelUsage', 'num_turns', 'stop_reason', 'subtype', 'terminal_reason', 'total_cost_usd', 'type', 'usage']);
 });
 
 test('Codex usage is read from the exec stream and from rollout token counts, with the model id and reasoning effort', () => {
@@ -187,7 +190,7 @@ test('the matcher tags review and supplemental calls; the usage file keeps 35 da
   });
   const jobs = [1, 2].map(index => ({ url: `https://example.com/jobs/${index}`, title: `Analyst ${index}`, company: 'Acme', description: 'x', bestScore: 50, scores: { data: 50 }, scoreDetails: { data: { roleRelevance: 25 } }, blockers: [], reasons: [], gaps: [] }));
   await applySubscriptionMatching(jobs, [{ id: 'data', label: 'Data', text: 'resume' }], {}, { engine: 'claude', model: 'fable', batchSize: 2, warnings: [], quotaEvents: [], makeEngine, now: () => NOW, sleep: async () => {}, retryDelayMs: 0, recordUsage: (purpose, usage) => recorded.push([purpose, usage.models.map(item => item.model)]) });
-  assert.deepEqual(recorded, [['review', ['claude-fable-5-1', 'claude-haiku-4-5-20251001']], ['supplemental', ['claude-fable-5-1', 'claude-haiku-4-5-20251001']]]);
+  assert.deepEqual(recorded, [['review', ['claude-fable-5-1']], ['supplemental', ['claude-fable-5-1']]]);
 
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'usage-test-'));
   try {
@@ -200,11 +203,11 @@ test('the matcher tags review and supplemental calls; the usage file keeps 35 da
     const record = await readUsage(file);
     assert.equal(USAGE_RETENTION_DAYS, 35);
     assert.equal(record.entries.some(entry => entry.at === day(40)), false, 'entries older than 35 days are pruned on write');
-    assert.equal(record.entries.length, 3);
+    assert.equal(record.entries.length, 2);
     const window = usageWindow(record, { now: NOW, timeZone: 'America/Chicago', days: 7 });
     assert.equal(window.nights.length, 7);
-    assert.deepEqual(window.nights.map(night => night.calls), [0, 0, 0, 0, 2, 0, 1]);
-    assert.deepEqual(Object.keys(window.byModel).sort(), ['claude-fable-5-1', 'claude-haiku-4-5-20251001', 'gpt-6-astra']);
+    assert.deepEqual(window.nights.map(night => night.calls), [0, 0, 0, 0, 1, 0, 1]);
+    assert.deepEqual(Object.keys(window.byModel).sort(), ['claude-fable-5-1', 'gpt-6-astra']);
     assert.equal(window.byModel['gpt-6-astra'].effort, 'medium');
     assert.deepEqual(Object.keys(window.byPurpose).sort(), ['letter', 'review']);
   } finally {
@@ -217,12 +220,11 @@ test('Run Details shows this run\'s usage totals by model and purpose; the revie
   const usage = summarizeUsage([...usageEntries(claudeUsageFromEnvelope(claudeFixture.envelope), { purpose: 'review', at }), ...usageEntries(codexUsageFromJsonl(codexExec, { model: 'gpt-6-astra', effort: 'medium' }), { purpose: 'supplemental', at })]);
   const meta = { date: '2026-10-05', resumeTracks: [], warnings: [], usage };
   const row = runDetailsView([], meta, []).rows.find(item => item.term === 'Subscription usage');
-  assert.equal(row.detail, '230k in · 4.0k out · 243k cache read · 9.3k cache write (3 calls)');
+  assert.equal(row.detail, '229k in · 3.9k out · 233k cache read · 19k cache write · 1.7k reasoning (2 calls)');
   assert.deepEqual(row.items, [
-    'claude-fable-5-1: 18 in · 3.9k out · 14k cache read · 9.3k cache write (1 call)',
-    'claude-haiku-4-5-20251001: 412 in · 23 out (1 call)',
+    'claude-fable-5-1: 2 in · 3.8k out · 4.2k cache read · 19k cache write · 1.7k reasoning (1 call)',
     'gpt-6-astra (medium effort): 229k in · 54 out · 229k cache read (1 call)',
-    'review: 430 in · 3.9k out · 14k cache read · 9.3k cache write (2 calls)',
+    'review: 2 in · 3.8k out · 4.2k cache read · 19k cache write · 1.7k reasoning (1 call)',
     'supplemental: 229k in · 54 out · 229k cache read (1 call)',
   ]);
   assert.equal(runDetailsView([], { ...meta, usage: summarizeUsage([]) }, []).rows.some(item => item.term === 'Subscription usage'), false, 'no calls, no row');

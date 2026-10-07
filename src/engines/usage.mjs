@@ -33,7 +33,7 @@ export function claudeUsageFromEnvelope(parsed) {
     const entry = {
       model: id,
       input: number(stats.inputTokens), output: number(stats.outputTokens),
-      cacheRead: number(stats.cacheReadInputTokens), cacheCreation: number(stats.cacheCreationInputTokens), reasoning: 0,
+      cacheRead: number(stats.cacheReadInputTokens), cacheCreation: number(stats.cacheCreationInputTokens), reasoning: number(stats.thinkingTokens),
     };
     if (entry.input + entry.output + entry.cacheRead + entry.cacheCreation > 0) models.push(entry);
   }

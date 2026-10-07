@@ -1,0 +1,101 @@
+{
+  "note": "Recorded from a nightly run on 2026-10-07T01:13:00.032Z (state/logs/claude-envelope-last.json, Claude Code print mode, --output-format json). The capture keeps only bookkeeping fields; the model's answer and every session identifier were never written. errorEnvelope: a real refusal envelope from the hub log, cut to the same structural fields plus its notice text.",
+  "envelope": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "num_turns": 2,
+    "duration_ms": 53328,
+    "duration_api_ms": 53290,
+    "stop_reason": "tool_use",
+    "terminal_reason": "completed",
+    "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 18722,
+      "cache_read_input_tokens": 4208,
+      "output_tokens": 3849,
+      "output_tokens_details": {
+        "thinking_tokens": 1674
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 18722,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 3849,
+          "cache_read_input_tokens": 4208,
+          "cache_creation_input_tokens": 18722,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 18722
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard",
+      "fallback_credit": null
+    },
+    "modelUsage": {
+      "claude-fable-5-1": {
+        "inputTokens": 2,
+        "outputTokens": 3849,
+        "cacheReadInputTokens": 4208,
+        "cacheCreationInputTokens": 18722,
+        "webSearchRequests": 0,
+        "costUSD": 0.567962,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000,
+        "thinkingTokens": 1674,
+        "canonicalModel": "claude-fable-5-1",
+        "provider": "firstParty",
+        "costBasis": "list"
+      }
+    },
+    "total_cost_usd": 0.567962,
+    "fast_mode_state": "off"
+  },
+  "errorEnvelope": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": true,
+    "num_turns": 1,
+    "duration_ms": 330,
+    "duration_api_ms": 0,
+    "stop_reason": "stop_sequence",
+    "terminal_reason": "api_error",
+    "api_error_status": 429,
+    "result": "You've hit your session limit \u00b7 resets 12:30am (America/Chicago)",
+    "usage": {
+      "output_tokens_details": {
+        "thinking_tokens": 0
+      },
+      "input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "output_tokens": 0,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "",
+      "iterations": [],
+      "speed": "standard"
+    },
+    "modelUsage": {},
+    "total_cost_usd": 0,
+    "fast_mode_state": "off"
+  }
+}

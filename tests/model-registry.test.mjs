@@ -20,9 +20,8 @@ import { statusText } from '../src/hub/model-settings.mjs';
 
 const fixtures = new URL('./fixtures/', import.meta.url);
 const NOW = new Date('2026-10-06T22:00:00Z');
-// Synthetic: written from the CLI's field names (see its note); the real recording replaces it once a
-// nightly run leaves state/logs/claude-envelope-last.json.
-const envelopeFixture = JSON.parse(await fs.readFile(new URL('usage/claude-result.synthetic.json', fixtures), 'utf8'));
+// Recorded from the 2026-10-06 nightly run (usage and modelUsage only).
+const envelopeFixture = JSON.parse(await fs.readFile(new URL('usage/claude-result.json', fixtures), 'utf8'));
 
 test('the registry holds the ids checked against the installed CLIs, and older configs migrate to them', () => {
   assert.deepEqual(DEFAULT_CATALOG.filter(entry => entry.provider === 'anthropic').map(entry => [entry.id, entry.alias]), [['claude-fable-5-1', 'fable'], ['claude-opus-5-5', 'opus'], ['claude-sonnet-5-5', 'sonnet'], ['claude-haiku-4-5', 'haiku']]);
@@ -64,7 +63,7 @@ test('the Claude CLI receives the registry alias, and the id it actually ran is 
     const response = await engine.generateText('Reply with OK', {});
     assert.equal(calls.at(-1)[calls.at(-1).indexOf('--model') + 1], 'fable', 'the CLI is given the alias, so it picks the current release');
     assert.equal(response.scoringModel, 'claude-fable-5-1', 'the id with the most output tokens in modelUsage');
-    assert.deepEqual(response.usage.models.map(item => item.model), ['claude-fable-5-1', 'claude-haiku-4-5-20251001']);
+    assert.deepEqual(response.usage.models.map(item => item.model), ['claude-fable-5-1'], 'the recorded run used one model');
     const record = normalizeAvailability(null);
     markModelUsed(record, engine.model, { resolvedId: response.scoringModel, at: NOW.toISOString() });
     markModelUsed(record, 'claude-haiku-4-5', { resolvedId: 'claude-haiku-4-5-20251001', at: NOW.toISOString() });
@@ -78,7 +77,7 @@ test('the Claude CLI receives the registry alias, and the id it actually ran is 
     let captured = null;
     for (let attempt = 0; attempt < 20 && !captured; attempt += 1) { captured = await fs.readFile(envelopeLog, 'utf8').catch(() => null); if (!captured) await new Promise(resolve => setTimeout(resolve, 10)); }
     assert.ok(captured, 'the redacted envelope is written');
-    assert.deepEqual(Object.keys(JSON.parse(captured).envelope.modelUsage), ['claude-fable-5-1', 'claude-haiku-4-5-20251001']);
+    assert.deepEqual(Object.keys(JSON.parse(captured).envelope.modelUsage), ['claude-fable-5-1']);
     assert.doesNotMatch(captured, /SECRET-SESSION|SECRET-UUID|MODEL ANSWER TEXT|structured_output/);
     assert.deepEqual(Object.keys(redactEnvelope({ result: 'x', session_id: 'y', usage: {}, modelUsage: {}, type: 'result' })).sort(), ['modelUsage', 'type', 'usage']);
   } finally {
