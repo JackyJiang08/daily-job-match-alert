@@ -53,7 +53,7 @@ disabled; do not expand them unless a task says so.
   After pulling new code run `npm run hub:restart` (launchctl kickstart).
 ## Sources, baselines, and the review budget
 - Built-in sources live in src/collectors/ (SimplifyJobs, community GitHub
-  lists via catalog.mjs, Hacker News hiring, RemoteOK, email files) and ATS
+  lists via catalog.mjs, Hacker News hiring, RemoteOK, search discovery, email files) and ATS
   boards discovered from posting URLs (ats-boards.mjs, registry in
   state/ats-boards.json; quiet after 30 days without new postings → weekly
   polls; dormant after 7 consecutive failures).
@@ -141,6 +141,29 @@ disabled; do not expand them unless a task says so.
   source 'auto-letters'. Letter records keep engine/model/effort for draft and
   editor (passLine in the footer and Editor notes). The letters status line
   goes to stderr: stdout is the run summary JSON that chaos parses.
+- Seeds and search discovery: config.sources.atsBoards.seeds (applySeedBoards:
+  { greenhouse|lever|ashby|smartrecruiters: id }, { workday: tenant/site, host }
+  (host required), key strings or URLs; origin 'seed', then the usual baseline /
+  quiet / dormant rules, never re-enabled). SmartRecruiters is a board kind
+  (public Posting API, country=us, newest first; enrich.mjs smartRecruitersApiUrl
+  detail endpoint; fixtures tests/fixtures/ats/smartrecruiters-*.json).
+  src/collectors/search-discovery.mjs (sources.searchDiscovery, default off):
+  brave (X-Subscription-Token) or tavily, key ONLY in private/search.json and one
+  request header (scrubbed from error text; never logged); no key → one info
+  line, no source row. rotateQueries(pool, now, queriesPerRun 12) by local
+  dayOfYear; every query counted in state/search-usage.json before it is sent,
+  monthlyQueryCap 400 → stop + warning. Results on greenhouse/lever/ashby/
+  workday/smartrecruiters → options.searchBoards → registered (origin
+  'search_discovery') and woken past the quiet wait (wakeKeys); icims and other
+  pages → candidates (sourceKind search_discovery: title family required,
+  job-board hosts and listing pages dropped). No page_age → postedAt null
+  (undated). dedupe/dedupeByFinalUrl drop the search copy when a list or board
+  has the posting (debug.searchDuplicates). Tests never call a real search API
+  (searchFetchImpl / readSearchKey injectable). The Muse was not integrated: its
+  terms require a registered app (checked 2026-10-09).
+- US evidence in a JD (usEvidenceInDescription) also counts a standalone
+  uppercase US / U.S. / USA, except lowercase "us" and all-caps phrases such as
+  "JOIN US".
 - Prefilter level ranges: LEVEL_ONE_RANGE ("I/II", "I-II", "I or II", "1/2",
   "I - III") bypasses the II/III/IV suffix rule and reads as entry level.
 - Stage assignments (src/engines/assignments.mjs): stageAssignments(config) →

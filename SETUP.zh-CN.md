@@ -6,7 +6,7 @@
 
 默认每天 **20:00 America/Chicago** 由 launchd 触发一次，无人值守：
 
-1. **采集。** 来源包括公开 GitHub 榜单（SimplifyJobs、Jobright、vanshb03、Zapply、zshah101）、当月的 Hacker News "Who is hiring" 帖、RemoteOK feed、由此前岗位链接自动发现的 Greenhouse / Lever / Ashby / Workday 公开 job board 接口，以及放进 `intake/eml` 的 `.eml` 提醒邮件。每个 board 每晚只轮询一次，带固定 user agent，并使用 ETag / If-Modified-Since 条件请求。
+1. **采集。** 来源包括公开 GitHub 榜单（SimplifyJobs、Jobright、vanshb03、Zapply、zshah101）、当月的 Hacker News "Who is hiring" 帖、RemoteOK feed、由此前岗位链接（以及手动种子或可选的搜索发现）找到的 Greenhouse / Lever / Ashby / Workday / SmartRecruiters 公开 job board 接口，以及放进 `intake/eml` 的 `.eml` 提醒邮件。每个 board 每晚只轮询一次，带固定 user agent，并使用 ETag / If-Modified-Since 条件请求。
 2. **去重。** URL 规范化（去追踪参数、解析跳转）后与 `state/state.json` 比对，同一岗位即使三个来源都列出也只出现一次。
 3. **抓 JD。** board 接口直接给出完整正文；其他链接只抓取一次，Workday 页面改走租户公开的 JSON 接口。抓不到的岗位后续夜晚重试，被拒绝或已下线的直接关闭。抓取后若拿到精确到分钟的发布时间（board 接口、带时分秒的 JSON-LD `datePosted`），会重新严格套用回看窗口，超出者不评分、不写 seen；天级来源（榜单的 "3d"、Workday 的 "Posted 3 Days Ago"）换算成发布日期，并按该日当地时间 23:59 参与所有窗口判断：昨天发布的整天都算新鲜，"3 天前" 连积压队列也进不了。来源完全不给日期的岗位（如 Oracle Cloud 招聘页）才以首次发现时间为准，报告与 xlsx 的 Posted At 显示 "Unknown (found Sep 26)"，评审排在所有有日期岗位之后，连续两晚仍无日期则不再顺延。Run Details 按来源统计精确 / 天级 / 无日期的条数。Workday 的实体名（如 `100000 Motorola Solutions, Inc.`）优先换成榜单或注册表里的公司标签，没有时做清洗；旧报告在渲染时同样清洗。报告卡片与 xlsx 的 Posted At 只在来源给出时间时显示时间，天级来源只显示日期并在悬停/Notes 注明 date only。
 4. **硬过滤。** 两条规则由代码强制执行，与模型无关：地点必须在美国（地点字段与 JD 都没有美国州名或城市、"United States"、"US-based" 或美国工作资格的说明时，卡片标记 `US location not stated`，投递前确认是否可在美国工作），岗位要求的毕业窗口必须与 `preferences.graduationDate` 相符。
@@ -70,13 +70,19 @@ Cover letter 由同一个订阅引擎根据你的 playbook、最多三封样稿�
 | Lever boards | `GET api.lever.co/v0/postings/{company}?mode=json`（`createdAt`，支持 ETag） | Lever 官方公开 Postings API，无需认证 | 同上 |
 | Ashby boards | `GET api.ashbyhq.com/posting-api/job-board/{org}`（`publishedAt`） | Ashby 官方公开 Job Posting API，无需认证 | 同上 |
 | Workday 招聘站 | `POST {tenant}.{wdN}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs`，每页 20 条，只翻到回看窗口之外为止；JD 来自单岗位 CXS 接口 | 公开招聘页自身加载的同一份无认证 JSON；只读、每晚一次短翻页、固定 user agent | 同上 |
+| SmartRecruiters boards | `GET api.smartrecruiters.com/v1/companies/{company}/postings?country=us`，每页 100 条、按发布时间倒序，只翻到回看窗口之外为止；JD 来自单岗位详情接口 | SmartRecruiters 公开 Posting API，无需 key | 自动发现、种子或搜索发现 |
+| 搜索发现（Brave 或 Tavily） | 每晚按轮换 query 池最多 `queriesPerRun`（12）次搜索，限美国、限过去一天 | 服务商 API，key 由你放进 `private/search.json`（gitignore）；月度硬上限保证不超出免费额度 | 默认关闭（`sources.searchDiscovery`）；没有 key 不运行 |
 | `intake/eml` 的 `.eml` 文件 | 每晚本地解析 | 你自己放进去的文件 | 采集器运行中，但目前没有邮件被投递进去 |
 | Himalaya 邮箱文件夹 | `himalaya` 只列 envelope 与 `--preview` 读取 | 你订阅的官方提醒邮件；不标记、不移动、不发送 | 已实现，未启用（`sources.himalaya.enabled: false`） |
 | career-ops scan history | [career-ops](https://github.com/santifer/career-ops) 写出的本地 TSV | 你自己的本地文件 | 可选（`sources.careerOps`） |
 
 每个来源在 `sources` 下都有独立的 `enabled` 开关；每个新榜单、feed 或 board 首次接入都先走基线：第一次采集只把发布时间早于回看窗口（以及没有发布时间）的岗位记为已见，窗口内的岗位立即按正常流程去重、评分；同一晚被其他来源列出的岗位绝不会被基线吞掉。因此开启一个来源既不会灌满报告，也不会漏掉真正的新岗位。榜单返回 200 但解析出 0 行会触发格式变更 warning；单个来源失败只记 warning，其余照常；Run Details 与 Status 页的 Sources 表各有一行。多榜单同一岗位只出现一次，来源字段记录全部命中的榜单。
 
-**board 如何被发现。** 每晚管道扫描本轮采集到的所有 URL，识别 Greenhouse / Lever / Ashby / Workday 岗位，并把对应 board 记入 `state/ats-boards.json`（含首次发现日期、揭示它的来源、最近一次成功轮询与岗位数）。也可以手动追加（`{ "url": "https://job-boards.greenhouse.io/examplecorp" }`，或 `greenhouse:` / `lever:` / `ashby:` / `workday:tenant/site` 形式的 key），或用 `"enabled": false` 禁用。
+**board 如何被发现。** 每晚管道扫描本轮采集到的所有 URL，识别 Greenhouse / Lever / Ashby / Workday 岗位，并把对应 board 记入 `state/ats-boards.json`（含首次发现日期、揭示它的来源、最近一次成功轮询与岗位数）。也可以手动追加（`{ "url": "https://job-boards.greenhouse.io/examplecorp" }`，或 `greenhouse:` / `lever:` / `ashby:` / `smartrecruiters:` / `workday:tenant/site` 形式的 key），或用 `"enabled": false` 禁用。
+
+**种子 board。** `sources.atsBoards.seeds` 用来手动加入已知公司的 board：`{ "greenhouse": "<token>" }`、`{ "lever": "<company>" }`、`{ "ashby": "<org>" }`、`{ "smartrecruiters": "<company>" }`，或 `{ "workday": "<tenant>/<site>", "host": "<tenant>.wdN.myworkdayjobs.com" }`（Workday 必须写 host，wdN 数据中心无法推断），可附 `company` 名称。种子只注册一次（origin 为 `seed`），之后与自动发现的 board 完全一样：首次轮询做基线，30 天无新岗位转 quiet，连续 7 次失败转 dormant。与 `boards` 不同，种子不会把已停用的 board 重新打开。
+
+**搜索发现。** `src/collectors/search-discovery.mjs`，默认关闭。打开 `sources.searchDiscovery.enabled`，选择 `provider`（`brave`，以 `X-Subscription-Token` 发送；或 `tavily`），把 key 写进 `private/search.json`：`{ "brave": "<key>" }` 或 `{ "tavily": { "apiKey": "<key>" } }`。key 只出现在一个请求头里，绝不写入代码、日志、warning、state 或报告（服务商错误文本中的 key 会被替换掉）。没有 key 时不运行，只记一条 info。每晚从 query 池按 dayOfYear 取连续 `queriesPerRun` 个（默认池：new grad data analyst 2027、entry level data scientist 2027、new graduate machine learning engineer、data analyst I hiring 2027、junior data scientist remote、new grad business analyst 2027、associate data engineer new grad、2027 graduate data science program、entry level AI engineer 2027），限美国、限过去一天。每次请求发出前先计入 `state/search-usage.json`；达到 `monthlyQueryCap`（默认 400）即停止并记 warning，避免超出免费额度被扣费。结果属于 Greenhouse / Lever / Ashby / Workday / SmartRecruiters 时，把对应 board 注册进注册表（origin 为 `search_discovery`，quiet 的 board 当晚也会被轮询），岗位经 ATS 接口获取完整数据；iCIMS 和其他雇主页面作为候选，标题与摘要先过预筛（要求岗位族词，招聘网站与列表页丢弃），再走基线、抓取与新鲜度规则。没有 `page_age` 的结果按无日期岗位处理，不会用当前时间填充。同一岗位若榜单或 board 也有，丢弃搜索版本并记入运行摘要的 `debug.searchDuplicates`。
 
 **首次轮询只做基线。** 某 board 第一次被轮询时，早于回看窗口的岗位写入 seen，窗口内的岗位直接评分；数量以 info 级别写进 `warnings.txt` 与 Run Details。此后每晚只处理 posted / updated 落在回看窗口内的岗位。每 board 每晚最多一次，并发受 `network.concurrency` 约束，请求头沿用 `network.userAgent`；单个 board 失败只记 warning；30 天没有新岗位的 board 标为 quiet、改为每周轮询一次，出现新岗位后自动恢复每晚；连续 7 晚失败的 board 标为 dormant 并停止轮询，直到在 Status 页点 Resume Polling。来自 board 的岗位在报告卡片上显示为 `Greenhouse · Example Corp` 等。
 
@@ -86,7 +92,8 @@ Cover letter 由同一个订阅引擎根据你的 playbook、最多三封样稿�
 |---|---|
 | LinkedIn、Indeed、Glassdoor、Handshake | 条款禁止自动化访问与抓取；有登录、限流与机器人检测，且没有公开的无认证 feed |
 | Wellfound、Work at a Startup | 岗位在登录墙之后，读取需要账号会话，本项目从不持有 |
-| Adzuna、USAJOBS | API 需要注册申请 key，本项目不使用任何 key |
+| Adzuna、USAJOBS | API 需要注册申请 key；除可选的搜索 key 外，本项目不使用 key |
+| The Muse | 公开 API 无 key 也能访问（每小时 500 次，2026-10-09 实测），但其条款要求任何使用都先注册应用，无 key 访问只限测试；结果按相关度排序，没有按日期排序或过滤 |
 
 若其中某个平台将来提供公开、无认证、合规的 feed，可按同样的采集器模式接入；在此之前，来自它们的提醒邮件是唯一规划中的途径，且只作为链接来源。
 

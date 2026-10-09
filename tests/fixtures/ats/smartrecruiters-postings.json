@@ -1,0 +1,142 @@
+{
+  "offset": 0,
+  "limit": 100,
+  "totalFound": 3,
+  "content": [
+    {
+      "id": "744000154523570",
+      "name": "Data Analyst I",
+      "uuid": "e1609dd4-258d-4d6e-b261-5b57522c411e",
+      "jobAdId": "7c0094c7-906d-43e5-b39e-feda8cdef523",
+      "defaultJobAd": true,
+      "refNumber": "REF297569N",
+      "company": {
+        "identifier": "ExampleCorp",
+        "name": "Example Corp"
+      },
+      "releasedDate": "2026-10-08T20:40:57.699Z",
+      "location": {
+        "city": "Oklahoma City",
+        "region": "OK",
+        "country": "us",
+        "remote": false,
+        "hybrid": true,
+        "fullLocation": "Oklahoma City, OK, United States"
+      },
+      "industry": {
+        "id": "consumer_goods",
+        "label": "Consumer Goods"
+      },
+      "department": {},
+      "function": {
+        "id": "sales",
+        "label": "Sales"
+      },
+      "typeOfEmployment": {
+        "id": "permanent",
+        "label": "Full-time"
+      },
+      "experienceLevel": {
+        "id": "associate",
+        "label": "Associate"
+      },
+      "visibility": "PUBLIC",
+      "ref": "https://api.smartrecruiters.com/v1/companies/ExampleCorp/postings/744000154523570",
+      "language": {
+        "code": "en",
+        "label": "English",
+        "labelNative": "English (US)"
+      }
+    },
+    {
+      "id": "744000154521839",
+      "name": "Senior Manufacturing Engineer",
+      "uuid": "82e6ef19-be88-46d7-af76-840ac7d58093",
+      "jobAdId": "94f4e9b7-9b0f-445a-97b2-13cd47be56a4",
+      "defaultJobAd": true,
+      "refNumber": "REF290674S",
+      "company": {
+        "identifier": "ExampleCorp",
+        "name": "Example Corp"
+      },
+      "releasedDate": "2026-10-08T20:10:10.562Z",
+      "location": {
+        "city": "Londonderry",
+        "region": "NH",
+        "country": "us",
+        "postalCode": "03053",
+        "remote": true,
+        "hybrid": false,
+        "fullLocation": "Londonderry, NH, United States"
+      },
+      "industry": {
+        "id": "mechanical_engineering",
+        "label": "Mechanical Or Industrial Engineering"
+      },
+      "department": {},
+      "function": {
+        "id": "business_development",
+        "label": "Business Development"
+      },
+      "typeOfEmployment": {
+        "id": "permanent",
+        "label": "Full-time"
+      },
+      "experienceLevel": {
+        "id": "associate",
+        "label": "Associate"
+      },
+      "visibility": "PUBLIC",
+      "ref": "https://api.smartrecruiters.com/v1/companies/ExampleCorp/postings/744000154521839",
+      "language": {
+        "code": "en",
+        "label": "English",
+        "labelNative": "English (US)"
+      }
+    },
+    {
+      "id": "744000154519875",
+      "name": "Machine Learning Engineer, New Grad",
+      "uuid": "ddb0db6b-6e68-4f7d-be9e-1dfb86454f84",
+      "jobAdId": "00ddd637-1f58-42f3-8595-9535fe849d70",
+      "defaultJobAd": true,
+      "refNumber": "REF298104J",
+      "company": {
+        "identifier": "ExampleCorp",
+        "name": "Example Corp"
+      },
+      "releasedDate": "2026-10-08T20:09:52.591Z",
+      "location": {
+        "city": "",
+        "country": "us",
+        "remote": true,
+        "hybrid": false,
+        "fullLocation": "Remote, , United States"
+      },
+      "industry": {
+        "id": "semiconductors",
+        "label": "Semiconductors"
+      },
+      "department": {},
+      "function": {
+        "id": "production",
+        "label": "Production"
+      },
+      "typeOfEmployment": {
+        "id": "permanent",
+        "label": "Full-time"
+      },
+      "experienceLevel": {
+        "id": "mid_senior_level",
+        "label": "Mid-Senior Level"
+      },
+      "visibility": "PUBLIC",
+      "ref": "https://api.smartrecruiters.com/v1/companies/ExampleCorp/postings/744000154519875",
+      "language": {
+        "code": "en",
+        "label": "English",
+        "labelNative": "English (US)"
+      }
+    }
+  ]
+}

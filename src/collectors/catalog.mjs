@@ -20,6 +20,7 @@ export const GITHUB_LISTS = [
 
 export const HACKER_NEWS_SOURCE = 'Hacker News Who is Hiring';
 export const REMOTEOK_SOURCE = 'RemoteOK';
+export const SEARCH_SOURCE_NAME = 'Search discovery';
 
 function rawUrl(list) {
   return `https://raw.githubusercontent.com/${list.repo}/${list.branch}/README.md`;
@@ -46,6 +47,7 @@ export function builtinSources(config) {
     ...githubLists(config).map(list => ({ id: list.id, name: list.name, enabled: list.enabled })),
     { id: 'hackerNewsHiring', name: HACKER_NEWS_SOURCE, enabled: sources.hackerNewsHiring?.enabled !== false },
     { id: 'remoteOk', name: REMOTEOK_SOURCE, enabled: sources.remoteOk?.enabled !== false },
+    { id: 'searchDiscovery', name: SEARCH_SOURCE_NAME, enabled: sources.searchDiscovery?.enabled === true },
     { id: 'emailFiles', name: 'Email files', enabled: sources.emailFiles?.enabled === true },
     { id: 'himalaya', name: 'Himalaya job-alert mailbox', enabled: sources.himalaya?.enabled === true },
     { id: 'careerOps', name: 'career-ops history', enabled: sources.careerOps?.enabled === true },

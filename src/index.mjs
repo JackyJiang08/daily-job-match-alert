@@ -13,7 +13,8 @@ import { collectGithubList } from './collectors/github-lists.mjs';
 import { collectHackerNewsHiring } from './collectors/hn-hiring.mjs';
 import { collectRemoteOk } from './collectors/remoteok.mjs';
 import { HACKER_NEWS_SOURCE, REMOTEOK_SOURCE, githubLists } from './collectors/catalog.mjs';
-import { applyConfigBoards, collectAtsBoards, discoverBoards, readRegistry, registerBoards, registryPath, withinWindow, writeRegistry } from './collectors/ats-boards.mjs';
+import { applyConfigBoards, applySeedBoards, collectAtsBoards, discoverBoards, readRegistry, registerBoards, registryPath, withinWindow, writeRegistry } from './collectors/ats-boards.mjs';
+import { SEARCH_DISCOVERY_SOURCE, SEARCH_PROVIDERS, SEARCH_SOURCE_KIND, collectSearchDiscovery, readSearchKey, searchSettings, searchUsagePath } from './collectors/search-discovery.mjs';
 import { enrichJob, enrichmentWarningMessage } from './enrich.mjs';
 import { evaluateJob, isEligible } from './match.mjs';
 import { annotateEligibility, summarizeExclusions } from './eligibility.mjs';
@@ -122,6 +123,7 @@ export async function collectEnabledSources(config, cutoff, options = {}) {
     githubList: collectGithubList,
     hackerNewsHiring: collectHackerNewsHiring,
     remoteOk: collectRemoteOk,
+    searchDiscovery: collectSearchDiscovery,
     ...options.collectors,
   };
   const sources = [];
@@ -149,6 +151,32 @@ export async function collectEnabledSources(config, cutoff, options = {}) {
     name: REMOTEOK_SOURCE, baseline: true,
     collect: () => collectors.remoteOk({ warnings, userAgent }),
   });
+  // Search discovery runs only with a key in private/search.json; without one it records an info line
+  // and stays out of the source list (no stat row, no baseline taken). ATS boards its results point at
+  // go to options.searchBoards for collectAtsBoardSources to register and poll.
+  const search = searchSettings(config);
+  if (search.enabled) {
+    const key = SEARCH_PROVIDERS.includes(search.provider)
+      ? await (options.readSearchKey || readSearchKey)(config, search.provider)
+      : { apiKey: null, reason: `provider "${search.provider}" is not one of ${SEARCH_PROVIDERS.join(', ')}` };
+    if (!key.apiKey) {
+      warnings.push(createWarning('collector', SEARCH_DISCOVERY_SOURCE, `enabled but not run: ${key.reason}; nothing was searched`, 'info'));
+    } else {
+      const entry = {
+        name: SEARCH_DISCOVERY_SOURCE, baseline: true, kind: 'search',
+        collect: async () => {
+          const result = await collectors.searchDiscovery({
+            settings: search, apiKey: key.apiKey, now: options.baseline?.now || new Date(), timeZone: config.timeZone,
+            usageFile: searchUsagePath(config), warnings, userAgent, ...(options.searchFetchImpl ? { fetchImpl: options.searchFetchImpl } : {}),
+          });
+          if (Array.isArray(options.searchBoards)) options.searchBoards.push(...(result.boards || []));
+          entry.stat = result.report || null;
+          return result.jobs;
+        },
+      };
+      sources.push(entry);
+    }
+  }
   if (config.sources.emailFiles?.enabled) sources.push({
     name: 'Email files',
     collect: () => collectors.emailFiles(config.sources.emailFiles.directory, { warnings }),
@@ -197,12 +225,13 @@ export async function collectEnabledSources(config, cutoff, options = {}) {
   const collected = [];
   for (const batch of batches) {
     const { source, jobs } = batch;
+    const extra = source.stat ? { ...source.stat, kind: source.kind || 'builtin' } : {};
     if (batch.error) {
-      sourceStats?.push({ name: source.name, kind: 'builtin', ok: false, count: 0, error: batch.error });
+      sourceStats?.push({ name: source.name, kind: 'builtin', ...extra, ok: false, count: 0, error: batch.error });
       continue;
     }
     if (!needsBaseline(batch)) {
-      sourceStats?.push({ name: source.name, kind: 'builtin', ok: true, count: jobs.length, error: null });
+      sourceStats?.push({ name: source.name, kind: 'builtin', ...extra, ok: true, count: jobs.length, error: null });
       collected.push(...jobs);
       continue;
     }
@@ -212,7 +241,7 @@ export async function collectEnabledSources(config, cutoff, options = {}) {
     for (const job of old) markJobSeen(state, { ...job, enrichment: 'source_baseline' }, at);
     state.sourceBaselines = { ...(state.sourceBaselines || {}), [source.name]: { baselinedAt: at, count: old.length } };
     warnings.push(createWarning('collector', source.name, `First collection recorded ${old.length} posting(s) older than the ${lookbackHours}-hour window as already seen (baseline); ${fresh.length} inside the window go through the normal flow`, 'info'));
-    sourceStats?.push({ name: source.name, kind: 'builtin', ok: true, count: fresh.length, jobCount: jobs.length, baselineCount: old.length, baseline: true, error: null });
+    sourceStats?.push({ name: source.name, kind: 'builtin', ...extra, ok: true, count: fresh.length, jobCount: jobs.length, baselineCount: old.length, baseline: true, error: null });
     collected.push(...fresh);
   }
   return collected;
@@ -221,19 +250,25 @@ export async function collectEnabledSources(config, cutoff, options = {}) {
 // Public ATS boards: discover new boards from this run's posting URLs, apply the manual entries from
 // config.sources.atsBoards, poll every active board once, and record the first poll of a board as a
 // baseline (its postings are marked seen, never scored). Returns the postings to score plus one stat row
-// per board; the registry is persisted before anything is scored.
-export async function collectAtsBoardSources(config, state, collectedJobs, { now, warnings, sourceStats, fetchImpl } = {}) {
+// per board; the registry is persisted before anything is scored. Seeds (config.sources.atsBoards.seeds)
+// and boards a search result pointed at (`searchBoards`) are registered the same way, with their own
+// origin; a search hit also lets a quiet board be polled tonight instead of waiting for its weekly poll.
+export async function collectAtsBoardSources(config, state, collectedJobs, { now, warnings, sourceStats, fetchImpl, searchBoards = [] } = {}) {
   const settings = config.sources.atsBoards || {};
   if (settings.enabled === false) return { jobs: [], results: [], registry: null };
   const file = registryPath(config);
   const registry = await readRegistry(file);
   registerBoards(registry, discoverBoards(collectedJobs), { now, origin: 'discovered' });
+  applySeedBoards(registry, settings.seeds, { now, warnings });
+  const searchAdded = registerBoards(registry, searchBoards, { now, origin: 'search_discovery' });
+  if (searchAdded.length) warnings.push(createWarning('collector', SEARCH_DISCOVERY_SOURCE, `registered ${searchAdded.length} new ATS board(s) from search results: ${searchAdded.slice(0, 5).join(', ')}${searchAdded.length > 5 ? ', …' : ''}`, 'info'));
   applyConfigBoards(registry, settings.boards, { now });
   const polled = await collectAtsBoards({
     registry, settings, network: config.network, now, lookbackHours: config.lookbackHours, timeZone: config.timeZone, warnings,
     isSeen: job => isJobSeen(state, job),
     isDeferred: job => deferredStatus(state, job).deferred,
     excludeUrls: new Set(collectedJobs.map(job => canonicalUrl(job.url)).filter(Boolean)),
+    wakeKeys: new Set(searchBoards.map(board => board.key)),
     ...(fetchImpl ? { fetchImpl } : {}),
   });
   for (const job of polled.baseline) markJobSeen(state, { ...job, enrichment: 'ats_baseline' }, now.toISOString());
@@ -259,11 +294,15 @@ export async function resolveZapplyJobs(jobs, { network = true, fetchImpl = unde
   return { jobs: resolved, failures };
 }
 
-export function dedupeByUrl(jobs) {
-  return dedupe(jobs);
+export function dedupeByUrl(jobs, dropped = null) {
+  return dedupe(jobs, dropped);
 }
 
-function dedupe(jobs) {
+const isSearchCopy = job => job?.sourceKind === SEARCH_SOURCE_KIND;
+
+// A search result that another source also collected is dropped whole: the list or ATS copy carries the
+// real company, location, and date. `dropped` (optional) receives one entry per discarded search copy.
+function dedupe(jobs, dropped = null) {
   const found = new Map();
   for (const job of jobs) {
     if (!job) continue;
@@ -271,6 +310,12 @@ function dedupe(jobs) {
     if (!url) continue;
     const key = sha256(url);
     const existing = found.get(key);
+    if (existing && isSearchCopy(job) !== isSearchCopy(existing)) {
+      const [search, kept] = isSearchCopy(job) ? [job, existing] : [existing, job];
+      dropped?.push({ url, source: search.source, keptSource: kept.source });
+      found.set(key, { ...kept, url });
+      continue;
+    }
     // A second copy of the same posting only adds what it knows; blank fields never erase filled ones.
     const filled = Object.fromEntries(Object.entries(job).filter(([, value]) => value != null && value !== ''));
     found.set(key, existing ? {
@@ -295,6 +340,12 @@ export function dedupeByFinalUrl(jobs) {
     const existing = kept.get(key);
     if (!existing) {
       kept.set(key, job);
+      continue;
+    }
+    if (isSearchCopy(job) !== isSearchCopy(existing)) {
+      const [search, winner] = isSearchCopy(job) ? [job, existing] : [existing, job];
+      kept.set(key, winner);
+      dropped.push({ url: search.originalUrl || search.url, finalUrl: search.finalUrl || search.url, source: search.source, duplicateOf: winner.originalUrl || winner.url, search: true });
       continue;
     }
     const sources = [...new Set(`${existing.source}|${job.source}`.split('|').map(item => item.trim()).filter(Boolean))];
@@ -735,12 +786,20 @@ async function runPipeline(config, clock, options = {}) {
   }
 
   const sourceStats = [];
-  const collectedRaw = await collectEnabledSources(config, cutoff, { warnings, sourceStats, baseline: { state, now, lookbackHours: config.lookbackHours } });
-  const atsSources = await collectAtsBoardSources(config, state, collectedRaw, { now, warnings, sourceStats });
+  const searchBoards = [];
+  const collectedRaw = await collectEnabledSources(config, cutoff, {
+    warnings, sourceStats, searchBoards, baseline: { state, now, lookbackHours: config.lookbackHours },
+    ...(options.collectors ? { collectors: options.collectors } : {}),
+    ...(options.readSearchKey ? { readSearchKey: options.readSearchKey } : {}),
+    ...(options.searchFetchImpl ? { searchFetchImpl: options.searchFetchImpl } : {}),
+  });
+  const atsSources = await collectAtsBoardSources(config, state, collectedRaw, { now, warnings, sourceStats, searchBoards, ...(options.atsFetchImpl ? { fetchImpl: options.atsFetchImpl } : {}) });
   // A baseline is only safe once the seen marks are on disk; otherwise a crash before the final state
   // write would let the next run score a source's whole backlog.
   await writeState(statePath, state);
-  const collected = dedupe([...collectedRaw, ...atsSources.jobs]).filter(job => {
+  // Search results that a list or an ATS board also returned are dropped (debug.searchDuplicates).
+  const searchDuplicates = [];
+  const collected = dedupe([...collectedRaw, ...atsSources.jobs], searchDuplicates).filter(job => {
     // A posting deferred by the review budget is due whatever its age.
     if (deferredStatus(state, job).deferred) return true;
     // The posting date decides (a date-only value as the end of its local day); the discovery time only
@@ -764,7 +823,7 @@ async function runPipeline(config, clock, options = {}) {
   if (zapply.failures.length) {
     warnings.push(createWarning('collector', 'Zapply', `could not resolve ${zapply.failures.length} Zapply link(s) to the employer posting; they are fetched through Zapply as before (${zapply.failures.slice(0, 3).map(item => item.reason).join('; ')}${zapply.failures.length > 3 ? '; …' : ''})`));
   }
-  const unseenCandidates = dedupe(zapply.jobs).filter(job => {
+  const unseenCandidates = dedupe(zapply.jobs, searchDuplicates).filter(job => {
     if (!job.zapplyUrl || !isJobSeen(state, job)) return true;
     markJobSeen(state, { url: job.zapplyUrl, enrichment: 'zapply_resolved' }, now.toISOString());
     return false;
@@ -793,9 +852,11 @@ async function runPipeline(config, clock, options = {}) {
     return false;
   });
   const deduped = dedupeByFinalUrl(unseenEnriched);
-  if (deduped.dropped.length) {
-    debug.droppedDuplicateFinalUrls = deduped.dropped;
-    for (const item of deduped.dropped) console.warn(`Dropped ${item.url} (${item.source}): same final URL as ${item.duplicateOf}`);
+  for (const item of deduped.dropped.filter(entry => entry.search)) searchDuplicates.push({ url: item.url, source: item.source, keptSource: item.duplicateOf });
+  if (searchDuplicates.length) debug.searchDuplicates = searchDuplicates;
+  if (deduped.dropped.some(entry => !entry.search)) {
+    debug.droppedDuplicateFinalUrls = deduped.dropped.filter(entry => !entry.search);
+    for (const item of deduped.dropped.filter(entry => !entry.search)) console.warn(`Dropped ${item.url} (${item.source}): same final URL as ${item.duplicateOf}`);
   }
   const enriched = deduped.jobs.map(job => {
     if (job.enrichment !== 'failed') return job;

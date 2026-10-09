@@ -34,7 +34,8 @@ test('the catalog lists every verified GitHub list, applies per-list overrides, 
   assert.deepEqual(rows.slice(0, 2).map(row => [row.id, row.enabled]), [['simplifyInternships', false], ['simplifyNewGrad', true]]);
   assert.equal(rows.find(row => row.id === 'hackerNewsHiring').enabled, true);
   assert.equal(rows.find(row => row.id === 'remoteOk').enabled, false);
-  assert.equal(rows.length, 2 + 11 + 2 + 3);
+  assert.equal(rows.find(row => row.id === 'searchDiscovery').enabled, false, 'search discovery is off by default');
+  assert.equal(rows.length, 2 + 11 + 3 + 3);
 });
 
 test('pipe tables split into tables with header columns; dates and age tokens normalize', () => {

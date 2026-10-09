@@ -155,6 +155,45 @@ function workdayEnrichment(originalJob, posting, finalUrl) {
   };
 }
 
+// SmartRecruiters posting pages (jobs.smartrecruiters.com/{company}/{id}[-slug]) have a public detail
+// endpoint, GET https://api.smartrecruiters.com/v1/companies/{company}/postings/{id} (no key), whose
+// jobAd.sections { companyDescription, jobDescription, qualifications, additionalInformation } hold the
+// description as HTML (verified 2026-10-09; fixture tests/fixtures/ats/smartrecruiters-posting.json).
+export function smartRecruitersApiUrl(raw) {
+  let url;
+  try { url = new URL(String(raw || '')); } catch { return null; }
+  if (!/^(?:jobs|careers)\.smartrecruiters\.com$/i.test(url.hostname)) return null;
+  const [company, posting] = url.pathname.split('/').filter(Boolean);
+  const id = /^(\d+)/.exec(posting || '')?.[1];
+  if (!company || !id || !/^[A-Za-z0-9._-]+$/.test(company)) return null;
+  return `https://api.smartrecruiters.com/v1/companies/${encodeURIComponent(company)}/postings/${id}`;
+}
+
+export function smartRecruitersEnrichment(originalJob, payload) {
+  const sections = payload?.jobAd?.sections && typeof payload.jobAd.sections === 'object' ? payload.jobAd.sections : {};
+  const text = ['jobDescription', 'qualifications', 'additionalInformation', 'companyDescription']
+    .map(key => sections[key]?.text ? `${cleanText(sections[key].title || '')}\n${cleanText(sections[key].text)}` : '')
+    .filter(Boolean).join('\n');
+  if (!text) return null;
+  const company = cleanText(payload.company?.name || '');
+  const released = isoDate(payload.releasedDate);
+  return {
+    ...originalJob,
+    company: isTrustedSourceName(originalJob.company) ? originalJob.company : (company || originalJob.company || ''),
+    companyFromSource: originalJob.companyFromSource ?? (originalJob.company || null),
+    atsCompany: company || originalJob.atsCompany || null,
+    title: cleanText(payload.name || originalJob.title),
+    location: originalJob.location || normalizeLocation(cleanText(String(payload.location?.fullLocation || '').replace(/(?:,\s*)+/g, ', '))),
+    employmentType: cleanText(payload.typeOfEmployment?.label || '') || originalJob.employmentType || '',
+    description: text.slice(0, 50000),
+    postedAt: released || originalJob.postedAt,
+    freshnessBasis: released ? 'smartrecruiters_released_date' : originalJob.freshnessBasis,
+    postedAtPrecision: released ? 'datetime' : originalJob.postedAtPrecision,
+    finalUrl: originalJob.url,
+    enrichment: 'smartrecruiters_api',
+  };
+}
+
 // The site refused us or the posting is gone; another night will not change that.
 const UNRECOVERABLE_HTTP = { 403: 'blocked', 404: 'removed', 410: 'removed' };
 
@@ -220,6 +259,15 @@ export async function enrichJob(job, network = {}, fetchImpl = fetch) {
           finalUrl: originalJob.url,
           enrichment: 'greenhouse_api',
         };
+      }
+    }
+
+    const smartRecruiters = smartRecruitersApiUrl(originalJob.url);
+    if (smartRecruiters) {
+      const response = await fetchWithTimeout(smartRecruiters, { headers: { ...headers, accept: 'application/json' } }, timeoutMs, fetchImpl);
+      if (response.ok) {
+        const enriched = smartRecruitersEnrichment(originalJob, await response.json());
+        if (enriched) return enriched;
       }
     }
 

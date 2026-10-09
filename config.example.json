@@ -131,6 +131,13 @@
       "enabled": true,
       "note": "RemoteOK's public JSON feed; only remote postings open to the United States with an early-career title or tag are kept, and each card links back to the posting on remoteok.com as its terms ask."
     },
+    "searchDiscovery": {
+      "enabled": false,
+      "provider": "brave",
+      "monthlyQueryCap": 400,
+      "queriesPerRun": 12,
+      "note": "Web search for full-time entry-level postings (past day, United States) through Brave or Tavily. The key lives in private/search.json: { \"brave\": \"<key>\" } or { \"tavily\": { \"apiKey\": \"<key>\" } }; without one nothing runs (one info line). Every query counts against monthlyQueryCap (state/search-usage.json, by local month) and the collector stops at the cap so a free tier is never exceeded. queries overrides the built-in pool; each run takes queriesPerRun consecutive queries starting at the day of the year. Results on Greenhouse, Lever, Ashby, Workday, or SmartRecruiters register that board; other pages are candidates that go through the prefilter."
+    },
     "emailFiles": {
       "enabled": true,
       "directory": "./intake/eml"
@@ -154,6 +161,11 @@
       "boardsNote": "Boards are discovered from posting URLs automatically and kept in state/ats-boards.json; list one here to add it by hand or to switch it off. key forms: greenhouse:<token>, lever:<company>, ashby:<org>, workday:<tenant>/<site>@<tenant>.wd5.myworkdayjobs.com; url accepts a board front page or any posting on it.",
       "boards": [
         { "url": "https://job-boards.greenhouse.io/examplecorp", "company": "Example Corp", "enabled": false }
+      ],
+      "seedsNote": "Company boards to add by hand. A seed is registered once (origin seed) and then follows the same baseline, quiet (weekly polls after 30 days without new postings), and dormant (7 failures) rules as a discovered board; unlike boards it never switches a board back on. Forms: { greenhouse: <token> }, { lever: <company> }, { ashby: <org> }, { smartrecruiters: <company> }, { workday: <tenant>/<site>, host: <tenant>.wdN.myworkdayjobs.com } (the host is required), a key string such as greenhouse:examplecorp, or a board URL; company is an optional label.",
+      "seeds": [
+        { "lever": "examplecorp", "company": "Example Corp" },
+        { "workday": "examplecorp/ExampleCareers", "host": "examplecorp.wd5.myworkdayjobs.com", "company": "Example Corp" }
       ]
     }
   },

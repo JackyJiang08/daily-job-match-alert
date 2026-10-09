@@ -4,7 +4,8 @@
 // false positive.
 //
 //   title families   config.preferences.titleFamilies; postings from sources that are not curated by a
-//                    person (public ATS boards, the Hacker News thread, RemoteOK) must name one.
+//                    person (public ATS boards, the Hacker News thread, RemoteOK, search discovery) must
+//                    name one.
 //   exclusions       preferences.excludeTitleTerms (the eligibility list, default senior/staff/principal/
 //                    lead/manager/director) plus preferences.prefilterExcludeTitleTerms (head of, vice
 //                    president, VP, account manager, sales, technician, nurse, driver, mechanic) and
@@ -12,6 +13,7 @@
 //   location         a location assessLocation() calls non-US is dropped before enrichment.
 import { assessLocation } from './eligibility.mjs';
 import { ATS_SOURCE_KIND } from './collectors/ats-boards.mjs';
+import { SEARCH_SOURCE_KIND } from './collectors/search-discovery.mjs';
 
 export const DEFAULT_TITLE_FAMILIES = [
   'data', 'analytics', 'analyst', 'scientist', 'machine learning', 'ML', 'AI', 'quantitative', 'quant',
@@ -38,7 +40,7 @@ const OVERRIDABLE_EXCLUDES = new Set(['manager']);
 
 // Sources a person already curated for early-career roles only face the exclusion list.
 const CURATED_SOURCE_KINDS = new Set(['public_github_list', 'official_email_alert', 'official_email_alert_via_himalaya', 'career_ops_scan']);
-const WHITELIST_SOURCE_KINDS = new Set([ATS_SOURCE_KIND, 'public_forum_thread', 'public_json_feed']);
+const WHITELIST_SOURCE_KINDS = new Set([ATS_SOURCE_KIND, 'public_forum_thread', 'public_json_feed', SEARCH_SOURCE_KIND]);
 
 function escapeRegExp(text) {
   return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

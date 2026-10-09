@@ -110,12 +110,26 @@ export function assessLocation(location) {
 
 // Evidence in the job description that the role is in the United States or open to people authorized to
 // work there: a US state or city name, "United States", "US-based", or the work-authorization sentence.
-// Only checked when the location field itself said nothing usable; bare "US" and state codes are left
-// out because they are too noisy in running text.
+// Only checked when the location field itself said nothing usable. A standalone uppercase "US", "U.S."
+// or "USA" counts ("within the US", "US only", "U.S. remote", "anywhere in the USA"); lowercase "us" never
+// does, nor does an all-caps phrase such as "JOIN US" or "ABOUT US". State codes stay out (too noisy).
+const US_ABBREVIATION = /(?<![A-Za-z0-9.])(?:U\.S\.A\.|U\.S\.|USA|US)(?![A-Za-z0-9])/g;
+const usAbbreviation = {
+  test(text) {
+    for (const match of String(text).matchAll(US_ABBREVIATION)) {
+      const before = text.slice(Math.max(0, match.index - 20), match.index).match(/([A-Za-z]+)\W*$/)?.[1] || '';
+      const after = text.slice(match.index + match[0].length, match.index + match[0].length + 20).match(/^\W*([A-Za-z]+)/)?.[1] || '';
+      const shouting = word => word.length > 1 && word === word.toUpperCase();
+      if (!shouting(before) && !shouting(after)) return true;
+    }
+    return false;
+  },
+};
 const US_DESCRIPTION_PATTERNS = [
   { marker: 'work authorization', pattern: /\bauthori[sz]ed to work in the (?:United States|U\.S\.|US)\b/i },
   { marker: 'US-based', pattern: /(?<![A-Za-z])(?:US|U\.S\.)-based\b/ },
   { marker: 'United States', pattern: /\bUnited States\b/i },
+  { marker: 'US', pattern: usAbbreviation },
   ...[...US_STATE_NAMES, ...US_CITY_NAMES].map(marker => ({ marker, pattern: phrasePattern(marker, '') })),
 ];
 

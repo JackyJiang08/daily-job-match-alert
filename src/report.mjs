@@ -159,6 +159,16 @@ export function sourceLine(stat) {
   if (stat?.skipped) return `${name}: not polled (${stat.skipped})`;
   if (stat?.ok === false) return `${name}: failed (${stat.error || 'unknown error'})`;
   if (stat?.baseline) return `${name}: first poll, ${Number(stat.baselineCount ?? stat.jobCount ?? 0)} older posting(s) recorded as seen (baseline), ${Number(stat.count || 0)} new`;
+  if (stat?.kind === 'search') {
+    const dropped = Object.entries(stat.dropped || {}).map(([reason, count]) => `${count} ${reason}${count === 1 ? '' : 's'}`);
+    const parts = [
+      `${Number(stat.queries || 0)} ${stat.provider || ''} quer${Number(stat.queries) === 1 ? 'y' : 'ies'} (${Number(stat.monthQueries || 0)}/${Number(stat.monthlyQueryCap || 0)} this month${stat.capReached ? ', cap reached' : ''})`.replace('  ', ' '),
+      `${Number(stat.count || 0)} candidate page(s)`,
+      `${Number(stat.boards || 0)} ATS board(s) found`,
+    ];
+    if (dropped.length) parts.push(`dropped ${dropped.join(', ')}`);
+    return `${name}: ${parts.join(', ')}`;
+  }
   const count = Number(stat?.count || 0);
   const parts = [stat?.kind === 'ats' ? `${count} new` : `${count} collected`];
   if (stat?.notModified) parts.push('unchanged since the last poll');

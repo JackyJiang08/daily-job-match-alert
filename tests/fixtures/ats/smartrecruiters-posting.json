@@ -1,0 +1,46 @@
+{
+  "id": "744000154523570",
+  "name": "Data Analyst I",
+  "company": {
+    "identifier": "ExampleCorp",
+    "name": "Example Corp"
+  },
+  "location": {
+    "city": "Oklahoma City",
+    "region": "OK",
+    "country": "us",
+    "remote": false,
+    "hybrid": true,
+    "fullLocation": "Oklahoma City, OK, United States"
+  },
+  "releasedDate": "2026-10-08T20:40:57.699Z",
+  "postingUrl": "https://jobs.smartrecruiters.com/ExampleCorp/744000154523570-data-analyst-i",
+  "typeOfEmployment": {
+    "id": "permanent",
+    "label": "Full-time"
+  },
+  "experienceLevel": {
+    "id": "associate",
+    "label": "Associate"
+  },
+  "jobAd": {
+    "sections": {
+      "companyDescription": {
+        "title": "Company Description",
+        "text": "<p>Example Corp builds tools for analysts.</p>"
+      },
+      "jobDescription": {
+        "title": "Job Description",
+        "text": "<p>Analyze sales data with SQL and Python and present weekly dashboards.</p><ul><li>Build reports</li></ul>"
+      },
+      "qualifications": {
+        "title": "Qualifications",
+        "text": "<p>Bachelor degree in statistics or a related field; 0-2 years of experience.</p>"
+      },
+      "additionalInformation": {
+        "title": "Additional Information",
+        "text": "<p>Candidates must be authorized to work in the United States.</p>"
+      }
+    }
+  }
+}

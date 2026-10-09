@@ -167,7 +167,7 @@ export function companyIsUncertain(job) {
 // clock time. Day-level bases (list ages, Workday "Posted N Days Ago", date-only datePosted) are not here.
 export const PRECISE_FRESHNESS_BASES = new Set([
   'greenhouse_updated_at', 'greenhouse_first_published', 'lever_created_at', 'ashby_published_at',
-  'hn_comment_created_at', 'remoteok_date', 'email_received_at',
+  'hn_comment_created_at', 'remoteok_date', 'email_received_at', 'smartrecruiters_released_date',
 ]);
 
 // True when a raw date string names a time of day ("2026-09-18T10:00:00Z", "2026-09-18 10:00").

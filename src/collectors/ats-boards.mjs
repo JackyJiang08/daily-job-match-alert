@@ -26,6 +26,12 @@
 //                 "Posted 3 Days Ago", "Posted 30+ Days Ago"), bulletFields: [req id] }], facets }.
 //               No description and no caching headers; the description comes from the existing
 //               per-posting CXS detail endpoint in enrich.mjs.
+//   SmartRecruiters GET https://api.smartrecruiters.com/v1/companies/{company}/postings?limit=100&country=us
+//               (public Posting API, no key; verified 2026-10-09) { offset, limit, totalFound, content: [{ id,
+//                 name (title), company: { identifier, name }, releasedDate (ISO, newest first), location:
+//                 { city, region, country, remote, fullLocation }, typeOfEmployment: { label },
+//                 experienceLevel: { label } }] }; no description: the posting page
+//               (jobs.smartrecruiters.com/{company}/{id}) carries it and is fetched by enrich.mjs.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { workdayPostedOn } from '../enrich.mjs';
@@ -33,7 +39,7 @@ import { canonicalUrl, cleanText, isoDate, mapLimit, normalizeLocation } from '.
 import { createWarning, errorSummary } from '../warnings.mjs';
 import { freshnessInstant } from '../posting-fields.mjs';
 
-export const ATS_KINDS = { greenhouse: 'Greenhouse', lever: 'Lever', ashby: 'Ashby', workday: 'Workday' };
+export const ATS_KINDS = { greenhouse: 'Greenhouse', lever: 'Lever', ashby: 'Ashby', workday: 'Workday', smartrecruiters: 'SmartRecruiters' };
 export const ATS_SOURCE_KIND = 'public_ats_board';
 // A board that fails this many nights in a row stops being polled until someone resumes it.
 export const DORMANT_AFTER_FAILURES = 7;
@@ -45,6 +51,8 @@ export const QUIET_POLL_DAYS = 7;
 export const REGISTRY_VERSION = 1;
 const WORKDAY_PAGE_SIZE = 20;
 const DEFAULT_MAXIMUM_WORKDAY_PAGES = 10;
+const SMARTRECRUITERS_PAGE_SIZE = 100;
+const DEFAULT_MAXIMUM_SMARTRECRUITERS_PAGES = 5;
 const SLUG = /^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/;
 const WORKDAY_HOST = /^([a-z0-9-]+)\.(wd\d+)\.myworkdayjobs\.com$/i;
 const WORKDAY_LOCALE = /^[a-z]{2}-[A-Z]{2}$/;
@@ -105,6 +113,16 @@ export function identifyBoard(raw) {
       key: `ashby:${org.toLowerCase()}`, kind: 'ashby', slug: org,
       boardUrl: `https://jobs.ashbyhq.com/${org}`,
       apiUrl: `https://api.ashbyhq.com/posting-api/job-board/${encodeURIComponent(org)}`,
+    };
+  }
+
+  if (host === 'jobs.smartrecruiters.com' || host === 'careers.smartrecruiters.com') {
+    const company = slug(segments[0]);
+    if (!company || /^(?:oneclick-ui|sr-jobs)$/i.test(company)) return null;
+    return {
+      key: `smartrecruiters:${company.toLowerCase()}`, kind: 'smartrecruiters', slug: company,
+      boardUrl: `https://jobs.smartrecruiters.com/${company}`,
+      apiUrl: `https://api.smartrecruiters.com/v1/companies/${encodeURIComponent(company)}/postings`,
     };
   }
 
@@ -206,19 +224,61 @@ export function applyConfigBoards(registry, entries, { now = new Date() } = {}) 
   return applied;
 }
 
-// "greenhouse:acme", "lever:acme", "ashby:acme", "workday:acme/External" (Workday also needs the host:
-// "workday:acme/External@acme.wd5.myworkdayjobs.com").
+// "greenhouse:acme", "lever:acme", "ashby:acme", "smartrecruiters:Acme", "workday:acme/External" (Workday
+// also needs the host: "workday:acme/External@acme.wd5.myworkdayjobs.com").
 export function boardFromKey(key) {
-  const match = /^(greenhouse|lever|ashby|workday):(.+)$/.exec(String(key || '').trim());
+  const match = /^(greenhouse|lever|ashby|smartrecruiters|workday):(.+)$/.exec(String(key || '').trim());
   if (!match) return null;
   const [, kind, rest] = match;
   if (kind === 'greenhouse') return identifyBoard(`https://job-boards.greenhouse.io/${rest}`);
   if (kind === 'lever') return identifyBoard(`https://jobs.lever.co/${rest}`);
   if (kind === 'ashby') return identifyBoard(`https://jobs.ashbyhq.com/${rest}`);
+  if (kind === 'smartrecruiters') return identifyBoard(`https://jobs.smartrecruiters.com/${rest}`);
   const [tenantSite, host] = rest.split('@');
   const [tenant, site] = tenantSite.split('/');
   if (!tenant || !site) return null;
   return identifyBoard(`https://${host || `${tenant}.wd5.myworkdayjobs.com`}/${site}`);
+}
+
+// config.sources.atsBoards.seeds: company boards the owner adds by hand. Each entry is a key string
+// ("greenhouse:acme", "workday:acme/External@acme.wd1.myworkdayjobs.com"), a board or posting URL, or an
+// object naming one vendor: { greenhouse: "<token>" }, { lever: "<company>" }, { ashby: "<org>" },
+// { smartrecruiters: "<company>" }, { workday: "<tenant>/<site>", host: "<tenant>.wdN.myworkdayjobs.com" },
+// with an optional company label. A seed is registered once (origin "seed") and then lives like a
+// discovered board: first-poll baseline, quiet after 30 days, dormant after 7 failures. Unlike `boards`,
+// a seed never switches a board on again or overrides its endpoint.
+export function seedBoard(entry) {
+  if (typeof entry === 'string') return /^https?:/i.test(entry.trim()) ? identifyBoard(entry.trim()) : boardFromKey(entry);
+  if (!entry || typeof entry !== 'object') return null;
+  if (entry.url) return identifyBoard(entry.url);
+  if (entry.key) return boardFromKey(entry.key);
+  for (const kind of ['greenhouse', 'lever', 'ashby', 'smartrecruiters']) {
+    if (entry[kind]) return boardFromKey(`${kind}:${entry[kind]}`);
+  }
+  if (entry.workday) {
+    const [tenantSite, inlineHost] = String(entry.workday).split('@');
+    const host = String(entry.host || inlineHost || '').trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
+    // The data-center number (wd1, wd5, ...) cannot be guessed; without the host the seed is refused.
+    if (!WORKDAY_HOST.test(host)) return null;
+    return boardFromKey(`workday:${tenantSite}@${host}`);
+  }
+  return null;
+}
+
+export function applySeedBoards(registry, seeds, { now = new Date(), warnings = null } = {}) {
+  const added = [];
+  const invalid = [];
+  for (const entry of Array.isArray(seeds) ? seeds : []) {
+    const board = seedBoard(entry);
+    if (!board) { invalid.push(entry); continue; }
+    const company = entry && typeof entry === 'object' ? cleanText(entry.company || entry.name || '') || null : null;
+    added.push(...registerBoards(registry, [{ ...board, company, discoveredFrom: 'seed' }], { now, origin: 'seed' }));
+  }
+  if (invalid.length && Array.isArray(warnings)) {
+    const shown = invalid.slice(0, 3).map(item => typeof item === 'string' ? item : JSON.stringify(item)).join('; ');
+    warnings.push(createWarning('collector', 'ATS board seeds', `ignored ${invalid.length} seed(s) that name no Greenhouse token, Lever company, Ashby organization, SmartRecruiters company, or Workday tenant/site with its host (${shown}${invalid.length > 3 ? '; …' : ''})`));
+  }
+  return { added, invalid };
 }
 
 export function boardLabel(board) {
@@ -371,7 +431,34 @@ export function parseWorkdayPostings(payload, board, now = new Date()) {
   }).filter(Boolean);
 }
 
-const PARSERS = { greenhouse: parseGreenhouseJobs, lever: parseLeverPostings, ashby: parseAshbyJobs, workday: parseWorkdayPostings };
+export function parseSmartRecruitersPostings(payload, board) {
+  const postings = Array.isArray(payload?.content) ? payload.content : [];
+  return postings.map(job => {
+    const id = job?.id != null ? String(job.id) : '';
+    const title = cleanText(job?.name || '');
+    const identifier = slug(job?.company?.identifier) || board.slug;
+    if (!/^[A-Za-z0-9-]+$/.test(id) || !title || !identifier) return null;
+    const url = canonicalUrl(`https://jobs.smartrecruiters.com/${identifier}/${id}`);
+    const place = job.location && typeof job.location === 'object' ? job.location : {};
+    const named = cleanText(String(place.fullLocation || '').replace(/(?:,\s*)+/g, ', ').replace(/^,\s*|,\s*$/g, ''))
+      || [place.city, place.region, String(place.country || '').toUpperCase()].filter(Boolean).join(', ');
+    const locations = [named];
+    if (place.remote === true && !/remote/i.test(named)) locations.unshift('Remote');
+    return atsJob(board, {
+      title,
+      company: cleanText(job.company?.name || '') || null,
+      location: normalizeLocation(locations.filter(Boolean)),
+      url,
+      postedAt: isoDate(job.releasedDate),
+      freshnessBasis: 'smartrecruiters_released_date',
+      employmentType: cleanText(job.typeOfEmployment?.label || ''),
+      externalId: id,
+      description: '',
+    });
+  }).filter(Boolean);
+}
+
+const PARSERS = { greenhouse: parseGreenhouseJobs, lever: parseLeverPostings, ashby: parseAshbyJobs, workday: parseWorkdayPostings, smartrecruiters: parseSmartRecruitersPostings };
 
 // ---------------------------------------------------------------------------------------------- polling
 
@@ -411,6 +498,27 @@ async function pollWorkday(board, { fetchImpl, headers, timeoutMs, now, cutoff, 
   return { notModified: false, jobs, etag: null, lastModified: null, status: 200 };
 }
 
+// Newest first, 100 per page, US postings only; the walk stops at the first page that reaches the window's edge.
+async function pollSmartRecruiters(board, { fetchImpl, headers, timeoutMs, now, cutoff, maximumPages }) {
+  const jobs = [];
+  for (let page = 0; page < maximumPages; page += 1) {
+    const url = new URL(board.apiUrl);
+    url.searchParams.set('limit', String(SMARTRECRUITERS_PAGE_SIZE));
+    url.searchParams.set('offset', String(page * SMARTRECRUITERS_PAGE_SIZE));
+    if (!url.searchParams.has('country')) url.searchParams.set('country', 'us');
+    const response = await fetchWithTimeout(url.toString(), { headers: { ...headers, accept: 'application/json' } }, timeoutMs, fetchImpl);
+    if (!response.ok) throw httpError(response);
+    const payload = await response.json();
+    const parsed = parseSmartRecruitersPostings(payload, board, now);
+    jobs.push(...parsed);
+    const total = Number(payload?.totalFound);
+    const rawCount = Array.isArray(payload?.content) ? payload.content.length : 0;
+    const reachedOld = parsed.some(job => job.postedAt && new Date(job.postedAt) < cutoff);
+    if (rawCount < SMARTRECRUITERS_PAGE_SIZE || reachedOld || (Number.isFinite(total) && (page + 1) * SMARTRECRUITERS_PAGE_SIZE >= total)) break;
+  }
+  return { notModified: false, jobs, etag: null, lastModified: null, status: 200 };
+}
+
 // One request (or one page walk for Workday) against a board's public endpoint. Conditional headers
 // come from the board record; a 304 means nothing changed since the last successful poll.
 export async function pollBoard(board, options = {}) {
@@ -421,6 +529,7 @@ export async function pollBoard(board, options = {}) {
   const cutoff = options.cutoff || new Date(now.getTime() - lookbackHours * 60 * 60 * 1000);
   const headers = { 'user-agent': 'DailyJobMatchAlert/0.1', ...(options.headers || {}) };
   if (board.kind === 'workday') return pollWorkday(board, { fetchImpl, headers, timeoutMs, now, cutoff, maximumPages: Number(options.maximumWorkdayPages || DEFAULT_MAXIMUM_WORKDAY_PAGES) });
+  if (board.kind === 'smartrecruiters') return pollSmartRecruiters(board, { fetchImpl, headers, timeoutMs, now, cutoff, maximumPages: Number(options.maximumSmartRecruitersPages || DEFAULT_MAXIMUM_SMARTRECRUITERS_PAGES) });
   const parse = PARSERS[board.kind];
   if (!parse) throw new Error(`Unsupported ATS kind "${board.kind}"`);
   const conditional = {};
@@ -453,8 +562,10 @@ export function isQuietBoard(board, now = new Date()) {
 // board does not flood one report with its backlog, while postings inside the window go through the
 // normal flow at once. Baseline marks skip URLs in `excludeUrls` (postings another source collected this
 // run) so a listing elsewhere is never swallowed. Failures are isolated per board; the seventh
-// consecutive failure marks the board dormant.
-export async function collectAtsBoards({ registry, settings = {}, network = {}, now = new Date(), lookbackHours = 24, timeZone = null, warnings = [], isSeen = () => false, isDeferred = () => false, excludeUrls = new Set(), fetchImpl = fetch }) {
+// consecutive failure marks the board dormant. A board in `wakeKeys` (a search result pointed at one of
+// its postings tonight) skips the quiet board's weekly wait; disabled, dormant, and recently polled
+// boards stay as they are.
+export async function collectAtsBoards({ registry, settings = {}, network = {}, now = new Date(), lookbackHours = 24, timeZone = null, warnings = [], isSeen = () => false, isDeferred = () => false, excludeUrls = new Set(), wakeKeys = new Set(), fetchImpl = fetch }) {
   const cutoff = new Date(now.getTime() - Number(lookbackHours) * 60 * 60 * 1000);
   const minimumHours = Number(settings.minimumPollIntervalHours ?? DEFAULT_MINIMUM_POLL_HOURS);
   const headers = { 'user-agent': network.userAgent || 'DailyJobMatchAlert/0.1' };
@@ -472,10 +583,10 @@ export async function collectAtsBoards({ registry, settings = {}, network = {}, 
     if (board.dormant) { result.skipped = 'dormant'; return; }
     const sinceLastPoll = board.lastPolledAt ? now.getTime() - new Date(board.lastPolledAt).getTime() : Infinity;
     if (sinceLastPoll < minimumHours * 60 * 60 * 1000) { result.skipped = 'polled recently'; return; }
-    if (board.quiet && sinceLastPoll < QUIET_POLL_DAYS * 24 * 60 * 60 * 1000) { result.skipped = 'quiet (weekly poll)'; return; }
+    if (board.quiet && !wakeKeys.has(board.key) && sinceLastPoll < QUIET_POLL_DAYS * 24 * 60 * 60 * 1000) { result.skipped = 'quiet (weekly poll)'; return; }
     board.lastPolledAt = now.toISOString();
     try {
-      const polled = await pollBoard(board, { fetchImpl, headers, timeoutMs: network.timeoutMs, now, cutoff, lookbackHours, maximumWorkdayPages: settings.maximumWorkdayPages });
+      const polled = await pollBoard(board, { fetchImpl, headers, timeoutMs: network.timeoutMs, now, cutoff, lookbackHours, maximumWorkdayPages: settings.maximumWorkdayPages, maximumSmartRecruitersPages: settings.maximumSmartRecruitersPages });
       board.consecutiveFailures = 0;
       board.lastError = null;
       board.lastSuccessAt = now.toISOString();
