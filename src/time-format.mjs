@@ -72,6 +72,20 @@ export function endOfLocalDay(value, timeZone) {
   return new Date(guess).toISOString();
 }
 
+// The instant a wall-clock time (year, month 1-12, day, hour, minute) has in the zone.
+export function zonedInstant(year, month, day, hour, minute, timeZone) {
+  const zone = safeZone(timeZone);
+  const target = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
+  let guess = target;
+  for (let pass = 0; pass < 2; pass += 1) {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: zone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(new Date(guess));
+    const value = type => Number(parts.find(part => part.type === type)?.value);
+    const wall = Date.UTC(value('year'), value('month') - 1, value('day'), value('hour') % 24, value('minute'), value('second'), 0);
+    guess -= wall - target;
+  }
+  return new Date(guess);
+}
+
 // A scheduled time that passed this long ago without a completed run reads as "overdue"; inside the
 // window it reads "due now", since the run itself takes a few minutes.
 export const OVERDUE_GRACE_MS = 30 * 60_000;

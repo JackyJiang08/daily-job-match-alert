@@ -16,9 +16,8 @@ import { compareVersions, isCredentialEnvironmentKey, normalizeModelName, run, s
 // The response schema is generated per run: one required integer score per enabled track id, so the
 // model has to score every resume, and the recommended track must be one of those ids.
 // Refusals that end a weekly window; a second one while probing after an ambiguous notice means the
-// account limit. An ambiguous limit settled as a model limit without a reset time is held for 7 days.
+// account limit. A settled limit keeps only the reset time the CLI gave (none is ever estimated).
 const WEEKLY_KINDS = new Set(['ambiguousWeeklyLimit', 'modelWeeklyLimit', 'accountWeeklyLimit']);
-const WEEKLY_HOLD_MS = 7 * 24 * 60 * 60 * 1000;
 
 export function buildResultSchema(resumes) {
   const tracks = trackSummaries(resumes);
@@ -457,9 +456,10 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
         continue;
       }
       if (probing) {
-        // The next model answered: the ambiguous notice was the first model's own weekly limit. It is kept
-        // until the reset time the CLI gave, or for seven days, and the rest of the run stays on this model.
-        const resetsAt = probing.quota.resetsAt || new Date(new Date(probing.at).getTime() + WEEKLY_HOLD_MS).toISOString();
+        // The next model answered: the ambiguous notice was the first model's own weekly limit. Only the
+        // CLI's own reset time is kept (the record's hold rules cover a notice without one), and the rest
+        // of the run stays on this model.
+        const resetsAt = probing.quota.resetsAt || null;
         quotaEvents.push({ kind: 'modelWeeklyLimit', model: probing.from, resetsAt, at: probing.at, action: 'downgraded', detail: `switched to ${engine.model} (the notice named no model; ${engine.model} answered)`, engine: engineName, message: probing.quota.message, settledFrom: 'ambiguousWeeklyLimit' });
         downgradeNote = `${probing.from} weekly limit`;
         limited.set(modelKey(probing.from), { model: probing.from, resetsAt });

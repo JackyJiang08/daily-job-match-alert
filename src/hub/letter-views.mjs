@@ -1,6 +1,7 @@
 // Cover-letter pages for the hub: the Settings material section, the Letters history, and the panel
 // that generates, edits, and downloads one letter. Only file metadata is shown for the material; the
 // copy never names directories, file-name templates, or configuration keys (tooltips may).
+import { classifyEditorNotes } from '../cover-letter/notes.mjs';
 import { formatLocalDateTime } from '../time-format.mjs';
 import { roleLabel } from '../report.mjs';
 import { htmlEscape } from '../utils.mjs';
@@ -103,7 +104,7 @@ export function autoLettersSettingsCard(settings = {}) {
   return `<article class="card" id="auto-letters"><h2>Automatic Letters</h2>
     <form method="post" action="/settings/letters-auto" class="auto-letters-form">
       <div class="field"><label class="check"><input type="checkbox" name="autoGenerate"${settings.enabled === false ? '' : ' checked'}> Write cover letters for new high matches after each run</label></div>
-      <label class="field"><span>Letters per run (best scores first; postings with a letter or an uncertain company are skipped)</span><input type="number" name="maxPerRun" class="control-input" min="0" max="50" step="1" value="${Number(settings.maxPerRun ?? 8)}" required></label>
+      <label class="field"><span>Letters per run (0 = no limit; best scores first; postings with a letter or an uncertain company are skipped)</span><input type="number" name="maxPerRun" class="control-input" min="0" max="500" step="1" value="${Number(settings.maxPerRun ?? 0)}" required></label>
       <button class="btn" type="submit">Save</button>
       <p class="form-foot">Uses the Cover letter draft and editor assignments under Subscriptions &amp; Models. The report is written first; letters follow.</p>
     </form></article>`;
@@ -220,7 +221,11 @@ export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, 
   const record = existing?.record || null;
   const paragraphs = record?.paragraphs || [];
   const issues = (record?.issues || []).map(issue => `<li data-kind="${htmlEscape(issue.kind)}">${htmlEscape(issue.message)}</li>`).join('');
-  const notes = (record?.editorNotes || []).map(note => `<li>${htmlEscape(note)}</li>`).join('');
+  // Editor notes split in two: what the owner must check before sending (shown open), and how the letter
+  // was made (engines, fallbacks, applied fixes), which only goes in the footer.
+  const levels = classifyEditorNotes(record?.editorNotes || []);
+  const notes = levels.needsReview.map(note => `<li>${htmlEscape(note)}</li>`).join('');
+  const infoNotes = levels.info.map(note => `<li>${htmlEscape(note)}</li>`).join('');
   const download = record?.pdfFileName && record.pdf
     ? `<a class="btn" id="download-link" href="/letters/${date}/${existing.slug}/${encodeURIComponent(record.pdfFileName)}">Download PDF</a>`
     : '<a class="btn" id="download-link" hidden href="#">Download PDF</a>';
@@ -257,8 +262,9 @@ export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, 
     <p class="muted" id="letter-empty"${paragraphs.length ? ' hidden' : ''}>No draft yet. Regenerate writes one with the selected track and company name.</p>
     <div id="paragraphs">${paragraphEditor(paragraphs)}</div>
     <ul class="issues" id="letter-issues">${issues}</ul>
-    <details class="notes" id="editor-notes"${notes || record?.reviewModel ? '' : ' hidden'}><summary>Editor Notes</summary>${record ? `<p class="muted notes-engine" id="notes-engine">${htmlEscape(passLine(record))}</p>` : ''}<ul class="issues" id="editor-notes-list">${notes}</ul></details>
+    <details class="notes" id="editor-notes" open${notes ? '' : ' hidden'}><summary>Check before sending</summary><ul class="issues" id="editor-notes-list">${notes}</ul></details>
     <p class="letter-foot" id="letter-foot">${htmlEscape(footLine(record, engineLabel))}</p>
+    <ul class="letter-foot foot-notes" id="letter-info-notes"${infoNotes ? '' : ' hidden'}>${infoNotes}</ul>
   </article>`;
 }
 
@@ -305,8 +311,10 @@ export const LETTER_SCRIPT = `
     fill(result.paragraphs);
     issues.innerHTML = '';
     (result.issues || []).forEach(function (issue) { var item = document.createElement('li'); item.dataset.kind = issue.kind; item.textContent = issue.message; issues.appendChild(item); });
-    if (notesList) { notesList.innerHTML = ''; (result.editorNotes || []).forEach(function (note) { var item = document.createElement('li'); item.textContent = note; notesList.appendChild(item); }); }
-    if (notesBox) notesBox.hidden = !(result.editorNotes && result.editorNotes.length);
+    if (notesList) { notesList.innerHTML = ''; (result.notesNeedReview || []).forEach(function (note) { var item = document.createElement('li'); item.textContent = note; notesList.appendChild(item); }); }
+    if (notesBox) notesBox.hidden = !(result.notesNeedReview && result.notesNeedReview.length);
+    var infoList = document.getElementById('letter-info-notes');
+    if (infoList) { infoList.innerHTML = ''; (result.notesInfo || []).forEach(function (note) { var item = document.createElement('li'); item.textContent = note; infoList.appendChild(item); }); infoList.hidden = !(result.notesInfo && result.notesInfo.length); }
     state.engine = result.engine; state.model = result.model; state.issues = result.issues || []; state.editorNotes = result.editorNotes || []; state.samplesUsed = result.samplesUsed || []; state.pages = null;
     showCounts(result.paragraphs, null);
     showFoot(result);
@@ -410,12 +418,13 @@ export const ONECLICK_SCRIPT = `
     button.dataset.state = 'ready';
     var open = document.createElement('a'); open.className = 'btn secondary small'; open.href = result.openUrl; open.textContent = 'Open Letter';
     var download = document.createElement('a'); download.className = 'btn secondary small'; download.href = result.downloadUrl; download.textContent = 'Download PDF';
-    button.replaceWith(open, download);
+    button.replaceWith(download, open);
     buttons = buttons.filter(function (item) { return item !== button; });
     var card = open.closest('.job');
     var badges = card && card.querySelector('.badges');
     if (card && !badges) { badges = document.createElement('div'); badges.className = 'badges'; card.querySelector('.scores').insertAdjacentElement('afterend', badges); }
-    if (badges && !badges.querySelector('[data-badge="letter-ready"]')) { var badge = document.createElement('span'); badge.className = 'badge badge-good'; badge.setAttribute('data-badge', 'letter-ready'); badge.textContent = 'Letter ready'; badges.appendChild(badge); }
+    // Only a letter with details to confirm gets a badge: "Check N details", the items on hover.
+    if (badges && result.checkBadge && !badges.querySelector('[data-badge="letter-check"]')) { var badge = document.createElement('span'); badge.className = 'badge badge-warn'; badge.setAttribute('data-badge', 'letter-check'); badge.textContent = result.checkBadge.label; badge.title = result.checkBadge.title; badges.appendChild(badge); }
     var anchor = document.createElement('a'); anchor.href = result.downloadUrl; anchor.download = ''; anchor.hidden = true; document.body.appendChild(anchor); anchor.click(); anchor.remove();
   }
   function markFailed(button, message, quota) {

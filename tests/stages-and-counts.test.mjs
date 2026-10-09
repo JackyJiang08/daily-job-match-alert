@@ -51,7 +51,7 @@ test('the run breakdown counts scoring by engine and model, deferrals by cause, 
 
   // The header line for a quota event.
   const downgraded = { events: [{ kind: 'modelWeeklyLimit', model: 'claude-fable-5-1', action: 'downgraded', detail: 'switched to claude-opus-5-5 (the notice named no model; claude-opus-5-5 answered)', engine: 'claude' }] };
-  assert.equal(quotaNote(downgraded, 0), 'Quota: Claude subscription claude-fable-5-1 weekly limit reached. claude-opus-5-5 took over; every posting was reviewed.');
+  assert.equal(quotaNote(downgraded, 0), null, 'a step down inside the Claude family that reviewed everything is only a Run Details line');
   const deferred = { events: [{ kind: 'ambiguousWeeklyLimit', model: 'claude-fable-5-1', action: 'probed' }, { kind: 'accountWeeklyLimit', model: null, action: 'deferred', detail: 'codex fallback is not connected' }] };
   assert.equal(quotaNote(deferred, 96), 'Quota: Claude subscription weekly account limit reached. 96 posting(s) were not reviewed because of it and wait for the next run; no engine took over.');
   const handedOff = { events: [{ kind: 'accountWeeklyLimit', action: 'fallback-engine', detail: 'switched to codex' }] };

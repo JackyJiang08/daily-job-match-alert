@@ -66,7 +66,7 @@ test('ambiguous notice, next model answers: the first model hit its own weekly l
   assert.equal(result.quotaEvents.length, 1);
   const [event] = result.quotaEvents;
   assert.deepEqual([event.kind, event.model, event.action, event.settledFrom], ['modelWeeklyLimit', 'claude-fable-5-1', 'downgraded', 'ambiguousWeeklyLimit']);
-  assert.equal(event.resetsAt, '2026-10-14T01:00:00.000Z', 'no reset time in the notice: held for 7 days');
+  assert.equal(event.resetsAt, null, 'no reset time in the notice: none is estimated');
   assert.equal(event.detail, 'switched to claude-opus-5-5 (the notice named no model; claude-opus-5-5 answered)');
   assert.match(event.message, /^You're out of usage credits\./);
   assert.equal(result.warnings.find(warning => /answered/.test(warning.message)).level, 'info');

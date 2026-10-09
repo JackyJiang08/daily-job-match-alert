@@ -168,13 +168,13 @@ test('each CLI refusal maps to its status badge; weekly limits clear at reset, s
   assert.equal(limited.state, 'weekly_limit');
   assert.equal(statusText(limited, 'America/Chicago'), 'Weekly limit until Oct 7, 2026, 9:00 AM', 'the reset time the CLI gave');
   markWeeklyLimit(record, 'claude-sonnet-5-5', { at: NOW.toISOString(), resetsAt: null });
-  assert.equal(statusText(modelStatus(record, 'claude-sonnet-5-5', { now: NOW }), 'America/Chicago'), 'Weekly limit since Oct 6, 2026, 5:00 PM', 'no reset time: when it was seen');
+  assert.equal(statusText(modelStatus(record, 'claude-sonnet-5-5', { now: NOW }), 'America/Chicago'), 'Weekly limit since Oct 6, 2026, 5:00 PM · no reset time given', 'no reset time: when it was seen, never an estimated date');
   assert.equal(statusText(modelStatus(record, 'claude-fable-5-1', { now: NOW }), 'America/Chicago'), 'Unavailable on Pro');
   assert.equal(modelStatus(record, 'claude-haiku-4-5', { now: NOW }).state, 'not_verified');
-  // A weekly limit lifts by itself at its reset time; one without a reset time after 7 days.
+  // A weekly limit lifts by itself at its reset time; one without a reset time after 24 hours.
   assert.equal(modelStatus(record, 'claude-opus-5-5', { now: new Date('2026-10-07T14:00:01Z') }).state, 'not_verified');
   assert.deepEqual(pruneLimits(record, { now: new Date('2026-10-07T14:00:01Z') }).map(item => item.model), ['claude-opus-5-5']);
-  assert.deepEqual(pruneLimits(record, { now: new Date('2026-10-13T22:00:00Z') }).map(item => item.model), ['claude-sonnet-5-5']);
+  assert.deepEqual(pruneLimits(record, { now: new Date('2026-10-07T22:00:00Z') }).map(item => item.model), ['claude-sonnet-5-5']);
   // A successful call proves a mark stale.
   markModelUsed(record, 'claude-fable-5-1', { resolvedId: 'claude-fable-5-1', at: NOW.toISOString() });
   assert.equal(modelStatus(record, 'claude-fable-5-1', { now: NOW }).state, 'available');

@@ -1155,7 +1155,8 @@ test('while the automatic pass writes letters, cards say so and manual letters w
     }));
     await hub.ctx.letterStore.saveLetter({ date: '2026-08-27', company: 'Acme', markdown: '# Letter', meta: { jobId, company: 'Acme', source: 'auto', engine: 'codex', model: 'gpt-5.6-sol', effort: 'medium', editorNotes: ['unverified detail: the 40% figure', 'Tighten the close'], paragraphs: ['x'] } });
     const after = (await hub.request('GET', '/reports/2026-08-27')).text;
-    assert.match(after, /data-badge="letter-ready"[^>]*>Letter ready \(auto\)<\/span><span class="badge badge-warn" data-badge="letter-notes" title="unverified detail: the 40% figure\nTighten the close">2 editor notes<\/span>/);
+    assert.match(after, /<span class="badge badge-warn" data-badge="letter-check" title="unverified detail: the 40% figure">Check 1 detail<\/span>/, 'only the needs-review note counts; the wording fix stays in the letter footer');
+    assert.doesNotMatch(after.split('<script>')[0], /Letter ready|data-badge="letter-notes"/);
     assert.match(after.split('<script>')[0], />Open Letter<\/a>/);
     const done = (await hub.request('GET', '/status')).text;
     assert.match(done, /data-badge="letters-done">Done<\/span>/);
@@ -1163,11 +1164,11 @@ test('while the automatic pass writes letters, cards say so and manual letters w
 
     // Settings → Cover Letters exposes the switch and the per-run limit.
     const settings = (await hub.request('GET', '/settings?tab=letters')).text;
-    assert.match(settings, /<article class="card" id="auto-letters"><h2>Automatic Letters<\/h2>[\s\S]*?<input type="checkbox" name="autoGenerate" checked> Write cover letters for new high matches after each run[\s\S]*?name="maxPerRun"[^>]*value="8"/);
+    assert.match(settings, /<article class="card" id="auto-letters"><h2>Automatic Letters<\/h2>[\s\S]*?<input type="checkbox" name="autoGenerate" checked> Write cover letters for new high matches after each run[\s\S]*?0 = no limit[\s\S]*?name="maxPerRun"[^>]*value="0"/);
     const saved = await hub.form('/settings/letters-auto', { maxPerRun: '3' });
     assert.equal(saved.status, 303);
     assert.deepEqual((await readConfig(root)).coverLetter.autoGenerate, { enabled: false, maxPerRun: 3 });
-    assert.match(decodeURIComponent((await hub.form('/settings/letters-auto', { autoGenerate: 'on', maxPerRun: '99' })).headers.location), /error=Letters per run must be a whole number from 0 to 50/);
+    assert.match(decodeURIComponent((await hub.form('/settings/letters-auto', { autoGenerate: 'on', maxPerRun: '999' })).headers.location), /error=Letters per run must be a whole number from 0 \(no limit\) to 500/);
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });

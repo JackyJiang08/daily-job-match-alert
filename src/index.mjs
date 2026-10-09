@@ -35,7 +35,7 @@ import { holdsToExactWindow, resolveCompanyName } from './posting-fields.mjs';
 import { describeConnections } from './engines/index.mjs';
 import { describeQuota, normalizeQuotaPolicy } from './engines/quota.mjs';
 import { AUTH_EXPIRED_MESSAGE, AUTH_EXPIRED_NOTIFICATION, classifyEngineError } from './engines/engine-errors.mjs';
-import { availabilityPath, markModelUnavailable, markModelUsed, markWeeklyLimit, pruneAvailability, pruneLimits, readAvailability, unavailableModelNames, writeAvailability } from './engines/model-availability.mjs';
+import { HOLD_GRACE_MS, availabilityPath, markModelUnavailable, markModelUsed, markWeeklyLimit, pruneAvailability, pruneLimits, readAvailability, unavailableModelNames, weeklyResetOf, writeAvailability } from './engines/model-availability.mjs';
 
 const execFileAsync = promisify(execFile);
 const REPORT_PAYLOAD_PREFIX = 'report-payload-';
@@ -332,11 +332,14 @@ export function runCounts({ evaluated = [], budget = {}, quotaDeferred = [], pre
   };
 }
 
-// One line for the report header when a quota limit touched the run: how many postings went unreviewed
-// because of it, and which engine or model took over. Null when nothing happened.
+// One line for the report header when a quota limit cost the run something: postings went unreviewed
+// (deferred, or left with local scores), or another engine (Codex) took over. A step down inside the
+// Claude family (Fable to Opus) that still reviewed every posting is only a Run Details line. Null otherwise.
 export function quotaNote(quota, deferredByQuota = 0) {
   const events = (quota?.events || []).filter(event => event.action !== 'skipped' || event.kind === 'modelWeeklyLimit');
   if (!events.length) return null;
+  const costly = events.some(event => ['deferred', 'fallback-engine', 'local-fallback'].includes(event.action));
+  if (!deferredByQuota && !costly) return null;
   const takeover = [...events].reverse().find(event => event.action === 'fallback-engine' || event.action === 'downgraded');
   const who = takeover ? String(takeover.detail || '').replace(/^switched to /, '').replace(/ \(.*\)$/, '') : null;
   const limit = describeQuota([...events].reverse().find(event => event.kind !== 'model_unavailable') || events.at(-1));
@@ -845,7 +848,9 @@ async function runPipeline(config, clock, options = {}) {
   const droppedMarks = pruneAvailability(availability, { now, plan: observedPlan });
   if (droppedMarks.length) warnings.push(createWarning('llm', 'model availability', `retrying ${droppedMarks.map(item => `${item.model} (${item.reason})`).join(', ')}`, 'info'));
   // Weekly limits still running are skipped from the first call; expired ones are dropped first.
-  let availabilityChanged = droppedMarks.length > 0 || pruneLimits(availability, { now }).length > 0;
+  // Weekly limits are held until the CLI's reset time, the owner's weekly reset, or 24 hours.
+  const limitClock = { now, weeklyReset: weeklyResetOf(config), timeZone: config.timeZone || 'America/Chicago', graceMs: HOLD_GRACE_MS };
+  let availabilityChanged = droppedMarks.length > 0 || pruneLimits(availability, limitClock).length > 0;
   const runUsage = [...prescreen.usage];
   let usageParseEmpty = 0;
   let planChange = null;
@@ -893,7 +898,7 @@ async function runPipeline(config, clock, options = {}) {
     markWeeklyLimit(availability, event.model, { at: event.at, resetsAt: event.resetsAt, notice: event.message || null });
     availabilityChanged = true;
   }
-  if (pruneLimits(availability, { now }).length) availabilityChanged = true;
+  if (pruneLimits(availability, limitClock).length) availabilityChanged = true;
   if (availabilityChanged) await writeAvailability(availabilityFile, availability);
   // The CLI's own words for each limit event go to state/quota-notices.json for later calibration.
   const notices = quotaEvents.filter(event => event.message && event.action !== 'skipped' && event.kind !== 'auth_expired')

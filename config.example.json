@@ -42,8 +42,8 @@
   "outputDirectory": "~/Desktop/Daily Job Match Alert",
   "coverLetter": {
     "editorReview": true,
-    "autoGenerateNote": "After each run (and Run Now) letters are written for the run's new high matches, best scores first, skipping postings with a letter or an uncertain company, using the Cover letter draft and editor assignments. Off for a local-only config or incomplete material.",
-    "autoGenerate": { "enabled": true, "maxPerRun": 8 }
+    "autoGenerateNote": "After each run (and Run Now) letters are written for the run's new high matches, best scores first, skipping postings with a letter or an uncertain company, using the Cover letter draft and editor assignments. maxPerRun 0 means no limit. Postings a pass did not reach (a limit or a failure stopped it) are queued and written first next time. Off for a local-only config or incomplete material.",
+    "autoGenerate": { "enabled": true, "maxPerRun": 0 }
   },
   "hub": {
     "port": 4747,

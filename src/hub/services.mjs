@@ -16,7 +16,7 @@ import { readConfigFile, updateConfigFile } from './config-file.mjs';
 import { readLockStatus } from './run.mjs';
 import { boardLabel, readRegistry, resumeBoard, writeRegistry } from '../collectors/ats-boards.mjs';
 import { builtinSources } from '../collectors/catalog.mjs';
-import { availabilityPath, markModelUnavailable, markModelUsed, markWeeklyLimit, pruneAvailability, pruneLimits, readAvailability, writeAvailability } from '../engines/model-availability.mjs';
+import { WEEKDAYS, availabilityPath, markModelUnavailable, markModelUsed, markWeeklyLimit, pruneAvailability, pruneLimits, readAvailability, weeklyResetOf, writeAvailability } from '../engines/model-availability.mjs';
 import { classifyEngineError, humanizeEngineError } from '../engines/engine-errors.mjs';
 import { planLabel } from '../engines/quota.mjs';
 import { planView } from '../engines/plans.mjs';
@@ -376,7 +376,8 @@ export async function planChangeView(ctx, config, latest, plans) {
 export async function modelAvailabilityView(ctx, plan) {
   const record = await readAvailability(availabilityPath(ctx.root), ctx.io);
   pruneAvailability(record, { now: ctx.now(), plan });
-  pruneLimits(record, { now: ctx.now() });
+  const config = await ctx.loadConfig().catch(() => ({}));
+  pruneLimits(record, { now: ctx.now(), weeklyReset: weeklyResetOf(config), timeZone: config.timeZone || 'America/Chicago' });
   return { models: record.models, unavailable: Object.keys(record.models), limited: Object.keys(record.limits || {}), plan: plan || null };
 }
 
@@ -837,6 +838,22 @@ export async function savePlan(ctx, form) {
   return { provider, plan: value || null };
 }
 
+// Settings > Subscriptions > Claude: the weekly reset (weekday and local HH:MM), or clear it.
+export async function saveWeeklyReset(ctx, form) {
+  const day = String(form.day || '').trim().toLowerCase().slice(0, 3);
+  const time = String(form.time || '').trim();
+  if (day && !WEEKDAYS.includes(day)) throw new HubInputError('Pick a weekday for the weekly reset');
+  if (day && !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw new HubInputError('The weekly reset time is a local time such as 17:00');
+  await updateConfigFile(ctx.configPath, config => {
+    config.plans = config.plans && typeof config.plans === 'object' ? config.plans : {};
+    config.plans.claude = config.plans.claude && typeof config.plans.claude === 'object' ? config.plans.claude : {};
+    if (day) config.plans.claude.weeklyReset = { day, time };
+    else delete config.plans.claude.weeklyReset;
+    return true;
+  }, { fs: ctx.io, pidAlive: ctx.pidAlive });
+  return day ? { day, time } : null;
+}
+
 export const TEST_PROMPT = 'Reply with OK';
 
 export class ModelTestBusyError extends Error {
@@ -1032,7 +1049,7 @@ export async function savePrescreen(ctx, form) {
 export async function saveAutoLetters(ctx, form) {
   const enabled = form.autoGenerate === 'on' || form.autoGenerate === 'true' || form.autoGenerate === true;
   const max = Number(form.maxPerRun);
-  if (!Number.isInteger(max) || max < 0 || max > 50) throw new HubInputError('Letters per run must be a whole number from 0 to 50');
+  if (!Number.isInteger(max) || max < 0 || max > 500) throw new HubInputError('Letters per run must be a whole number from 0 (no limit) to 500');
   await updateConfigFile(ctx.configPath, config => {
     config.coverLetter = config.coverLetter && typeof config.coverLetter === 'object' ? config.coverLetter : {};
     config.coverLetter.autoGenerate = { enabled, maxPerRun: max };

@@ -587,7 +587,8 @@ test('generate → edit → save renders a PDF, records the letter, marks the ca
     assert.equal((await hub.request('GET', '/letters/2026-09-15/AcmeInc')).status, 200);
     const reopened = (await hub.request('GET', '/letters/2026-09-15/AcmeInc')).text;
     assert.match(reopened, /I edited this paragraph by hand before rendering\./);
-    assert.match(reopened, /<details class="notes" id="editor-notes"><summary>Editor Notes<\/summary><p class="muted notes-engine" id="notes-engine">Engine: [^<]+<\/p><ul class="issues" id="editor-notes-list"><li>Paragraph 1 lacks the GPA<\/li><\/ul><\/details>/);
+    assert.match(reopened, /<details class="notes" id="editor-notes" open hidden><summary>Check before sending<\/summary><ul class="issues" id="editor-notes-list"><\/ul><\/details>/, 'a rule fix the editor applied needs no check');
+    assert.match(reopened, /<ul class="letter-foot foot-notes" id="letter-info-notes"><li>Paragraph 1 lacks the GPA<\/li><\/ul>/, 'it is an info note in the footer');
     assert.match(reopened, /<p class="letter-foot" id="letter-foot">Samples used: sample\.txt · Engine: claude · claude-fable-5 · PDF via pdfkit<\/p>/);
     assert.match(reopened, /<p class="letter-counts" id="letter-counts">\d+ words · 5 paragraphs · 1 page<\/p>\s*<p class="muted" id="letter-empty" hidden>[^<]*<\/p>\s*<div id="paragraphs"><div class="para-row"><span class="num">1<\/span><textarea class="para" name="paragraph" data-index="0">/);
     assert.match(reopened, /<span>Resume Track<\/span><select id="letter-track" class="control-input">/);
@@ -613,8 +614,8 @@ test('generate → edit → save renders a PDF, records the letter, marks the ca
     assert.doesNotMatch(list.text, /private\/cover-letters/);
     assert.match(list.text, /href="\/letters\/2026-09-15\/AcmeInc\/JaneDoe_Cover_Letter_AcmeInc\.pdf">Download PDF<\/a>/);
     const report = await hub.request('GET', '/reports/2026-09-15');
-    assert.match(report.text, /<span class="badge badge-good" data-badge="letter-ready"[^>]*>Letter ready<\/span>/);
-    assert.match(report.text, /<a class="btn secondary small" href="\/letters\/2026-09-15\/AcmeInc">Open Letter<\/a><a class="btn secondary small" href="\/letters\/2026-09-15\/AcmeInc\/JaneDoe_Cover_Letter_AcmeInc\.pdf">Download PDF<\/a>/, 'a saved letter gives the card both buttons');
+    assert.doesNotMatch(report.text.split('<script>')[0], /data-badge="letter-/, 'no status badge: the only letter badge is "Check N details"');
+    assert.match(report.text, /<div class="actions"><a class="apply"[^>]*>Open Posting<\/a><a class="btn secondary small" href="\/letters\/2026-09-15\/AcmeInc\/JaneDoe_Cover_Letter_AcmeInc\.pdf">Download PDF<\/a><a class="btn secondary small" href="\/letters\/2026-09-15\/AcmeInc">Open Letter<\/a><span class="meta"/, 'a saved letter gives the card exactly two buttons');
     assert.doesNotMatch(report.text.split('<script>')[0], /Generate Cover Letter/, 'no one-click button once a letter exists (the page script mentions the label)');
     assert.match(list.text, /<a class="btn secondary small" href="\/letters\/2026-09-15\/AcmeInc">Open<\/a> <a class="btn secondary small" href="\/letters\/2026-09-15\/AcmeInc\/JaneDoe_Cover_Letter_AcmeInc\.pdf">Download PDF<\/a>/, 'the Letters row has the same two actions');
 
@@ -687,7 +688,7 @@ test('one click on a card generates in the background: generating → ready with
     assert.equal(pdf.headers['content-disposition'], 'attachment; filename="JaneDoe_Cover_Letter_AcmeInc.pdf"', 'the browser downloads it under the templated name');
     assert.equal(pdf.buffer.slice(0, 5).toString('latin1'), '%PDF-');
     const report = await hub.request('GET', '/reports/2026-09-15');
-    assert.match(report.text, /<a class="btn secondary small" href="\/letters\/2026-09-15\/AcmeInc">Open Letter<\/a><a class="btn secondary small" href="\/letters\/2026-09-15\/AcmeInc\/JaneDoe_Cover_Letter_AcmeInc\.pdf">Download PDF<\/a>/);
+    assert.match(report.text, /<a class="btn secondary small" href="\/letters\/2026-09-15\/AcmeInc\/JaneDoe_Cover_Letter_AcmeInc\.pdf">Download PDF<\/a><a class="btn secondary small" href="\/letters\/2026-09-15\/AcmeInc">Open Letter<\/a>/);
     assert.doesNotMatch(report.text.split('<script>')[0], /data-oneclick/);
     const opened = await hub.request('GET', '/letters/2026-09-15/AcmeInc');
     assert.match(opened.text, /<article class="card" id="letter-editor" data-state="editing">/);
@@ -1080,7 +1081,7 @@ test('a cover letter follows the same weekly rule: an unnamed notice is settled 
     assert.equal(JSON.parse(first.text).downgradeNote, 'Generated with claude-opus-5-5: claude-fable-5-1 weekly limit');
     assert.deepEqual(calls, ['claude-fable-5-1', 'claude-opus-5-5', 'claude-opus-5-5']);
     const record = JSON.parse(await fs.readFile(path.join(root, 'state', 'model-availability.json'), 'utf8'));
-    assert.equal(record.limits['claude-fable-5-1'].resetsAt, '2026-09-22T15:00:00.000Z', 'no reset time in the notice: 7 days');
+    assert.equal(record.limits['claude-fable-5-1'].resetsAt, null, 'no reset time in the notice: none is estimated (held 24 hours)');
     const notices = JSON.parse(await fs.readFile(path.join(root, 'state', 'quota-notices.json'), 'utf8')).notices;
     assert.deepEqual(notices.map(item => [item.source, item.kind, item.action]), [['cover-letter', 'ambiguousWeeklyLimit', 'refused'], ['cover-letter', 'modelWeeklyLimit', 'settled']]);
     assert.equal(notices.some(item => item.text.includes('?from=') || item.text.includes('exited 1')), false);

@@ -12,6 +12,7 @@ import { formatLocalDateTime, formatLocalDay, formatLocalShort } from './time-fo
 import { normalizeLocation, sha256 } from './utils.mjs';
 import { companyIsUncertain, displayCompanyName, postedAtPrecision, unknownPostedLabel } from './posting-fields.mjs';
 import { describeQuota } from './engines/quota.mjs';
+import { LEGACY_LOCATION_GAP, LOCATION_NOT_STATED_LABEL, LOCATION_NOT_STATED_TITLE, LOCATION_UNVERIFIED_GAP, usEvidenceInDescription } from './eligibility.mjs';
 import { describePrescreen, funnelText } from './prescreen-text.mjs';
 
 export const REPORT_TITLE = 'Daily Job Match Alert';
@@ -45,6 +46,19 @@ function matchLabel(count) {
   return `${count} ${count === 1 ? 'match' : 'matches'}`;
 }
 
+// An unverified location that the description does not settle either (older payloads were annotated
+// before the description check existed, so it is repeated at render time).
+export function locationNotStated(job) {
+  return job.eligibility?.location?.verdict === 'unverified' && !usEvidenceInDescription(job.description);
+}
+
+function displayGaps(job) {
+  const stated = !locationNotStated(job);
+  return (job.gaps || []).map(String)
+    .filter(gap => !(stated && (gap === LOCATION_UNVERIFIED_GAP || gap === LEGACY_LOCATION_GAP)))
+    .map(gap => (gap === LEGACY_LOCATION_GAP ? LOCATION_UNVERIFIED_GAP : gap));
+}
+
 // Semantic markers shown as small badges instead of text prefixes.
 export function jobBadges(job) {
   const badges = [];
@@ -53,8 +67,8 @@ export function jobBadges(job) {
   else if (job.semanticReviewed && job.matchLevel && job.matchLevel !== 'high') {
     badges.push({ key: `match-${job.matchLevel}`, label: `Match: ${job.matchLevel}`, tone: 'note' });
   }
-  if (job.eligibility?.location?.verdict === 'unverified') {
-    badges.push({ key: 'location-unverified', label: 'Location unverified', tone: 'note', title: 'The posting only says Remote or gives no location; confirm it permits work from the United States' });
+  if (locationNotStated(job)) {
+    badges.push({ key: 'location-unverified', label: LOCATION_NOT_STATED_LABEL, tone: 'note', title: LOCATION_NOT_STATED_TITLE });
   }
   if (companyIsUncertain(job)) {
     badges.push({ key: 'company-uncertain', label: 'Company name uncertain', tone: 'warn', title: 'No source gave a usable employer name; confirm it before applying or generating a letter' });
@@ -125,7 +139,7 @@ export function cardView(job, tracks, timeZone = null, decorate = null) {
     recommendation: recommendedLabel ? `Apply with ${recommendedLabel} Resume` : 'No Resume Recommended',
     badges: [...jobBadges(job), ...(Array.isArray(extra.badges) ? extra.badges : [])],
     reasons: (job.reasons || []).map(String),
-    gaps: (job.gaps || []).map(String),
+    gaps: displayGaps(job),
     description: String(job.description || '').trim(),
     footnote: note.text,
     footnoteTitle: note.title,
@@ -281,8 +295,8 @@ export function runDetailsView(jobs, meta, tracks) {
   const unreviewed = jobs.filter(job => job.matchLevel === 'unreviewed' || job.scoringEngine === 'local_fallback').length;
   if (unreviewed) status.push(`${unreviewed} of ${jobs.length} matches kept local scores because semantic review was unavailable (unreviewed)`);
   if (!unreviewed && (meta.scoringModel === 'local_only' || meta.scoringModel === 'none') && jobs.length) status.push('No semantic review ran; scores are local triage only');
-  const unverified = jobs.filter(job => job.eligibility?.location?.verdict === 'unverified').length;
-  if (unverified) status.push(`${unverified} match(es) have an unverified location; confirm US eligibility before applying`);
+  const unverified = jobs.filter(locationNotStated).length;
+  if (unverified) status.push(`${unverified} match(es) do not state a US location; confirm you can work from the United States before applying`);
   const enrichmentFailures = jobs.filter(job => job.enrichment === 'failed');
   if (enrichmentFailures.length) {
     const reasons = enrichmentFailures.map(job => job.enrichmentReason).filter(Boolean);

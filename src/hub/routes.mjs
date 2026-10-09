@@ -1,6 +1,7 @@
 // HTTP routing for the hub. GET renders pages; every state change is a POST whose Host and Origin must
 // be this machine. Path parameters are validated against strict patterns before they touch the
 // filesystem, and request bodies are capped just above the 5 MB upload limit.
+import { reviewBadge } from '../cover-letter/notes.mjs';
 import { buildReportView } from '../report.mjs';
 import path from 'node:path';
 import { renderReportBody } from '../report-components.mjs';
@@ -8,7 +9,7 @@ import { HubLockedError } from './config-file.mjs';
 import { parseMultipart } from './multipart.mjs';
 import {
   HubInputError, annotateConnections, assertDate, buildStatusView, claudeAuthView, clearModelAvailability, configuredCliCommands, desktopCopyPath, desktopWorkbookPath, listReportSummaries, loadTracksView, modelAvailabilityView, readErrorReport,
-  autoLettersView, readReportPayload, readSettings, resumeAtsBoard, saveAssignments, saveAutoLetters, savePrescreen, saveCliPath, saveSettings, selectResumeVersion, setTrackEnabled, sidebarSummary, uploadResumePdf, ModelTestBusyError, savePlan, testModel,
+  autoLettersView, readReportPayload, readSettings, resumeAtsBoard, saveAssignments, saveAutoLetters, savePrescreen, saveWeeklyReset, saveCliPath, saveSettings, selectResumeVersion, setTrackEnabled, sidebarSummary, uploadResumePdf, ModelTestBusyError, savePlan, testModel,
 } from './services.mjs';
 import { localDate } from '../time-format.mjs';
 import { LETTER_SCRIPT, ONECLICK_SCRIPT, SAMPLE_TRACK_SCRIPT, letterPanel, lettersPage, trackLabelOf } from './letter-views.mjs';
@@ -22,7 +23,7 @@ import { displayCompanyName } from '../posting-fields.mjs';
 import { REPORTS_SCRIPT, SETTINGS_SCRIPT, STATUS_SCRIPT, renderHubPage, reportsPage, resumesPage, settingsPage, statusPage } from './views.mjs';
 import { modelSettingsView } from './model-settings.mjs';
 import { MODEL_SETTINGS_SCRIPT } from './model-settings-views.mjs';
-import { availabilityPath, normalizeAvailability, pruneAvailability, pruneLimits, readAvailability } from '../engines/model-availability.mjs';
+import { availabilityPath, normalizeAvailability, pruneAvailability, pruneLimits, readAvailability, weeklyResetOf } from '../engines/model-availability.mjs';
 import { readUsage, usagePath } from '../engines/usage.mjs';
 
 const MAXIMUM_BODY_BYTES = 6 * 1024 * 1024;
@@ -113,6 +114,11 @@ export function createHubHandler(ctx) {
     send(response, status, renderHubPage({ port: ctx.port, timeZone, sidebar, now: ctx.now(), ...options }));
   };
 
+  // High matches of a report that have no letter and a trusted company name.
+  function missingLetterJobs(matches, lettersByJob) {
+    return (matches || []).filter(job => !lettersByJob.has(jobIdOf(job)) && job.companyUncertain !== true && !letterCompanyFor(job).uncertain);
+  }
+
   async function getReports(url, response) {
     const config = await ctx.loadConfig();
     const timeZone = config.timeZone || 'America/Chicago';
@@ -123,6 +129,7 @@ export function createHubHandler(ctx) {
     const selected = match ? assertDate(match[1]) : todayTarget(dates, today).date;
     let reportBody = null;
     let desktopPath = null;
+    let missingLetters = null;
     if (selected) {
       const payload = await readReportPayload(ctx, selected);
       if (!payload) {
@@ -139,23 +146,24 @@ export function createHubHandler(ctx) {
         if (!letter && pending.has(id)) {
           return { actions: [{ button: true, disabled: true, label: 'Letter generating…', data: { autoletter: '1', job: id } }], badges: [{ key: 'letter-generating', label: 'Letter generating…', tone: 'note', title: 'The automatic cover-letter pass after the nightly run is writing this letter' }] };
         }
-        // Editor notes on a saved letter: a count, in a warning tone when one flags an unverified detail.
-        const notes = Array.isArray(letter?.editorNotes) ? letter.editorNotes : [];
-        const notesBadge = notes.length ? [{ key: 'letter-notes', label: `${notes.length} editor note${notes.length === 1 ? '' : 's'}`, tone: notes.some(note => /unverified detail/i.test(String(note))) ? 'warn' : 'note', title: notes.join('\n') }] : [];
-        // A saved letter gets Open Letter plus a direct PDF download; the PDF link exists only once rendered.
-        // Without one the card carries a one-click button that the page script drives (see ONECLICK_SCRIPT).
+        // A saved letter gets just Download PDF (once rendered) and Open Letter. The only badge is
+        // "Check N details" when the editor flagged something the owner must confirm; how the letter was
+        // made (engines, fallbacks, applied fixes) stays in the Open Letter footer.
+        // Without a letter the card carries a one-click button that the page script drives (ONECLICK_SCRIPT).
         const download = letter?.pdf && letter.pdfFileName ? [{ href: `/letters/${letter.date}/${letter.slug}/${encodeURIComponent(letter.pdfFileName)}`, label: 'Download PDF' }] : [];
+        const check = letter ? reviewBadge(letter.editorNotes) : null;
         return {
           actions: letter
-            ? [{ href: `/letters/${letter.date}/${letter.slug}`, label: 'Open Letter' }, ...download]
+            ? [...download, { href: `/letters/${letter.date}/${letter.slug}`, label: 'Open Letter' }]
             : [{ button: true, label: 'Generate Cover Letter', data: { oneclick: '1', date: selected, job: id } }],
-          badges: letter ? [{ key: 'letter-ready', label: letter.source === 'auto' ? 'Letter ready (auto)' : 'Letter ready', tone: 'good', title: `Cover letter saved ${letter.savedAt || ''}` }, ...notesBadge] : [],
+          badges: check ? [check] : [],
         };
       };
       reportBody = renderReportBody(buildReportView(payload.matches, { timeZone, ...payload.meta }, { embedded: true, decorate }));
       desktopPath = desktopCopyPath(config, selected);
+      missingLetters = { count: missingLetterJobs(payload.matches, lettersByJob).length, running: Boolean(autoStatus?.running), done: autoStatus?.done || 0, planned: autoStatus?.planned || 0 };
     }
-    await page(response, 200, { active: 'reports', title: selected ? `Report ${selected}` : 'Reports', content: reportsPage({ dates, selected, reportBody, desktopPath, today }), script: REPORTS_SCRIPT + ONECLICK_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
+    await page(response, 200, { active: 'reports', title: selected ? `Report ${selected}` : 'Reports', content: reportsPage({ dates, selected, reportBody, desktopPath, today, missingLetters }), script: REPORTS_SCRIPT + ONECLICK_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
   }
 
   async function getResumes(url, response) {
@@ -185,7 +193,7 @@ export function createHubHandler(ctx) {
     const record = await readAvailability(availabilityPath(ctx.root), ctx.io).catch(() => normalizeAvailability(null));
     // The same pruning the runs apply: marks from another plan or older than 7 days, and limits past reset.
     pruneAvailability(record, { now: ctx.now(), plan: connections?.claude?.plan || null });
-    pruneLimits(record, { now: ctx.now() });
+    pruneLimits(record, { now: ctx.now(), weeklyReset: weeklyResetOf(config), timeZone: config.timeZone || 'America/Chicago' });
     const usage = await readUsage(usagePath(ctx.root), ctx.io).catch(() => ({ entries: [] }));
     // Limit events for the subscription cards: the newest run's and this hub's own (cover letters).
     const events = [...(latest?.meta?.quota?.events || []).map(event => ({ ...event, source: 'nightly run' })), ...(ctx.quotaLog?.last ? [{ ...ctx.quotaLog.last, source: ctx.quotaLog.last.source || 'hub' }] : [])];
@@ -282,7 +290,7 @@ export function createHubHandler(ctx) {
       }
       case '/settings/letters-auto': {
         const saved = await saveAutoLetters(ctx, fields);
-        redirect(response, '/settings?tab=letters#auto-letters', saved.enabled ? `Automatic cover letters on: up to ${saved.maxPerRun} per run` : 'Automatic cover letters off');
+        redirect(response, '/settings?tab=letters#auto-letters', saved.enabled ? (saved.maxPerRun > 0 ? `Automatic cover letters on: up to ${saved.maxPerRun} per run` : 'Automatic cover letters on: every new high match') : 'Automatic cover letters off');
         return;
       }
       case '/settings/prescreen': {
@@ -294,6 +302,11 @@ export function createHubHandler(ctx) {
         await saveAssignments(ctx, fields);
         ctx.connections?.reset?.();
         redirect(response, '/settings?tab=models#assignments-form', 'Task assignments saved to config.json');
+        return;
+      }
+      case '/settings/plans/weekly-reset': {
+        const saved = await saveWeeklyReset(ctx, fields);
+        redirect(response, '/settings', saved ? `Claude weekly reset saved: ${saved.day} ${saved.time}` : 'Claude weekly reset cleared');
         return;
       }
       case '/settings/plans': {
@@ -351,6 +364,33 @@ export function createHubHandler(ctx) {
         }
         const started = ctx.letterJobs.start({ date, jobId: id, company: displayCompanyName(job) || job.company || null, run: () => oneClickLetter(ctx, { date, jobId: id, engine: engineChoice }) });
         json(response, 202, started);
+        return;
+      }
+      case '/letters/missing': {
+        const date = assertDate(fields.date);
+        const autoRunning = await autoLettersView(ctx);
+        if (autoRunning?.running) { redirect(response, `/reports/${date}`, `Cover letters are already being written (${autoRunning.done} of ${autoRunning.planned})`, 'error'); return; }
+        if (ctx.letterJobs.busy()) { redirect(response, `/reports/${date}`, 'A cover letter is generating; try again when it finishes', 'error'); return; }
+        const readiness = await ctx.letterStore.readiness();
+        if (!readiness.ready) throw new HubInputError(`Cover-letter material is incomplete (${readiness.missing.join(', ')}); upload it under Settings first`);
+        const payload = await readReportPayload(ctx, date);
+        if (!payload) throw new HubInputError(`No report payload for ${date}`);
+        const lettersByJob = await ctx.letterStore.lettersByJob().catch(() => new Map());
+        const count = missingLetterJobs(payload.matches, lettersByJob).length;
+        if (!count) { redirect(response, `/reports/${date}`, 'Every high match on this date already has a letter (or needs its company confirmed)'); return; }
+        const config = await ctx.loadConfig();
+        const { runAutoLetters } = await import('../auto-letters.mjs');
+        // The pass runs in the background; the redirect waits only until it holds the letters lock and has
+        // written its plan, so the cards already say "Letter generating…".
+        let markStarted;
+        const started = new Promise(resolve => { markStarted = resolve; });
+        const warnings = [];
+        ctx.missingLetters = runAutoLetters({ config, date, ctx, mode: 'missing', warnings, onStarted: () => markStarted() })
+          .then(outcome => { console.error(`[cover-letter] Generate Missing Letters ${date}: ${outcome.generated ?? 0} generated, ${outcome.failed ?? 0} failed${outcome.stopReason ? ` (${outcome.stopReason})` : ''}${outcome.reason ? ` (${outcome.reason})` : ''}`); return outcome; })
+          .catch(error => { console.error(`[cover-letter] Generate Missing Letters ${date} failed: ${String(error?.stack || error)}`); return { state: 'stopped' }; })
+          .finally(() => markStarted());
+        await started;
+        redirect(response, `/reports/${date}`, `Writing ${count} missing cover letter(s) in the background; the cards update as they finish`);
         return;
       }
       case '/letters/rename': {

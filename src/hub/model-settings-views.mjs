@@ -27,6 +27,14 @@ function tokens(totals) {
   return `${formatTokens(totals.input + totals.cacheRead + totals.cacheCreation)} in · ${formatTokens(totals.output)} out`;
 }
 
+// Optional: the weekday and local time the owner's Claude weekly limits reset. Without it a limit the CLI
+// gave no reset time for is held for 24 hours only; no reset date is ever estimated.
+const WEEKDAY_OPTIONS = [['mon', 'Monday'], ['tue', 'Tuesday'], ['wed', 'Wednesday'], ['thu', 'Thursday'], ['fri', 'Friday'], ['sat', 'Saturday'], ['sun', 'Sunday']];
+function weeklyResetForm(value) {
+  const days = `<option value=""${value ? '' : ' selected'}>Not set</option>${WEEKDAY_OPTIONS.map(([key, label]) => `<option value="${key}"${value?.day === key ? ' selected' : ''}>${label}</option>`).join('')}`;
+  return `<form class="inline weekly-reset" method="post" action="/settings/plans/weekly-reset"><select name="day" class="control-input small-input" aria-label="Weekly reset day">${days}</select> <input type="time" name="time" class="control-input small-input" aria-label="Weekly reset time" value="${htmlEscape(value?.time || '')}"> <button class="btn secondary small" type="submit">Save</button></form><span class="muted">Optional, local time. Without it a limit with no reset time is held for 24 hours.</span>`;
+}
+
 function subscriptionCard(card, { timeZone, connectionRow, refresh }) {
   const plan = card.plan;
   const providerKey = card.provider === 'anthropic' ? 'claude' : 'chatgpt';
@@ -56,6 +64,7 @@ function subscriptionCard(card, { timeZone, connectionRow, refresh }) {
         ${card.connection?.version ? `<dt>CLI</dt><dd>${engineName} CLI ${htmlEscape(card.connection.version)}</dd>` : ''}
         <dt>Last 7 days</dt><dd data-plan-usage="${card.engine}">${usage}</dd>
         <dt>Last limit</dt><dd data-last-limit="${card.engine}">${limit}</dd>
+        ${card.weeklyReset ? `<dt>Weekly reset</dt><dd data-weekly-reset>${weeklyResetForm(card.weeklyReset.value)}</dd>` : ''}
       </dl>
     </div>
   </article>`;

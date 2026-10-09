@@ -91,8 +91,13 @@ disabled; do not expand them unless a task says so.
   (only via that second refusal or an empty ladder: defer everything, report
   banner; optional quotaPolicy.fallbackEngine "codex" when Codex is signed in).
   Model weekly limits are recorded in state/model-availability.json limits
-  until the reset time (7 days when the notice gave none) and the next run
-  starts on the next model without asking the limited one. The CLI's words
+  with resetsAt ONLY when the CLI gave one (never estimated; an old exact
+  at+7d estimate is dropped on read). limitHold: CLI reset → owner's
+  config.plans.claude.weeklyReset { day, time } (Settings > Claude card,
+  POST /settings/plans/weekly-reset) → 24 h (nightly prune has a 2 h grace so
+  the next 20:00 run retries the preferred model). Until then runs skip it.
+  The report banner/header quotaNote appear only when postings went
+  unreviewed or Codex took over; a Fable → Opus step is a Run Details line. The CLI's words
   (sanitizeNotice: no command path, ids, e-mail, URL query; 300 chars) go to
   state/quota-notices.json and the Quota card's CLI notices. Deferred
   postings use state.deferred (quotaDeferred), never unreviewed. Cover letters
@@ -116,10 +121,18 @@ disabled; do not expand them unless a task says so.
   runPipeline returns and the run lock is released (Run Now too), under
   state/.letters.lock, with a headless hub context (createHubContext; tests pass
   options.lettersContext with fake engines). config.coverLetter.autoGenerate
-  { enabled true, maxPerRun 8 }; selection = this run's new matches
-  (summary.newMatchUrls) by score, skipping letters on file and uncertain
-  companies; generateLetter(strict) + saveLetter on the draft/editor stage
-  chains; a fully failed chain stops the pass with a warning. Off when the
+  { enabled true, maxPerRun 0 = no limit }; selection = the carry-over queue
+  (state/letters-backlog.json: postings a stopped pass did not write; 14 days)
+  first, then this run's new matches (summary.newMatchUrls) by score, skipping
+  letters on file and uncertain companies; generateLetter(strict) + saveLetter
+  on the draft/editor stage chains; a fully failed chain stops the pass with a
+  warning and queues the rest. mode 'missing' = POST /letters/missing (the
+  report's "Generate Missing Letters" button): every high match of that date
+  without a letter, trusted company, no cap, works with autoGenerate off.
+  Cards with a letter: Download PDF + Open Letter only; the one badge is
+  "Check N details" (src/cover-letter/notes.mjs classifyEditorNotes:
+  needs-review = unverified detail, salutation mismatch, unsupported number,
+  still too long; everything else is info, shown in the Open Letter footer). Off when the
   draft stage is the local_only placeholder or material is incomplete. Status
   in state/letters-auto.json (cards: "Letter generating…", manual one-click
   and Test refused while the letters lock is held); outcome goes to
@@ -177,7 +190,7 @@ disabled; do not expand them unless a task says so.
   model_reasoning_effort="x"` (unset = CLI default).
 - Model status lives in state/model-availability.json (version 2): models
   (kind not_on_plan | unknown_model, skipped by the ladder), limits (weekly
-  limit, cleared at resetsAt or after 7 days), seen ({ resolvedId,
+  limit, cleared when limitHold ends), seen ({ resolvedId,
   lastUsedAt } from modelUsage of every successful call: matcher recordUsage
   info, hub letters, Test). Badges: Available, Not verified, Weekly limit,
   Not on plan, Unknown model (quotaPolicy.patterns.unknownModel, incl. the

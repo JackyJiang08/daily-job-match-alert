@@ -4,7 +4,11 @@
 // excluding it wrongly: ambiguous wording is left to the semantic review.
 import { unique } from './utils.mjs';
 
-export const LOCATION_UNVERIFIED_GAP = 'Location unverified — confirm US eligibility';
+export const LOCATION_UNVERIFIED_GAP = 'US location not stated: confirm you can work from the United States';
+// The wording older payloads carry; replaced on the next pass and at render time.
+export const LEGACY_LOCATION_GAP = 'Location unverified — confirm US eligibility';
+export const LOCATION_NOT_STATED_LABEL = 'US location not stated';
+export const LOCATION_NOT_STATED_TITLE = 'The posting does not state a US location; confirm you can work from the United States before applying';
 
 // Any of these in the location field marks a posting as outside the United States, unless a US marker is
 // also present (multi-location postings such as "Toronto / New York, NY" pass to the semantic layer).
@@ -102,6 +106,22 @@ export function assessLocation(location) {
   const nonUs = firstMarker(text, NON_US_PATTERNS);
   if (nonUs) return { verdict: 'non_us', marker: nonUs };
   return { verdict: 'unverified', marker: null };
+}
+
+// Evidence in the job description that the role is in the United States or open to people authorized to
+// work there: a US state or city name, "United States", "US-based", or the work-authorization sentence.
+// Only checked when the location field itself said nothing usable; bare "US" and state codes are left
+// out because they are too noisy in running text.
+const US_DESCRIPTION_PATTERNS = [
+  { marker: 'work authorization', pattern: /\bauthori[sz]ed to work in the (?:United States|U\.S\.|US)\b/i },
+  { marker: 'US-based', pattern: /(?<![A-Za-z])(?:US|U\.S\.)-based\b/ },
+  { marker: 'United States', pattern: /\bUnited States\b/i },
+  ...[...US_STATE_NAMES, ...US_CITY_NAMES].map(marker => ({ marker, pattern: phrasePattern(marker, '') })),
+];
+
+export function usEvidenceInDescription(description) {
+  const text = String(description || '').replace(/\s+/g, ' ');
+  return text ? firstMarker(text, US_DESCRIPTION_PATTERNS) : null;
 }
 
 const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
@@ -203,7 +223,11 @@ export function assessGraduationWindow(text, graduationDate, roleType = null) {
 }
 
 export function assessEligibility(job, preferences = {}) {
-  const location = assessLocation(job.location);
+  let location = assessLocation(job.location);
+  if (location.verdict === 'unverified') {
+    const marker = usEvidenceInDescription(job.description);
+    if (marker) location = { verdict: 'us', marker, source: 'description' };
+  }
   if (location.verdict === 'non_us') {
     return { location, exclusion: { kind: 'location', reason: `location outside the United States (${location.marker})` } };
   }
@@ -220,7 +244,7 @@ export function annotateEligibility(job, preferences = {}) {
   const gaps = eligibility.location.verdict === 'unverified'
     ? unique([...(job.gaps || []), LOCATION_UNVERIFIED_GAP])
     : (job.gaps || []).filter(gap => gap !== LOCATION_UNVERIFIED_GAP);
-  return { ...job, eligibility, gaps };
+  return { ...job, eligibility, gaps: gaps.filter(gap => gap !== LEGACY_LOCATION_GAP) };
 }
 
 export function summarizeExclusions(jobs) {

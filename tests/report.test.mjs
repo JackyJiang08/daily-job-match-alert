@@ -176,8 +176,8 @@ test('semantic markers render as badges instead of text prefixes', () => {
   assert.deepEqual(jobBadges({ ...job, badges: ['Referral available', { key: 'hot', label: 'Hot', tone: 'bad' }] }).map(badge => badge.key), ['referral-available', 'hot']);
 
   const html = buildHtml([{ ...job, matchLevel: 'unreviewed', scoringEngine: 'local_fallback', location: 'Remote', gaps: ['Location unverified — confirm US eligibility'], eligibility: { location: { verdict: 'unverified', marker: null }, exclusion: null } }], meta);
-  assert.match(html, /<div class="badges"><span class="badge badge-warn" data-badge="unreviewed" title="[^"]+">Unreviewed<\/span><span class="badge" data-badge="location-unverified" title="[^"]+">Location unverified<\/span><\/div>/);
-  assert.match(html, /Location unverified — confirm US eligibility/);
+  assert.match(html, /<div class="badges"><span class="badge badge-warn" data-badge="unreviewed" title="[^"]+">Unreviewed<\/span><span class="badge" data-badge="location-unverified" title="The posting does not state a US location; confirm you can work from the United States before applying">US location not stated<\/span><\/div>/);
+  assert.match(html, /US location not stated: confirm you can work from the United States/, 'an older payload\'s gap reads with the new wording');
   assert.doesNotMatch(html, /\[unreviewed\]|Match level:/);
   const clean = buildHtml([job], meta);
   assert.doesNotMatch(clean, /<div class="badges">/);

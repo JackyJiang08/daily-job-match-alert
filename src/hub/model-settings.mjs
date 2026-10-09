@@ -6,7 +6,7 @@
 // state/model-availability.json, state/usage.json, quota events, and config.json. Nothing here calls a model.
 import { ENGINE_PROVIDER, PROVIDER_ENGINE, PROVIDER_LABELS, findModel, newerRelease, normalizeCatalog, providerModels } from '../engines/catalog.mjs';
 import { STAGE_LABELS, stageAssignments, stageChain } from '../engines/assignments.mjs';
-import { modelKey, modelStatus } from '../engines/model-availability.mjs';
+import { WEEKDAY_LABELS, modelKey, modelStatus, weeklyResetOf } from '../engines/model-availability.mjs';
 import { describeQuota, planLabel } from '../engines/quota.mjs';
 import { planView, displayPlan } from '../engines/plans.mjs';
 import { formatLocalDateTime } from '../time-format.mjs';
@@ -18,16 +18,20 @@ export const STATUS_LABELS = {
 export const STATUS_TONES = { available: 'good', not_verified: 'muted', weekly_limit: 'warn', not_on_plan: 'bad', unknown_model: 'bad' };
 const BLOCKING = new Set(['not_on_plan', 'unknown_model', 'weekly_limit']);
 
-// "Available", "Unavailable on Pro", "Weekly limit until Oct 8, 2026, 9:00 AM" (or "since …" without a
-// reset time), "Unknown model", "Not verified".
+// "Available", "Unavailable on Pro", "Weekly limit until Oct 8, 2026, 9:00 AM" (the CLI's reset time, or
+// "(weekly reset)" for the owner's), "Weekly limit since … · no reset time given" (never an estimated
+// date), "Unknown model", "Not verified".
 export function statusText(status, timeZone, plan = null) {
-  if (status.state === 'weekly_limit') return status.resetsAt ? `Weekly limit until ${formatLocalDateTime(status.resetsAt, timeZone)}` : `Weekly limit since ${formatLocalDateTime(status.at, timeZone)}`;
+  if (status.state === 'weekly_limit') {
+    if (status.resetsAt) return `Weekly limit until ${formatLocalDateTime(status.resetsAt, timeZone)}${status.resetSource === 'weekly_reset' ? ' (weekly reset)' : ''}`;
+    return `Weekly limit since ${formatLocalDateTime(status.at, timeZone)} · no reset time given`;
+  }
   if (status.state === 'not_on_plan') return `Unavailable on ${planLabel(status.plan || plan)}`;
   return STATUS_LABELS[status.state] || status.state;
 }
 
-function step(catalog, record, entry, { now, timeZone, plan }) {
-  const status = modelStatus(record, entry.model, { now });
+function step(catalog, record, entry, { now, timeZone, plan, weeklyReset = null }) {
+  const status = modelStatus(record, entry.model, { now, weeklyReset, timeZone });
   return { ...entry, alias: findModel(catalog, entry.model)?.alias || null, status, blocked: BLOCKING.has(status.state), reason: BLOCKING.has(status.state) ? statusText(status, timeZone, plan) : null };
 }
 
@@ -46,13 +50,14 @@ function lastLimitFor(engine, events, record, timeZone) {
 export function modelSettingsView({ config = {}, settings = {}, connections = null, record, usage = null, events = [], now = new Date(), timeZone = 'America/Chicago' }) {
   const catalog = normalizeCatalog(config);
   const assignments = stageAssignments(config);
+  const weeklyReset = weeklyResetOf(config);
   const claudePlan = planView('claude', { detected: connections?.claude?.plan || null, detectedSource: connections?.claude?.planSource || null, config, now, timeZone });
   const chatgptPlan = planView('chatgpt', { detected: connections?.codex?.plan || null, detectedSource: connections?.codex?.planSource || null, config, now, timeZone });
   const planFor = provider => (provider === 'anthropic' ? claudePlan : chatgptPlan);
 
   const stages = ['scoring', 'supplemental', 'letterDraft', 'letterEditor', 'prescreen'].map(stage => {
     const assignment = assignments[stage];
-    const chain = stageChain(assignment, catalog).map(entry => step(catalog, record, entry, { now, timeZone, plan: planFor(ENGINE_PROVIDER[entry.engine])?.plan }));
+    const chain = stageChain(assignment, catalog).map(entry => step(catalog, record, entry, { now, timeZone, plan: planFor(ENGINE_PROVIDER[entry.engine])?.plan, weeklyReset }));
     return { stage, label: STAGE_LABELS[stage], ...assignment, chain, off: (stage === 'letterEditor' && settings.editorReview === false) || (stage === 'prescreen' && config.prescreen?.enabled === false) };
   });
   const usedBy = id => stages.filter(row => !row.reserved && !row.linked && !row.off && row.chain.some(item => modelKey(item.model) === modelKey(id)))
@@ -65,7 +70,7 @@ export function modelSettingsView({ config = {}, settings = {}, connections = nu
     const window = usage?.entries ? usageWindow({ entries: usage.entries.filter(entry => entry.engine === engine) }, usage.options) : null;
     const tokensByModel = window?.total?.calls ? Object.entries(window.byModel).map(([model, totals]) => ({ model, totals })).sort((a, b) => (b.totals.input + b.totals.output) - (a.totals.input + a.totals.output)) : [];
     const models = providerModels(catalog, provider).map(entry => {
-      const status = modelStatus(record, entry.id, { now });
+      const status = modelStatus(record, entry.id, { now, weeklyReset, timeZone });
       const stagesUsing = usedBy(entry.id);
       return {
         ...entry, status, statusText: statusText(status, timeZone, plan.plan), usedBy: stagesUsing,
@@ -78,6 +83,8 @@ export function modelSettingsView({ config = {}, settings = {}, connections = nu
       provider, engine, name: PROVIDER_LABELS[provider], connection, plan, checkedAt: connections?.checkedAt || null,
       usage: window?.total?.calls ? { total: window.total, tokensByModel } : null,
       lastLimit: lastLimitFor(engine, events, record, timeZone), models,
+      // The owner's weekly reset (Claude only): limits without a CLI reset time are held until it.
+      weeklyReset: provider === 'anthropic' ? { value: weeklyReset, label: weeklyReset ? `${WEEKDAY_LABELS[weeklyReset.day]} ${weeklyReset.time}` : null } : null,
     };
   };
   return { catalog, cards: [card('anthropic'), card('openai')], stages, assignments, displayPlan };

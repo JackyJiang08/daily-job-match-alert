@@ -70,10 +70,10 @@ async function contextFor(root, { codexConnected = true, behaviour = null, calls
   return { ctx, calls };
 }
 
-test('settings default to on with up to 8 letters; selection takes this run\'s new matches, best first, and skips letters on file, uncertain companies, and the overflow', () => {
-  assert.deepEqual(autoLetterSettings({}), { enabled: true, maxPerRun: 8 });
+test('settings default to on with no limit; selection takes this run\'s new matches, best first, and skips letters on file, uncertain companies, and the overflow', () => {
+  assert.deepEqual(autoLetterSettings({}), { enabled: true, maxPerRun: 0 }, '0 means every new high match');
   assert.deepEqual(autoLetterSettings({ coverLetter: { autoGenerate: { enabled: false, maxPerRun: 3 } } }), { enabled: false, maxPerRun: 3 });
-  assert.equal(autoLetterSettings({ coverLetter: { autoGenerate: { maxPerRun: -2 } } }).maxPerRun, 8, 'a bad value falls back');
+  assert.equal(autoLetterSettings({ coverLetter: { autoGenerate: { maxPerRun: -2 } } }).maxPerRun, 0, 'a bad value falls back to no limit');
   const matches = [job(1), job(9), job(5), job(7, { companyUncertain: true, company: '100000 Example', companySource: 'url' }), job(3), job(2)];
   const lettersByJob = new Map([[jobIdOf(job(5)), { jobId: jobIdOf(job(5)) }]]);
   const newMatchUrls = matches.filter(item => item.url !== job(2).url).map(item => item.url);
@@ -147,7 +147,7 @@ test('without Codex the chain falls back to Claude Opus and notes it; a chain th
     const outcome = await runAutoLetters({ config: await failing.ctx.loadConfig(), date: '2026-09-15', newMatchUrls: matches.map(item => item.url), ctx: failing.ctx, warnings });
     assert.deepEqual([outcome.state, outcome.generated, outcome.failed], ['stopped', 1, 1]);
     assert.match(outcome.stopReason, /^stopped after Example Co 2 failed:/);
-    assert.match(warnings[0].message, /stopped after Example Co 2 failed: .*; 1 remaining posting\(s\) keep their Generate Cover Letter button/);
+    assert.match(warnings[0].message, /stopped after Example Co 2 failed: .*; 2 posting\(s\) are queued for the next run or Run Now/);
     const written = await failing.ctx.letterStore.listLetters();
     assert.deepEqual(written.map(letter => letter.company), ['Example Co 3']);
     assert.match(written[0].editorNotes.join('\n'), /Cover letter draft: gpt-5\.6-sol failed \(.*usage limit.*\); used claude-opus-5-5/);

@@ -449,8 +449,8 @@ scenarios['fable-weekly-limit'] = async function fableWeeklyLimit() {
 // a banner, and every candidate waits in the deferral queue instead of being lost or marked unreviewed.
 // The 2026-10-06 failure: Fable hit its own weekly limit, but the CLI's notice named no model, so the run
 // treated it as the account limit and deferred every posting. Now the next ladder model is asked first:
-// Opus answers, the run is scored by Opus with nothing deferred, the limit is recorded, and the next night
-// starts on Opus without asking Fable again.
+// Opus answers, the run is scored by Opus with nothing deferred, the limit is recorded without an estimated
+// reset time, and a run within the next 24 hours starts on Opus without asking Fable again.
 scenarios['fable-unnamed-limit'] = async function fableUnnamedLimit() {
   const directory = await prepareDirectory('fable-unnamed-limit');
   await addFixtureEmail(directory, 'demo-new-grad-alert.eml');
@@ -470,7 +470,7 @@ scenarios['fable-unnamed-limit'] = async function fableUnnamedLimit() {
   assert.ok(!artifacts.warnings.some(warning => /MODEL MISMATCH|deferred to the next run/.test(warning.message)), warningLines(artifacts.warnings).join(' | '));
   const record = JSON.parse(await fs.readFile(path.join(directory, 'state', 'model-availability.json'), 'utf8'));
   const limit = record.limits['claude-fable-5-1'];
-  assert.equal(new Date(limit.resetsAt).getTime() - new Date(limit.at).getTime(), 7 * 24 * 60 * 60 * 1000, 'held for 7 days without a reset time');
+  assert.equal(limit.resetsAt, null, 'no reset time in the notice: none is estimated (held 24 hours, or to the owner\'s weekly reset)');
   const notices = JSON.parse(await fs.readFile(path.join(directory, 'state', 'quota-notices.json'), 'utf8')).notices;
   assert.equal(notices[0].text, "You're out of usage credits. Switch to another model, or manage usage credits at https://claude.ai/settings/usage, to continue.");
   assert.deepEqual((await fs.readFile(callsFile, 'utf8')).trim().split('\n'), ['fable', 'opus'], 'one refused call to fable, then opus');

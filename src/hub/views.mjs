@@ -247,10 +247,18 @@ export function todayTarget(dates, today) {
   return { date: list[0] || null, isToday: false };
 }
 
-export function reportsPage({ dates, selected, reportBody, desktopPath, today }) {
+// "Generate Missing Letters": every high match of the date without a letter and with a trusted company,
+// written in the background under the letters lock; hidden when there is nothing to write.
+function missingLettersControl(selected, missing) {
+  if (!missing || (!missing.count && !missing.running)) return '';
+  if (missing.running) return `<button class="btn small" type="button" id="missing-letters" disabled title="Cover letters are being written; the cards update as they finish">Writing letters… ${Number(missing.done || 0)} of ${Number(missing.planned || 0)}</button>`;
+  return `<form class="inline" method="post" action="/letters/missing" id="missing-letters-form"><input type="hidden" name="date" value="${htmlEscape(selected)}"><button class="btn small" type="submit" id="missing-letters" title="Write a letter for every high match on this date that has none and a trusted company name">Generate Missing Letters (${Number(missing.count)})</button></form>`;
+}
+
+export function reportsPage({ dates, selected, reportBody, desktopPath, today, missingLetters = null }) {
   const list = renderDateList({ dates, selected, today });
   const body = reportBody
-    ? `<div class="report-head"><a class="btn secondary small" href="/desktop/${selected}" target="_blank" rel="noopener noreferrer" title="${htmlEscape(desktopPath)}">Open Desktop Copy</a><a class="btn secondary small" href="/desktop/${selected}/xlsx" title="Download the Desktop workbook">Download XLSX</a></div><div class="page">${reportBody}</div>`
+    ? `<div class="report-head">${missingLettersControl(selected, missingLetters)}<a class="btn secondary small" href="/desktop/${selected}" target="_blank" rel="noopener noreferrer" title="${htmlEscape(desktopPath)}">Open Desktop Copy</a><a class="btn secondary small" href="/desktop/${selected}/xlsx" title="Download the Desktop workbook">Download XLSX</a></div><div class="page">${reportBody}</div>`
     : `<p class="muted">${dates.length ? 'Pick a date on the left.' : 'Run the pipeline once and its report will appear here.'}</p>`;
   return `<div class="split"><aside id="date-column">${list}</aside><section>${body}</section></div>`;
 }
@@ -448,7 +456,7 @@ function usageRows(usage) {
 function autoLettersCard(auto, timeZone) {
   if (!auto) return '';
   const settings = auto.settings || {};
-  const config = `${settings.enabled === false ? 'Off' : `On · up to ${Number(settings.maxPerRun ?? 8)} per run`} <a href="/settings?tab=letters#auto-letters">Settings</a>`;
+  const config = `${settings.enabled === false ? 'Off' : Number(settings.maxPerRun || 0) > 0 ? `On · up to ${Number(settings.maxPerRun)} per run` : 'On · every new high match'} <a href="/settings?tab=letters#auto-letters">Settings</a>`;
   if (!auto.date) return `<article class="card" id="auto-letters-card"><h2>Automatic Cover Letters</h2><dl class="kv"><dt>Setting</dt><dd>${config}</dd><dt>Last pass</dt><dd><span class="muted">None yet</span></dd></dl></article>`;
   const state = auto.running ? `<span class="badge badge-good" data-badge="letters-running">Running</span> ${Number(auto.done)} of ${Number(auto.planned)} done` : auto.state === 'stopped' ? '<span class="badge badge-warn" data-badge="letters-stopped">Stopped</span>' : auto.state === 'interrupted' ? '<span class="badge badge-warn" data-badge="letters-interrupted">Interrupted</span>' : '<span class="badge badge-muted" data-badge="letters-done">Done</span>';
   const skipped = auto.skipped ? [auto.skipped.existing ? `${auto.skipped.existing} already had a letter` : '', auto.skipped.uncertain ? `${auto.skipped.uncertain} with an uncertain company` : '', auto.skipped.overLimit ? `${auto.skipped.overLimit} over the per-run limit` : ''].filter(Boolean).join(' · ') : '';
@@ -456,7 +464,7 @@ function autoLettersCard(auto, timeZone) {
   return `<article class="card" id="auto-letters-card"><h2>Automatic Cover Letters</h2><dl class="kv">
     <dt>Setting</dt><dd>${config}</dd>
     <dt>Last pass</dt><dd>${state} · ${htmlEscape(auto.date)} · ${htmlEscape(formatLocalDateTime(auto.finishedAt || auto.startedAt, timeZone))}</dd>
-    <dt>Letters</dt><dd id="auto-letters-counts">${Number(auto.generated)} generated · ${Number(auto.failed)} failed${skipped ? ` <span class="muted">(skipped: ${htmlEscape(skipped)})</span>` : ''}</dd>
+    <dt>Letters</dt><dd id="auto-letters-counts">${Number(auto.generated)} generated · ${Number(auto.failed)} failed${auto.carriedOver ? ` · ${Number(auto.carriedOver)} from the queue` : ''}${skipped ? ` <span class="muted">(skipped: ${htmlEscape(skipped)})</span>` : ''}${auto.queued ? `<br><span class="muted">${Number(auto.queued)} queued for the next run or Run Now</span>` : ''}</dd>
     <dt>Engines</dt><dd>${auto.engines?.length ? htmlEscape(auto.engines.join('; ')) : '<span class="muted">—</span>'}</dd>
     <dt>Usage</dt><dd>${htmlEscape(usage)}</dd>
     ${auto.stopReason ? `<dt>Stopped</dt><dd>${htmlEscape(auto.stopReason)}</dd>` : ''}

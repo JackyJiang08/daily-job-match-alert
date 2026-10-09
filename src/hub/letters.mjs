@@ -1,5 +1,6 @@
 // Hub-side cover-letter flow: locate the posting in a day payload, gather the private material and the
 // chosen resume track, run the engine, validate, then assemble, render, and store the letter.
+import { classifyEditorNotes, reviewBadge } from '../cover-letter/notes.mjs';
 import { STAGE_LABELS, stageAssignments, stageChain } from '../engines/assignments.mjs';
 import { normalizeCatalog } from '../engines/catalog.mjs';
 import path from 'node:path';
@@ -210,7 +211,7 @@ async function withQuotaPolicy(ctx, config, engineChoice, attempt) {
       try {
         const result = await attempt(fallback);
         if (quota.kind === 'ambiguousWeeklyLimit') {
-          const resetsAt = quota.resetsAt || new Date(ctx.now().getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+          const resetsAt = quota.resetsAt || null;
           await updateAvailabilityInHub(ctx, record => markWeeklyLimit(record, first.model, { at: ctx.now().toISOString(), resetsAt, notice: quota.message })).catch(() => {});
           await recordQuotaNotice(ctx, { kind: 'modelWeeklyLimit', model: first.model, engine: first.id, action: 'settled', text: `${quota.message} (no model named; ${next} answered)` });
         }
@@ -262,8 +263,11 @@ export async function generateLetter(ctx, { date, jobId, trackId, company, engin
   });
   const leading = [...draftPlan.notes, ...(editorPlan?.notes || []), ...generated.chainNotes, ...(generated.downgradeNote ? [generated.downgradeNote] : [])];
   const result = { ...generated.result, editorNotes: [...leading, ...(generated.result.editorNotes || [])], ...(generated.downgradeNote ? { downgradeNote: generated.downgradeNote } : {}) };
+  const levels = classifyEditorNotes(result.editorNotes);
   return {
     ...result,
+    notesNeedReview: levels.needsReview,
+    notesInfo: levels.info,
     jobId: id,
     date,
     company: salutationCompany || 'Company',
@@ -285,7 +289,7 @@ export async function oneClickLetter(ctx, { date, jobId, engine = null }) {
     engine: draft.engine, model: draft.model, effort: draft.effort, reviewEngine: draft.reviewEngine, reviewModel: draft.reviewModel, reviewEffort: draft.reviewEffort,
     issues: draft.issues || [], editorNotes: draft.editorNotes || [], samplesUsed: draft.samplesUsed || [],
   });
-  return { downloadUrl: saved.downloadUrl, openUrl: `/letters/${date}/${saved.slug}`, pdf: saved.pdf, company: draft.company, track: draft.track, wordCount: saved.wordCount, engine: draft.engine, model: draft.model, downgradeNote: draft.downgradeNote || null };
+  return { downloadUrl: saved.downloadUrl, openUrl: `/letters/${date}/${saved.slug}`, pdf: saved.pdf, company: draft.company, track: draft.track, wordCount: saved.wordCount, engine: draft.engine, model: draft.model, downgradeNote: draft.downgradeNote || null, checkBadge: reviewBadge(draft.editorNotes || []) };
 }
 
 // Persists edited paragraphs, renders the PDF, and records everything needed to reopen or re-download.
