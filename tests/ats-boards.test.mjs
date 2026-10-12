@@ -170,7 +170,7 @@ test('pollBoard sends conditional headers, honours 304, and walks Workday pages 
   assert.equal(calls[0].options.headers['if-none-match'], 'W/"abc"');
   assert.equal(calls[0].options.headers['if-modified-since'], 'Mon, 14 Sep 2026 20:01:39 GMT');
   assert.match(calls[0].options.headers['user-agent'], /DailyJobMatchAlert/);
-  assert.deepEqual(notModified, { notModified: true, jobs: [], etag: 'W/"abc"', lastModified: greenhouse.lastModified, status: 304 });
+  assert.deepEqual(notModified, { notModified: true, jobs: [], etag: 'W/"abc"', lastModified: greenhouse.lastModified, status: 304, complete: true });
   const fresh = await pollBoard(greenhouse, { now: NOW, fetchImpl: async () => jsonResponse(await fixture('greenhouse-jobs.json'), { headers: { etag: 'W/"def"' } }) });
   assert.equal(fresh.jobs.length, 2);
   assert.equal(fresh.etag, 'W/"def"');

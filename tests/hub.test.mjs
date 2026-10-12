@@ -621,7 +621,7 @@ test('a persisted Workday company name is cleaned when rendered in the report an
     const report = await hub.request('GET', '/reports/2026-08-27');
     assert.match(report.text, /<p class="job-meta">Motorola Solutions · Remote - US · New Grad<\/p>/, 'the card shows the cleaned name');
     assert.match(report.text, /data-company="motorola solutions"/);
-    assert.match(report.text, /<span class="meta" title="Date only: the source reports no time of day">Posted Aug 26 · fixture<\/span>/, 'a Workday day is shown as the local calendar day, date only');
+    assert.match(report.text, /<span class="meta" title="Date only: the source reports no time of day">Posted Aug 26 \(date only\) · fixture<\/span>/, 'a Workday day is shown as the local calendar day, date only');
     assert.doesNotMatch(report.text, /100000 Motorola/);
     const jobId = sha256(workday.url).slice(0, 16);
     const panel = await hub.request('GET', `/letters/new?date=2026-08-27&job=${jobId}`);
@@ -1169,6 +1169,28 @@ test('while the automatic pass writes letters, cards say so and manual letters w
     assert.equal(saved.status, 303);
     assert.deepEqual((await readConfig(root)).coverLetter.autoGenerate, { enabled: false, maxPerRun: 3 });
     assert.match(decodeURIComponent((await hub.form('/settings/letters-auto', { autoGenerate: 'on', maxPerRun: '999' })).headers.location), /error=Letters per run must be a whole number from 0 \(no limit\) to 500/);
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('Settings > Pipeline has "Include carried-over postings" (default on); only the Pipeline form changes it', async () => {
+  const root = await prepareProject();
+  const hub = await startHub(root);
+  try {
+    const page = await hub.request('GET', '/settings?tab=pipeline');
+    assert.match(page.text, /<legend>Matching<\/legend>[\s\S]*?<input type="checkbox" name="includeCarriedOver" checked> Include carried-over postings<\/label>[\s\S]*?<\/fieldset>/, 'on when config says nothing');
+    const off = await hub.form('/settings', { pipelinePresent: '1', minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' });
+    assert.equal(off.status, 303);
+    assert.equal((await readConfig(root)).semanticMatching.includeCarriedOver, false, 'an unchecked box on the Pipeline form turns it off');
+    assert.match((await hub.request('GET', '/settings?tab=pipeline')).text, /<input type="checkbox" name="includeCarriedOver"> Include carried-over postings/);
+    const other = await hub.form('/settings', { minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' });
+    assert.equal(other.status, 303);
+    assert.equal((await readConfig(root)).semanticMatching.includeCarriedOver, false, 'a form without the Pipeline marker leaves it alone');
+    await hub.form('/settings', { pipelinePresent: '1', includeCarriedOver: 'on', minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' });
+    assert.equal((await readConfig(root)).semanticMatching.includeCarriedOver, true);
+    assert.equal(validateSettings({ minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' }).includeCarriedOver, null);
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });

@@ -3,8 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import ExcelJS from 'exceljs';
 import { reportTracks, scoreHeader, trackScore } from './resume-tracks.mjs';
-import { displayCompanyName, postedAtPrecision, unknownPostedLabel } from './posting-fields.mjs';
-import { localDate } from './time-format.mjs';
+import { displayCompanyName, freshnessLabel, postedAtPrecision, postedText } from './posting-fields.mjs';
 
 const [jsonPath, outputPath, verifyFlag] = process.argv.slice(2);
 if (!jsonPath || !outputPath) {
@@ -29,7 +28,7 @@ const COLORS = {
 };
 const UNREVIEWED_PREFIX = '[unreviewed]';
 
-// Matches sheet layout: five fixed columns, one "<Label> Score" column per enabled resume track (in
+// Matches sheet layout: six fixed columns, one "<Label> Score" column per enabled resume track (in
 // configured order), then the recommendation and text columns. Column letters for formulas and the
 // color scale are derived from this list, so the sheet adapts to any number of tracks.
 export function matchColumnsFor(tracks) {
@@ -38,7 +37,8 @@ export function matchColumnsFor(tracks) {
     { header: 'Title', width: 38 },
     { header: 'Location', width: 22 },
     { header: 'Role Type', width: 13 },
-    { header: 'Posted At', width: 18 },
+    { header: 'Posted At', width: 22 },
+    { header: 'Freshness', width: 18 },
     ...tracks.map(track => ({ header: scoreHeader(track), width: Math.max(10, Math.min(18, track.label.length + 7)), score: track.id })),
     { header: 'Recommended Resume', width: 18 },
     { header: 'Why It Matches', width: 45, wrap: true },
@@ -235,15 +235,11 @@ for (let row = 1; row <= roleTypeEndRow; row++) {
 
 for (const column of ['C', 'D', 'E', 'F']) summary.getColumn(column).width = 12;
 
-// Day-level posting dates are written as the calendar day in the report's time zone (no 00:00 time);
-// precise timestamps keep their time of day.
+// Precise timestamps stay a date-time value (sortable); everything else is the same text the
+// report card shows: "Oct 8 (date only)", "first seen Oct 9, 8:04 PM", "Unknown (found Sep 26)".
 function postedAtCell(job, timeZone) {
-  if (!job.postedAt) return unknownPostedLabel(job, timeZone);
-  if (postedAtPrecision(job) === 'datetime') return asDate(job.postedAt);
-  const parsed = new Date(job.postedAt);
-  if (Number.isNaN(parsed.getTime())) return String(job.postedAt);
-  const [year, month, day] = localDate(parsed, timeZone).split('-').map(Number);
-  return new Date(Date.UTC(year, month - 1, day));
+  if (job.postedAt && freshnessLabel(job) === 'posted today') return asDate(job.postedAt);
+  return postedText(job, timeZone);
 }
 
 const rows = jobs.map(job => [
@@ -252,6 +248,7 @@ const rows = jobs.map(job => [
   job.location,
   job.roleType,
   postedAtCell(job, payload.meta?.timeZone),
+  freshnessLabel(job),
   ...tracks.map(track => trackScore(job, track.id)),
   null,
   whyItMatches(job),
@@ -305,7 +302,7 @@ for (let index = 0; index < jobs.length; index++) {
   MATCH_COLUMNS.forEach((column, columnIndex) => {
     matches.getCell(rowNumber, columnIndex + 1).alignment = { vertical: 'top', wrapText: Boolean(column.wrap) };
   });
-  matches.getCell(rowNumber, COLUMN['Posted At']).numFmt = postedAtPrecision(jobs[index]) === 'datetime' ? 'yyyy-mm-dd hh:mm' : 'yyyy-mm-dd';
+  if (matches.getCell(rowNumber, COLUMN['Posted At']).value instanceof Date) matches.getCell(rowNumber, COLUMN['Posted At']).numFmt = 'yyyy-mm-dd hh:mm';
   for (const column of SCORE_COLUMNS) matches.getCell(rowNumber, column.index).numFmt = '0';
   const link = matches.getCell(rowNumber, COLUMN['Posting Link']);
   if (link.value && typeof link.value === 'object') link.font = { color: { argb: COLORS.link }, underline: true };
@@ -339,7 +336,8 @@ const noteRows = [
   ['Gaps / Verify', 'Skills or eligibility details that were not found in the selected resume or need manual confirmation. "US location not stated" means neither the location nor the description names a US place or US work authorization; confirm you can work from the United States.'],
   ['Update today', 'How many runs have contributed to this application date. Every run merges its findings into the day\'s stored payload and re-renders the whole report, so a later run never shrinks it.'],
   ['Excluded rows', 'Postings removed by the deterministic eligibility rules before scoring mattered: a location outside the United States, or cohort wording (class of, graduate by, full-time start) that is incompatible with the configured graduation date. They never appear in Matches.'],
-  ['Posted At', 'When the source says the posting was published. A value with a time of day comes from a board API or structured posting data; a bare date is date only, because the source (a curated list, a Workday "Posted N Days Ago") reports no time of day; "Unknown (found Sep 26)" means the source gives no posting date at all and the day is when this pipeline first found the posting.'],
+  ['Posted At', 'When the source says the posting was published. A value with a time of day comes from a board API or structured posting data; "Oct 8 (date only)" means the source (a curated list, a Workday "Posted N Days Ago") reports no time of day; "first seen Oct 9, 8:04 PM" is when this pipeline first found a board posting that was not on the board at its previous poll; "Unknown (found Sep 26)" means the source gives no posting date at all and the day is when this pipeline first found the posting.'],
+  ['Freshness', 'Why the posting counts as fresh: "new since last poll" (not on its board at the previous poll, at most 30 hours earlier), "posted today" (a precise posting time inside the window), "carried over" (deferred by the review budget on an earlier run and reviewed now; also listed under Carried over from yesterday in the report), "date only" (a posting date without a time of day), or "undated" (no posting date).'],
   ['Posting Link', 'Clickable link to the original or final resolved posting; the cell shows the domain and the hyperlink carries the full URL.'],
   ['HTML report', 'The full captured JD, salary, employment type, source, discovery time, and freshness basis stay in the companion HTML file.'],
   ['Safety', 'This workbook never submits an application.'],

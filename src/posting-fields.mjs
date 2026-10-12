@@ -5,7 +5,7 @@
 //     list age ("1d"), a Workday "Posted Yesterday", or a date-only JSON-LD datePosted.
 // Both are pure functions of the job so the pipeline, the Desktop report, the XLSX, and the hub agree.
 import { cleanText } from './utils.mjs';
-import { endOfLocalDay, formatLocalDay } from './time-format.mjs';
+import { endOfLocalDay, formatLocalDay, formatLocalShort, localDate, zonedInstant } from './time-format.mjs';
 
 // Leading tenant codes: "100000 ", "1007 ", "US101 ", "CP1367 ", "6942-", and 3–4 letter codes such as
 // "TMN " when a multi-word name follows (two-letter codes like "GD" or "GE" are part of real names).
@@ -188,12 +188,108 @@ export function postedAtPrecision(job) {
   return 'date';
 }
 
-// The instant a posting is held to the window by: its own time when precise, the end of its local
-// calendar day when the source gives a date only, null when the source gives no date at all.
+// A board posting that was not on the board at its previous successful poll (at most
+// SNAPSHOT_MAX_AGE_HOURS earlier) appeared since then: it is inside the window whatever date the board
+// prints, and it is held to the window by the moment it was first seen (job.firstSeenAt).
+export const NEW_SINCE_LAST_POLL = 'new since last poll';
+
+export function isNewSinceLastPoll(job) {
+  return job?.freshnessBasis === NEW_SINCE_LAST_POLL && Boolean(job.firstSeenAt);
+}
+
+// ---------------------------------------------------------------------------------------------- calendar dates
+
+// A calendar date with no time of day is stored as noon UTC of that date, so every US zone reads the
+// same day back ("2026-10-08" → 2026-10-08T12:00:00.000Z).
+export function calendarDateIso(day) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(day || ''));
+  if (!match) return null;
+  const stamp = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12);
+  return Number.isFinite(stamp) ? new Date(stamp).toISOString() : null;
+}
+
+// The calendar day (YYYY-MM-DD) a date-only posting names. Stored calendar dates (noon UTC, or midnight
+// UTC in older payloads, which a bare JSON-LD datePosted used to produce) are read in UTC, so
+// "2026-10-08" is Oct 8 and not Oct 7 in Chicago; any other instant (Workday "Posted Yesterday",
+// list ages) is read as the local day in the zone.
+export function postingDay(job, timeZone) {
+  const raw = String(job?.postedAt || '');
+  if (!raw) return null;
+  const stored = /^(\d{4}-\d{2}-\d{2})T(?:00|12):00:00(?:\.000)?Z$/.exec(raw);
+  if (stored) return stored[1];
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? null : localDate(date, timeZone || 'America/Chicago');
+}
+
+function dayParts(day) {
+  return String(day).split('-').map(Number);
+}
+
+// "Oct 8" for a YYYY-MM-DD calendar day.
+export function formatCalendarDay(day) {
+  const [year, month, date] = dayParts(day);
+  return new Date(Date.UTC(year, month - 1, date, 12)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+}
+
+function endOfCalendarDay(day, timeZone) {
+  const [year, month, date] = dayParts(day);
+  return endOfLocalDay(zonedInstant(year, month, date, 12, 0, timeZone), timeZone);
+}
+
+// Posting pages whose datePosted carries a clock time but no zone, and the zone the site means. jobright.ai
+// prints "2026-10-11 23:49:00" next to "2 hours ago" at 02:04 UTC on Oct 12 (checked 2026-10-11): UTC.
+export const ZONELESS_TIME_ZONES = [{ host: /(?:^|\.)jobright\.ai$/i, zone: 'UTC' }];
+
+function zoneFor(url) {
+  let host = '';
+  try { host = new URL(String(url || '')).hostname; } catch { return null; }
+  return ZONELESS_TIME_ZONES.find(entry => entry.host.test(host))?.zone || null;
+}
+
+const DATE_TIME = /^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?\s*(Z|[+-]\d{2}:?\d{2})?)?$/i;
+
+// Reads a posting page's date (JSON-LD datePosted, a search result's page_age) into { postedAt, precision,
+// zoneless }. A bare date is a calendar date; a time with an offset or Z is precise; a midnight time is a
+// calendar date (an export that pads the date, the "00:00:00" the report used to show); a time with no zone
+// is precise only for a site whose zone is known (ZONELESS_TIME_ZONES), else it is cut to its calendar date.
+// Anything else falls back to Date parsing and counts as precise only when it names an offset.
+export function parsePostingDate(raw, { url = null } = {}) {
+  const text = String(raw ?? '').trim();
+  if (!text) return null;
+  const match = DATE_TIME.exec(text);
+  if (!match) {
+    const date = new Date(text);
+    if (Number.isNaN(date.getTime())) return null;
+    const zoned = /(?:Z|GMT|UTC|[+-]\d{2}:?\d{2})\b/i.test(text) || /Z$/i.test(text);
+    return zoned && hasClockTime(text)
+      ? { postedAt: date.toISOString(), precision: 'datetime', zoneless: false }
+      : { postedAt: calendarDateIso(localDate(date, 'UTC')), precision: 'date', zoneless: !zoned };
+  }
+  const [, year, month, day, hour, minute, second, offset] = match;
+  const calendar = `${year}-${month}-${day}`;
+  if (hour == null) return { postedAt: calendarDateIso(calendar), precision: 'date', zoneless: false };
+  if (Number(hour) === 0 && Number(minute) === 0 && Number(second || 0) === 0) return { postedAt: calendarDateIso(calendar), precision: 'date', zoneless: !offset };
+  if (offset) {
+    const normalized = offset.toUpperCase() === 'Z' ? 'Z' : offset.replace(/^([+-]\d{2})(\d{2})$/, '$1:$2');
+    const date = new Date(`${calendar}T${hour.padStart(2, '0')}:${minute}:${second || '00'}${normalized}`);
+    return Number.isNaN(date.getTime()) ? null : { postedAt: date.toISOString(), precision: 'datetime', zoneless: false };
+  }
+  const zone = zoneFor(url);
+  if (!zone) return { postedAt: calendarDateIso(calendar), precision: 'date', zoneless: true };
+  const instant = zonedInstant(Number(year), Number(month), Number(day), Number(hour), Number(minute), zone);
+  instant.setUTCSeconds(Number(second || 0));
+  return { postedAt: instant.toISOString(), precision: 'datetime', zoneless: true, zone };
+}
+
+// The instant a posting is held to the window by: the moment it was first seen for a board posting new
+// since the last poll, its own time when precise, the end of its calendar day when the source gives a
+// date only, null when the source gives no date at all.
 export function freshnessInstant(job, timeZone) {
+  if (isNewSinceLastPoll(job)) return job.firstSeenAt;
   if (!job?.postedAt) return null;
   if (postedAtPrecision(job) === 'datetime') return job.postedAt;
-  return endOfLocalDay(job.postedAt, timeZone) || job.postedAt;
+  const day = postingDay(job, timeZone);
+  return (day && endOfCalendarDay(day, timeZone)) || endOfLocalDay(job.postedAt, timeZone) || job.postedAt;
 }
 
 // Freshness and deferral age are judged by the posting date; the discovery time stands in only when the
@@ -203,7 +299,7 @@ export function ageBasisInstant(job, timeZone) {
 }
 
 export function isUndated(job) {
-  return !job?.postedAt;
+  return !job?.postedAt && !isNewSinceLastPoll(job);
 }
 
 // "Unknown (found Sep 26)" for a posting whose source gives no date; the report and the workbook show it.
@@ -230,11 +326,67 @@ export function hasPreciseTimestamp(job) {
   return postedAtPrecision(job) === 'datetime';
 }
 
-// An alert email's received time is precise but is not the posting's own time, so it stays lenient.
-const RECHECK_EXEMPT_BASES = new Set(['email_received_at']);
+// An alert email's received time is precise but is not the posting's own time, so it stays lenient; a
+// posting new since the last board poll is inside the window by that fact, whatever the board's date says.
+const RECHECK_EXEMPT_BASES = new Set(['email_received_at', NEW_SINCE_LAST_POLL]);
 
 // A posting whose own publish time is known to the minute can be held to the lookback window exactly;
 // day-level sources keep the lenient rule because "Posted Yesterday" may mean 24 to 47 hours ago.
 export function holdsToExactWindow(job) {
   return hasPreciseTimestamp(job) && !RECHECK_EXEMPT_BASES.has(String(job.freshnessBasis || ''));
+}
+
+// ---------------------------------------------------------------------------------------------- display
+
+// What the report, the hub, and the workbook say about a posting's date:
+//   precise          "Oct 9, 3:12 PM"
+//   date only        "Oct 8 (date only)"   (never a 00:00 time)
+//   new since poll   "first seen Oct 9, 8:04 PM"
+//   carried over     "Oct 8 (date only) · first seen Oct 8, 8:04 PM"
+//   no date          "Unknown (found Sep 26)"
+export function postedText(job, timeZone) {
+  if (isNewSinceLastPoll(job)) return `first seen ${formatLocalShort(job.firstSeenAt, timeZone)}`;
+  let base;
+  if (!job?.postedAt) base = unknownPostedLabel(job, timeZone);
+  else if (postedAtPrecision(job) === 'datetime') base = formatLocalShort(job.postedAt, timeZone);
+  else {
+    const day = postingDay(job, timeZone);
+    base = `${day ? formatCalendarDay(day) : formatLocalDay(job.postedAt, timeZone)} (date only)`;
+  }
+  if (job?.carriedOver && job.firstSeenAt && job.postedAt) return `${base} · first seen ${formatLocalShort(job.firstSeenAt, timeZone)}`;
+  return base;
+}
+
+// The xlsx "Freshness" column and the card hover: why a posting counts as fresh.
+export const FRESHNESS_LABELS = ['new since last poll', 'posted today', 'carried over', 'date only', 'undated'];
+export function freshnessLabel(job) {
+  if (job?.carriedOver) return 'carried over';
+  if (isNewSinceLastPoll(job)) return 'new since last poll';
+  const precision = postedAtPrecision(job);
+  if (precision === 'datetime') return 'posted today';
+  if (precision === 'date') return 'date only';
+  return 'undated';
+}
+
+// A posting date later than the run is a misread time zone. A date-only value later than the run's
+// local day, or a precise value later than `checkedAt` (the moment of the check, never before the run
+// started: a board may publish while the run is collecting), is cut back to a date-only value on the
+// run's local day. Returns the job unchanged, or a copy with postedAtCorrection { from, to, reason }.
+export function correctFutureTimestamp(job, { now, checkedAt = now, timeZone } = {}) {
+  if (!job?.postedAt || !now) return job;
+  const stamp = new Date(job.postedAt).getTime();
+  if (!Number.isFinite(stamp)) return job;
+  const today = localDate(now, timeZone || 'America/Chicago');
+  const precision = postedAtPrecision(job);
+  const future = precision === 'datetime'
+    ? stamp > Math.max(now.getTime(), new Date(checkedAt).getTime())
+    : (postingDay(job, timeZone) || today) > today;
+  if (!future) return job;
+  const to = calendarDateIso(today);
+  return {
+    ...job,
+    postedAt: to,
+    postedAtPrecision: 'date',
+    postedAtCorrection: { from: job.postedAt, to, precision, reason: precision === 'datetime' ? 'later than the run (time zone misread); cut to the run\'s date' : 'calendar date after the run\'s local day; cut to the run\'s date' },
+  };
 }

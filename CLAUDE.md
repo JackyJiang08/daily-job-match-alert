@@ -161,6 +161,25 @@ disabled; do not expand them unless a task says so.
   has the posting (debug.searchDuplicates). Tests never call a real search API
   (searchFetchImpl / readSearchKey injectable). The Muse was not integrated: its
   terms require a registered app (checked 2026-10-09).
+- Poll snapshots (2026-10-11): state/ats-snapshots.json ({ at, complete, count, ids: 16-hex sha256 of
+  canonical URL and id:<externalId> }, separate from the registry). collectAtsBoards: with a usableSnapshot
+  (≤ SNAPSHOT_MAX_AGE_HOURS 30, no lastFailureAt after it) a posting absent from it is NEW_SINCE_LAST_POLL
+  (freshnessBasis 'new since last poll', sourceFreshnessBasis, firstSeenAt = now, previousPollAt; a partial
+  Workday/SmartRecruiters walk also needs the date rule) and a present one is dropped unless deferred
+  (snapshotExcluded); otherwise the date rule (freshnessRule 'date', snapshotReason). No snapshot → no
+  conditional headers. freshnessInstant/isUndated/holdsToExactWindow treat NEW by firstSeenAt.
+- Carried over: a job whose state.deferred entry exists when stamped gets carriedOver, firstSeenAt (entry
+  discoveredAt), restored NEW basis; markDeferred(state, job, at, reason 'budget'|'quota'). Report: separate
+  "Carried over from yesterday" group (view.carried, section#jobs-carried; the script sorts each
+  section.jobs). semanticMatching.includeCarriedOver (Settings > Pipeline, pipelinePresent marker) false →
+  clearBudgetDeferrals at startup and no budget deferral kept (quota ones stay).
+- Dates: parsePostingDate (JSON-LD datePosted, Workday startDate, search page_age): bare date → noon UTC
+  calendar date; midnight → date; zoneless clock time → ZONELESS_TIME_ZONES (jobright.ai = UTC, verified
+  2026-10-11 against its "2 hours ago") else date only. postingDay reads stored noon/midnight-UTC values as
+  the UTC date. postedText: "Oct 8 (date only)", "first seen Oct 9, 8:04 PM", carried adds first seen.
+  correctFutureTimestamp after enrichment (precise > max(run start, check time), or a calendar day after
+  the run's local day) → date-only run day, meta.freshness.futureCorrected. xlsx: Posted At text except a
+  'posted today' value, new Freshness column (freshnessLabel). Run Details "Freshness" row.
 - US evidence in a JD (usEvidenceInDescription) also counts a standalone
   uppercase US / U.S. / USA, except lowercase "us" and all-caps phrases such as
   "JOIN US".

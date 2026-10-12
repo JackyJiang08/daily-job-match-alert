@@ -13,7 +13,7 @@ import { collectGithubList } from './collectors/github-lists.mjs';
 import { collectHackerNewsHiring } from './collectors/hn-hiring.mjs';
 import { collectRemoteOk } from './collectors/remoteok.mjs';
 import { HACKER_NEWS_SOURCE, REMOTEOK_SOURCE, githubLists } from './collectors/catalog.mjs';
-import { applyConfigBoards, applySeedBoards, collectAtsBoards, discoverBoards, readRegistry, registerBoards, registryPath, withinWindow, writeRegistry } from './collectors/ats-boards.mjs';
+import { applyConfigBoards, applySeedBoards, collectAtsBoards, discoverBoards, readRegistry, readSnapshots, registerBoards, registryPath, snapshotPath, withinWindow, writeRegistry, writeSnapshots } from './collectors/ats-boards.mjs';
 import { SEARCH_DISCOVERY_SOURCE, SEARCH_PROVIDERS, SEARCH_SOURCE_KIND, collectSearchDiscovery, readSearchKey, searchSettings, searchUsagePath } from './collectors/search-discovery.mjs';
 import { enrichJob, enrichmentWarningMessage } from './enrich.mjs';
 import { evaluateJob, isEligible } from './match.mjs';
@@ -21,8 +21,8 @@ import { annotateEligibility, summarizeExclusions } from './eligibility.mjs';
 import { applySubscriptionMatching, isSemanticCandidate, localFallbackJob, summarizeScoringModel } from './subscription-match.mjs';
 import { normalizeEngineId, resolveModel } from './engines/index.mjs';
 import { buildHtml, writeReports, writeWarningsFile } from './report.mjs';
-import { clearDeferred, deferredStatus, expireDeferred, isJobSeen, markDeferred, markJobSeen, normalizeState, pruneSeen, releaseRecentBaselines } from './state.mjs';
-import { ageBasisInstant, datePrecisionSummary, freshnessInstant, isUndated } from './posting-fields.mjs';
+import { clearBudgetDeferrals, clearDeferred, deferredStatus, expireDeferred, isJobSeen, markDeferred, markJobSeen, normalizeState, pruneSeen, releaseRecentBaselines } from './state.mjs';
+import { ageBasisInstant, correctFutureTimestamp, datePrecisionSummary, freshnessInstant, isNewSinceLastPoll, isUndated } from './posting-fields.mjs';
 import { detectEarlyCareer, isEarlyCareerPriority, prefilterJobs } from './prefilter.mjs';
 import { isZapplyLink, resolveZapplyLink } from './collectors/zapply.mjs';
 import { appendUsage, summarizeUsage, usageEntries, usagePath } from './engines/usage.mjs';
@@ -263,8 +263,10 @@ export async function collectAtsBoardSources(config, state, collectedJobs, { now
   const searchAdded = registerBoards(registry, searchBoards, { now, origin: 'search_discovery' });
   if (searchAdded.length) warnings.push(createWarning('collector', SEARCH_DISCOVERY_SOURCE, `registered ${searchAdded.length} new ATS board(s) from search results: ${searchAdded.slice(0, 5).join(', ')}${searchAdded.length > 5 ? ', …' : ''}`, 'info'));
   applyConfigBoards(registry, settings.boards, { now });
+  const snapshotFile = snapshotPath(config);
+  const snapshots = await readSnapshots(snapshotFile);
   const polled = await collectAtsBoards({
-    registry, settings, network: config.network, now, lookbackHours: config.lookbackHours, timeZone: config.timeZone, warnings,
+    registry, snapshots, settings, network: config.network, now, lookbackHours: config.lookbackHours, timeZone: config.timeZone, warnings,
     isSeen: job => isJobSeen(state, job),
     isDeferred: job => deferredStatus(state, job).deferred,
     excludeUrls: new Set(collectedJobs.map(job => canonicalUrl(job.url)).filter(Boolean)),
@@ -273,8 +275,13 @@ export async function collectAtsBoardSources(config, state, collectedJobs, { now
   });
   for (const job of polled.baseline) markJobSeen(state, { ...job, enrichment: 'ats_baseline' }, now.toISOString());
   await writeRegistry(file, registry);
+  try {
+    await writeSnapshots(snapshotFile, polled.snapshots, registry);
+  } catch (error) {
+    warnings.push(createWarning('collector', 'ATS boards', `could not save tonight's board snapshots (${errorSummary(error)}); tomorrow's boards fall back to posting dates`));
+  }
   for (const result of polled.results) {
-    sourceStats?.push({ name: result.label, kind: 'ats', key: result.key, ok: result.ok, count: result.newCount, jobCount: result.jobCount, baseline: result.baseline, baselineCount: result.baselineCount, skipped: result.skipped, notModified: result.notModified, dormant: result.dormant, quiet: result.quiet, error: result.error });
+    sourceStats?.push({ name: result.label, kind: 'ats', key: result.key, ok: result.ok, count: result.newCount, jobCount: result.jobCount, baseline: result.baseline, baselineCount: result.baselineCount, skipped: result.skipped, notModified: result.notModified, dormant: result.dormant, quiet: result.quiet, error: result.error, freshnessRule: result.freshnessRule, snapshotReason: result.snapshotReason, newSinceLastPoll: result.newSinceLastPoll, snapshotExcluded: result.snapshotExcluded });
   }
   return { jobs: polled.jobs, results: polled.results, registry };
 }
@@ -587,6 +594,29 @@ export function applyFreshnessRecheck(jobs, cutoff, isDeferred = () => false) {
   return { jobs: kept, dropped };
 }
 
+// Run Details "Freshness": how board postings were judged (snapshot of the previous poll or posting dates),
+// how many postings already on the board last night were left out, how many reviewed postings were carried
+// over, and the posting dates corrected for lying in the future.
+export function freshnessMeta({ sourceStats = [], evaluated = [], futureCorrections = [], includeCarriedOver = true } = {}) {
+  const boards = (sourceStats || []).filter(stat => stat?.kind === 'ats' && !stat.skipped && stat.ok !== false);
+  const fallbackReasons = {};
+  for (const stat of boards.filter(item => item.freshnessRule === 'date')) {
+    const reason = stat.snapshotReason || 'no snapshot';
+    fallbackReasons[reason] = (fallbackReasons[reason] || 0) + 1;
+  }
+  return {
+    snapshotBoards: boards.filter(stat => stat.freshnessRule === 'snapshot').length,
+    dateBoards: boards.filter(stat => stat.freshnessRule === 'date').length,
+    fallbackReasons,
+    newSinceLastPoll: boards.reduce((sum, stat) => sum + Number(stat.newSinceLastPoll || 0), 0),
+    snapshotExcluded: boards.reduce((sum, stat) => sum + Number(stat.snapshotExcluded || 0), 0),
+    carriedOver: evaluated.filter(job => job.carriedOver).length,
+    includeCarriedOver,
+    futureCorrected: futureCorrections.length,
+    futureCorrections: futureCorrections.slice(0, 50),
+  };
+}
+
 // What the report and the hub show about quota handling: every event of this run, the model and engine
 // that ended up scoring, and how many postings the refusal pushed to the next run.
 export function summarizeQuota(events, policy, config, deferredCount = 0) {
@@ -781,6 +811,17 @@ async function runPipeline(config, clock, options = {}) {
   const deferralMaxAgeHours = Number(config.lookbackHours || 24) + Number(config.deferralGraceHours ?? DEFAULT_DEFERRAL_GRACE_HOURS);
   const staleBacklog = expireDeferred(state, now, deferralMaxAgeHours, { timeZone: config.timeZone });
   if (staleBacklog.removed) warnings.push(createWarning('llm', 'review budget', `expired ${staleBacklog.removed} backlog postings older than ${deferralMaxAgeHours} hours (not scored, not marked seen)`, 'info'));
+  // Settings > Pipeline "Include carried-over postings" (semanticMatching.includeCarriedOver, default on).
+  // Off: postings the review budget left behind are not carried into this or any later run (quota
+  // deferrals still are; the report promised them).
+  const includeCarriedOver = config.semanticMatching?.includeCarriedOver !== false;
+  if (!includeCarriedOver) {
+    const released = clearBudgetDeferrals(state);
+    if (released.length) {
+      staleBacklog.urls.push(...released);
+      warnings.push(createWarning('llm', 'review budget', `carried-over postings are switched off: dropped ${released.length} posting(s) left over from an earlier run (not scored, not marked seen)`, 'info'));
+    }
+  }
   if (!prefs.graduationDate) {
     warnings.push(createWarning('eligibility', 'graduation window', 'preferences.graduationDate is not set, so the graduation-window hard filter is disabled and only the semantic review checks cohort wording'));
   }
@@ -828,11 +869,23 @@ async function runPipeline(config, clock, options = {}) {
     markJobSeen(state, { url: job.zapplyUrl, enrichment: 'zapply_resolved' }, now.toISOString());
     return false;
   });
-  const stamped = unseenCandidates.map(job => ({
-    ...job,
-    originalUrl: job.originalUrl || job.url,
-    discoveredAt: job.discoveredAt || now.toISOString(),
-  }));
+  // A posting the review budget deferred on an earlier run is carried over: it keeps the time it was first
+  // found (and, for a board posting that was new since the last poll then, that basis) and is shown in the
+  // report's "Carried over from yesterday" group, never in the main list.
+  const stamped = unseenCandidates.map(job => {
+    const entry = deferredStatus(state, job).entry;
+    if (!entry) return { ...job, originalUrl: job.originalUrl || job.url, discoveredAt: job.discoveredAt || now.toISOString() };
+    const firstSeenAt = entry.firstSeenAt || entry.discoveredAt || entry.firstDeferredAt || now.toISOString();
+    return {
+      ...job,
+      originalUrl: job.originalUrl || job.url,
+      discoveredAt: entry.discoveredAt || job.discoveredAt || now.toISOString(),
+      carriedOver: true,
+      carriedReason: entry.reason || 'budget',
+      firstSeenAt,
+      ...(entry.freshnessBasis && !isNewSinceLastPoll(job) ? { freshnessBasis: entry.freshnessBasis, sourceFreshnessBasis: job.freshnessBasis || null } : {}),
+    };
+  });
   const enrichedCandidates = config.network.fetchDescriptions === false ? stamped : await mapLimit(
     stamped,
     Number(config.network.concurrency || 3),
@@ -864,7 +917,17 @@ async function runPipeline(config, clock, options = {}) {
     warnings.push(createWarning('enrichment', job.source || 'job posting', enrichmentWarningMessage(job, status)));
     return { ...job, enrichmentAttempts: status.attempts, enrichmentTerminal: status.completed };
   });
-  const freshness = applyFreshnessRecheck(enriched, cutoff, job => deferredStatus(state, job).deferred);
+  // A posting date later than the run is a misread time zone: it is cut to a date-only value on the run's
+  // day (Run Details counts and lists them).
+  const futureCorrections = [];
+  const checkedAt = new Date(Math.max(now.getTime(), (options.clockNow ? options.clockNow() : new Date()).getTime()));
+  const corrected = enriched.map(job => {
+    const fixed = correctFutureTimestamp(job, { now, checkedAt, timeZone: config.timeZone });
+    if (fixed !== job) futureCorrections.push({ source: job.source || 'unknown source', company: job.company || '', title: job.title || '', from: fixed.postedAtCorrection.from, to: fixed.postedAtCorrection.to, precision: fixed.postedAtCorrection.precision });
+    return fixed;
+  });
+  if (futureCorrections.length) warnings.push(createWarning('collector', 'posting dates', `corrected ${futureCorrections.length} posting date(s) later than the run (time zone misread); they now show the run's date as a date-only value`, 'info'));
+  const freshness = applyFreshnessRecheck(corrected, cutoff, job => deferredStatus(state, job).deferred);
   if (freshness.dropped.length) {
     warnings.push(createWarning('collector', 'freshness', `dropped ${freshness.dropped.length} postings after precise timestamps put them outside the ${config.lookbackHours}-hour window`, 'info'));
   }
@@ -894,7 +957,11 @@ async function runPipeline(config, clock, options = {}) {
   const budget = applyReviewBudget(prescreen.jobs, state, config.semanticMatching?.maxReviewedPerRun, now, { lookbackHours: config.lookbackHours, timeZone: config.timeZone, rankByPrescreen: prescreen.meta.status === 'ok' && prescreen.meta.mode === 'enforced' });
   if (budget.abandoned.length) warnings.push(createWarning('llm', 'review budget', `stopped carrying ${budget.abandoned.length} undated postings after ${UNDATED_DEFERRAL_NIGHTS} nights without a posting date (not scored)`, 'info'));
   debug.reviewBudget = { kept: budget.ranking.filter(item => item.kept).map(item => ({ url: item.url, bucket: item.bucket, bestScore: item.bestScore, deferredCount: item.deferredCount })), deferred: budget.ranking.filter(item => !item.kept && !item.abandoned).map(item => ({ url: item.url, bucket: item.bucket, bestScore: item.bestScore, deferredCount: item.deferredCount })), abandoned: budget.abandoned.map(job => job.url), expired: [...staleBacklog.urls, ...backlog.expired.map(job => job.url)] };
-  if (budget.deferred.length) {
+  if (budget.deferred.length && !includeCarriedOver) {
+    // Carry-over is off: nothing waits for the next run; the postings stay unseen and unscored.
+    for (const job of budget.deferred) clearDeferred(state, job);
+    warnings.push(createWarning('llm', 'review budget', `left ${budget.deferred.length} postings unreviewed (review limit ${budget.limit} per run); carried-over postings are switched off, so they are not carried to the next run`, 'info'));
+  } else if (budget.deferred.length) {
     warnings.push(createWarning('llm', 'review budget', `deferred ${budget.deferred.length} postings to the next run (review limit ${budget.limit} per run); they are not marked as seen`, 'info'));
   }
   const budgetAlert = recordBudgetHistory(state, { date, at: now.toISOString(), candidates: budget.candidateCount, inWindow: budget.inWindowCount, limit: budget.limit, reviewed: budget.reviewedCount });
@@ -951,7 +1018,7 @@ async function runPipeline(config, clock, options = {}) {
   }
   // Postings a quota refusal left unscored wait for the next run like budget deferrals: never seen, never unreviewed.
   const quotaDeferred = evaluated.filter(job => job.quotaDeferred);
-  for (const job of quotaDeferred) markDeferred(state, job, now.toISOString());
+  for (const job of quotaDeferred) markDeferred(state, job, now.toISOString(), 'quota');
   evaluated = evaluated.filter(job => !job.quotaDeferred);
   // Weekly limits the run hit are shown on Settings until their reset time.
   // Only limits this run actually met are recorded (a skip of an already recorded limit is not new).
@@ -1049,6 +1116,7 @@ async function runPipeline(config, clock, options = {}) {
     },
     budgetAlert, budgetHistory: (state.budgetHistory || []).slice(-BUDGET_HISTORY_NIGHTS),
     droppedAfterPreciseTimestamps: freshness.dropped.length,
+    freshness: freshnessMeta({ sourceStats, evaluated, futureCorrections, includeCarriedOver }),
     quota,
     authExpired,
     planChange,

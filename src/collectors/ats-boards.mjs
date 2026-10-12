@@ -35,9 +35,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { workdayPostedOn } from '../enrich.mjs';
-import { canonicalUrl, cleanText, isoDate, mapLimit, normalizeLocation } from '../utils.mjs';
+import { canonicalUrl, cleanText, isoDate, mapLimit, normalizeLocation, sha256 } from '../utils.mjs';
 import { createWarning, errorSummary } from '../warnings.mjs';
-import { freshnessInstant } from '../posting-fields.mjs';
+import { NEW_SINCE_LAST_POLL, freshnessInstant } from '../posting-fields.mjs';
 
 export const ATS_KINDS = { greenhouse: 'Greenhouse', lever: 'Lever', ashby: 'Ashby', workday: 'Workday', smartrecruiters: 'SmartRecruiters' };
 export const ATS_SOURCE_KIND = 'public_ats_board';
@@ -68,6 +68,71 @@ function titleCase(value) {
 
 export function registryPath(config) {
   return path.join(config.root, 'state', 'ats-boards.json');
+}
+
+// ---------------------------------------------------------------------------------------------- poll snapshots
+
+// What each board listed at its last successful poll, kept apart from the registry (the hub reads that
+// one and it stays small): { version, boards: { key: { at, complete, count, ids: [16-hex hashes] } } }.
+// A posting missing from a snapshot taken at most SNAPSHOT_MAX_AGE_HOURS ago appeared since that poll;
+// one present in it was already on the board, whatever "Posted Yesterday" says now.
+export const SNAPSHOT_MAX_AGE_HOURS = 30;
+export const SNAPSHOT_VERSION = 1;
+
+export function snapshotPath(config) {
+  return path.join(config.root, 'state', 'ats-snapshots.json');
+}
+
+export function normalizeSnapshots(raw) {
+  const boards = raw && typeof raw === 'object' && raw.boards && typeof raw.boards === 'object' && !Array.isArray(raw.boards) ? raw.boards : {};
+  return { version: SNAPSHOT_VERSION, boards: { ...boards } };
+}
+
+export async function readSnapshots(file, io = fs) {
+  try {
+    return normalizeSnapshots(JSON.parse(await io.readFile(file, 'utf8')));
+  } catch (error) {
+    // A missing or unreadable file only means no board has a usable snapshot tonight.
+    if (error.code === 'ENOENT' || error instanceof SyntaxError) return normalizeSnapshots(null);
+    throw error;
+  }
+}
+
+export async function writeSnapshots(file, snapshots, registry = null, io = fs) {
+  const normalized = normalizeSnapshots(snapshots);
+  // Boards that left the registry leave the snapshot file too.
+  if (registry) for (const key of Object.keys(normalized.boards)) if (!registry.boards[key]) delete normalized.boards[key];
+  await io.mkdir(path.dirname(file), { recursive: true });
+  await io.writeFile(file, `${JSON.stringify(normalized)}\n`);
+}
+
+// A posting is identified by its canonical URL and, when the board gives one, its own id; either match
+// counts, so a retitled Workday posting (new URL slug, same requisition) is still the same posting.
+export function postingSnapshotIds(job) {
+  const keys = [canonicalUrl(job?.url)].filter(Boolean);
+  if (job?.externalId) keys.push(`id:${job.externalId}`);
+  return keys.map(key => sha256(key).slice(0, 16));
+}
+
+export function buildSnapshot(jobs, { now, complete }) {
+  const ids = new Set();
+  for (const job of jobs || []) for (const id of postingSnapshotIds(job)) ids.add(id);
+  return { at: now.toISOString(), complete: Boolean(complete), count: (jobs || []).length, ids: [...ids] };
+}
+
+// The previous snapshot when it can tell new from old: taken by a successful poll at most `maxAgeHours`
+// ago, with no failed poll after it. Otherwise null, and the board falls back to the posting dates.
+export function usableSnapshot(entry, board, now, maxAgeHours = SNAPSHOT_MAX_AGE_HOURS) {
+  if (!entry || !Array.isArray(entry.ids) || !entry.at) return { snapshot: null, reason: 'no snapshot' };
+  const at = new Date(entry.at).getTime();
+  if (!Number.isFinite(at)) return { snapshot: null, reason: 'no snapshot' };
+  if (board?.lastFailureAt && new Date(board.lastFailureAt).getTime() > at) return { snapshot: null, reason: 'last poll failed' };
+  if (now.getTime() - at > Number(maxAgeHours) * 60 * 60 * 1000) return { snapshot: null, reason: `snapshot older than ${maxAgeHours} h` };
+  return { snapshot: { ...entry, idSet: new Set(entry.ids) }, reason: null };
+}
+
+export function snapshotHas(snapshot, job) {
+  return postingSnapshotIds(job).some(id => snapshot.idSet.has(id));
 }
 
 // ---------------------------------------------------------------------------------------------- identification
@@ -482,6 +547,9 @@ function httpError(response) {
 
 async function pollWorkday(board, { fetchImpl, headers, timeoutMs, now, cutoff, maximumPages }) {
   const jobs = [];
+  // Complete only when the walk reached the end of the list; a walk stopped at the window's edge or at
+  // the page limit leaves older postings out of the snapshot.
+  let complete = false;
   for (let page = 0; page < maximumPages; page += 1) {
     const body = JSON.stringify({ appliedFacets: {}, limit: WORKDAY_PAGE_SIZE, offset: page * WORKDAY_PAGE_SIZE, searchText: '' });
     const response = await fetchWithTimeout(board.apiUrl, { method: 'POST', headers: { ...headers, accept: 'application/json', 'content-type': 'application/json' }, body }, timeoutMs, fetchImpl);
@@ -493,14 +561,17 @@ async function pollWorkday(board, { fetchImpl, headers, timeoutMs, now, cutoff, 
     const rawCount = Array.isArray(payload?.jobPostings) ? payload.jobPostings.length : 0;
     // Newest first: once a page reaches postings older than the window there is nothing newer behind it.
     const reachedOld = parsed.some(job => job.postedAt && new Date(job.postedAt) < cutoff);
-    if (rawCount < WORKDAY_PAGE_SIZE || reachedOld || (Number.isFinite(total) && (page + 1) * WORKDAY_PAGE_SIZE >= total)) break;
+    const reachedEnd = rawCount < WORKDAY_PAGE_SIZE || (Number.isFinite(total) && (page + 1) * WORKDAY_PAGE_SIZE >= total);
+    if (reachedEnd) complete = true;
+    if (reachedEnd || reachedOld) break;
   }
-  return { notModified: false, jobs, etag: null, lastModified: null, status: 200 };
+  return { notModified: false, jobs, etag: null, lastModified: null, status: 200, complete };
 }
 
 // Newest first, 100 per page, US postings only; the walk stops at the first page that reaches the window's edge.
 async function pollSmartRecruiters(board, { fetchImpl, headers, timeoutMs, now, cutoff, maximumPages }) {
   const jobs = [];
+  let complete = false;
   for (let page = 0; page < maximumPages; page += 1) {
     const url = new URL(board.apiUrl);
     url.searchParams.set('limit', String(SMARTRECRUITERS_PAGE_SIZE));
@@ -514,9 +585,11 @@ async function pollSmartRecruiters(board, { fetchImpl, headers, timeoutMs, now, 
     const total = Number(payload?.totalFound);
     const rawCount = Array.isArray(payload?.content) ? payload.content.length : 0;
     const reachedOld = parsed.some(job => job.postedAt && new Date(job.postedAt) < cutoff);
-    if (rawCount < SMARTRECRUITERS_PAGE_SIZE || reachedOld || (Number.isFinite(total) && (page + 1) * SMARTRECRUITERS_PAGE_SIZE >= total)) break;
+    const reachedEnd = rawCount < SMARTRECRUITERS_PAGE_SIZE || (Number.isFinite(total) && (page + 1) * SMARTRECRUITERS_PAGE_SIZE >= total);
+    if (reachedEnd) complete = true;
+    if (reachedEnd || reachedOld) break;
   }
-  return { notModified: false, jobs, etag: null, lastModified: null, status: 200 };
+  return { notModified: false, jobs, etag: null, lastModified: null, status: 200, complete };
 }
 
 // One request (or one page walk for Workday) against a board's public endpoint. Conditional headers
@@ -532,14 +605,18 @@ export async function pollBoard(board, options = {}) {
   if (board.kind === 'smartrecruiters') return pollSmartRecruiters(board, { fetchImpl, headers, timeoutMs, now, cutoff, maximumPages: Number(options.maximumSmartRecruitersPages || DEFAULT_MAXIMUM_SMARTRECRUITERS_PAGES) });
   const parse = PARSERS[board.kind];
   if (!parse) throw new Error(`Unsupported ATS kind "${board.kind}"`);
+  // Without a snapshot to carry forward, a 304 would leave nothing to compare against next night, so the
+  // conditional headers are left off (options.conditional false) and the full list is fetched.
   const conditional = {};
-  if (board.etag) conditional['if-none-match'] = board.etag;
-  if (board.lastModified) conditional['if-modified-since'] = board.lastModified;
+  if (options.conditional !== false) {
+    if (board.etag) conditional['if-none-match'] = board.etag;
+    if (board.lastModified) conditional['if-modified-since'] = board.lastModified;
+  }
   const response = await fetchWithTimeout(board.apiUrl, { headers: { ...headers, accept: 'application/json', ...conditional } }, timeoutMs, fetchImpl);
-  if (response.status === 304) return { notModified: true, jobs: [], etag: board.etag, lastModified: board.lastModified, status: 304 };
+  if (response.status === 304) return { notModified: true, jobs: [], etag: board.etag, lastModified: board.lastModified, status: 304, complete: true };
   if (!response.ok) throw httpError(response);
   const payload = await response.json();
-  return { notModified: false, jobs: parse(payload, board, now), etag: response.headers.get('etag') || null, lastModified: response.headers.get('last-modified') || null, status: response.status };
+  return { notModified: false, jobs: parse(payload, board, now), etag: response.headers.get('etag') || null, lastModified: response.headers.get('last-modified') || null, status: response.status, complete: true };
 }
 
 // Inside the lookback window means posted or updated at or after the cutoff. A posting whose date the
@@ -557,7 +634,13 @@ export function isQuietBoard(board, now = new Date()) {
   return now.getTime() - new Date(basis).getTime() >= QUIET_AFTER_DAYS * 24 * 60 * 60 * 1000;
 }
 
-// Polls every enabled, non-dormant board once per night (weekly when quiet). The first poll of a board
+// Polls every enabled, non-dormant board once per night (weekly when quiet). Freshness by snapshot: with a
+// usable snapshot of the previous poll (`snapshots`, see usableSnapshot), a posting absent from it is new
+// since that poll (freshnessBasis "new since last poll", firstSeenAt = now; on a partial snapshot it must
+// also pass the posting-date rule) and a posting present in it is old even when its date says yesterday,
+// unless it is deferred (carried over). Without one (a new board, a failed last poll, a quiet board's week
+// gap) the posting dates decide, as before. Every successful poll replaces the board's snapshot; a 304
+// renews it. The first poll of a board
 // records the postings older than the lookback window as already seen (`baseline`) so a newly discovered
 // board does not flood one report with its backlog, while postings inside the window go through the
 // normal flow at once. Baseline marks skip URLs in `excludeUrls` (postings another source collected this
@@ -565,7 +648,9 @@ export function isQuietBoard(board, now = new Date()) {
 // consecutive failure marks the board dormant. A board in `wakeKeys` (a search result pointed at one of
 // its postings tonight) skips the quiet board's weekly wait; disabled, dormant, and recently polled
 // boards stay as they are.
-export async function collectAtsBoards({ registry, settings = {}, network = {}, now = new Date(), lookbackHours = 24, timeZone = null, warnings = [], isSeen = () => false, isDeferred = () => false, excludeUrls = new Set(), wakeKeys = new Set(), fetchImpl = fetch }) {
+export async function collectAtsBoards({ registry, snapshots = null, settings = {}, network = {}, now = new Date(), lookbackHours = 24, timeZone = null, warnings = [], isSeen = () => false, isDeferred = () => false, excludeUrls = new Set(), wakeKeys = new Set(), fetchImpl = fetch }) {
+  const store = snapshots || normalizeSnapshots(null);
+  const snapshotMaxAgeHours = Number(settings.snapshotMaxAgeHours ?? SNAPSHOT_MAX_AGE_HOURS);
   const cutoff = new Date(now.getTime() - Number(lookbackHours) * 60 * 60 * 1000);
   const minimumHours = Number(settings.minimumPollIntervalHours ?? DEFAULT_MINIMUM_POLL_HOURS);
   const headers = { 'user-agent': network.userAgent || 'DailyJobMatchAlert/0.1' };
@@ -577,16 +662,18 @@ export async function collectAtsBoards({ registry, settings = {}, network = {}, 
   await mapLimit(boards, Number(network.concurrency || 3), async board => {
     const label = boardLabel(board);
     board.quiet = board.enabled !== false && !board.dormant && isQuietBoard(board, now);
-    const result = { key: board.key, label, kind: board.kind, ok: true, skipped: null, baseline: false, jobCount: null, newCount: 0, baselineCount: 0, notModified: false, error: null, dormant: board.dormant === true, quiet: board.quiet };
+    const result = { key: board.key, label, kind: board.kind, ok: true, skipped: null, baseline: false, jobCount: null, newCount: 0, baselineCount: 0, notModified: false, error: null, dormant: board.dormant === true, quiet: board.quiet, freshnessRule: null, snapshotReason: null, newSinceLastPoll: 0, snapshotExcluded: 0 };
     results.push(result);
     if (board.enabled === false) { result.skipped = 'disabled'; return; }
     if (board.dormant) { result.skipped = 'dormant'; return; }
     const sinceLastPoll = board.lastPolledAt ? now.getTime() - new Date(board.lastPolledAt).getTime() : Infinity;
     if (sinceLastPoll < minimumHours * 60 * 60 * 1000) { result.skipped = 'polled recently'; return; }
     if (board.quiet && !wakeKeys.has(board.key) && sinceLastPoll < QUIET_POLL_DAYS * 24 * 60 * 60 * 1000) { result.skipped = 'quiet (weekly poll)'; return; }
+    // Read before this poll changes lastFailureAt: a failure after the snapshot makes it unusable.
+    const previous = usableSnapshot(store.boards[board.key], board, now, snapshotMaxAgeHours);
     board.lastPolledAt = now.toISOString();
     try {
-      const polled = await pollBoard(board, { fetchImpl, headers, timeoutMs: network.timeoutMs, now, cutoff, lookbackHours, maximumWorkdayPages: settings.maximumWorkdayPages, maximumSmartRecruitersPages: settings.maximumSmartRecruitersPages });
+      const polled = await pollBoard(board, { fetchImpl, headers, timeoutMs: network.timeoutMs, now, cutoff, lookbackHours, maximumWorkdayPages: settings.maximumWorkdayPages, maximumSmartRecruitersPages: settings.maximumSmartRecruitersPages, conditional: Boolean(store.boards[board.key]) });
       board.consecutiveFailures = 0;
       board.lastError = null;
       board.lastSuccessAt = now.toISOString();
@@ -599,9 +686,35 @@ export async function collectAtsBoards({ registry, settings = {}, network = {}, 
         const named = polled.jobs.find(job => job.company && job.company !== titleCase(board.token || board.slug || board.tenant || ''));
         if (named) board.company = named.company;
       }
-      const fresh = polled.jobs.filter(wanted);
+      let fresh;
+      const snapshot = previous.snapshot;
+      if (snapshot) {
+        result.freshnessRule = 'snapshot';
+        fresh = [];
+        for (const job of polled.jobs) {
+          if (isSeen(job)) continue;
+          const present = snapshotHas(snapshot, job);
+          if (present || (!snapshot.complete && !withinWindow(job, cutoff, timeZone))) {
+            // Already on the board last night: only a posting the review budget deferred comes back.
+            if (isDeferred(job)) fresh.push(job);
+            else if (present && withinWindow(job, cutoff, timeZone)) result.snapshotExcluded += 1;
+            continue;
+          }
+          fresh.push({ ...job, freshnessBasis: NEW_SINCE_LAST_POLL, sourceFreshnessBasis: job.freshnessBasis || null, firstSeenAt: now.toISOString(), previousPollAt: snapshot.at });
+          result.newSinceLastPoll += 1;
+        }
+      } else {
+        result.freshnessRule = 'date';
+        result.snapshotReason = previous.reason;
+        fresh = polled.jobs.filter(wanted);
+      }
+      if (polled.notModified) {
+        if (store.boards[board.key]) store.boards[board.key] = { ...store.boards[board.key], at: now.toISOString() };
+      } else {
+        store.boards[board.key] = buildSnapshot(polled.jobs, { now, complete: polled.complete !== false });
+      }
       if (!board.baselinedAt) {
-        const old = polled.jobs.filter(job => !withinWindow(job, cutoff) && !excludeUrls.has(job.url) && !isDeferred(job));
+        const old = polled.jobs.filter(job => !withinWindow(job, cutoff, timeZone) && !excludeUrls.has(job.url) && !isDeferred(job));
         board.baselinedAt = now.toISOString();
         board.baselineCount = old.length;
         baseline.push(...old);
@@ -630,5 +743,5 @@ export async function collectAtsBoards({ registry, settings = {}, network = {}, 
     }
   });
   results.sort((a, b) => a.label.localeCompare(b.label));
-  return { jobs, baseline, results };
+  return { jobs, baseline, results, snapshots: store };
 }

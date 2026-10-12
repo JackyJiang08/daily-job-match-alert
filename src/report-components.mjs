@@ -114,8 +114,16 @@ export function renderEmptyState(message) {
 
 // Everything between <main> and </main>: the hub embeds this inside its own shell.
 export function renderReportBody(view) {
-  const list = view.cards.length
-    ? `<section class="jobs" id="jobs">${view.cards.map(renderJobCard).join('\n')}</section><div class="empty" id="no-results" hidden>No matches for the current filters.</div>`
+  const carried = view.carried?.cards?.length ? view.carried : null;
+  const main = view.cards.length
+    ? `<section class="jobs" id="jobs">${view.cards.map(renderJobCard).join('\n')}</section>`
+    : (carried ? renderEmptyState(view.emptyMessage) : '');
+  // Postings the review budget carried from an earlier run: their own group under the main list.
+  const carriedGroup = carried
+    ? `<h2 class="group-title" id="carried-over">${htmlEscape(carried.title)} <span class="group-count">(${carried.cards.length})</span></h2>${carried.note ? `<p class="group-note">${htmlEscape(carried.note)}</p>` : ''}<section class="jobs carried" id="jobs-carried">${carried.cards.map(renderJobCard).join('\n')}</section>`
+    : '';
+  const list = view.cards.length || carried
+    ? `${main}${carriedGroup}<div class="empty" id="no-results" hidden>No matches for the current filters.</div>`
     : renderEmptyState(view.emptyMessage);
   return `${renderMasthead(view)}
 ${view.banner ? `<div class="banner" data-banner="quota">${htmlEscape(view.banner)}</div>` : ''}

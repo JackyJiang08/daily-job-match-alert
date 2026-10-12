@@ -27,8 +27,9 @@ import path from 'node:path';
 import { identifyBoard } from './ats-boards.mjs';
 import { SEARCH_SOURCE_NAME } from './catalog.mjs';
 import { localDate } from '../time-format.mjs';
-import { canonicalUrl, cleanText, isoDate } from '../utils.mjs';
+import { canonicalUrl, cleanText } from '../utils.mjs';
 import { createWarning, errorSummary } from '../warnings.mjs';
+import { parsePostingDate } from '../posting-fields.mjs';
 
 export const SEARCH_DISCOVERY_SOURCE = SEARCH_SOURCE_NAME;
 export const SEARCH_SOURCE_KIND = 'search_discovery';
@@ -170,7 +171,8 @@ export function parseSearchResults(provider, payload) {
     title: cleanText(item.title || ''),
     url: canonicalUrl(item.url),
     snippet: cleanText(item.snippet || ''),
-    pageAge: item.pageAge ? isoDate(item.pageAge) : null,
+    // page_age is often a clock time with no zone ("2026-10-08T14:03:11"): only its calendar date is kept.
+    pageAge: item.pageAge ? parsePostingDate(item.pageAge)?.postedAt || null : null,
   })).filter(item => item.url && item.title);
 }
 

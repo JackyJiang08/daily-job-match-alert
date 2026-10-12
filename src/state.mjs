@@ -1,6 +1,5 @@
 import { canonicalUrl, sha256, unique } from './utils.mjs';
-import { postedAtPrecision } from './posting-fields.mjs';
-import { endOfLocalDay } from './time-format.mjs';
+import { NEW_SINCE_LAST_POLL, freshnessInstant, isNewSinceLastPoll, postedAtPrecision } from './posting-fields.mjs';
 
 export function normalizeState(value) {
   const state = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -101,22 +100,44 @@ function deferredKey(job) {
 
 export function deferredStatus(state, job) {
   const entry = state?.deferred?.[deferredKey(job)];
-  return { deferred: Boolean(entry), deferredCount: Number(entry?.deferredCount || 0) };
+  return { deferred: Boolean(entry), deferredCount: Number(entry?.deferredCount || 0), entry: entry || null };
 }
 
-export function markDeferred(state, job, deferredAt) {
+// `reason` is 'budget' (the review limit) or 'quota' (a refusal); a budget deferral is what the report
+// calls carried over, and Settings can switch it off. A posting new since the last board poll keeps that
+// basis and its first-seen time, so it is still aged from the night it appeared.
+export function markDeferred(state, job, deferredAt, reason = 'budget') {
   state.deferred = state.deferred && typeof state.deferred === 'object' ? state.deferred : {};
   const key = deferredKey(job);
   const previous = state.deferred[key];
-  state.deferred[key] = { url: canonicalUrl(job.finalUrl || job.url) || job.url, deferredCount: Number(previous?.deferredCount || 0) + 1, firstDeferredAt: previous?.firstDeferredAt || deferredAt, lastDeferredAt: deferredAt, postedAt: job.postedAt || previous?.postedAt || null, postedAtPrecision: job.postedAt ? postedAtPrecision(job) : previous?.postedAtPrecision || null, discoveredAt: job.discoveredAt || previous?.discoveredAt || null };
+  const fresh = isNewSinceLastPoll(job);
+  state.deferred[key] = {
+    url: canonicalUrl(job.finalUrl || job.url) || job.url, deferredCount: Number(previous?.deferredCount || 0) + 1, firstDeferredAt: previous?.firstDeferredAt || deferredAt, lastDeferredAt: deferredAt,
+    postedAt: job.postedAt || previous?.postedAt || null, postedAtPrecision: job.postedAt ? postedAtPrecision(job) : previous?.postedAtPrecision || null, discoveredAt: job.discoveredAt || previous?.discoveredAt || null,
+    reason: previous?.reason === 'quota' && reason === 'quota' ? 'quota' : reason,
+    ...(fresh || previous?.freshnessBasis === NEW_SINCE_LAST_POLL ? { freshnessBasis: NEW_SINCE_LAST_POLL, firstSeenAt: (fresh ? job.firstSeenAt : null) || previous?.firstSeenAt || null } : {}),
+  };
   return state.deferred[key];
 }
 
-// When a posting was published, as far as the queue knows: its posting date (a date-only value counts as
-// the end of that local day), else, only for a posting with no date at all, the moment it was first
-// discovered, else the moment it was first deferred.
+// Drops every budget deferral (entries without a reason are budget deferrals from older versions); quota
+// deferrals stay, since the report promised them to the next run. Returns the URLs removed.
+export function clearBudgetDeferrals(state) {
+  const urls = [];
+  for (const [key, entry] of Object.entries(state?.deferred || {})) {
+    if (entry?.reason === 'quota') continue;
+    urls.push(entry?.url || key);
+    delete state.deferred[key];
+  }
+  return urls;
+}
+
+// When a posting was published, as far as the queue knows: the night it appeared for a posting new since
+// the last board poll, its posting date (a date-only value counts as the end of that local day), else, only
+// for a posting with no date at all, the moment it was first discovered, else the moment it was first deferred.
 export function deferralAgeBasis(entry, timeZone) {
-  if (entry?.postedAt) return entry.postedAtPrecision === 'date' ? endOfLocalDay(entry.postedAt, timeZone) || entry.postedAt : entry.postedAt;
+  if (entry?.freshnessBasis === NEW_SINCE_LAST_POLL && entry.firstSeenAt) return entry.firstSeenAt;
+  if (entry?.postedAt) return entry.postedAtPrecision === 'date' ? freshnessInstant({ postedAt: entry.postedAt, postedAtPrecision: 'date' }, timeZone) || entry.postedAt : entry.postedAt;
   return entry?.discoveredAt || entry?.firstDeferredAt || null;
 }
 

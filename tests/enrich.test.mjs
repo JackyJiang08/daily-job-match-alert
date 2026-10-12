@@ -92,7 +92,7 @@ test('fetches a Workday posting through the CXS endpoint and returns a clean JD'
   assert.equal(job.location, 'Charlotte, North Carolina · Chandler, Arizona');
   assert.equal(job.employmentType, 'Full time');
   assert.equal(job.description, "About this role: Build & ship 'data' pipelines. Partner with analysts – daily.");
-  assert.equal(job.postedAt, '2026-08-26T00:00:00.000Z');
+  assert.equal(job.postedAt, '2026-08-26T12:00:00.000Z', 'a bare startDate is stored as that calendar day (noon UTC), not UTC midnight');
   assert.equal(job.freshnessBasis, 'workday_start_date');
   assert.equal(job.finalUrl, 'https://wf.wd1.myworkdayjobs.com/en-US/WellsFargoJobs/job/Charlotte-NC/Software-Engineer_R-123456');
   assert.equal(job.url, job.finalUrl);

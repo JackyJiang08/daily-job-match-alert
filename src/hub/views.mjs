@@ -645,6 +645,7 @@ export function settingsPage({ settings, connections = null, timeZone, coverLett
       <label class="field"><span>Minimum Match Score (0–100)</span><input type="number" name="minimumMatchScore" class="control-input" min="0" max="100" step="1" value="${Number(settings.minimumMatchScore)}" required></label>
       <div class="field"><span>Accepted Match Levels</span>${levels}</div>
       <label class="field"><span>Max Reviewed Per Run (0 = no limit)</span><input type="number" name="maxReviewedPerRun" class="control-input" min="0" max="5000" step="1" value="${Number(settings.maxReviewedPerRun ?? 60)}" required></label>
+      <div class="field"><label class="check"><input type="checkbox" name="includeCarriedOver"${settings.includeCarriedOver !== false ? ' checked' : ''}> Include carried-over postings</label><span class="muted">Postings over the review limit wait for the next run and appear under "Carried over from yesterday". Off: they are left unreviewed and not carried.</span></div>
     </fieldset>
     <fieldset class="group"><legend>Reports</legend>
       <div class="field"><label class="check"><input type="checkbox" name="xlsxRequired"${settings.xlsxRequired ? ' checked' : ''}> Require XLSX Workbook (fail the run when it cannot be written)</label></div>

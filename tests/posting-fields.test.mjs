@@ -97,13 +97,13 @@ test('cards show day-level dates without a time and say so on hover; precise one
     { ...base, company: 'Acme', postedAt: '2026-09-19T01:15:00.000Z', freshnessBasis: 'greenhouse_updated_at' },
     { ...base, company: '100000 Motorola Solutions, Inc.', url: 'https://motorola.wd5.myworkdayjobs.com/Careers/job/x', enrichment: 'workday_cxs', postedAt: '2026-09-19T01:00:00.000Z', freshnessBasis: 'workday_posted_on' },
   ], meta).cards;
-  assert.equal(dayCard.footnote, 'Posted Sep 18 · fixture');
+  assert.equal(dayCard.footnote, 'Posted Sep 18 (date only) · fixture');
   assert.equal(dayCard.footnoteTitle, 'Date only: the source reports no time of day');
   assert.equal(preciseCard.footnote, 'Posted Sep 18, 8:15 PM · fixture');
   assert.equal(preciseCard.footnoteTitle, 'Posted Sep 18, 2026, 8:15 PM');
   assert.equal(workdayCard.company, 'Motorola Solutions', 'the render layer cleans a persisted Workday name');
-  assert.equal(workdayCard.footnote, 'Posted Sep 18 · fixture', 'a Workday day-level date is shown as the local calendar day');
-  assert.match(renderJobCard(dayCard), /<span class="meta" title="Date only: the source reports no time of day">Posted Sep 18 · fixture<\/span>/);
+  assert.equal(workdayCard.footnote, 'Posted Sep 18 (date only) · fixture', 'a Workday day-level date is shown as the local calendar day');
+  assert.match(renderJobCard(dayCard), /<span class="meta" title="Date only: the source reports no time of day">Posted Sep 18 \(date only\) · fixture<\/span>/);
   assert.match(renderJobCard(preciseCard), /<span class="meta" title="Posted Sep 18, 2026, 8:15 PM">Posted Sep 18, 8:15 PM · fixture<\/span>/);
 });
 

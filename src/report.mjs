@@ -10,13 +10,14 @@ import { renderReportPage } from './report-components.mjs';
 import { warningText } from './warnings.mjs';
 import { formatLocalDateTime, formatLocalDay, formatLocalShort } from './time-format.mjs';
 import { normalizeLocation, sha256 } from './utils.mjs';
-import { companyIsUncertain, displayCompanyName, postedAtPrecision, unknownPostedLabel } from './posting-fields.mjs';
+import { companyIsUncertain, displayCompanyName, freshnessLabel, isNewSinceLastPoll, postedAtPrecision, postedText } from './posting-fields.mjs';
 import { describeQuota } from './engines/quota.mjs';
 import { LEGACY_LOCATION_GAP, LOCATION_NOT_STATED_LABEL, LOCATION_NOT_STATED_TITLE, LOCATION_UNVERIFIED_GAP, usEvidenceInDescription } from './eligibility.mjs';
 import { describePrescreen, funnelText } from './prescreen-text.mjs';
 
 export const REPORT_TITLE = 'Daily Job Match Alert';
 export const WARNINGS_FILE_NAME = 'warnings.txt';
+export const CARRIED_OVER_TITLE = 'Carried over from yesterday';
 
 const ROLE_LABELS = { internship: 'Internship', new_grad: 'New Grad', entry_level: 'Entry Level', unknown: 'Unknown Role Type' };
 const ENRICHMENT_BADGES = {
@@ -86,29 +87,31 @@ export function jobBadges(job) {
 }
 
 function postedEpoch(job) {
-  const stamp = new Date(job.postedAt || job.discoveredAt || '');
+  const stamp = new Date((isNewSinceLastPoll(job) ? job.firstSeenAt : null) || job.postedAt || job.discoveredAt || '');
   return Number.isNaN(stamp.getTime()) ? '' : String(stamp.getTime());
 }
 
-// "Posted Sep 18 · source" for day-level dates (hover says the source gives no time of day) and
-// "Posted Sep 18, 8:00 PM · source" when the posting time is precise.
+// "Posted Oct 9, 3:12 PM · source" when the posting time is precise, "Posted Oct 8 (date only) · source"
+// for a day-level date, "first seen Oct 9, 8:04 PM · source" for a board posting that was not on the
+// board at the previous poll, and a carried-over posting adds when it was first found.
 function footnote(job, timeZone) {
   const parts = [];
   let title = '';
-  if (job.postedAt) {
-    const precision = postedAtPrecision(job);
-    if (precision === 'datetime') {
-      parts.push(`Posted ${formatLocalShort(job.postedAt, timeZone)}`);
-      title = `Posted ${formatLocalDateTime(job.postedAt, timeZone)}`;
-    } else {
-      parts.push(`Posted ${formatLocalDay(job.postedAt, timeZone)}`);
-      title = 'Date only: the source reports no time of day';
-    }
+  const text = postedText(job, timeZone);
+  if (isNewSinceLastPoll(job)) {
+    parts.push(text);
+    const previous = job.previousPollAt ? ` (${formatLocalShort(job.previousPollAt, timeZone)})` : '';
+    title = `New since the last poll: not on the board at the previous poll${previous}, so it appeared within the last day`;
+  } else if (job.postedAt) {
+    parts.push(`Posted ${text}`);
+    title = postedAtPrecision(job) === 'datetime' ? `Posted ${formatLocalDateTime(job.postedAt, timeZone)}` : 'Date only: the source reports no time of day';
   } else {
     // The source gives no posting date: say so, and when this pipeline first saw the posting.
-    parts.push(`Posted ${unknownPostedLabel(job, timeZone)}`);
+    parts.push(`Posted ${text}`);
     title = 'The source reports no posting date; the day shown is when this pipeline first found it';
   }
+  if (job.carriedOver) title = `Carried over: deferred by the review budget on an earlier run and reviewed now. ${title}`;
+  if (job.postedAtCorrection) title = `${title}. The source's time (${job.postedAtCorrection.from}) was later than the run, so only the date is kept`;
   if (job.source) parts.push(String(job.source));
   return { text: parts.join(' · '), title };
 }
@@ -143,6 +146,8 @@ export function cardView(job, tracks, timeZone = null, decorate = null) {
     description: String(job.description || '').trim(),
     footnote: note.text,
     footnoteTitle: note.title,
+    freshness: freshnessLabel(job),
+    carriedOver: Boolean(job.carriedOver),
     alternates: (Array.isArray(job.alternates) ? job.alternates : []).map(item => ({ url: String(item?.url || ''), label: [item?.source, item?.location].filter(Boolean).join(' · ') || 'alternate listing' })).filter(item => item.url),
     sort: {
       score: Number(job.bestScore) || 0,
@@ -222,6 +227,22 @@ export function runDetailsView(jobs, meta, tracks) {
   if (meta.quota?.events?.length) {
     const events = meta.quota.events.map(event => `${describeQuota(event, { timeZone: meta.timeZone })}: ${event.action}${event.detail ? ` (${event.detail})` : ''}`);
     rows.push({ term: 'Subscription quota', detail: `${events.length} event(s)${meta.quota.effectiveModel || meta.quota.effectiveEngine ? ` · scored by ${meta.quota.effectiveEngine || 'claude'}${meta.quota.effectiveModel ? ` · ${meta.quota.effectiveModel}` : ''}` : ''}${meta.quota.deferredByQuota ? ` · ${meta.quota.deferredByQuota} deferred` : ''}`, items: events });
+  }
+  if (meta.freshness) {
+    const fresh = meta.freshness;
+    const fallback = Object.entries(fresh.fallbackReasons || {}).map(([reason, count]) => `${count} ${reason}`);
+    const parts = [
+      `${Number(fresh.newSinceLastPoll || 0)} new since last poll`,
+      `${Number(fresh.snapshotBoards || 0)} board(s) compared with the previous poll, ${Number(fresh.dateBoards || 0)} judged by posting dates${fallback.length ? ` (${fallback.join(', ')})` : ''}`,
+    ];
+    if (fresh.snapshotExcluded) parts.push(`${Number(fresh.snapshotExcluded)} already on the board at the last poll left out`);
+    parts.push(fresh.includeCarriedOver === false ? 'carried-over postings off' : `${Number(fresh.carriedOver || 0)} carried over`);
+    parts.push(`${Number(fresh.futureCorrected || 0)} future posting time(s) corrected`);
+    rows.push({
+      term: 'Freshness',
+      detail: parts.join(' · '),
+      items: (fresh.futureCorrections || []).map(item => `${item.company || 'Unknown company'} · ${item.title || 'Untitled'} · ${item.source}: ${item.from} → ${String(item.to).slice(0, 10)} (date only)`),
+    });
   }
   if (meta.droppedAfterPreciseTimestamps != null) {
     rows.push({ term: 'Freshness check', detail: `dropped ${Number(meta.droppedAfterPreciseTimestamps)} postings after precise timestamps` });
@@ -327,7 +348,8 @@ export function postingWindowLabel(jobs, meta) {
   const ranAt = meta.completedAt || meta.lastUpdatedAt || meta.generatedAt || null;
   if (!ranAt || Number.isNaN(new Date(ranAt).getTime())) return null;
   const end = new Date(ranAt).getTime();
-  const stamps = jobs.map(job => new Date(job.postedAt || job.discoveredAt || '').getTime()).filter(Number.isFinite);
+  // Carried-over postings sit in their own group and do not stretch the headline window.
+  const stamps = jobs.filter(job => !job.carriedOver).map(job => new Date((isNewSinceLastPoll(job) ? job.firstSeenAt : null) || job.postedAt || job.discoveredAt || '').getTime()).filter(Number.isFinite);
   if (!stamps.length) return null;
   const hours = Math.max(0, (end - Math.min(...stamps)) / 3_600_000);
   if (hours <= 24) return 'posted within the last 24 hours';
@@ -350,7 +372,11 @@ export function mastheadSubtitle(jobs, meta, { withDate = true } = {}) {
 // `embedded: true`, which titles the masthead with the date instead of repeating the product name.
 export function buildReportView(jobs, meta, options = {}) {
   const tracks = reportTracks(meta, jobs);
-  const cards = jobs.map(job => cardView(job, tracks, meta.timeZone, options.decorate));
+  const allCards = jobs.map(job => cardView(job, tracks, meta.timeZone, options.decorate));
+  // The main list holds this run's window; postings the review budget carried from an earlier run are
+  // a separate group under it.
+  const cards = allCards.filter(card => !card.carriedOver);
+  const carriedCards = allCards.filter(card => card.carriedOver);
   const roleTypes = [...new Set(jobs.map(job => job.roleType || 'unknown'))].map(value => ({ value, label: roleLabel(value) }));
   const embedded = options.embedded === true;
   return {
@@ -363,6 +389,7 @@ export function buildReportView(jobs, meta, options = {}) {
     toolbar: { roleTypes, tracks, quiet: jobs.length < 5, total: jobs.length },
     banner: meta.authExpired ? `${meta.authExpired.message}${meta.authExpired.deferred ? ` ${meta.authExpired.deferred} posting(s) were deferred to the next run and are not lost.` : ''}` : (meta.quota?.banner || null),
     cards,
+    carried: carriedCards.length ? { title: CARRIED_OVER_TITLE, note: 'Deferred by the review budget on an earlier run and reviewed now; each card says when it was first found.', cards: carriedCards } : null,
     emptyMessage: 'No new postings cleared the configured threshold for this date.',
     runDetails: runDetailsView(jobs, meta, tracks),
     footer: `Generated locally. Scores are triage aids, not facts. Verify eligibility, posting date, and JD before applying. No applications were submitted.${meta.authExpired ? ` ${meta.authExpired.message}` : ''}`,

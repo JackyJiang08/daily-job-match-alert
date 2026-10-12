@@ -77,7 +77,7 @@ test('three enabled tracks flow through extraction, scoring, and both reports en
     assert.ok(stderr.some(line => /^Resume tracks: Data, LLM, AI Agent$/.test(line)), stderr.join('\n'));
     assert.ok(!stderr.some(line => /legacy/.test(line)), 'no legacy notice for the new layout');
     const { html, matches, headers, summaryRows, payload } = await readOutputs(root, summary);
-    assert.deepEqual(headers, ['Company', 'Title', 'Location', 'Role Type', 'Posted At', 'Data Score', 'LLM Score', 'AI Agent Score', 'Recommended Resume', 'Why It Matches', 'Gaps / Verify', 'Posting Link']);
+    assert.deepEqual(headers, ['Company', 'Title', 'Location', 'Role Type', 'Posted At', 'Freshness', 'Data Score', 'LLM Score', 'AI Agent Score', 'Recommended Resume', 'Why It Matches', 'Gaps / Verify', 'Posting Link']);
     assert.equal(matches.actualRowCount, summary.meta.matchCount + 1);
     assert.equal(summaryRows['Resume tracks'], 'Data, LLM, AI Agent');
     assert.match(html, /<dt>Resume tracks<\/dt><dd>Data, LLM, AI Agent<\/dd>/);
@@ -87,7 +87,7 @@ test('three enabled tracks flow through extraction, scoring, and both reports en
     assert.equal(job.recommendedTrack, 'data');
     assert.equal(job.recommendedResume, 'Data');
     assert.equal(job.bestScore, Math.max(...Object.values(job.scores)));
-    assert.equal(matches.getCell('I2').value.result, 'Data');
+    assert.equal(matches.getCell('J2').value.result, 'Data');
     assert.equal(job.dataScore, undefined);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
@@ -101,7 +101,7 @@ test('a single enabled track produces a complete report with one score column', 
     assert.ok(summary.meta.matchCount >= 1);
     assert.deepEqual(summary.meta.resumeTracks, [{ id: 'data', label: 'Data' }]);
     const { html, headers, summaryRows, payload } = await readOutputs(root, summary);
-    assert.deepEqual(headers, ['Company', 'Title', 'Location', 'Role Type', 'Posted At', 'Data Score', 'Recommended Resume', 'Why It Matches', 'Gaps / Verify', 'Posting Link']);
+    assert.deepEqual(headers, ['Company', 'Title', 'Location', 'Role Type', 'Posted At', 'Freshness', 'Data Score', 'Recommended Resume', 'Why It Matches', 'Gaps / Verify', 'Posting Link']);
     assert.equal(summaryRows['Resume tracks'], 'Data');
     assert.match(html, /<span class="track best" data-track="data">Data <b>\d+<\/b><\/span><span class="recommend">Apply with Data Resume<\/span>/);
     assert.deepEqual(Object.keys(payload.matches[0].scores), ['data']);
@@ -119,7 +119,7 @@ test('a disabled track is neither loaded nor scored and never appears in the rep
     assert.deepEqual(summary.meta.resumeTracks, [{ id: 'data', label: 'Data' }, { id: 'llm', label: 'LLM' }]);
     assert.ok(stderr.some(line => /^Resume tracks: Data, LLM \(disabled: AI Agent\)$/.test(line)), stderr.join('\n'));
     const { html, headers, summaryRows, payload } = await readOutputs(root, summary);
-    assert.deepEqual(headers, ['Company', 'Title', 'Location', 'Role Type', 'Posted At', 'Data Score', 'LLM Score', 'Recommended Resume', 'Why It Matches', 'Gaps / Verify', 'Posting Link']);
+    assert.deepEqual(headers, ['Company', 'Title', 'Location', 'Role Type', 'Posted At', 'Freshness', 'Data Score', 'LLM Score', 'Recommended Resume', 'Why It Matches', 'Gaps / Verify', 'Posting Link']);
     assert.equal(summaryRows['Resume tracks'], 'Data, LLM');
     assert.doesNotMatch(html, /AI Agent/);
     assert.doesNotMatch(JSON.stringify(payload), /"agent"/);
@@ -139,7 +139,7 @@ test('the legacy resumes + resumeSources layout still runs, with an upgrade noti
     assert.ok(stderr.some(line => /legacy "resumes": \{ data, ai \} \+ "resumeSources" layout/.test(line)), stderr.join('\n'));
     assert.deepEqual(summary.meta.resumeTracks, [{ id: 'data', label: 'Data' }, { id: 'ai', label: 'AI' }]);
     const { headers, summaryRows } = await readOutputs(root, summary);
-    assert.deepEqual(headers, ['Company', 'Title', 'Location', 'Role Type', 'Posted At', 'Data Score', 'AI Score', 'Recommended Resume', 'Why It Matches', 'Gaps / Verify', 'Posting Link']);
+    assert.deepEqual(headers, ['Company', 'Title', 'Location', 'Role Type', 'Posted At', 'Freshness', 'Data Score', 'AI Score', 'Recommended Resume', 'Why It Matches', 'Gaps / Verify', 'Posting Link']);
     assert.equal(summaryRows['Resume tracks'], 'Data, AI');
   } finally {
     await fs.rm(root, { recursive: true, force: true });

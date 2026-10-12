@@ -10,7 +10,7 @@ import ExcelJS from 'exceljs';
 
 const execFileAsync = promisify(execFile);
 const builderPath = fileURLToPath(new URL('../src/report-xlsx.mjs', import.meta.url));
-const FIXED_HEADERS_BEFORE = ['Company', 'Title', 'Location', 'Role Type', 'Posted At'];
+const FIXED_HEADERS_BEFORE = ['Company', 'Title', 'Location', 'Role Type', 'Posted At', 'Freshness'];
 const FIXED_HEADERS_AFTER = ['Recommended Resume', 'Why It Matches', 'Gaps / Verify', 'Posting Link'];
 
 function expectedHeaders(labels) {
@@ -76,31 +76,31 @@ test('writes and re-reads the ExcelJS workbook with one score column per enabled
     const matches = workbook.getWorksheet('Matches');
     assert.equal(matches.actualRowCount, 3);
     assert.deepEqual(headersOf(matches), expectedHeaders(['Data', 'LLM', 'AI Agent']));
-    assert.equal(matches.actualColumnCount, 12);
+    assert.equal(matches.actualColumnCount, 13);
     assert.equal(matches.getCell('A2').value, 'Acme');
     assert.equal(matches.getCell('D2').value, 'new_grad');
     assert.equal(matches.getCell('C3').value, 'Boston, MA · Johnston, RI · Columbus, OH', 'the Location column prints the joined list verbatim');
-    assert.deepEqual([matches.getCell('F2').value, matches.getCell('G2').value, matches.getCell('H2').value], [88, 74, 88]);
-    assert.deepEqual([matches.getCell('F3').value, matches.getCell('G3').value, matches.getCell('H3').value], [60, 85, 91]);
-    assert.equal(matches.getCell('I2').value.formula, 'CHOOSE(MATCH(MAX(F2:H2),F2:H2,0),"Data","LLM","AI Agent")');
-    assert.equal(matches.getCell('I2').value.result, 'Data', 'a tie resolves to the earlier configured track');
-    assert.equal(matches.getCell('I3').value.result, 'AI Agent');
-    assert.equal(matches.getCell('J2').value, '[unreviewed] SQL');
-    assert.equal(matches.getCell('J3').value, 'Tool use; Evaluation loops');
-    assert.equal(matches.getCell('K3').value, 'Verify sponsorship');
+    assert.deepEqual([matches.getCell('G2').value, matches.getCell('H2').value, matches.getCell('I2').value], [88, 74, 88]);
+    assert.deepEqual([matches.getCell('G3').value, matches.getCell('H3').value, matches.getCell('I3').value], [60, 85, 91]);
+    assert.equal(matches.getCell('J2').value.formula, 'CHOOSE(MATCH(MAX(G2:I2),G2:I2,0),"Data","LLM","AI Agent")');
+    assert.equal(matches.getCell('J2').value.result, 'Data', 'a tie resolves to the earlier configured track');
+    assert.equal(matches.getCell('J3').value.result, 'AI Agent');
+    assert.equal(matches.getCell('K2').value, '[unreviewed] SQL');
+    assert.equal(matches.getCell('K3').value, 'Tool use; Evaluation loops');
+    assert.equal(matches.getCell('L3').value, 'Verify sponsorship');
     assert.deepEqual(
-      { text: matches.getCell('L2').value.text, hyperlink: matches.getCell('L2').value.hyperlink },
+      { text: matches.getCell('M2').value.text, hyperlink: matches.getCell('M2').value.hyperlink },
       { text: 'example.com', hyperlink: 'https://www.example.com/jobs/42?utm=1' },
     );
-    assert.equal(matches.getCell('L3').value.text, 'jobs.beta.io');
-    assert.equal(matches.getCell('M2').value, null);
+    assert.equal(matches.getCell('M3').value.text, 'jobs.beta.io');
+    assert.equal(matches.getCell('N2').value, null);
     assert.doesNotMatch(JSON.stringify(matches.getRow(2).values), /xxxxxxxxxx/);
     assert.equal(matches.getRow(2).height, undefined);
-    assert.equal(matches.getCell('J2').alignment.wrapText, true);
     assert.equal(matches.getCell('K2').alignment.wrapText, true);
-    assert.equal(matches.getColumn('J').width, 45);
+    assert.equal(matches.getCell('L2').alignment.wrapText, true);
     assert.equal(matches.getColumn('K').width, 45);
-    assert.equal(matches.conditionalFormattings[0].ref, 'F2:H3', 'the three-color scale spans every score column');
+    assert.equal(matches.getColumn('L').width, 45);
+    assert.equal(matches.conditionalFormattings[0].ref, 'G2:I3', 'the three-color scale spans every score column');
     assert.equal(matches.conditionalFormattings[0].rules[0].type, 'colorScale');
     assert.equal(matches.views[0].ySplit, 1);
     assert.equal(matches.views[0].state, 'frozen');
@@ -132,7 +132,7 @@ test('writes and re-reads the ExcelJS workbook with one score column per enabled
   }
 });
 
-test('Posted At keeps the time for precise sources and writes a bare local calendar day for day-level ones', async () => {
+test('Posted At keeps the time for precise sources and writes "Aug 26 (date only)" for day-level ones; Freshness says which', async () => {
   const meta = { date: '2026-08-27', applicationDate: '2026-08-27', generatedAt: '2026-08-27T01:00:00.000Z', timeZone: 'America/Chicago', resumeTracks: [{ id: 'data', label: 'Data' }], warnings: [], scoringModel: 'local_only' };
   const base = { title: 'Analyst', location: 'Remote', roleType: 'new_grad', scores: { data: 80 }, bestScore: 80, recommendedTrack: 'data', reasons: ['x'], gaps: [], url: 'https://example.com/1' };
   const payload = { meta, matches: [
@@ -145,8 +145,9 @@ test('Posted At keeps the time for precise sources and writes a bare local calen
     const postedColumn = 5;
     assert.equal(sheet.getCell(2, postedColumn).numFmt, 'yyyy-mm-dd hh:mm');
     assert.equal(sheet.getCell(2, postedColumn).value.toISOString(), '2026-08-27T01:15:00.000Z');
-    assert.equal(sheet.getCell(3, postedColumn).numFmt, 'yyyy-mm-dd', 'a day-level source shows no 00:00');
-    assert.equal(sheet.getCell(3, postedColumn).value.toISOString(), '2026-08-26T00:00:00.000Z', 'the local calendar day in America/Chicago, as a bare date');
+    assert.equal(sheet.getCell(3, postedColumn).value, 'Aug 26 (date only)', 'a day-level source is the local calendar day in America/Chicago, never 00:00');
+    assert.equal(sheet.getCell(2, postedColumn + 1).value, 'posted today');
+    assert.equal(sheet.getCell(3, postedColumn + 1).value, 'date only');
     assert.equal(sheet.getCell(3, 1).value, 'Motorola Solutions', 'the Workday entity name is cleaned in the workbook too');
     let note = '';
     workbook.getWorksheet('Notes').eachRow(row => { if (String(row.getCell(1).value) === 'Posted At') note = String(row.getCell(2).value); });
@@ -156,7 +157,7 @@ test('Posted At keeps the time for precise sources and writes a bare local calen
   }
 });
 
-test('a single enabled track yields a 10-column sheet and a disabled track never appears', async () => {
+test('a single enabled track yields an 11-column sheet and a disabled track never appears', async () => {
   const payload = {
     meta: {
       applicationDate: '2026-08-28', date: '2026-08-28', generatedAt: '2026-08-27T20:00:00.000-05:00', lookbackHours: 24,
@@ -172,12 +173,12 @@ test('a single enabled track yields a 10-column sheet and a disabled track never
   try {
     const matches = workbook.getWorksheet('Matches');
     assert.deepEqual(headersOf(matches), expectedHeaders(['LLM']));
-    assert.equal(matches.actualColumnCount, 10);
-    assert.equal(matches.getCell('F2').value, 77);
-    assert.equal(matches.getCell('G2').value.formula, 'CHOOSE(MATCH(MAX(F2:F2),F2:F2,0),"LLM")');
-    assert.equal(matches.getCell('G2').value.result, 'LLM');
-    assert.equal(matches.getCell('J2').value.hyperlink, 'https://www.example.com/jobs/llm');
-    assert.equal(matches.conditionalFormattings[0].ref, 'F2:F2');
+    assert.equal(matches.actualColumnCount, 11);
+    assert.equal(matches.getCell('G2').value, 77);
+    assert.equal(matches.getCell('H2').value.formula, 'CHOOSE(MATCH(MAX(G2:G2),G2:G2,0),"LLM")');
+    assert.equal(matches.getCell('H2').value.result, 'LLM');
+    assert.equal(matches.getCell('K2').value.hyperlink, 'https://www.example.com/jobs/llm');
+    assert.equal(matches.conditionalFormattings[0].ref, 'G2:G2');
     assert.doesNotMatch(headersOf(matches).join('|'), /Data Score|AI Score|AI Agent Score/);
     assert.equal(summaryRowsOf(workbook)['Resume tracks'], 'LLM');
   } finally {
@@ -185,7 +186,7 @@ test('a single enabled track yields a 10-column sheet and a disabled track never
   }
 });
 
-test('a payload written before tracks existed still renders the 11-column Data / AI layout', async () => {
+test('a payload written before tracks existed still renders the 12-column Data / AI layout', async () => {
   const payload = {
     meta: { applicationDate: '2026-08-28', date: '2026-08-28', generatedAt: '2026-08-27T20:00:00.000-05:00', lookbackHours: 24, reviewedCount: 1, minimumMatchScore: 70, scoringModel: 'none', warnings: [] },
     matches: [{
@@ -198,11 +199,11 @@ test('a payload written before tracks existed still renders the 11-column Data /
   try {
     const matches = workbook.getWorksheet('Matches');
     assert.deepEqual(headersOf(matches), expectedHeaders(['Data', 'AI']));
-    assert.equal(matches.actualColumnCount, 11);
-    assert.deepEqual([matches.getCell('F2').value, matches.getCell('G2').value], [60, 91]);
-    assert.equal(matches.getCell('H2').value.formula, 'CHOOSE(MATCH(MAX(F2:G2),F2:G2,0),"Data","AI")');
-    assert.equal(matches.getCell('H2').value.result, 'AI');
-    assert.equal(matches.getCell('K2').value.hyperlink, 'https://www.example.com/jobs/legacy');
+    assert.equal(matches.actualColumnCount, 12);
+    assert.deepEqual([matches.getCell('G2').value, matches.getCell('H2').value], [60, 91]);
+    assert.equal(matches.getCell('I2').value.formula, 'CHOOSE(MATCH(MAX(G2:H2),G2:H2,0),"Data","AI")');
+    assert.equal(matches.getCell('I2').value.result, 'AI');
+    assert.equal(matches.getCell('L2').value.hyperlink, 'https://www.example.com/jobs/legacy');
     assert.equal(summaryRowsOf(workbook)['Resume tracks'], 'Data, AI');
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
@@ -218,7 +219,7 @@ test('an empty match list still writes the dynamic header and passes --verify', 
     const matches = workbook.getWorksheet('Matches');
     assert.equal(matches.actualRowCount, 1);
     assert.deepEqual(headersOf(matches), expectedHeaders(['Data', 'LLM', 'AI Agent']));
-    assert.equal(matches.getCell('L1').value, 'Posting Link');
+    assert.equal(matches.getCell('M1').value, 'Posting Link');
     const summaryRows = summaryRowsOf(workbook);
     assert.equal(summaryRows['Scoring model'], 'unknown');
     assert.equal(summaryRows['Resume tracks'], 'Data, LLM, AI Agent');
@@ -242,7 +243,7 @@ test('Run Summary lists the hard-filter exclusion counts and the Gaps column car
     const summaryRows = summaryRowsOf(workbook);
     assert.equal(summaryRows['Excluded: location outside US'], 2);
     assert.equal(summaryRows['Excluded: graduation window'], 1);
-    assert.equal(workbook.getWorksheet('Matches').getCell('J2').value, 'JD skill not found in resume: dbt; Location unverified — confirm US eligibility');
+    assert.equal(workbook.getWorksheet('Matches').getCell('K2').value, 'JD skill not found in resume: dbt; Location unverified — confirm US eligibility');
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }

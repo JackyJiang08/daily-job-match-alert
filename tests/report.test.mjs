@@ -129,7 +129,7 @@ test('cards carry the ring score, compact track scores, the recommendation, and 
   assert.match(html, /<div class="facts-label">Gaps \/ Verify<\/div><ul class="facts gaps"><li>a<\/li><li>b<\/li><\/ul><details class="more"><summary>1 more<\/summary>/);
   assert.match(html, /<span class="meta" title="Posted Aug 27, 2026, 5:00 AM">Posted Aug 27, 5:00 AM · fixture<\/span>/, 'a JSON-LD datePosted with a clock time is precise and shows the local time');
   const dayOnly = buildHtml([{ ...job, postedAt: '2026-08-27T00:00:00.000Z' }], { ...meta, timeZone: 'America/Chicago' });
-  assert.match(dayOnly, /<span class="meta" title="Date only: the source reports no time of day">Posted Aug 26 · fixture<\/span>/, 'a bare-date datePosted shows the local day only and says so on hover');
+  assert.match(dayOnly, /<span class="meta" title="Date only: the source reports no time of day">Posted Aug 27 \(date only\) · fixture<\/span>/, 'a bare-date datePosted (stored as UTC midnight by older versions) shows the day it names, marked date only');
   const found = buildHtml([{ ...job, postedAt: null, discoveredAt: '2026-09-13T01:30:00Z' }], { ...meta, timeZone: 'America/Chicago' });
   assert.match(found, /<span class="meta" title="The source reports no posting date; the day shown is when this pipeline first found it">Posted Unknown \(found Sep 12\) · fixture<\/span>/);
   assert.doesNotMatch(found, /Discovered|Found Sep/);
@@ -157,7 +157,7 @@ test('the toolbar offers sort, role and resume filters, and search, and turns qu
   assert.doesNotMatch(html, /Sort: |Data resume<\/option>|All role types|All resumes/);
   assert.match(html, /<span class="count" id="count">5 shown<\/span>/);
   assert.match(html, /<div class="empty" id="no-results" hidden>/);
-  assert.match(html, /<script>[\s\S]*getElementById\('jobs'\)[\s\S]*localeCompare[\s\S]*<\/script>/);
+  assert.match(html, /<script>[\s\S]*querySelectorAll\('section\.jobs'\)[\s\S]*localeCompare[\s\S]*<\/script>/);
   assert.doesNotMatch(html, /<script src=/);
 
   const few = buildHtml(many.slice(0, 4), { ...meta, resumeTracks: tracks });

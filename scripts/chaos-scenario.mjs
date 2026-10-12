@@ -29,7 +29,7 @@ const TRACKS = [
   { id: 'agent', label: 'AI Agent', file: 'agent-resume.md' },
 ];
 const EXPECTED_HEADERS = [
-  'Company', 'Title', 'Location', 'Role Type', 'Posted At',
+  'Company', 'Title', 'Location', 'Role Type', 'Posted At', 'Freshness',
   ...TRACKS.map(track => `${track.label} Score`),
   'Recommended Resume', 'Why It Matches', 'Gaps / Verify', 'Posting Link',
 ];

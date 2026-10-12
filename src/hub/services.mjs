@@ -683,6 +683,7 @@ export async function readSettings(ctx) {
   return {
     minimumMatchScore: config.minimumMatchScore ?? 60,
     maxReviewedPerRun: semantic.maxReviewedPerRun == null ? 60 : Number(semantic.maxReviewedPerRun),
+    includeCarriedOver: semantic.includeCarriedOver !== false,
     modelLadder: normalizeQuotaPolicy({ ...(semantic.quotaPolicy || {}), catalog }).modelLadder.join(', '),
     reasoningEffort: semantic.reasoningEffort ? String(semantic.reasoningEffort) : '',
     catalog,
@@ -751,8 +752,10 @@ export function validateSettings(form, { catalog = DEFAULT_CATALOG } = {}) {
   const xlsxRequired = form.xlsxRequired === 'on' || form.xlsxRequired === 'true' || form.xlsxRequired === true;
   // Only the settings form carries the flag; a form without it (older callers) leaves the config value alone.
   const editorReview = form.editorReviewPresent != null ? (form.editorReview === 'on' || form.editorReview === 'true' || form.editorReview === true) : null;
+  // Only the Pipeline tab carries "Include carried-over postings"; other forms leave it alone.
+  const includeCarriedOver = form.pipelinePresent != null ? (form.includeCarriedOver === 'on' || form.includeCarriedOver === 'true' || form.includeCarriedOver === true) : null;
   if (errors.length) throw new HubInputError(errors.join('; '));
-  return { minimumMatchScore, acceptedMatchLevels: MATCH_LEVELS.filter(level => levels.includes(level)), engine, model, xlsxRequired, editorReview, hubPort, maxReviewedPerRun, modelLadder, fallbackEngine, reasoningEffort };
+  return { minimumMatchScore, acceptedMatchLevels: MATCH_LEVELS.filter(level => levels.includes(level)), engine, model, xlsxRequired, editorReview, hubPort, maxReviewedPerRun, includeCarriedOver, modelLadder, fallbackEngine, reasoningEffort };
 }
 
 // "Save this path to config": pins the resolved binary as semanticMatching.<engine>Command.
@@ -788,6 +791,7 @@ export async function saveSettings(ctx, form) {
     config.semanticMatching = config.semanticMatching && typeof config.semanticMatching === 'object' ? config.semanticMatching : {};
     config.semanticMatching.acceptedMatchLevels = settings.acceptedMatchLevels;
     if (settings.maxReviewedPerRun != null) config.semanticMatching.maxReviewedPerRun = settings.maxReviewedPerRun;
+    if (settings.includeCarriedOver != null) config.semanticMatching.includeCarriedOver = settings.includeCarriedOver;
     if (settings.modelLadder || settings.fallbackEngine !== undefined) {
       config.semanticMatching.quotaPolicy = config.semanticMatching.quotaPolicy && typeof config.semanticMatching.quotaPolicy === 'object' ? config.semanticMatching.quotaPolicy : {};
       if (settings.modelLadder) config.semanticMatching.quotaPolicy.modelLadder = settings.modelLadder;

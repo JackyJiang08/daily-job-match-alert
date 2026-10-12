@@ -1,5 +1,5 @@
 import { LOCATION_SEPARATOR, normalizeLocation, canonicalUrl, cleanText, isoDate } from './utils.mjs';
-import { cleanWorkdayCompany, hasClockTime, isTrustedSourceName } from './posting-fields.mjs';
+import { cleanWorkdayCompany, isTrustedSourceName, parsePostingDate } from './posting-fields.mjs';
 
 function meta(html, key) {
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -132,7 +132,8 @@ async function fetchWorkdayPosting(cxsUrl, headers, timeoutMs, fetchImpl) {
 
 function workdayEnrichment(originalJob, posting, finalUrl) {
   const { info, company } = posting;
-  const startDate = isoDate(info.startDate);
+  // startDate is a bare calendar date ("2026-10-08"); it is stored as that day, not as UTC midnight.
+  const startDate = info.startDate ? parsePostingDate(info.startDate)?.postedAt || null : null;
   const postedOn = startDate ? null : workdayPostedOn(info.postedOn);
   return {
     ...originalJob,
@@ -291,6 +292,7 @@ export async function enrichJob(job, network = {}, fetchImpl = fetch) {
     const posting = parseJsonLd(body);
     const htmlTitle = meta(body, 'og:title') || cleanText(body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '');
     const postingDescription = posting?.description ? cleanText(posting.description) : '';
+    const posted = parsePostingDate(posting?.datePosted, { url: finalUrl });
     return {
       ...originalJob,
       company: isTrustedSourceName(originalJob.company) ? originalJob.company : (posting?.hiringOrganization?.name || originalJob.company),
@@ -301,12 +303,14 @@ export async function enrichJob(job, network = {}, fetchImpl = fetch) {
       employmentType: employmentTypeFromPosting(posting || {}) || originalJob.employmentType || '',
       salary: salaryFromPosting(posting || {}) || originalJob.salary || '',
       description: (postingDescription || meta(body, 'description') || meta(body, 'og:description') || originalJob.description || '').slice(0, 50000),
-      postedAt: isoDate(posting?.datePosted) || originalJob.postedAt,
+      postedAt: posted?.postedAt || originalJob.postedAt,
       finalUrl,
       url: finalUrl,
-      freshnessBasis: posting?.datePosted ? 'jobposting_date_posted' : originalJob.freshnessBasis,
-      // JSON-LD datePosted is sometimes a bare date; only a value with a clock time is precise.
-      postedAtPrecision: isoDate(posting?.datePosted) ? (hasClockTime(posting.datePosted) ? 'datetime' : 'date') : originalJob.postedAtPrecision,
+      freshnessBasis: posted ? 'jobposting_date_posted' : originalJob.freshnessBasis,
+      // JSON-LD datePosted is sometimes a bare date, a padded midnight, or a clock time without a zone;
+      // parsePostingDate keeps only what the page actually says (a calendar date unless the zone is known).
+      postedAtPrecision: posted ? posted.precision : originalJob.postedAtPrecision,
+      ...(posted?.zoneless ? { postedAtZoneless: posted.zone ? `read as ${posted.zone}` : 'no zone: date only' } : {}),
       enrichment: posting ? 'json_ld_jobposting' : 'html_metadata',
     };
   } catch (error) {

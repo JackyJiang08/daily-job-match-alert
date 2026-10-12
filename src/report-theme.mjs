@@ -101,6 +101,9 @@ select.control-input:focus,.control-input:focus{outline:2px solid var(--accent);
 .jobs{display:flex;flex-direction:column;gap:var(--space-3);margin:0;padding:0;list-style:none}
 .job{display:grid;grid-template-columns:52px 1fr;gap:var(--space-4);align-items:start;padding:var(--space-4);background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
 .job[hidden]{display:none}
+.group-title{margin:var(--space-5) 0 var(--space-1);font-size:var(--fs-title);font-weight:650}
+.group-count{color:var(--ink-2);font-weight:400}
+.group-note{margin:0 0 var(--space-3);font-size:var(--fs-body);color:var(--ink-2)}
 .ring{--score:0;position:relative;width:52px;height:52px;border-radius:50%;background:conic-gradient(var(--accent) calc(var(--score) * 1%),var(--ring-track) 0);display:grid;place-items:center}
 .ring::before{content:"";position:absolute;inset:5px;border-radius:50%;background:var(--surface)}
 .ring b{position:relative;font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-0.01em}
@@ -170,10 +173,12 @@ details.run-list ul{max-height:320px;overflow:auto}
 // so the script never re-parses text and needs no library.
 export const REPORT_SCRIPT = `
 (function () {
-  var list = document.getElementById('jobs');
+  // The main list and the carried-over group sort and filter separately; the count covers both.
+  var lists = Array.prototype.slice.call(document.querySelectorAll('section.jobs'));
   var toolbar = document.getElementById('toolbar');
-  if (!list || !toolbar) return;
-  var cards = Array.prototype.slice.call(list.querySelectorAll('.job'));
+  if (!lists.length || !toolbar) return;
+  var cards = [];
+  lists.forEach(function (list) { cards = cards.concat(Array.prototype.slice.call(list.querySelectorAll('.job'))); });
   var q = document.getElementById('q');
   var sort = document.getElementById('sort');
   var role = document.getElementById('role');
@@ -198,7 +203,7 @@ export const REPORT_SCRIPT = `
         && (!term || (card.dataset.search || '').indexOf(term) >= 0);
       card.hidden = !ok;
       if (ok) shown += 1;
-      list.appendChild(card);
+      card.parentNode.appendChild(card);
     });
     if (count) count.textContent = shown === cards.length ? cards.length + ' shown' : shown + ' of ' + cards.length + ' shown';
     if (none) none.hidden = shown > 0;
