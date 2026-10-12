@@ -253,6 +253,38 @@ export async function collectEnabledSources(config, cutoff, options = {}) {
 // per board; the registry is persisted before anything is scored. Seeds (config.sources.atsBoards.seeds)
 // and boards a search result pointed at (`searchBoards`) are registered the same way, with their own
 // origin; a search hit also lets a quiet board be polled tonight instead of waiting for its weekly poll.
+// Sources read from local files: they answer with the network down, so they do not count toward
+// "every source failed".
+const LOCAL_SOURCE_NAMES = new Set(['Email files', 'career-ops history']);
+
+// Why this run counts as cut short by the network, or null: the ATS outage rule held (networkOutage), or
+// every network source that was attempted (not skipped) failed.
+export function incompleteRunReason({ networkOutage = null, sourceStats = [] } = {}) {
+  if (networkOutage) return { reason: 'network_outage', detail: networkOutage.detail || networkOutage.message || NETWORK_OUTAGE_MESSAGE };
+  const attempted = sourceStats.filter(stat => !LOCAL_SOURCE_NAMES.has(stat.name) && !stat.skipped);
+  if (attempted.length && attempted.every(stat => stat.ok === false)) {
+    const codes = [...new Set(attempted.map(stat => stat.errorCode || stat.error).filter(Boolean))].slice(0, 3);
+    return { reason: 'all_sources_failed', detail: `All ${attempted.length} network source(s) failed${codes.length ? ` (${codes.join('; ')})` : ''}.` };
+  }
+  return null;
+}
+
+// state.incompleteRun = { date, reason, detail, at, firstAt, trigger } while the newest run was cut short;
+// a run that collected normally clears it and leaves state.lastIncompleteRun (with resolvedAt) behind.
+export function recordIncompleteRun(state, incomplete, { now, runDate, trigger }) {
+  const previous = state.incompleteRun && typeof state.incompleteRun === 'object' ? state.incompleteRun : null;
+  if (incomplete) {
+    const sameDay = previous?.date === runDate;
+    state.incompleteRun = { date: runDate, reason: incomplete.reason, detail: incomplete.detail, at: now.toISOString(), firstAt: sameDay ? previous.firstAt || previous.at : now.toISOString(), trigger };
+    return state.incompleteRun;
+  }
+  if (previous) {
+    state.lastIncompleteRun = { ...previous, resolvedAt: now.toISOString(), resolvedBy: trigger };
+    delete state.incompleteRun;
+  }
+  return null;
+}
+
 // The report, warning, and notification text for a run whose board polls were cut off by this Mac's
 // network (see collectAtsBoards). Null when the retry brought the boards back.
 export const NETWORK_OUTAGE_MESSAGE = "This Mac's network dropped while the job boards were being polled, so ATS sources are missing from this run.";
@@ -1122,7 +1154,7 @@ async function runPipeline(config, clock, options = {}) {
   const timeZone = config.timeZone || 'America/Chicago';
   const runsToday = Number(previous?.meta?.runsToday || 0) + 1;
   // How this run was started (the launchd dispatcher and the hub set the variable; a bare `npm run run` is manual).
-  const trigger = ['scheduled', 'catchup', 'manual'].includes(process.env.DAILY_JOB_MATCH_ALERT_TRIGGER) ? process.env.DAILY_JOB_MATCH_ALERT_TRIGGER : 'manual';
+  const trigger = ['scheduled', 'catchup', 'manual', 'auto_catchup'].includes(process.env.DAILY_JOB_MATCH_ALERT_TRIGGER) ? process.env.DAILY_JOB_MATCH_ALERT_TRIGGER : 'manual';
   // Run Summary: this run's reviewed postings, and the total over the 90 days of stored payloads. The
   // counter an earlier version kept in state was seeded from the same payloads, so it is dropped.
   const reviewedLast90Days = await reviewedInLastDays(config, date, reviewed.length, now);
@@ -1178,6 +1210,9 @@ async function runPipeline(config, clock, options = {}) {
   }
   pruneSeen(state, now, 90);
   await pruneReportPayloads(config, now, 90);
+  // A run this Mac's network cut short is recorded as incomplete for the hub's auto catch-up (see
+  // src/hub/auto-catchup.mjs); any run that did collect clears the record.
+  recordIncompleteRun(state, incompleteRunReason({ networkOutage, sourceStats }), { now, runDate, trigger });
   await writeState(statePath, state);
 
   const rendered = await renderReports(config, payload);

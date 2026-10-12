@@ -483,6 +483,25 @@ function sourcesCard(rows, timeZone) {
   return `<article class="card" id="sources-card"><h2>Sources</h2><p class="muted">Built-in lists and every public ATS board discovered from posting URLs. A board with no new posting for 30 days is polled weekly; one that fails seven nights in a row goes dormant until you resume it.</p>${summary}${body}</article>`;
 }
 
+// The Runs card's Catch-up line: an incomplete run (cut short by the network) and what the hub's
+// 10-minute check is doing about it.
+function catchUpLine(view, at) {
+  if (!view) return '—';
+  const parts = [];
+  const record = view.record;
+  if (record) parts.push(`<span class="badge badge-warn" data-badge="incomplete">Incomplete</span> The run of ${htmlEscape(record.date)} was cut short at ${at(record.at)}: ${htmlEscape(record.detail || record.reason || 'network outage')}`);
+  if (!view.enabled) {
+    parts.push(`<span class="muted">Auto catch-up after network outage is off (<a href="/settings?tab=pipeline">Settings → Pipeline</a>).</span>`);
+    return parts.join('<br>');
+  }
+  if (record) parts.push(`<span class="muted">Auto catch-up: ${Number(view.attempts || 0)} of ${Number(view.maximumAttempts || 2)} used${view.nextCheckAt ? ` · next check ${at(view.nextCheckAt)}` : ''}${view.lastCheck?.reason ? ` · last check: ${htmlEscape(view.lastCheck.reason)}` : ''}</span>`);
+  else {
+    parts.push(`Nothing to catch up${view.nextCheckAt ? ` <span class="muted">· next check ${at(view.nextCheckAt)}</span>` : ''}`);
+    if (view.resolved?.resolvedAt) parts.push(`<span class="muted">The ${htmlEscape(view.resolved.date)} outage was made up at ${at(view.resolved.resolvedAt)}${view.resolved.resolvedBy ? ` (${htmlEscape(view.resolved.resolvedBy)})` : ''}.</span>`);
+  }
+  return parts.join('<br>');
+}
+
 export function statusPage({ status, timeZone }) {
   const { lastRun, nextRun, lock, runNow, run } = status;
   const at = value => htmlEscape(formatLocalDateTime(value, timeZone));
@@ -518,6 +537,7 @@ export function statusPage({ status, timeZone }) {
     ${lastRun.prescreen ? `<dt>Prescreen</dt><dd id="status-prescreen">${htmlEscape(describePrescreen(lastRun.prescreen))}${lastRun.prescreenOverview?.mode === 'shadow' ? `<br><span class="muted">Shadow period: ${Number(lastRun.prescreenOverview.shadowRunsDone)} of ${Number(lastRun.prescreenOverview.shadowRuns)} nights · ${htmlEscape(recallText(lastRun.prescreenOverview.finalMatches, lastRun.prescreenOverview.lost))} · <a href="/settings?tab=pipeline#prescreen">Settings</a></span>` : ''}</dd>` : ''}
     ${lastRun.candidateCount != null ? `<dt>Review budget</dt><dd>${Number(lastRun.candidateCount)} candidates · ${Number(lastRun.reviewedThisRun || 0)} reviewed · ${Number(lastRun.deferredCount || 0)} deferred${Number(lastRun.maxReviewedPerRun) > 0 ? ` · limit ${Number(lastRun.maxReviewedPerRun)} per run` : ' · no limit'}</dd>` : ''}
     <dt>Next run</dt><dd>${nextRunLine}</dd>
+    <dt>Catch-up</dt><dd id="catch-up-line">${catchUpLine(status.autoCatchUp, at)}</dd>
     <dt>Lock</dt><dd id="lock-line">${lockLine}</dd>
   </dl></article>
   <article class="card" id="run-card" data-state="${runState}"><h2>Run Now</h2>
@@ -647,6 +667,7 @@ export function settingsPage({ settings, connections = null, timeZone, coverLett
       <div class="field"><span>Accepted Match Levels</span>${levels}</div>
       <label class="field"><span>Max Reviewed Per Run (0 = no limit)</span><input type="number" name="maxReviewedPerRun" class="control-input" min="0" max="5000" step="1" value="${Number(settings.maxReviewedPerRun ?? 60)}" required></label>
       <div class="field"><label class="check"><input type="checkbox" name="includeCarriedOver"${settings.includeCarriedOver !== false ? ' checked' : ''}> Include carried-over postings</label><span class="muted">Postings over the review limit wait for the next run and appear under "Carried over from yesterday". Off: they are left unreviewed and not carried.</span></div>
+      <div class="field"><label class="check"><input type="checkbox" name="autoCatchUp"${settings.autoCatchUp !== false ? ' checked' : ''}> Auto catch-up after network outage</label><span class="muted">When the nightly run is cut short by this Mac's network, the hub checks every 10 minutes and reruns it once the network is back (at most twice a day, until the next nightly run).</span></div>
     </fieldset>
     <fieldset class="group"><legend>Reports</legend>
       <div class="field"><label class="check"><input type="checkbox" name="xlsxRequired"${settings.xlsxRequired ? ' checked' : ''}> Require XLSX Workbook (fail the run when it cannot be written)</label></div>

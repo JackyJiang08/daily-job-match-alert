@@ -14,6 +14,7 @@ import { OVERDUE_GRACE_MS, localDate } from '../time-format.mjs';
 import { ENGINE_DEFAULT_MODELS, ENGINE_IDS, ENGINE_LABELS, createEngine, normalizeEngineId, resolveModel } from '../engines/index.mjs';
 import { readConfigFile, updateConfigFile } from './config-file.mjs';
 import { readLockStatus } from './run.mjs';
+import { MAXIMUM_ATTEMPTS, autoCatchUpEnabled } from './auto-catchup.mjs';
 import { boardLabel, readRegistry, resumeBoard, writeRegistry } from '../collectors/ats-boards.mjs';
 import { builtinSources } from '../collectors/catalog.mjs';
 import { WEEKDAYS, availabilityPath, markModelUnavailable, markModelUsed, markWeeklyLimit, pruneAvailability, pruneLimits, readAvailability, weeklyResetOf, writeAvailability } from '../engines/model-availability.mjs';
@@ -314,7 +315,7 @@ export function previousScheduledRun(now, timeZone, hour = 20, minute = 0) {
   return null;
 }
 
-async function installedSchedule(ctx) {
+export async function installedSchedule(ctx) {
   const plist = path.join(ctx.homedir, 'Library', 'LaunchAgents', 'com.dailyjobmatchalert.daily.plist');
   try {
     const text = await ctx.io.readFile(plist, 'utf8');
@@ -566,6 +567,12 @@ export async function buildStatusView(ctx, config) {
     quota: { ...quotaView(ctx, config, latest, state), notices: (await readQuotaNotices(quotaNoticesPath(ctx.root), ctx.io).catch(() => [])).slice(-5).reverse(), plans, modelAvailability: await modelAvailabilityView(ctx, plans.claude || state.observedPlans?.claude?.type || null), usage: usageWindow(await readUsage(usagePath(ctx.root), ctx.io).catch(() => ({ entries: [] })), { now: ctx.now(), timeZone: config.timeZone, days: 7 }) },
     claudeAuth: claudeAuthView(ctx, latest),
     planChange: await planChangeView(ctx, config, latest, plans),
+    autoCatchUp: {
+      enabled: autoCatchUpEnabled(config),
+      record: state.incompleteRun && typeof state.incompleteRun === 'object' ? state.incompleteRun : null,
+      resolved: state.lastIncompleteRun && typeof state.lastIncompleteRun === 'object' ? state.lastIncompleteRun : null,
+      ...(ctx.autoCatchUp ? await ctx.autoCatchUp.status(state) : { running: false, nextCheckAt: null, attempts: 0, maximumAttempts: MAXIMUM_ATTEMPTS, lastCheck: null }),
+    },
     outputDirectory: config.outputDirectory,
   };
 }
@@ -686,6 +693,7 @@ export async function readSettings(ctx) {
     minimumMatchScore: config.minimumMatchScore ?? 60,
     maxReviewedPerRun: semantic.maxReviewedPerRun == null ? 60 : Number(semantic.maxReviewedPerRun),
     includeCarriedOver: semantic.includeCarriedOver !== false,
+    autoCatchUp: autoCatchUpEnabled(config),
     modelLadder: normalizeQuotaPolicy({ ...(semantic.quotaPolicy || {}), catalog }).modelLadder.join(', '),
     reasoningEffort: semantic.reasoningEffort ? String(semantic.reasoningEffort) : '',
     catalog,
@@ -756,8 +764,9 @@ export function validateSettings(form, { catalog = DEFAULT_CATALOG } = {}) {
   const editorReview = form.editorReviewPresent != null ? (form.editorReview === 'on' || form.editorReview === 'true' || form.editorReview === true) : null;
   // Only the Pipeline tab carries "Include carried-over postings"; other forms leave it alone.
   const includeCarriedOver = form.pipelinePresent != null ? (form.includeCarriedOver === 'on' || form.includeCarriedOver === 'true' || form.includeCarriedOver === true) : null;
+  const autoCatchUp = form.pipelinePresent != null ? (form.autoCatchUp === 'on' || form.autoCatchUp === 'true' || form.autoCatchUp === true) : null;
   if (errors.length) throw new HubInputError(errors.join('; '));
-  return { minimumMatchScore, acceptedMatchLevels: MATCH_LEVELS.filter(level => levels.includes(level)), engine, model, xlsxRequired, editorReview, hubPort, maxReviewedPerRun, includeCarriedOver, modelLadder, fallbackEngine, reasoningEffort };
+  return { minimumMatchScore, acceptedMatchLevels: MATCH_LEVELS.filter(level => levels.includes(level)), engine, model, xlsxRequired, editorReview, hubPort, maxReviewedPerRun, includeCarriedOver, autoCatchUp, modelLadder, fallbackEngine, reasoningEffort };
 }
 
 // "Save this path to config": pins the resolved binary as semanticMatching.<engine>Command.
@@ -794,6 +803,7 @@ export async function saveSettings(ctx, form) {
     config.semanticMatching.acceptedMatchLevels = settings.acceptedMatchLevels;
     if (settings.maxReviewedPerRun != null) config.semanticMatching.maxReviewedPerRun = settings.maxReviewedPerRun;
     if (settings.includeCarriedOver != null) config.semanticMatching.includeCarriedOver = settings.includeCarriedOver;
+    if (settings.autoCatchUp != null) config.autoCatchUp = { ...(config.autoCatchUp && typeof config.autoCatchUp === 'object' ? config.autoCatchUp : {}), enabled: settings.autoCatchUp };
     if (settings.modelLadder || settings.fallbackEngine !== undefined) {
       config.semanticMatching.quotaPolicy = config.semanticMatching.quotaPolicy && typeof config.semanticMatching.quotaPolicy === 'object' ? config.semanticMatching.quotaPolicy : {};
       if (settings.modelLadder) config.semanticMatching.quotaPolicy.modelLadder = settings.modelLadder;

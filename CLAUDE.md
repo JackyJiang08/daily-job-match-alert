@@ -192,6 +192,16 @@ disabled; do not expand them unless a task says so.
   registry.migrations repair (applied to the real registry 2026-10-12: 841 boards). caffeinated() wraps
   launchd runNode and Run Now in /usr/bin/caffeinate -i on darwin. npm run boards:probe (src/boards-probe.mjs)
   is read-only. Chaos scenario network-drop.
+- Auto catch-up (2026-10-12): runPipeline calls recordIncompleteRun(state, incompleteRunReason({networkOutage,
+  sourceStats})) before the final state write: state.incompleteRun { date (runDate), reason network_outage |
+  all_sources_failed (local Email files / career-ops excluded, skipped boards excluded), detail, at, firstAt,
+  trigger }; a normal run clears it into state.lastIncompleteRun { resolvedAt, resolvedBy }.
+  src/hub/auto-catchup.mjs createAutoCatchUp (ctx.autoCatchUp, timer started only in startHub, unref'd):
+  check() order = config.autoCatchUp.enabled → record → deadline (nextScheduledRun after firstAt, from the
+  plist schedule) → attempts in private/hub/auto-catchup.json (MAXIMUM_ATTEMPTS 2 per record date) → clock
+  jump since the previous check → probeNetwork (api.github.com + boards-api.greenhouse.io/v1/boards/greenhouse)
+  → runManager.availability → runManager.start({ trigger: 'auto_catchup' }) + CATCH_UP_NOTIFICATION. Status
+  Runs card "Catch-up" row (#catch-up-line); Settings > Pipeline checkbox autoCatchUp (pipelinePresent).
 - US evidence in a JD (usEvidenceInDescription) also counts a standalone
   uppercase US / U.S. / USA, except lowercase "us" and all-caps phrases such as
   "JOIN US".

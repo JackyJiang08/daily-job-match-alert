@@ -516,7 +516,7 @@ test('Status merges runs into one card, formats every time in the configured zon
   try {
     const page = await hub.request('GET', '/status');
     assert.equal(page.status, 200);
-    assert.match(page.text, /<h2>Runs<\/h2><dl class="kv">\s*<dt>Last run<\/dt><dd>Aug 26, 2026, 8:00 PM · scheduled · success · 1 match · <a href="\/reports\/2026-08-27">report<\/a><\/dd>\s*<dt>Engine<\/dt><dd>local_only<\/dd>\s*<dt>Next run<\/dt><dd>Aug 27, 2026, 8:00 PM <span class="badge badge-warn" data-badge="not-installed">[^<]*<\/span><\/dd>\s*<dt>Lock<\/dt><dd id="lock-line">Free<\/dd>/);
+    assert.match(page.text, /<h2>Runs<\/h2><dl class="kv">\s*<dt>Last run<\/dt><dd>Aug 26, 2026, 8:00 PM · scheduled · success · 1 match · <a href="\/reports\/2026-08-27">report<\/a><\/dd>\s*<dt>Engine<\/dt><dd>local_only<\/dd>\s*<dt>Next run<\/dt><dd>Aug 27, 2026, 8:00 PM <span class="badge badge-warn" data-badge="not-installed">[^<]*<\/span><\/dd>\s*<dt>Catch-up<\/dt><dd id="catch-up-line">Nothing to catch up<\/dd>\s*<dt>Lock<\/dt><dd id="lock-line">Free<\/dd>/);
     assert.doesNotMatch(page.text, /<h2>Last run<\/h2>|<h2>Schedule<\/h2>|<h2>Fatal error reports<\/h2>|\bUTC\b/);
     assert.match(page.text, /<div id="run-progress" hidden>/);
     assert.match(page.text, /<h2>Warnings<\/h2>/);
@@ -1194,6 +1194,36 @@ test('Settings > Pipeline has "Include carried-over postings" (default on); only
     await hub.form('/settings', { pipelinePresent: '1', includeCarriedOver: 'on', minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' });
     assert.equal((await readConfig(root)).semanticMatching.includeCarriedOver, true);
     assert.equal(validateSettings({ minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' }).includeCarriedOver, null);
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('Settings > Pipeline has "Auto catch-up after network outage" (default on); Status shows an incomplete run and the next check', async () => {
+  const root = await prepareProject();
+  const state = JSON.parse(await fs.readFile(path.join(root, 'state', 'state.json'), 'utf8'));
+  state.incompleteRun = { date: '2026-08-26', reason: 'network_outage', detail: "This Mac's network dropped while the job boards were being polled, so ATS sources are missing from this run.", at: '2026-08-27T01:06:00.000Z', firstAt: '2026-08-27T01:06:00.000Z', trigger: 'scheduled' };
+  await fs.writeFile(path.join(root, 'state', 'state.json'), JSON.stringify(state));
+  const hub = await startHub(root);
+  try {
+    const page = await hub.request('GET', '/settings?tab=pipeline');
+    assert.match(page.text, /<input type="checkbox" name="autoCatchUp" checked> Auto catch-up after network outage<\/label>/, 'on when config says nothing');
+    hub.ctx.autoCatchUp.start();
+    const status = await hub.request('GET', '/status');
+    const line = status.text.match(/<dd id="catch-up-line">([\s\S]*?)<\/dd>/)[1];
+    assert.match(line, /data-badge="incomplete">Incomplete<\/span> The run of 2026-08-26 was cut short at Aug 26, 2026, 8:06 PM: This Mac&#39;s network dropped/);
+    assert.match(line, /Auto catch-up: 0 of 2 used · next check Aug 27, 2026, 7:10 AM/);
+    hub.ctx.autoCatchUp.stop();
+
+    await hub.form('/settings', { pipelinePresent: '1', includeCarriedOver: 'on', minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' });
+    assert.deepEqual((await readConfig(root)).autoCatchUp, { enabled: false }, 'an unchecked box on the Pipeline form turns it off');
+    assert.match((await hub.request('GET', '/settings?tab=pipeline')).text, /<input type="checkbox" name="autoCatchUp"> Auto catch-up after network outage/);
+    assert.match((await hub.request('GET', '/status')).text, /Auto catch-up after network outage is off/);
+    await hub.form('/settings', { minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' });
+    assert.deepEqual((await readConfig(root)).autoCatchUp, { enabled: false }, 'a form without the Pipeline marker leaves it alone');
+    await hub.form('/settings', { pipelinePresent: '1', autoCatchUp: 'on', includeCarriedOver: 'on', minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' });
+    assert.deepEqual((await readConfig(root)).autoCatchUp, { enabled: true });
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });

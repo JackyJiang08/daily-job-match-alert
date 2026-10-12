@@ -51,7 +51,8 @@ export function createRunManager(options) {
     return { available: true, reason: null };
   }
 
-  async function start() {
+  // trigger: 'manual' for Run Now, 'auto_catchup' for the network catch-up (src/hub/auto-catchup.mjs).
+  async function start({ trigger = 'manual' } = {}) {
     const gate = await availability();
     if (!gate.available) {
       const error = new Error(gate.reason);
@@ -67,10 +68,10 @@ export function createRunManager(options) {
     const launch = caffeinated(nodeBinary, [entrypoint, '--config', configPath], { platform });
     const child = spawn(launch.command, launch.args, {
       cwd: root,
-      env: { ...process.env, DAILY_JOB_MATCH_ALERT_TRIGGER: 'manual' },
+      env: { ...process.env, DAILY_JOB_MATCH_ALERT_TRIGGER: trigger },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    current = { running: true, startedAt, finishedAt: null, exitCode: null, pid: child.pid ?? null, logPath, matchCount: null, error: null, trigger: 'manual' };
+    current = { running: true, startedAt, finishedAt: null, exitCode: null, pid: child.pid ?? null, logPath, matchCount: null, error: null, trigger };
     let stdout = '';
     const append = chunk => {
       const text = chunk.toString('utf8');

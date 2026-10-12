@@ -9,6 +9,8 @@ import { isPidAlive } from '../lock.mjs';
 import { extractPdfText } from '../resume-sync.mjs';
 import { createHubHandler } from './routes.mjs';
 import { createRunManager } from './run.mjs';
+import { createAutoCatchUp } from './auto-catchup.mjs';
+import { installedSchedule, nextScheduledRun } from './services.mjs';
 import { createConnectionsProbe } from './connections.mjs';
 import { describeConnections } from '../engines/index.mjs';
 import { createLetterStore } from '../cover-letter/store.mjs';
@@ -72,6 +74,18 @@ export function createHubContext(options) {
     spawn: options.spawn, nodeBinary: options.nodeBinary, entrypoint: options.entrypoint,
     ...(options.platform ? { platform: options.platform } : {}),
   });
+  // Checks every 10 minutes for a run the network cut short; startHub starts the timer.
+  ctx.autoCatchUp = options.autoCatchUp || createAutoCatchUp({
+    io, hubDirectory, now, runManager: ctx.runManager,
+    readState: async () => {
+      try { return JSON.parse(await io.readFile(path.join(root, 'state', 'state.json'), 'utf8')); } catch { return {}; }
+    },
+    loadConfig: () => ctx.loadConfig(),
+    schedule: () => installedSchedule(ctx),
+    nextScheduledRun,
+    notify: text => ctx.notify(text),
+    ...(options.networkProbe ? { probe: options.networkProbe } : {}),
+  });
   return ctx;
 }
 
@@ -98,5 +112,7 @@ export async function startHub(options = {}) {
     server.once('error', reject);
     server.listen(port, HUB_HOST, () => { server.off('error', reject); resolve(); });
   });
+  ctx.autoCatchUp.start();
+  server.on('close', () => ctx.autoCatchUp.stop());
   return { server, ctx, url: `http://${HUB_HOST}:${port}/` };
 }

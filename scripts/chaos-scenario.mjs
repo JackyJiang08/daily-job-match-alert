@@ -437,6 +437,8 @@ scenarios['network-drop'] = async function networkDrop() {
     const stats = run.summary.meta.sourceCounts.filter(stat => stat.kind === 'ats' && stat.outage);
     assert.equal(stats.length, 4);
     assert.ok(stats.every(stat => stat.errorCode), 'the per-source counts lack the cause code');
+    const cutShort = JSON.parse(await fs.readFile(path.join(directory, 'state', 'state.json'), 'utf8'));
+    assert.equal(cutShort.incompleteRun?.reason, 'network_outage', 'the outage run is not recorded as incomplete for the hub catch-up');
 
     // The network is back an hour later: a manual run polls the four boards (not "polled recently").
     allowance = Infinity;
@@ -448,7 +450,9 @@ scenarios['network-drop'] = async function networkDrop() {
     assert.equal(hits.length, 4, `the reconnected run polled ${hits.length} board(s)`);
     const healed = JSON.parse(await fs.readFile(path.join(directory, 'state', 'ats-boards.json'), 'utf8'));
     assert.ok(tokens.every(token => healed.boards[`greenhouse:${token}`].consecutiveFailures === 0 && healed.boards[`greenhouse:${token}`].lastSuccessAt));
-    return `mid-run drop: 4 of 5 boards unreachable, retried once, banner + warning, 0 failures counted; reconnected run polled all 4`;
+    const caughtUp = JSON.parse(await fs.readFile(path.join(directory, 'state', 'state.json'), 'utf8'));
+    assert.equal(caughtUp.incompleteRun, undefined, 'the reconnected run did not clear the incomplete record');
+    return `mid-run drop: 4 of 5 boards unreachable, retried once, banner + warning, 0 failures counted, run marked incomplete; reconnected run polled all 4 and cleared it`;
   } finally {
     await new Promise(resolve => server.close(resolve));
   }
