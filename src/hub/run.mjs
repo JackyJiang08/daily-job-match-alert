@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { caffeinated } from '../caffeinate.mjs';
 import { isPidAlive } from '../lock.mjs';
 
 const TAIL_LINES = 50;
@@ -31,7 +32,7 @@ export function createRunManager(options) {
   const {
     root, configPath, hubDirectory,
     spawn = nodeSpawn, io = fs, now = () => new Date(), pidAlive = isPidAlive,
-    nodeBinary = process.execPath, onFinished = null,
+    nodeBinary = process.execPath, onFinished = null, platform = process.platform,
   } = options;
   const lockPath = options.lockPath || path.join(root, 'state', '.lock');
   const entrypoint = options.entrypoint || fileURLToPath(new URL('../index.mjs', import.meta.url));
@@ -62,7 +63,9 @@ export function createRunManager(options) {
     await io.mkdir(logDirectory, { recursive: true });
     const logPath = path.join(logDirectory, `run-${startedAt.replace(/[:.]/g, '-')}.log`);
     output = '';
-    const child = spawn(nodeBinary, [entrypoint, '--config', configPath], {
+    // Under `caffeinate -i` on macOS, as the nightly run is, so the Mac stays awake until the run ends.
+    const launch = caffeinated(nodeBinary, [entrypoint, '--config', configPath], { platform });
+    const child = spawn(launch.command, launch.args, {
       cwd: root,
       env: { ...process.env, DAILY_JOB_MATCH_ALERT_TRIGGER: 'manual' },
       stdio: ['ignore', 'pipe', 'pipe'],

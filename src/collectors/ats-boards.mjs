@@ -36,7 +36,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { workdayPostedOn } from '../enrich.mjs';
 import { canonicalUrl, cleanText, isoDate, mapLimit, normalizeLocation, sha256 } from '../utils.mjs';
-import { createWarning, errorSummary } from '../warnings.mjs';
+import { createWarning, errorCause, errorSummary, isNetworkError } from '../warnings.mjs';
 import { NEW_SINCE_LAST_POLL, freshnessInstant } from '../posting-fields.mjs';
 
 export const ATS_KINDS = { greenhouse: 'Greenhouse', lever: 'Lever', ashby: 'Ashby', workday: 'Workday', smartrecruiters: 'SmartRecruiters' };
@@ -49,6 +49,14 @@ export const DEFAULT_MINIMUM_POLL_HOURS = 20;
 export const QUIET_AFTER_DAYS = 30;
 export const QUIET_POLL_DAYS = 7;
 export const REGISTRY_VERSION = 1;
+// More than this share of the boards polled in one run failing without an HTTP answer means this Mac
+// lost its network, not that the boards broke: nothing is counted against them and they are retried once
+// after OUTAGE_RETRY_DELAY_MS. At least OUTAGE_MINIMUM_FAILURES such failures are needed to call it.
+export const OUTAGE_SHARE = 0.5;
+export const OUTAGE_MINIMUM_FAILURES = 3;
+export const OUTAGE_RETRY_DELAY_MS = 60_000;
+// The wall clock running ahead of the monotonic clock by this much means the Mac slept during the run.
+export const CLOCK_JUMP_MS = 5 * 60_000;
 const WORKDAY_PAGE_SIZE = 20;
 const DEFAULT_MAXIMUM_WORKDAY_PAGES = 10;
 const SMARTRECRUITERS_PAGE_SIZE = 100;
@@ -224,7 +232,47 @@ export function discoverBoards(jobs) {
 
 export function normalizeRegistry(raw) {
   const boards = raw && typeof raw === 'object' && raw.boards && typeof raw.boards === 'object' && !Array.isArray(raw.boards) ? raw.boards : {};
-  return { version: REGISTRY_VERSION, boards: { ...boards } };
+  const migrations = raw && typeof raw === 'object' && raw.migrations && typeof raw.migrations === 'object' && !Array.isArray(raw.migrations) ? raw.migrations : null;
+  return { version: REGISTRY_VERSION, boards: { ...boards }, ...(migrations ? { migrations: { ...migrations } } : {}) };
+}
+
+// One-time repair for runs before outage detection existed: a run in which more than OUTAGE_SHARE of the
+// boards it polled failed without an HTTP answer at the same instant (10-11: the Mac was in a dark wake
+// with no network and 841 boards said "fetch failed") counted a failure against every one of them. Those
+// failures are taken back: the count drops by one, the error and failure time are cleared, a dormancy
+// that started then is lifted, and lastPolledAt returns to the last success so the next run polls them.
+// HTTP failures in the same run stay counted. Recorded in registry.migrations so it runs once.
+export const OUTAGE_REPAIR_MIGRATION = 'undo-network-outage-failures';
+const LEGACY_NETWORK_ERROR = /^fetch failed\b|^timeout after\b/i;
+
+export function undoOutageFailures(registry, now = new Date()) {
+  registry.migrations = registry.migrations && typeof registry.migrations === 'object' ? registry.migrations : {};
+  if (registry.migrations[OUTAGE_REPAIR_MIGRATION]) return { applied: false, runs: [], boards: 0 };
+  const boards = Object.values(registry.boards);
+  const failedAt = new Map();
+  for (const board of boards) {
+    if (!board.lastFailureAt || !LEGACY_NETWORK_ERROR.test(String(board.lastError || ''))) continue;
+    if (!failedAt.has(board.lastFailureAt)) failedAt.set(board.lastFailureAt, []);
+    failedAt.get(board.lastFailureAt).push(board);
+  }
+  const runs = [];
+  let repaired = 0;
+  for (const [at, failed] of failedAt) {
+    const polled = boards.filter(board => board.lastPolledAt === at || board.lastSuccessAt === at || board.lastFailureAt === at).length;
+    if (failed.length < OUTAGE_MINIMUM_FAILURES || failed.length <= polled * OUTAGE_SHARE) continue;
+    for (const board of failed) {
+      board.consecutiveFailures = Math.max(0, Number(board.consecutiveFailures || 0) - 1);
+      board.lastError = null;
+      board.lastErrorCode = null;
+      board.lastFailureAt = null;
+      if (board.lastPolledAt === at) board.lastPolledAt = board.lastSuccessAt || null;
+      if (board.dormant && board.dormantSince === at) { board.dormant = false; board.dormantSince = null; }
+    }
+    repaired += failed.length;
+    runs.push({ at, boards: failed.length });
+  }
+  registry.migrations[OUTAGE_REPAIR_MIGRATION] = { at: now.toISOString(), runs };
+  return { applied: true, runs, boards: repaired };
 }
 
 export async function readRegistry(file, io = fs) {
@@ -533,7 +581,7 @@ async function fetchWithTimeout(url, options, timeoutMs, fetchImpl) {
   try {
     return await fetchImpl(url, { ...options, signal: controller.signal, redirect: 'follow' });
   } catch (error) {
-    throw error?.name === 'AbortError' ? new Error(`timeout after ${timeoutMs} ms`) : error;
+    throw error?.name === 'AbortError' ? Object.assign(new Error(`timeout after ${timeoutMs} ms`), { code: 'ETIMEDOUT' }) : error;
   } finally {
     clearTimeout(timer);
   }
@@ -634,6 +682,29 @@ export function isQuietBoard(board, now = new Date()) {
   return now.getTime() - new Date(basis).getTime() >= QUIET_AFTER_DAYS * 24 * 60 * 60 * 1000;
 }
 
+// Measures how far the wall clock ran ahead of the monotonic clock since `start` (the monotonic clock
+// stops while the Mac sleeps): a gap of CLOCK_JUMP_MS or more is a sleep, or a clock reset, mid-run.
+export function createRunClock({ wall = () => Date.now(), monotonic = () => performance.now() } = {}) {
+  const wall0 = wall();
+  const monotonic0 = monotonic();
+  return { jumpMs: () => Math.abs((wall() - wall0) - (monotonic() - monotonic0)) };
+}
+
+// "ENOTFOUND ×812, ECONNRESET ×3": the commonest reasons among failed polls, most frequent first.
+export function causeTally(errors, limit = 3) {
+  const counts = new Map();
+  for (const error of errors) {
+    const cause = errorCause(error);
+    const code = cause?.code || cause?.message || error?.message || 'unknown';
+    counts.set(code, (counts.get(code) || 0) + 1);
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([code, count]) => ({ code, count }));
+}
+
+export function causeTallyText(tally) {
+  return tally.map(item => `${item.code} ×${item.count}`).join(', ');
+}
+
 // Polls every enabled, non-dormant board once per night (weekly when quiet). Freshness by snapshot: with a
 // usable snapshot of the previous poll (`snapshots`, see usableSnapshot), a posting absent from it is new
 // since that poll (freshnessBasis "new since last poll", firstSeenAt = now; on a partial snapshot it must
@@ -648,100 +719,166 @@ export function isQuietBoard(board, now = new Date()) {
 // consecutive failure marks the board dormant. A board in `wakeKeys` (a search result pointed at one of
 // its postings tonight) skips the quiet board's weekly wait; disabled, dormant, and recently polled
 // boards stay as they are.
-export async function collectAtsBoards({ registry, snapshots = null, settings = {}, network = {}, now = new Date(), lookbackHours = 24, timeZone = null, warnings = [], isSeen = () => false, isDeferred = () => false, excludeUrls = new Set(), wakeKeys = new Set(), fetchImpl = fetch }) {
+//
+// Local outages: when more than OUTAGE_SHARE of the polled boards fail without an HTTP answer (or the
+// clock jumped by CLOCK_JUMP_MS during the run, see createRunClock), the failures are this Mac's, not the
+// boards'. Those boards are polled once more after `retryDelayMs`; any still failing then are left exactly
+// as they were (no failure counted, no dormancy, no snapshot, no lastSuccessAt, lastPolledAt restored so
+// the next run polls them) and the result's `outage` describes it. HTTP errors are always the board's own.
+export async function collectAtsBoards({ registry, snapshots = null, settings = {}, network = {}, now = new Date(), lookbackHours = 24, timeZone = null, warnings = [], isSeen = () => false, isDeferred = () => false, excludeUrls = new Set(), wakeKeys = new Set(), fetchImpl = fetch, clock = null, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), retryDelayMs = OUTAGE_RETRY_DELAY_MS }) {
+  const runClock = clock || createRunClock();
   const store = snapshots || normalizeSnapshots(null);
   const snapshotMaxAgeHours = Number(settings.snapshotMaxAgeHours ?? SNAPSHOT_MAX_AGE_HOURS);
   const cutoff = new Date(now.getTime() - Number(lookbackHours) * 60 * 60 * 1000);
   const minimumHours = Number(settings.minimumPollIntervalHours ?? DEFAULT_MINIMUM_POLL_HOURS);
   const headers = { 'user-agent': network.userAgent || 'DailyJobMatchAlert/0.1' };
+  const concurrency = Number(network.concurrency || 3);
   const jobs = [];
   const baseline = [];
   const results = [];
+  const failures = [];
   const boards = Object.values(registry.boards);
   const wanted = job => (withinWindow(job, cutoff, timeZone) || isDeferred(job)) && !isSeen(job);
-  await mapLimit(boards, Number(network.concurrency || 3), async board => {
+
+  function applySuccess(board, result, polled, previous) {
+    board.consecutiveFailures = 0;
+    board.lastError = null;
+    board.lastErrorCode = null;
+    board.lastSuccessAt = now.toISOString();
+    board.etag = polled.etag;
+    board.lastModified = polled.lastModified;
+    Object.assign(result, { ok: true, error: null, errorCode: null, outage: false, notModified: polled.notModified });
+    if (!polled.notModified) board.lastJobCount = polled.jobs.length;
+    result.jobCount = board.lastJobCount;
+    if (!board.company) {
+      const named = polled.jobs.find(job => job.company && job.company !== titleCase(board.token || board.slug || board.tenant || ''));
+      if (named) board.company = named.company;
+    }
+    let fresh;
+    const snapshot = previous.snapshot;
+    if (snapshot) {
+      result.freshnessRule = 'snapshot';
+      fresh = [];
+      for (const job of polled.jobs) {
+        if (isSeen(job)) continue;
+        const present = snapshotHas(snapshot, job);
+        if (present || (!snapshot.complete && !withinWindow(job, cutoff, timeZone))) {
+          // Already on the board last night: only a posting the review budget deferred comes back.
+          if (isDeferred(job)) fresh.push(job);
+          else if (present && withinWindow(job, cutoff, timeZone)) result.snapshotExcluded += 1;
+          continue;
+        }
+        fresh.push({ ...job, freshnessBasis: NEW_SINCE_LAST_POLL, sourceFreshnessBasis: job.freshnessBasis || null, firstSeenAt: now.toISOString(), previousPollAt: snapshot.at });
+        result.newSinceLastPoll += 1;
+      }
+    } else {
+      result.freshnessRule = 'date';
+      result.snapshotReason = previous.reason;
+      fresh = polled.jobs.filter(wanted);
+    }
+    if (polled.notModified) {
+      if (store.boards[board.key]) store.boards[board.key] = { ...store.boards[board.key], at: now.toISOString() };
+    } else {
+      store.boards[board.key] = buildSnapshot(polled.jobs, { now, complete: polled.complete !== false });
+    }
+    if (!board.baselinedAt) {
+      const old = polled.jobs.filter(job => !withinWindow(job, cutoff, timeZone) && !excludeUrls.has(job.url) && !isDeferred(job));
+      board.baselinedAt = now.toISOString();
+      board.baselineCount = old.length;
+      baseline.push(...old);
+      result.baseline = true;
+      result.baselineCount = old.length;
+      warnings.push(createWarning('collector', boardLabel(board), `First poll recorded ${old.length} posting(s) older than the ${lookbackHours}-hour window as already seen (baseline); ${fresh.length} inside the window go through the normal flow`, 'info'));
+    }
+    board.lastNewCount = fresh.length;
+    if (fresh.length) { board.lastNewAt = now.toISOString(); board.quiet = false; result.quiet = false; }
+    result.newCount = fresh.length;
+    jobs.push(...fresh);
+  }
+
+  async function attempt(entry) {
+    try {
+      const polled = await pollBoard(entry.board, { fetchImpl, headers, timeoutMs: network.timeoutMs, now, cutoff, lookbackHours, maximumWorkdayPages: settings.maximumWorkdayPages, maximumSmartRecruitersPages: settings.maximumSmartRecruitersPages, conditional: Boolean(store.boards[entry.board.key]) });
+      applySuccess(entry.board, entry.result, polled, entry.previous);
+      return true;
+    } catch (error) {
+      entry.error = error;
+      entry.network = isNetworkError(error);
+      entry.result.ok = false;
+      entry.result.error = errorSummary(error);
+      entry.result.errorCode = errorCause(error)?.code || null;
+      return false;
+    }
+  }
+
+  function recordFailure({ board, result, error }) {
+    board.consecutiveFailures = Number(board.consecutiveFailures || 0) + 1;
+    board.lastError = errorSummary(error);
+    board.lastErrorCode = errorCause(error)?.code || null;
+    board.lastFailureAt = now.toISOString();
+    result.ok = false;
+    result.error = board.lastError;
+    let note = `failure ${board.consecutiveFailures} in a row`;
+    if (board.consecutiveFailures >= DORMANT_AFTER_FAILURES) {
+      board.dormant = true;
+      board.dormantSince = now.toISOString();
+      result.dormant = true;
+      note += `; marked dormant after ${DORMANT_AFTER_FAILURES} consecutive failures, resume it from the hub Status page`;
+    }
+    warnings.push(createWarning('collector', result.label, `${board.lastError} (${note}); the other sources were not affected`));
+  }
+
+  // A failure the outage explains leaves the board as it was before this run touched it.
+  function excuse({ board, result, previousPolledAt }) {
+    if (previousPolledAt) board.lastPolledAt = previousPolledAt;
+    else board.lastPolledAt = null;
+    board.lastOutageAt = now.toISOString();
+    board.lastOutageError = result.error;
+    result.outage = true;
+  }
+
+  let attempted = 0;
+  await mapLimit(boards, concurrency, async board => {
     const label = boardLabel(board);
     board.quiet = board.enabled !== false && !board.dormant && isQuietBoard(board, now);
-    const result = { key: board.key, label, kind: board.kind, ok: true, skipped: null, baseline: false, jobCount: null, newCount: 0, baselineCount: 0, notModified: false, error: null, dormant: board.dormant === true, quiet: board.quiet, freshnessRule: null, snapshotReason: null, newSinceLastPoll: 0, snapshotExcluded: 0 };
+    const result = { key: board.key, label, kind: board.kind, ok: true, skipped: null, baseline: false, jobCount: null, newCount: 0, baselineCount: 0, notModified: false, error: null, errorCode: null, outage: false, dormant: board.dormant === true, quiet: board.quiet, freshnessRule: null, snapshotReason: null, newSinceLastPoll: 0, snapshotExcluded: 0 };
     results.push(result);
     if (board.enabled === false) { result.skipped = 'disabled'; return; }
     if (board.dormant) { result.skipped = 'dormant'; return; }
     const sinceLastPoll = board.lastPolledAt ? now.getTime() - new Date(board.lastPolledAt).getTime() : Infinity;
     if (sinceLastPoll < minimumHours * 60 * 60 * 1000) { result.skipped = 'polled recently'; return; }
     if (board.quiet && !wakeKeys.has(board.key) && sinceLastPoll < QUIET_POLL_DAYS * 24 * 60 * 60 * 1000) { result.skipped = 'quiet (weekly poll)'; return; }
+    attempted += 1;
     // Read before this poll changes lastFailureAt: a failure after the snapshot makes it unusable.
-    const previous = usableSnapshot(store.boards[board.key], board, now, snapshotMaxAgeHours);
+    const entry = { board, result, previous: usableSnapshot(store.boards[board.key], board, now, snapshotMaxAgeHours), previousPolledAt: board.lastPolledAt || null, error: null, network: false };
     board.lastPolledAt = now.toISOString();
-    try {
-      const polled = await pollBoard(board, { fetchImpl, headers, timeoutMs: network.timeoutMs, now, cutoff, lookbackHours, maximumWorkdayPages: settings.maximumWorkdayPages, maximumSmartRecruitersPages: settings.maximumSmartRecruitersPages, conditional: Boolean(store.boards[board.key]) });
-      board.consecutiveFailures = 0;
-      board.lastError = null;
-      board.lastSuccessAt = now.toISOString();
-      board.etag = polled.etag;
-      board.lastModified = polled.lastModified;
-      result.notModified = polled.notModified;
-      if (!polled.notModified) board.lastJobCount = polled.jobs.length;
-      result.jobCount = board.lastJobCount;
-      if (!board.company) {
-        const named = polled.jobs.find(job => job.company && job.company !== titleCase(board.token || board.slug || board.tenant || ''));
-        if (named) board.company = named.company;
-      }
-      let fresh;
-      const snapshot = previous.snapshot;
-      if (snapshot) {
-        result.freshnessRule = 'snapshot';
-        fresh = [];
-        for (const job of polled.jobs) {
-          if (isSeen(job)) continue;
-          const present = snapshotHas(snapshot, job);
-          if (present || (!snapshot.complete && !withinWindow(job, cutoff, timeZone))) {
-            // Already on the board last night: only a posting the review budget deferred comes back.
-            if (isDeferred(job)) fresh.push(job);
-            else if (present && withinWindow(job, cutoff, timeZone)) result.snapshotExcluded += 1;
-            continue;
-          }
-          fresh.push({ ...job, freshnessBasis: NEW_SINCE_LAST_POLL, sourceFreshnessBasis: job.freshnessBasis || null, firstSeenAt: now.toISOString(), previousPollAt: snapshot.at });
-          result.newSinceLastPoll += 1;
-        }
-      } else {
-        result.freshnessRule = 'date';
-        result.snapshotReason = previous.reason;
-        fresh = polled.jobs.filter(wanted);
-      }
-      if (polled.notModified) {
-        if (store.boards[board.key]) store.boards[board.key] = { ...store.boards[board.key], at: now.toISOString() };
-      } else {
-        store.boards[board.key] = buildSnapshot(polled.jobs, { now, complete: polled.complete !== false });
-      }
-      if (!board.baselinedAt) {
-        const old = polled.jobs.filter(job => !withinWindow(job, cutoff, timeZone) && !excludeUrls.has(job.url) && !isDeferred(job));
-        board.baselinedAt = now.toISOString();
-        board.baselineCount = old.length;
-        baseline.push(...old);
-        result.baseline = true;
-        result.baselineCount = old.length;
-        warnings.push(createWarning('collector', boardLabel(board), `First poll recorded ${old.length} posting(s) older than the ${lookbackHours}-hour window as already seen (baseline); ${fresh.length} inside the window go through the normal flow`, 'info'));
-      }
-      board.lastNewCount = fresh.length;
-      if (fresh.length) { board.lastNewAt = now.toISOString(); board.quiet = false; result.quiet = false; }
-      result.newCount = fresh.length;
-      jobs.push(...fresh);
-    } catch (error) {
-      board.consecutiveFailures = Number(board.consecutiveFailures || 0) + 1;
-      board.lastError = errorSummary(error);
-      board.lastFailureAt = now.toISOString();
-      result.ok = false;
-      result.error = board.lastError;
-      let note = `failure ${board.consecutiveFailures} in a row`;
-      if (board.consecutiveFailures >= DORMANT_AFTER_FAILURES) {
-        board.dormant = true;
-        board.dormantSince = now.toISOString();
-        result.dormant = true;
-        note += `; marked dormant after ${DORMANT_AFTER_FAILURES} consecutive failures, resume it from the hub Status page`;
-      }
-      warnings.push(createWarning('collector', label, `${board.lastError} (${note}); the other sources were not affected`));
-    }
+    if (!(await attempt(entry))) failures.push(entry);
   });
+
+  let outage = null;
+  const networkFailures = () => failures.filter(entry => entry.result.ok === false && entry.network);
+  const looksSystemic = (failed, polled, jumped) => failed.length > 0 && (jumped || (failed.length >= OUTAGE_MINIMUM_FAILURES && failed.length > polled * OUTAGE_SHARE));
+  const firstJump = runClock.jumpMs();
+  const firstFailed = networkFailures();
+  if (looksSystemic(firstFailed, attempted, firstJump >= CLOCK_JUMP_MS)) {
+    const reason = firstFailed.length > attempted * OUTAGE_SHARE && firstFailed.length >= OUTAGE_MINIMUM_FAILURES ? 'network' : 'clock_jump';
+    const firstCauses = causeTally(firstFailed.map(entry => entry.error));
+    await sleep(retryDelayMs);
+    const retryClock = createRunClock();
+    await mapLimit(firstFailed, concurrency, entry => attempt(entry));
+    const stillFailed = networkFailures();
+    const recovered = firstFailed.length - stillFailed.length;
+    // The retry decides: if most boards still cannot be reached (or the Mac slept again), the remaining
+    // failures are the outage's; if most came back, the ones still failing are failing on their own.
+    const persisting = stillFailed.length > 0 && (stillFailed.length * 2 > firstFailed.length || retryClock.jumpMs() >= CLOCK_JUMP_MS);
+    outage = {
+      detected: true, reason, attempted, failed: firstFailed.length, retried: firstFailed.length, recovered,
+      missing: persisting ? stillFailed.length : 0, clockJumpMs: firstJump >= CLOCK_JUMP_MS ? Math.round(firstJump) : 0,
+      retryDelayMs, causes: firstCauses, persisting,
+    };
+    if (persisting) for (const entry of stillFailed) excuse(entry);
+  }
+  for (const entry of failures) if (entry.result.ok === false && !entry.result.outage) recordFailure(entry);
   results.sort((a, b) => a.label.localeCompare(b.label));
-  return { jobs, baseline, results, snapshots: store };
+  return { jobs, baseline, results, snapshots: store, outage };
 }

@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { caffeinated } from './caffeinate.mjs';
 import { normalizeState } from './state.mjs';
 
 function arg(name, fallback = null) {
@@ -32,9 +33,11 @@ export function launchdTrigger(options = {}) {
     : 'catchup';
 }
 
-function runNode(args, options = {}) {
+// The run is wrapped in `caffeinate -i` on macOS so the Mac does not idle-sleep halfway through it.
+export function runNode(args, options = {}) {
+  const launch = caffeinated(options.nodeBinary || process.execPath, args, { platform: options.platform });
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, args, { cwd: options.cwd, env: options.env, stdio: 'inherit' });
+    const child = (options.spawn || spawn)(launch.command, launch.args, { cwd: options.cwd, env: options.env, stdio: 'inherit' });
     child.on('error', reject);
     child.on('close', code => {
       if (code === 0) resolve();

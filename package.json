@@ -28,6 +28,7 @@
     "run": "node src/index.mjs --config config.json",
     "run:catchup": "node src/catchup.mjs --config config.json",
     "resume:sync": "node src/resume-sync-cli.mjs --config config.json",
+    "boards:probe": "node src/boards-probe.mjs --config config.json",
     "hub": "node src/hub/index.mjs --config config.json",
     "hub:restart": "sh scripts/hub-restart.sh",
     "test": "node --test tests/*.test.mjs",

@@ -13,7 +13,7 @@ import { collectGithubList } from './collectors/github-lists.mjs';
 import { collectHackerNewsHiring } from './collectors/hn-hiring.mjs';
 import { collectRemoteOk } from './collectors/remoteok.mjs';
 import { HACKER_NEWS_SOURCE, REMOTEOK_SOURCE, githubLists } from './collectors/catalog.mjs';
-import { applyConfigBoards, applySeedBoards, collectAtsBoards, discoverBoards, readRegistry, readSnapshots, registerBoards, registryPath, snapshotPath, withinWindow, writeRegistry, writeSnapshots } from './collectors/ats-boards.mjs';
+import { applyConfigBoards, applySeedBoards, causeTallyText, collectAtsBoards, createRunClock, discoverBoards, readRegistry, readSnapshots, registerBoards, registryPath, snapshotPath, undoOutageFailures, withinWindow, writeRegistry, writeSnapshots } from './collectors/ats-boards.mjs';
 import { SEARCH_DISCOVERY_SOURCE, SEARCH_PROVIDERS, SEARCH_SOURCE_KIND, collectSearchDiscovery, readSearchKey, searchSettings, searchUsagePath } from './collectors/search-discovery.mjs';
 import { enrichJob, enrichmentWarningMessage } from './enrich.mjs';
 import { evaluateJob, isEligible } from './match.mjs';
@@ -253,11 +253,23 @@ export async function collectEnabledSources(config, cutoff, options = {}) {
 // per board; the registry is persisted before anything is scored. Seeds (config.sources.atsBoards.seeds)
 // and boards a search result pointed at (`searchBoards`) are registered the same way, with their own
 // origin; a search hit also lets a quiet board be polled tonight instead of waiting for its weekly poll.
-export async function collectAtsBoardSources(config, state, collectedJobs, { now, warnings, sourceStats, fetchImpl, searchBoards = [] } = {}) {
+// The report, warning, and notification text for a run whose board polls were cut off by this Mac's
+// network (see collectAtsBoards). Null when the retry brought the boards back.
+export const NETWORK_OUTAGE_MESSAGE = "This Mac's network dropped while the job boards were being polled, so ATS sources are missing from this run.";
+
+export function networkOutageNotice(outage) {
+  if (!outage?.persisting) return null;
+  const why = outage.reason === 'clock_jump' ? `the Mac slept for about ${Math.round(outage.clockJumpMs / 60_000)} minutes mid-run` : `${outage.failed} of ${outage.attempted} boards failed without an answer`;
+  return `${NETWORK_OUTAGE_MESSAGE} ${outage.missing} board(s) could not be reached (${why}; ${causeTallyText(outage.causes)}; retried after ${Math.round(outage.retryDelayMs / 1000)} s). They were not counted as failing and will be polled on the next run.`;
+}
+
+export async function collectAtsBoardSources(config, state, collectedJobs, { now, warnings, sourceStats, fetchImpl, searchBoards = [], clock = null, sleep = null, retryDelayMs = null } = {}) {
   const settings = config.sources.atsBoards || {};
-  if (settings.enabled === false) return { jobs: [], results: [], registry: null };
+  if (settings.enabled === false) return { jobs: [], results: [], registry: null, outage: null };
   const file = registryPath(config);
   const registry = await readRegistry(file);
+  const repaired = undoOutageFailures(registry, now);
+  if (repaired.boards) warnings.push(createWarning('collector', 'ATS boards', `took back ${repaired.boards} failure count(s) recorded during an earlier network outage (${repaired.runs.map(run => run.at).join(', ')}); those boards are polled normally again`, 'info'));
   registerBoards(registry, discoverBoards(collectedJobs), { now, origin: 'discovered' });
   applySeedBoards(registry, settings.seeds, { now, warnings });
   const searchAdded = registerBoards(registry, searchBoards, { now, origin: 'search_discovery' });
@@ -272,7 +284,14 @@ export async function collectAtsBoardSources(config, state, collectedJobs, { now
     excludeUrls: new Set(collectedJobs.map(job => canonicalUrl(job.url)).filter(Boolean)),
     wakeKeys: new Set(searchBoards.map(board => board.key)),
     ...(fetchImpl ? { fetchImpl } : {}),
+    ...(clock ? { clock } : {}),
+    ...(sleep ? { sleep } : {}),
+    // sources.atsBoards.outageRetryDelaySeconds (default 60) sets the wait before the outage retry.
+    ...(retryDelayMs != null ? { retryDelayMs } : Number.isFinite(Number(settings.outageRetryDelaySeconds)) && settings.outageRetryDelaySeconds !== null ? { retryDelayMs: Math.max(0, Number(settings.outageRetryDelaySeconds)) * 1000 } : {}),
   });
+  const outage = polled.outage;
+  if (outage?.persisting) warnings.push(createWarning('collector', 'ATS boards', networkOutageNotice(outage)));
+  else if (outage) warnings.push(createWarning('collector', 'ATS boards', `${outage.failed} of ${outage.attempted} boards failed without an answer (${causeTallyText(outage.causes)})${outage.clockJumpMs ? ` after the Mac slept for about ${Math.round(outage.clockJumpMs / 60_000)} minutes` : ''}; retried after ${Math.round(outage.retryDelayMs / 1000)} s and ${outage.recovered} came back. Boards still failing were counted as usual.`, 'info'));
   for (const job of polled.baseline) markJobSeen(state, { ...job, enrichment: 'ats_baseline' }, now.toISOString());
   await writeRegistry(file, registry);
   try {
@@ -281,9 +300,9 @@ export async function collectAtsBoardSources(config, state, collectedJobs, { now
     warnings.push(createWarning('collector', 'ATS boards', `could not save tonight's board snapshots (${errorSummary(error)}); tomorrow's boards fall back to posting dates`));
   }
   for (const result of polled.results) {
-    sourceStats?.push({ name: result.label, kind: 'ats', key: result.key, ok: result.ok, count: result.newCount, jobCount: result.jobCount, baseline: result.baseline, baselineCount: result.baselineCount, skipped: result.skipped, notModified: result.notModified, dormant: result.dormant, quiet: result.quiet, error: result.error, freshnessRule: result.freshnessRule, snapshotReason: result.snapshotReason, newSinceLastPoll: result.newSinceLastPoll, snapshotExcluded: result.snapshotExcluded });
+    sourceStats?.push({ name: result.label, kind: 'ats', key: result.key, ok: result.ok, count: result.newCount, jobCount: result.jobCount, baseline: result.baseline, baselineCount: result.baselineCount, skipped: result.skipped, notModified: result.notModified, dormant: result.dormant, quiet: result.quiet, error: result.error, errorCode: result.errorCode || null, outage: result.outage === true, freshnessRule: result.freshnessRule, snapshotReason: result.snapshotReason, newSinceLastPoll: result.newSinceLastPoll, snapshotExcluded: result.snapshotExcluded });
   }
-  return { jobs: polled.jobs, results: polled.results, registry };
+  return { jobs: polled.jobs, results: polled.results, registry, outage };
 }
 
 // Replaces each Zapply link with the employer URL it redirects to; failures keep the Zapply link.
@@ -786,6 +805,8 @@ export function mergeNearDuplicates(jobs) {
 
 async function runPipeline(config, clock, options = {}) {
   const { now, runDate, applicationDate: date } = clock;
+  // Watches for a sleep mid-run (the wall clock jumping ahead of the monotonic one); see collectAtsBoards.
+  const runClock = options.runClock || createRunClock();
   const warnings = [];
   // Resume sync may recover an iCloud-evicted PDF; that disclosure belongs in the day's report.
   const resumeSync = await syncResumes(config, { warnings });
@@ -834,7 +855,22 @@ async function runPipeline(config, clock, options = {}) {
     ...(options.readSearchKey ? { readSearchKey: options.readSearchKey } : {}),
     ...(options.searchFetchImpl ? { searchFetchImpl: options.searchFetchImpl } : {}),
   });
-  const atsSources = await collectAtsBoardSources(config, state, collectedRaw, { now, warnings, sourceStats, searchBoards, ...(options.atsFetchImpl ? { fetchImpl: options.atsFetchImpl } : {}) });
+  const atsSources = await collectAtsBoardSources(config, state, collectedRaw, {
+    now, warnings, sourceStats, searchBoards, clock: runClock,
+    ...(options.atsFetchImpl ? { fetchImpl: options.atsFetchImpl } : {}),
+    ...(options.atsSleep ? { sleep: options.atsSleep } : {}),
+    ...(options.atsRetryDelayMs != null ? { retryDelayMs: options.atsRetryDelayMs } : {}),
+  });
+  const networkOutage = atsSources.outage?.persisting
+    ? { at: now.toISOString(), message: NETWORK_OUTAGE_MESSAGE, detail: networkOutageNotice(atsSources.outage), reason: atsSources.outage.reason, missing: atsSources.outage.missing, attempted: atsSources.outage.attempted, causes: atsSources.outage.causes }
+    : null;
+  if (networkOutage) {
+    try {
+      await (options.notify || notifyMessage)(`${NETWORK_OUTAGE_MESSAGE} Run it again from the hub once the Mac is online.`, { runner: options.notificationRunner });
+    } catch (error) {
+      console.warn(`Could not send the network-outage notification: ${errorSummary(error)}`);
+    }
+  }
   // A baseline is only safe once the seen marks are on disk; otherwise a crash before the final state
   // write would let the next run score a source's whole backlog.
   await writeState(statePath, state);
@@ -1119,6 +1155,7 @@ async function runPipeline(config, clock, options = {}) {
     freshness: freshnessMeta({ sourceStats, evaluated, futureCorrections, includeCarriedOver }),
     quota,
     authExpired,
+    networkOutage,
     planChange,
     plan: state.observedPlans?.claude?.type || null,
     unavailableModels: Object.values(availability.models),
@@ -1288,8 +1325,10 @@ export async function writeFatalErrorReport(error, options = {}) {
 }
 
 // macOS notification with the given sentence; a no-op off macOS.
+// DAILY_JOB_MATCH_ALERT_NOTIFY=off silences it (the chaos scenarios set it).
 export async function notifyMessage(text, options = {}) {
   if ((options.platform || process.platform) !== 'darwin') return false;
+  if ((options.env || process.env).DAILY_JOB_MATCH_ALERT_NOTIFY === 'off') return false;
   const runner = options.runner || execFileAsync;
   const safe = String(text || '').replace(/["\\]/g, ' ');
   await runner('osascript', ['-e', `display notification "${safe}" with title "Daily Job Match Alert"`], { timeout: 10_000 });

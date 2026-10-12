@@ -630,6 +630,8 @@ export async function sourcesView(ctx, config, latest) {
       lastSuccessAt: board.lastSuccessAt || null, newCount: stat ? Number(stat.count || 0) : (board.lastNewCount ?? null), jobCount: board.lastJobCount ?? null,
       baselineCount: board.baselineCount ?? null, baselinedAt: board.baselinedAt || null, dormant: board.dormant === true, dormantSince: board.dormantSince || null, quiet: board.quiet === true, lastNewAt: board.lastNewAt || null,
       error: board.lastError || null, skipped: stat?.skipped || null, consecutiveFailures: Number(board.consecutiveFailures || 0), boardUrl: board.boardUrl || null, origin: board.origin || null,
+      // Unreachable during a network outage on this Mac: the reason shows, but it is not the board's failure.
+      outage: stat?.outage === true ? (stat.error || board.lastOutageError || 'network unavailable') : null,
     });
   }
   return rows;

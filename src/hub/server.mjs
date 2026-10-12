@@ -70,6 +70,7 @@ export function createHubContext(options) {
   ctx.runManager = options.runManager || createRunManager({
     root, configPath, hubDirectory, io, now, pidAlive,
     spawn: options.spawn, nodeBinary: options.nodeBinary, entrypoint: options.entrypoint,
+    ...(options.platform ? { platform: options.platform } : {}),
   });
   return ctx;
 }

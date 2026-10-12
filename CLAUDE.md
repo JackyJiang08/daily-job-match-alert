@@ -180,6 +180,18 @@ disabled; do not expand them unless a task says so.
   correctFutureTimestamp after enrichment (precise > max(run start, check time), or a calendar day after
   the run's local day) → date-only run day, meta.freshness.futureCorrected. xlsx: Posted At text except a
   'posted today' value, new Freshness column (freshnessLabel). Run Details "Freshness" row.
+- Network outages (2026-10-12; 10-11's 20:06 run fired in a lid-closed DarkWake, every source said "fetch
+  failed"): errorSummary appends error.cause (errorCause walks cause / AggregateError; HTTP errors carry
+  status). isNetworkError = no HTTP answer. collectAtsBoards defers failure bookkeeping: > OUTAGE_SHARE 0.5
+  of attempted boards (min 3) failing on the network, or createRunClock().jumpMs() ≥ CLOCK_JUMP_MS 5 min
+  (wall vs monotonic), → sleep(retryDelayMs 60 s, sources.atsBoards.outageRetryDelaySeconds) and retry
+  those once; if most still fail they are excused (no count/lastError/lastFailureAt/snapshot/lastSuccessAt,
+  lastPolledAt restored, lastOutageAt/lastOutageError, result.outage) and meta.networkOutage drives the
+  report banner (data-banner="network"), Run Details "Network", the warning, and notifyMessage
+  (DAILY_JOB_MATCH_ALERT_NOTIFY=off silences it; chaos sets it). undoOutageFailures is the one-time
+  registry.migrations repair (applied to the real registry 2026-10-12: 841 boards). caffeinated() wraps
+  launchd runNode and Run Now in /usr/bin/caffeinate -i on darwin. npm run boards:probe (src/boards-probe.mjs)
+  is read-only. Chaos scenario network-drop.
 - US evidence in a JD (usEvidenceInDescription) also counts a standalone
   uppercase US / U.S. / USA, except lowercase "us" and all-caps phrases such as
   "JOIN US".

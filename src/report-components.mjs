@@ -126,6 +126,7 @@ export function renderReportBody(view) {
     ? `${main}${carriedGroup}<div class="empty" id="no-results" hidden>No matches for the current filters.</div>`
     : renderEmptyState(view.emptyMessage);
   return `${renderMasthead(view)}
+${view.networkBanner ? `<div class="banner" data-banner="network">${htmlEscape(view.networkBanner)}</div>` : ''}
 ${view.banner ? `<div class="banner" data-banner="quota">${htmlEscape(view.banner)}</div>` : ''}
 ${renderToolbar(view.toolbar)}
 ${list}

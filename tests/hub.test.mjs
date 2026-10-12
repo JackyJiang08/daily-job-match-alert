@@ -1,5 +1,6 @@
 // Route-level tests for the local hub: a temporary project on disk, an injected spawn fake for Run Now,
 // an injected pidAlive for the lock, and a fake text extractor so no pdftotext is needed.
+import { caffeinated } from '../src/caffeinate.mjs';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs/promises';
@@ -388,8 +389,10 @@ test('Run Now is refused while the pipeline lock is held, then spawns the pipeli
     assert.equal(started.status, 202);
     assert.equal(JSON.parse(started.text).run.running, true);
     assert.equal(hub.spawnCalls.length, 1);
-    assert.equal(hub.spawnCalls[0].command, '/fake/node');
-    assert.deepEqual(hub.spawnCalls[0].args, ['/fake/index.mjs', '--config', path.join(root, 'config.json')]);
+    // Under caffeinate -i on macOS, directly elsewhere (see tests/network-outage.test.mjs).
+    const expectedLaunch = caffeinated('/fake/node', ['/fake/index.mjs', '--config', path.join(root, 'config.json')]);
+    assert.equal(hub.spawnCalls[0].command, expectedLaunch.command);
+    assert.deepEqual(hub.spawnCalls[0].args, expectedLaunch.args);
     assert.equal(hub.spawnCalls[0].options.env.DAILY_JOB_MATCH_ALERT_TRIGGER, 'manual');
     assert.equal(hub.spawnCalls[0].options.cwd, root);
     assert.equal((await hub.form('/run', { confirm: 'yes' })).status, 409, 'a second run cannot start while the first is in progress');

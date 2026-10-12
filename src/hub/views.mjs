@@ -403,6 +403,7 @@ function sourceRow(row, timeZone) {
   const notes = [];
   if (row.quiet && !row.dormant) notes.push('<span class="badge badge-muted" data-badge="quiet" title="No new posting for 30 days; polled weekly">Quiet</span>');
   if (row.dormant) notes.push(`<span class="badge badge-bad" data-badge="dormant" title="${htmlEscape(row.error || '')}">Dormant</span> <form class="inline" method="post" action="/status/sources/resume"><input type="hidden" name="board" value="${htmlEscape(row.key)}"><button class="btn secondary small" type="submit">Resume Polling</button></form>`);
+  else if (row.outage) notes.push(`<span class="badge badge-muted" data-badge="outage" title="This Mac's network was down during the run; not counted as a failure">Network outage</span> <span class="muted">${htmlEscape(row.outage)}</span>`);
   else if (row.error) notes.push(`<span class="badge badge-warn" data-badge="failing">Failing${row.consecutiveFailures > 1 ? ` (${row.consecutiveFailures} in a row)` : ''}</span> <span class="muted">${htmlEscape(row.error)}</span>`);
   else if (row.skipped) notes.push(`<span class="muted">Not polled (${htmlEscape(row.skipped)})</span>`);
   else if (row.baselineCount != null && row.newCount == null) notes.push(`<span class="muted">Baseline of ${row.baselineCount} recorded</span>`);

@@ -1,7 +1,7 @@
 // One chaos scenario: build an isolated config under <workRoot>/<scenario>, run src/index.mjs
 // against it, and assert that the Desktop-equivalent output folder still holds a usable report.
 //
-//   node scripts/chaos-scenario.mjs <baseline|offline|llm-down|bad-input|xlsx-recovery|ats-500|review-cap|fable-weekly-limit|account-limit|backlog-priority> <workRoot>
+//   node scripts/chaos-scenario.mjs <baseline|offline|llm-down|bad-input|xlsx-recovery|ats-500|network-drop|review-cap|fable-weekly-limit|account-limit|backlog-priority> <workRoot>
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -380,6 +380,75 @@ scenarios['ats-500'] = async function atsFiveHundred() {
     assert.match(artifacts.html, /Greenhouse · Chaos Co: failed \(HTTP 500\)/, 'Run Details does not list the failed board');
     assert.match(await readWarningsFile(config, run) || '', /^\[collector \/ Greenhouse · Chaos Co\] HTTP 500/m);
     return `board failure isolated (1 warning, consecutiveFailures=1, not dormant), ${run.summary.meta.matchCount} match(es) from the healthy email`;
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+};
+
+// The network drops mid-run: the first board answers, then every connection is cut. Most boards fail
+// without an answer, so the run calls it an outage: one retry (after 1 s here, 60 s by default), then a
+// report banner and warning, and no failure counted, no snapshot, and lastPolledAt left alone. An hour
+// later the network is back and a manual run polls the same boards normally.
+scenarios['network-drop'] = async function networkDrop() {
+  const directory = await prepareDirectory('network-drop');
+  await addFixtureEmail(directory, 'demo-new-grad-alert.eml');
+  const hits = [];
+  // How many requests get an answer before every connection is cut.
+  let allowance = 1;
+  const server = http.createServer((request, response) => {
+    hits.push(request.url);
+    if (allowance <= 0) { request.socket.destroy(); return; }
+    allowance -= 1;
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ jobs: [] }));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const port = server.address().port;
+    const tokens = ['alpha', 'bravo', 'charlie', 'delta', 'echo'];
+    const config = baseConfig(directory);
+    config.network = { ...(config.network || {}), concurrency: 1 };
+    config.sources.atsBoards = { enabled: true, outageRetryDelaySeconds: 1, boards: tokens.map(token => ({ key: `greenhouse:${token}`, company: `Chaos ${token}`, apiUrl: `http://127.0.0.1:${port}/v1/boards/${token}/jobs?content=true` })) };
+    const configPath = await writeConfig(directory, config);
+    const quiet = { DAILY_JOB_MATCH_ALERT_NOTIFY: 'off' };
+    const run = await runPipeline(configPath, NOW, quiet);
+    const artifacts = await assertDesktopArtifacts(config, run);
+    assert.equal(run.exitCode, 0, `network-drop run exited ${run.exitCode}`);
+    assert.equal(hits.length, 5 + 4, 'five polls, then the four unreachable boards once more');
+    const outage = run.summary.meta.networkOutage;
+    assert.ok(outage, 'no networkOutage in the run summary');
+    assert.equal(outage.missing, 4);
+    assert.match(artifacts.html, /data-banner="network">This Mac&#39;s network dropped while the job boards were being polled, so ATS sources are missing from this run\./);
+    const warning = artifacts.warnings.find(item => item.source === 'ATS boards' && item.level === 'warning');
+    assert.ok(warning, `no outage warning: ${warningLines(artifacts.warnings).join(' | ')}`);
+    assert.match(warning.message, /4 board\(s\) could not be reached .*(?:UND_ERR_SOCKET|ECONNRESET)/);
+    assert.ok(!artifacts.warnings.some(item => /in a row/.test(item.message)), 'an outage must not produce per-board failure warnings');
+    assert.ok(run.summary.meta.matchCount >= 1, 'the email-sourced posting did not survive the outage');
+    const registry = JSON.parse(await fs.readFile(path.join(directory, 'state', 'ats-boards.json'), 'utf8'));
+    const failed = tokens.map(token => registry.boards[`greenhouse:${token}`]).filter(board => !board.lastSuccessAt);
+    assert.equal(failed.length, 4);
+    for (const board of failed) {
+      assert.equal(board.consecutiveFailures, 0, `${board.key} counted a failure`);
+      assert.equal(board.lastPolledAt, null, `${board.key} kept tonight's poll time`);
+      assert.match(board.lastOutageError, /fetch failed \(/, `${board.key} has no recorded cause`);
+    }
+    const snapshots = JSON.parse(await fs.readFile(path.join(directory, 'state', 'ats-snapshots.json'), 'utf8'));
+    assert.equal(Object.keys(snapshots.boards).length, 1, 'only the board that answered has a snapshot');
+    const stats = run.summary.meta.sourceCounts.filter(stat => stat.kind === 'ats' && stat.outage);
+    assert.equal(stats.length, 4);
+    assert.ok(stats.every(stat => stat.errorCode), 'the per-source counts lack the cause code');
+
+    // The network is back an hour later: a manual run polls the four boards (not "polled recently").
+    allowance = Infinity;
+    hits.length = 0;
+    const later = new Date(new Date(NOW).getTime() + 60 * 60 * 1000).toISOString();
+    const again = await runPipeline(configPath, later, quiet);
+    assert.equal(again.exitCode, 0);
+    assert.equal(again.summary.meta.networkOutage, null);
+    assert.equal(hits.length, 4, `the reconnected run polled ${hits.length} board(s)`);
+    const healed = JSON.parse(await fs.readFile(path.join(directory, 'state', 'ats-boards.json'), 'utf8'));
+    assert.ok(tokens.every(token => healed.boards[`greenhouse:${token}`].consecutiveFailures === 0 && healed.boards[`greenhouse:${token}`].lastSuccessAt));
+    return `mid-run drop: 4 of 5 boards unreachable, retried once, banner + warning, 0 failures counted; reconnected run polled all 4`;
   } finally {
     await new Promise(resolve => server.close(resolve));
   }

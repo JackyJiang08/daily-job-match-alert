@@ -223,6 +223,7 @@ export function runDetailsView(jobs, meta, tracks) {
       items: [auto.stopReason, auto.skipped?.existing ? `${auto.skipped.existing} already had a letter` : null, auto.skipped?.uncertain ? `${auto.skipped.uncertain} skipped: company name uncertain` : null, auto.skipped?.overLimit ? `${auto.skipped.overLimit} over the per-run limit` : null].filter(Boolean),
     });
   }
+  if (meta.networkOutage) rows.push({ term: 'Network', detail: meta.networkOutage.detail || meta.networkOutage.message });
   if (meta.authExpired) rows.push({ term: 'Claude login', detail: `${meta.authExpired.message}${meta.authExpired.deferred ? ` (${meta.authExpired.deferred} deferred)` : ''}` });
   if (meta.quota?.events?.length) {
     const events = meta.quota.events.map(event => `${describeQuota(event, { timeZone: meta.timeZone })}: ${event.action}${event.detail ? ` (${event.detail})` : ''}`);
@@ -388,6 +389,7 @@ export function buildReportView(jobs, meta, options = {}) {
       : { title: REPORT_TITLE, subtitle: mastheadSubtitle(jobs, meta), note: meta.quotaNote || null },
     toolbar: { roleTypes, tracks, quiet: jobs.length < 5, total: jobs.length },
     banner: meta.authExpired ? `${meta.authExpired.message}${meta.authExpired.deferred ? ` ${meta.authExpired.deferred} posting(s) were deferred to the next run and are not lost.` : ''}` : (meta.quota?.banner || null),
+    networkBanner: meta.networkOutage ? meta.networkOutage.detail || meta.networkOutage.message : null,
     cards,
     carried: carriedCards.length ? { title: CARRIED_OVER_TITLE, note: 'Deferred by the review budget on an earlier run and reviewed now; each card says when it was first found.', cards: carriedCards } : null,
     emptyMessage: 'No new postings cleared the configured threshold for this date.',
