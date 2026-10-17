@@ -1,5 +1,6 @@
 import { classifyRole, minimumYears } from './classify.mjs';
 import { assessEligibility } from './eligibility.mjs';
+import { exclusionLifted } from './prefilter.mjs';
 import { pickBestTrack, resumeTrackList } from './resume-tracks.mjs';
 import { unique } from './utils.mjs';
 
@@ -153,7 +154,8 @@ export function isEligible(job, config) {
   if ((job.eligibility || assessEligibility(job, prefs)).exclusion) return false;
   if (config.requireFullDescription !== false && String(job.description || '').trim().length < Number(config.minimumDescriptionCharacters || 200)) return false;
   if (prefs.roleTypes?.length && !prefs.roleTypes.includes(job.roleType)) return false;
-  if (prefs.excludeTitleTerms?.some(term => includesPhrase(job.title, term))) return false;
+  // "Manager" stands down for an early-career title (Associate Product Manager), exactly as in the pre-screen.
+  if (prefs.excludeTitleTerms?.some(term => includesPhrase(job.title, term) && !exclusionLifted(job.title, term, prefs))) return false;
   if (job.blockers?.length) return false;
   if (maxRoleRelevance(job) < 14) return false;
   const semantic = config.semanticMatching || {};

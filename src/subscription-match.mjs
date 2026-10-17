@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { pickBestTrack, reportTracks, resumeTrackList, trackSummaries } from './resume-tracks.mjs';
+import { targetRoleGuidance } from './role-families.mjs';
 import { sha256, unique } from './utils.mjs';
 import { createWarning, errorSummary } from './warnings.mjs';
 
@@ -86,6 +87,8 @@ Set "recommendedTrack" to the key of the best-fitting resume. Scores are evidenc
 - Treat the configured location policy as a hard filter. Reject postings explicitly outside it; a remote role must permit work from the allowed country.
 - Do not infer a skill merely from adjacent experience. Name concise matched evidence and missing requirements.
 - Set "employerName" to the employer's public brand name exactly as the posting text presents it (not a legal entity code, not the job board); use an empty string when the posting does not name it.
+
+${targetRoleGuidance(preferences)}
 
 Candidate preferences:
 ${JSON.stringify(preferences, null, 2)}

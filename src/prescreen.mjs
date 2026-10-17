@@ -19,6 +19,7 @@ import { STAGE_LABELS, stageAssignments } from './engines/assignments.mjs';
 import { createEngine } from './engines/index.mjs';
 import { usageEntries } from './engines/usage.mjs';
 import { ensureDigests } from './resume-digest.mjs';
+import { targetRoleGuidance } from './role-families.mjs';
 import { clearDeferred, markJobSeen } from './state.mjs';
 import { isSemanticCandidate } from './subscription-match.mjs';
 
@@ -59,7 +60,7 @@ export function prescreenSchema(trackIds) {
   };
 }
 
-export function buildPrescreenPrompt(batch, tracks, digests) {
+export function buildPrescreenPrompt(batch, tracks, digests, preferences = {}) {
   const resumes = tracks.map(track => `### ${track.id} (${track.label})\n${digests[track.id] || '(no digest)'}`).join('\n\n');
   const jobs = batch.map(job => ({
     id: job.semanticId, title: job.title || '', company: job.company || '', location: job.location || '', roleType: job.roleType || 'unknown',
@@ -68,6 +69,7 @@ export function buildPrescreenPrompt(batch, tracks, digests) {
   return [
     'PRESCREEN. Rate how well each posting fits the candidate, from 0 to 100, as a quick first pass before a careful review.',
     'Use only the resume digests below. 80+ = clearly worth a full review; 55-79 = plausible; below 55 = unlikely (wrong field, too senior, or unrelated skills).',
+    targetRoleGuidance(preferences),
     'Return exactly one result per posting id, with the best-fitting track id.',
     `Resume digests (track ids: ${tracks.map(track => track.id).join(', ')}):`,
     resumes,
@@ -84,7 +86,7 @@ function chunks(items, size) {
 
 // Scores the candidates. Any failed batch (login, limit, unparseable reply) ends the prescreen for the run:
 // { ok: false, error } and the caller keeps the local order. On success: { ok: true, scores: Map }.
-export async function runPrescreen(candidates, { engine, tracks, digests, batchSize = DEFAULT_PRESCREEN.batchSize, recordUsage = null, io = fs }) {
+export async function runPrescreen(candidates, { engine, tracks, digests, preferences = {}, batchSize = DEFAULT_PRESCREEN.batchSize, recordUsage = null, io = fs }) {
   const trackIds = tracks.map(track => track.id);
   const schema = prescreenSchema(trackIds);
   const scores = new Map();
@@ -92,7 +94,7 @@ export async function runPrescreen(candidates, { engine, tracks, digests, batchS
   try {
     await engine.verifyAuth?.();
     for (const batch of chunks(candidates, batchSize)) {
-      const response = await engine.reviewBatch(buildPrescreenPrompt(batch, tracks, digests), schema, { tempDirectory: temp });
+      const response = await engine.reviewBatch(buildPrescreenPrompt(batch, tracks, digests, preferences), schema, { tempDirectory: temp });
       if (typeof recordUsage === 'function' && response?.usage) recordUsage('prescreen', response.usage, { model: engine.model, scoringModel: response.scoringModel || null });
       const wanted = new Set(batch.map(job => job.semanticId));
       const results = Array.isArray(response?.results) ? response.results : null;
@@ -176,7 +178,7 @@ export async function prescreenStage(jobs, { config, state, resumes, tracks, dat
   try {
     const { digests } = await ensureDigests(config.root, resumes, { io });
     const engine = (makeEngine || (value => defaultMakeEngine(value, config)))(assignment);
-    result = await runPrescreen(candidates, { engine, tracks, digests, batchSize: settings.batchSize, recordUsage, io });
+    result = await runPrescreen(candidates, { engine, tracks, digests, preferences: config.preferences || {}, batchSize: settings.batchSize, recordUsage, io });
   } catch (error) {
     result = { ok: false, error, scores: new Map() };
   }

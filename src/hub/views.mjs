@@ -98,6 +98,8 @@ fieldset.group legend{font-size:var(--fs-meta);font-weight:600;letter-spacing:.0
 .field label.check{display:inline-flex;align-items:center;gap:6px;margin-right:var(--space-3)}
 .inline{display:inline}
 .form-foot{font-size:var(--fs-meta);color:var(--ink-3);margin:var(--space-2) 0 0}
+.tag-list{display:flex;flex-wrap:wrap;gap:4px;list-style:none;margin:var(--space-1) 0;padding:0}
+.tag-add{max-width:22em}
 table.plain{border-collapse:collapse;width:100%;font-size:var(--fs-body)}
 table.plain th,table.plain td{text-align:left;padding:6px var(--space-2);border-bottom:1px solid var(--line);vertical-align:top}
 table.plain th{font-size:var(--fs-meta);color:var(--ink-3);font-weight:600;text-transform:uppercase;letter-spacing:.06em}
@@ -653,6 +655,16 @@ function prescreenSettingsCard(prescreen) {
   </form></article>`;
 }
 
+// An editable tag list: one hidden field per tag (× removes it) and an add box (Enter or a comma adds a
+// tag; text left in the box is still saved, split on commas, so the form works without the script).
+function tagEditor(name, tags, { label, hint, placeholder }) {
+  const items = tags.map(tag => `<li class="tag" data-tag="${htmlEscape(tag)}"><span>${htmlEscape(tag)}</span><input type="hidden" name="${name}" value="${htmlEscape(tag)}"><button type="button" class="tag-x" aria-label="Remove ${htmlEscape(tag)}">×</button></li>`).join('');
+  return `<div class="field tag-edit" data-name="${name}" id="${name}-editor"><span>${htmlEscape(label)}</span>
+      <ul class="tag-list">${items}</ul>
+      <input type="text" name="${name}Add" class="control-input tag-add" placeholder="${htmlEscape(placeholder)}" aria-label="Add to ${htmlEscape(label)}" autocomplete="off">
+      <span class="muted">${htmlEscape(hint)}</span></div>`;
+}
+
 export function settingsPage({ settings, connections = null, timeZone, coverLetter = null, modelView = null, tab = 'models' }) {
   const active = ['models', 'pipeline', 'letters'].includes(tab) ? tab : 'models';
   const head = `<h1 class="hub-title">Settings</h1>${settingsTabs(active)}`;
@@ -668,6 +680,11 @@ export function settingsPage({ settings, connections = null, timeZone, coverLett
       <label class="field"><span>Max Reviewed Per Run (0 = no limit)</span><input type="number" name="maxReviewedPerRun" class="control-input" min="0" max="5000" step="1" value="${Number(settings.maxReviewedPerRun ?? 60)}" required></label>
       <div class="field"><label class="check"><input type="checkbox" name="includeCarriedOver"${settings.includeCarriedOver !== false ? ' checked' : ''}> Include carried-over postings</label><span class="muted">Postings over the review limit wait for the next run and appear under "Carried over from yesterday". Off: they are left unreviewed and not carried.</span></div>
       <div class="field"><label class="check"><input type="checkbox" name="autoCatchUp"${settings.autoCatchUp !== false ? ' checked' : ''}> Auto catch-up after network outage</label><span class="muted">When the nightly run is cut short by this Mac's network, the hub checks every 10 minutes and reruns it once the network is back (at most twice a day, until the next nightly run).</span></div>
+    </fieldset>
+    <fieldset class="group"><legend>Role scope</legend>
+      <input type="hidden" name="roleScopePresent" value="1">
+      ${tagEditor('titleFamilies', settings.titleFamilies || [], { label: 'Title families', placeholder: 'Add a family, then Enter', hint: 'Postings from ATS boards, Hacker News, RemoteOK, and search discovery must name one of these in the title (whole words; the last word also takes common endings). "Associate" passes only beside a family word.' })}
+      ${tagEditor('targetRoleFamilies', settings.targetRoleFamilies || [], { label: 'Target role families', placeholder: 'Add a role family, then Enter', hint: 'Given to the prescreen and the review: postings in these families are judged on what the role asks for, and a product or consulting role is not marked down for not being a data role. The score bands stay the same.' })}
     </fieldset>
     <fieldset class="group"><legend>Reports</legend>
       <div class="field"><label class="check"><input type="checkbox" name="xlsxRequired"${settings.xlsxRequired ? ' checked' : ''}> Require XLSX Workbook (fail the run when it cannot be written)</label></div>
@@ -688,6 +705,38 @@ export function settingsPage({ settings, connections = null, timeZone, coverLett
 }
 
 export const SETTINGS_SCRIPT = `
+(function () {
+  document.querySelectorAll('.tag-edit').forEach(function (box) {
+    var name = box.getAttribute('data-name');
+    var list = box.querySelector('.tag-list');
+    var input = box.querySelector('.tag-add');
+    box.addEventListener('click', function (event) {
+      var x = event.target.closest('.tag-x');
+      if (x) x.closest('.tag').remove();
+    });
+    function add(text) {
+      var tag = String(text || '').replace(/\\s+/g, ' ').trim();
+      if (!tag) return;
+      var exists = Array.prototype.some.call(list.querySelectorAll('.tag'), function (li) { return li.getAttribute('data-tag').toLowerCase() === tag.toLowerCase(); });
+      if (exists) return;
+      var li = document.createElement('li');
+      li.className = 'tag';
+      li.setAttribute('data-tag', tag);
+      li.innerHTML = '<span></span><input type="hidden"><button type="button" class="tag-x">×</button>';
+      li.querySelector('span').textContent = tag;
+      li.querySelector('input').name = name;
+      li.querySelector('input').value = tag;
+      li.querySelector('.tag-x').setAttribute('aria-label', 'Remove ' + tag);
+      list.appendChild(li);
+    }
+    input.addEventListener('keydown', function (event) {
+      if (event.key !== 'Enter' && event.key !== ',') return;
+      event.preventDefault();
+      input.value.split(',').forEach(add);
+      input.value = '';
+    });
+  });
+})();
 (function () {
   var form = document.getElementById('settings-form');
   if (!form) return;

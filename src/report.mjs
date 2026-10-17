@@ -14,6 +14,7 @@ import { companyIsUncertain, displayCompanyName, freshnessLabel, isNewSinceLastP
 import { describeQuota } from './engines/quota.mjs';
 import { LEGACY_LOCATION_GAP, LOCATION_NOT_STATED_LABEL, LOCATION_NOT_STATED_TITLE, LOCATION_UNVERIFIED_GAP, usEvidenceInDescription } from './eligibility.mjs';
 import { describePrescreen, funnelText } from './prescreen-text.mjs';
+import { roleFamilyCountsText } from './role-families.mjs';
 
 export const REPORT_TITLE = 'Daily Job Match Alert';
 export const WARNINGS_FILE_NAME = 'warnings.txt';
@@ -269,6 +270,9 @@ export function runDetailsView(jobs, meta, tracks) {
   if (meta.funnel) {
     const byPurpose = meta.usage?.byPurpose || {};
     rows.push({ term: 'Funnel', detail: funnelText(meta.funnel), items: ['prescreen', 'review', 'supplemental'].filter(purpose => byPurpose[purpose]?.calls).map(purpose => `${purpose}: ${describeTotals(byPurpose[purpose])}`) });
+  }
+  if (Array.isArray(meta.roleFamilies) && meta.roleFamilies.length) {
+    rows.push({ term: 'Candidates by role family', detail: `${roleFamilyCountsText(meta.roleFamilies)} (entered prescreen / review / matched)` });
   }
   if (meta.prescreen) {
     const prescreen = meta.prescreen;

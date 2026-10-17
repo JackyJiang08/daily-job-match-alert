@@ -298,25 +298,39 @@ disabled; do not expand them unless a task says so.
 - Pre-screen (src/prefilter.mjs), before enrichment and the budget, every
   source: titles hitting preferences.excludeTitleTerms (the eligibility list)
   + prefilterExcludeTitleTerms (head of, vice president, VP, account manager,
-  sales, technician, nurse, driver, mechanic) + excludeLevelSuffixes (II, III,
+  sales, sales/store associate, warehouse, retail, customer success, engagement manager, technician,
+  nurse, driver, mechanic) + excludeLevelSuffixes (II, III,
   IV, standalone uppercase) are skipped; uncurated sources (ATS boards, HN,
   RemoteOK) must also name a preferences.titleFamilies term (whole words; the
   last word of a family term also takes common endings: engineer →
   engineering, developer → development, statistic → statistician; acronyms
   and exclusions stay strict). A title with a prefilterExcludeOverrides
   phrase (new grad, early career, university, graduate program, 2027,
-  rotational, associate product manager) is exempt from the "manager" and
-  level-suffix exclusions only;
+  rotational, associate product/program manager, APM) is exempt from the "manager" and
+  level-suffix exclusions only (isEligible applies the same lift via exclusionLifted);
+  NON_FAMILY_TERMS: "associate" is never a family (dropped even if configured);
   curated lists and alert emails skip the family check. A location
   assessLocation() calls non-US is skipped too. Skipped postings are not marked
   seen. meta.prefilter feeds the Run Details "Prefilter" row (per-source counts
-  and a folded list: company · title · source · rule). Final scoring and
-  isEligible are unchanged. `detectEarlyCareer` marks job.earlyCareer
-  (entry_level from the title: level I, Associate, Junior, Graduate,
+  and a folded list: company · title · source · rule). Score bands unchanged. `detectEarlyCareer` marks job.earlyCareer
+  (entry_level from the title: level I, Associate Consultant, Business Analyst,
+  Associate Product/Program Manager, APM, Consulting/Strategy Analyst, Rotational/
+  Graduate Program, Associate, Junior, Graduate,
   University, Early Career, Entry, Rotational, or a plain Analyst; new_grad
   when the JD also says 0-2 years / recent graduate / Class of 2027 / new
   grad); it never rewrites roleType and only ranks those postings with
   internships inside a freshness bucket (`isEarlyCareerPriority`).
+- Role scope (src/role-families.mjs, 2026-10-17): preferences.targetRoleFamilies (DEFAULT_TARGET_ROLE_FAMILIES
+  data, AI/ML, software, product management, consulting/strategy) → targetRoleGuidance paragraph in
+  buildSemanticPrompt and buildPrescreenPrompt (product/consulting judged on analysis, projects/internships,
+  communication, business sense; not marked down as non-data; "Manager" in an entry title is not a manager
+  role; track chosen from evidence). classify.mjs reads Business/Consulting/Strategy Analyst, Rotational
+  Program, APM from the title as entry_level. meta.roleFamilies = countByRoleFamily (roleFamilyOf buckets
+  product → consulting → AI/ML → data → software → other; prescreen = local candidates, review = semantic
+  candidates kept by the budget, matched) → Run Details "Candidates by role family". Settings > Pipeline
+  "Role scope" tag editors (roleScopePresent marker; hidden field per tag + <name>Add box split on commas;
+  tagListField / validateSettings reject empty lists and a lone "associate") write
+  config.preferences.titleFamilies / targetRoleFamilies.
 - Usage (src/engines/usage.mjs): engines return `usage` (Claude modelUsage keyed
   by the real model id, recorded verbatim; Codex turn.completed usage with the
   model id and reasoning effort). The matcher tags review / supplemental, hub

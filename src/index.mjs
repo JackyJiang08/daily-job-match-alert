@@ -24,6 +24,7 @@ import { buildHtml, writeReports, writeWarningsFile } from './report.mjs';
 import { clearBudgetDeferrals, clearDeferred, deferredStatus, expireDeferred, isJobSeen, markDeferred, markJobSeen, normalizeState, pruneSeen, releaseRecentBaselines } from './state.mjs';
 import { ageBasisInstant, correctFutureTimestamp, datePrecisionSummary, freshnessInstant, isNewSinceLastPoll, isUndated } from './posting-fields.mjs';
 import { detectEarlyCareer, isEarlyCareerPriority, prefilterJobs } from './prefilter.mjs';
+import { countByRoleFamily } from './role-families.mjs';
 import { isZapplyLink, resolveZapplyLink } from './collectors/zapply.mjs';
 import { appendUsage, summarizeUsage, usageEntries, usagePath } from './engines/usage.mjs';
 import { appendQuotaNotices, quotaNoticesPath } from './engines/quota-notices.mjs';
@@ -1174,6 +1175,8 @@ async function runPipeline(config, clock, options = {}) {
     quotaNote: quotaNote(quota, quotaDeferred.length),
     prefilter: { titleExcluded: prefiltered.titleExcluded, locationExcludedCount: prefiltered.locationExcluded.length, titleExcludedCount: prefiltered.titleExcluded.length, bySource: prefiltered.bySource },
     earlyCareerCount: locallyEvaluated.filter(job => job.earlyCareer).length,
+    // Run Details "Candidates by role family": what reached the prescreen, the review, and the matches.
+    roleFamilies: countByRoleFamily({ prescreen: locallyEvaluated, review: budget.jobs.filter(isSemanticCandidate), matched: runMatches }),
     usage: summarizeUsage(runUsage),
     prescreen: prescreenMeta,
     funnel: {

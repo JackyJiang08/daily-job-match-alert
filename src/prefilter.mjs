@@ -20,9 +20,16 @@ export const DEFAULT_TITLE_FAMILIES = [
   'business intelligence', 'BI', 'data engineer', 'software engineer', 'developer', 'product analyst',
   'research', 'insights', 'decision', 'statistic', 'actuarial', 'consultant', 'strategist',
   'forward deployed engineer', 'solutions engineer', 'associate product manager', 'product manager',
+  'consulting', 'strategy', 'business analyst', 'program manager', 'APM',
 ];
+// "associate" is never a family on its own: it passes only beside a family word (Associate Consultant,
+// Associate Product Manager, "Associate, Strategy"), so a lone "Associate" or "Sales Associate" does not.
+export const NON_FAMILY_TERMS = new Set(['associate', 'associates']);
 export const DEFAULT_ELIGIBILITY_EXCLUDES = ['senior', 'staff', 'principal', 'lead', 'manager', 'director'];
-export const DEFAULT_PREFILTER_EXCLUDES = ['head of', 'vice president', 'VP', 'account manager', 'sales', 'technician', 'nurse', 'driver', 'mechanic'];
+export const DEFAULT_PREFILTER_EXCLUDES = [
+  'head of', 'vice president', 'VP', 'account manager', 'sales', 'technician', 'nurse', 'driver', 'mechanic',
+  'sales associate', 'store associate', 'warehouse', 'retail', 'customer success', 'engagement manager',
+];
 export const DEFAULT_LEVEL_SUFFIXES = ['II', 'III', 'IV'];
 // Gender markers German, Austrian, Swiss, and French postings put in the title: (m/w/d), (f/m/d), (w/m/d),
 // (m/f/d), (d/m/w), (h/f), (f/h), (m/w), (w/m), with optional spaces or an x/i/* for diverse.
@@ -35,7 +42,7 @@ export const NON_US_TITLE_MARKER = /\(\s*(?:[mwfdhxi*]\s*\/\s*){1,3}[mwfdhxi*]\s
 // Wording that marks a posting as early career even when its title carries "Manager" or a level suffix
 // ("Software Engineer II, Early Career", "Associate Product Manager, 2027"). Only those two exclusions
 // stand down; every other one (sales, director, senior, ...) still applies.
-export const DEFAULT_EXCLUDE_OVERRIDES = ['new grad', 'early career', 'university', 'graduate program', '2027', 'rotational', 'associate product manager'];
+export const DEFAULT_EXCLUDE_OVERRIDES = ['new grad', 'early career', 'university', 'graduate program', '2027', 'rotational', 'associate product manager', 'associate program manager', 'APM'];
 const OVERRIDABLE_EXCLUDES = new Set(['manager']);
 
 // Sources a person already curated for early-career roles only face the exclusion list.
@@ -91,7 +98,7 @@ export function prefilterSettings(preferences = {}) {
   const overrides = listOr(preferences.prefilterExcludeOverrides, DEFAULT_EXCLUDE_OVERRIDES);
   return {
     overrides: overrides.map(term => ({ term, pattern: phrasePattern(term) })).filter(item => item.pattern),
-    families: families.map(term => ({ term, pattern: familyPattern(term) })).filter(item => item.pattern),
+    families: families.filter(term => !NON_FAMILY_TERMS.has(term.trim().toLowerCase())).map(term => ({ term, pattern: familyPattern(term) })).filter(item => item.pattern),
     excludes: excludes.map(term => ({ term, pattern: phrasePattern(term) })).filter(item => item.pattern),
     suffixes: suffixes.map(term => ({ term, pattern: suffixPattern(term) })).filter(item => item.pattern),
   };
@@ -115,6 +122,17 @@ export function exclusionRule(title, settings) {
   const suffix = overridden ? null : settings.suffixes.find(item => item.pattern.test(withoutRange));
   if (suffix) return `level suffix: ${suffix.term}`;
   return null;
+}
+
+// For the final eligibility check (match.mjs isEligible): whether an excludeTitleTerms hit on this title
+// stands down because the title carries an early-career override phrase. Only "manager" can, as in the
+// pre-screen: "Associate Product Manager" stays eligible, "Senior Consultant" and "Engagement Manager" do not.
+export function exclusionLifted(title, term, preferences = {}) {
+  if (!OVERRIDABLE_EXCLUDES.has(String(term || '').trim().toLowerCase())) return false;
+  const overrides = listOr(preferences.prefilterExcludeOverrides, DEFAULT_EXCLUDE_OVERRIDES);
+  const text = String(title || '');
+  if (overrides.some(item => phrasePattern(item)?.test(text))) return !prefilterSettings(preferences).excludes.some(item => !OVERRIDABLE_EXCLUDES.has(item.term.trim().toLowerCase()) && item.pattern.test(text));
+  return false;
 }
 
 export function titleRule(job, settings) {
@@ -166,6 +184,9 @@ export function prefilterJobs(jobs, preferences = {}) {
 
 // ---- full-time early-career recognition (used by the review budget only; roleType is not changed)
 
+// Entry roles in product management and consulting, named as the signal ("business analyst", "APM").
+const ENTRY_ROLE = /(?<![A-Za-z0-9])(?:associate\s+consultant|associate\s+product\s+manager|associate\s+program\s+manager|business\s+analyst|consulting\s+analyst|strategy\s+analyst|rotational\s+program|graduate\s+program)(?![A-Za-z0-9])/i;
+const APM = /(?<![A-Za-z0-9])APM(?![A-Za-z0-9])/;
 const ENTRY_TITLE = /(?<![A-Za-z0-9])(?:associate|junior|jr\.?|graduate|university|early[\s-]+career|entry(?:[\s-]+level)?|rotational)(?![A-Za-z0-9])/i;
 const LEVEL_ONE = /(?<![A-Za-z0-9])I(?![A-Za-z0-9])(?!\s*(?:\/|&))/;
 const ANALYST = /(?<![A-Za-z0-9])analyst(?![A-Za-z0-9])/i;
@@ -174,15 +195,18 @@ const INTERN = /(?<![A-Za-z0-9])(?:intern(?:ship)?s?|co[\s-]?op)(?![A-Za-z0-9])/
 
 // 'new_grad' when the description (read after enrichment) names an early-career signal ("0-2 years",
 // "0 to 2 years", "recent graduate(s)", "Class of 2027", "new grad(uate)s"); 'entry_level' when only the
-// title reads entry level (level I, Associate, Junior, ..., or a plain Analyst); null otherwise. Internships
-// are left to their own role type, and a senior word or level suffix in the title rules a posting out.
+// title reads entry level (level I, an entry product or consulting role such as Associate Consultant,
+// Business Analyst, APM, Strategy Analyst, a rotational or graduate program, Associate, Junior, ..., or a
+// plain Analyst); null otherwise. Internships are left to their own role type, and a senior word or level
+// suffix in the title rules a posting out (Senior Consultant, Engagement Manager, Principal).
 export function detectEarlyCareer(job, preferences = {}) {
   const title = String(job?.title || '');
   if (!title || job?.roleType === 'internship' || INTERN.test(title)) return { level: null, signal: null };
   const settings = prefilterSettings(preferences);
   if (exclusionRule(title, settings)) return { level: null, signal: null };
   const range = LEVEL_ONE_RANGE.exec(title)?.[0];
-  const titleSignal = (range ? `level ${range.replace(/\s+/g, ' ')}` : null) || ENTRY_TITLE.exec(title)?.[0] || (LEVEL_ONE.test(title) ? 'level I' : null) || (ANALYST.test(title) ? 'analyst' : null);
+  const role = ENTRY_ROLE.exec(title)?.[0].replace(/\s+/g, ' ').toLowerCase() || APM.exec(title)?.[0] || null;
+  const titleSignal = (range ? `level ${range.replace(/\s+/g, ' ')}` : null) || role || ENTRY_TITLE.exec(title)?.[0] || (LEVEL_ONE.test(title) ? 'level I' : null) || (ANALYST.test(title) ? 'analyst' : null);
   const jdSignal = NEW_GRAD_JD.exec(String(job?.description || ''))?.[0] || null;
   if (jdSignal) return { level: 'new_grad', signal: titleSignal ? `${titleSignal}; JD: ${jdSignal}` : `JD: ${jdSignal}` };
   if (titleSignal) return { level: 'entry_level', signal: titleSignal };

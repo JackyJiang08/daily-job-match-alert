@@ -26,6 +26,8 @@ import { quotaNoticesPath, readQuotaNotices } from '../engines/quota-notices.mjs
 import { describeQuota, normalizeQuotaPolicy } from '../engines/quota.mjs';
 import { HubLockedError } from './config-file.mjs';
 import { prescreenOverview } from '../prescreen.mjs';
+import { DEFAULT_TITLE_FAMILIES, NON_FAMILY_TERMS } from '../prefilter.mjs';
+import { targetRoleFamilies } from '../role-families.mjs';
 import { acquireRunLock, releaseRunLock } from '../lock.mjs';
 
 export const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -694,6 +696,8 @@ export async function readSettings(ctx) {
     maxReviewedPerRun: semantic.maxReviewedPerRun == null ? 60 : Number(semantic.maxReviewedPerRun),
     includeCarriedOver: semantic.includeCarriedOver !== false,
     autoCatchUp: autoCatchUpEnabled(config),
+    titleFamilies: Array.isArray(config.preferences?.titleFamilies) ? config.preferences.titleFamilies.map(String) : [...DEFAULT_TITLE_FAMILIES],
+    targetRoleFamilies: targetRoleFamilies(config.preferences),
     modelLadder: normalizeQuotaPolicy({ ...(semantic.quotaPolicy || {}), catalog }).modelLadder.join(', '),
     reasoningEffort: semantic.reasoningEffort ? String(semantic.reasoningEffort) : '',
     catalog,
@@ -710,6 +714,34 @@ export async function readSettings(ctx) {
     prescreen: prescreenOverview(config, await readJson(ctx.io, path.join(ctx.root, 'state', 'state.json'), {}) || {}),
     hubPort: Number(config.hub?.port || 4747),
   };
+}
+
+export const MAXIMUM_TAGS = 80;
+const MAXIMUM_TAG_LENGTH = 60;
+
+// A tag list from the Settings editor: one hidden field per tag plus the add box (its text is split on
+// commas, so a word typed without pressing Enter is kept). Trimmed, deduplicated ignoring case, in order.
+export function tagListField(form, name) {
+  const typed = [].concat(form[name] ?? []).map(String);
+  const added = String(form[`${name}Add`] ?? '').split(/[,\n]/);
+  const seen = new Set();
+  const tags = [];
+  for (const raw of [...typed, ...added]) {
+    const tag = raw.replace(/\s+/g, ' ').trim();
+    if (!tag || seen.has(tag.toLowerCase())) continue;
+    seen.add(tag.toLowerCase());
+    tags.push(tag);
+  }
+  return tags;
+}
+
+function tagListErrors(tags, label) {
+  const errors = [];
+  if (!tags.length) errors.push(`${label} needs at least one entry`);
+  if (tags.length > MAXIMUM_TAGS) errors.push(`${label} takes at most ${MAXIMUM_TAGS} entries`);
+  const long = tags.find(tag => tag.length > MAXIMUM_TAG_LENGTH);
+  if (long) errors.push(`${label}: "${long.slice(0, 20)}…" is longer than ${MAXIMUM_TAG_LENGTH} characters`);
+  return errors;
 }
 
 export function validateSettings(form, { catalog = DEFAULT_CATALOG } = {}) {
@@ -765,8 +797,18 @@ export function validateSettings(form, { catalog = DEFAULT_CATALOG } = {}) {
   // Only the Pipeline tab carries "Include carried-over postings"; other forms leave it alone.
   const includeCarriedOver = form.pipelinePresent != null ? (form.includeCarriedOver === 'on' || form.includeCarriedOver === 'true' || form.includeCarriedOver === true) : null;
   const autoCatchUp = form.pipelinePresent != null ? (form.autoCatchUp === 'on' || form.autoCatchUp === 'true' || form.autoCatchUp === true) : null;
+  // Role scope: only a form with the roleScopePresent marker (Settings > Pipeline) changes the two lists.
+  let titleFamilies = null;
+  let roleFamilies = null;
+  if (form.roleScopePresent != null) {
+    titleFamilies = tagListField(form, 'titleFamilies');
+    roleFamilies = tagListField(form, 'targetRoleFamilies');
+    errors.push(...tagListErrors(titleFamilies, 'Title families'), ...tagListErrors(roleFamilies, 'Target role families'));
+    const lone = titleFamilies.find(tag => NON_FAMILY_TERMS.has(tag.toLowerCase()));
+    if (lone) errors.push(`"${lone}" is not a title family on its own; it passes beside a family word (Associate Consultant, Associate Product Manager)`);
+  }
   if (errors.length) throw new HubInputError(errors.join('; '));
-  return { minimumMatchScore, acceptedMatchLevels: MATCH_LEVELS.filter(level => levels.includes(level)), engine, model, xlsxRequired, editorReview, hubPort, maxReviewedPerRun, includeCarriedOver, autoCatchUp, modelLadder, fallbackEngine, reasoningEffort };
+  return { minimumMatchScore, acceptedMatchLevels: MATCH_LEVELS.filter(level => levels.includes(level)), engine, model, xlsxRequired, editorReview, hubPort, maxReviewedPerRun, includeCarriedOver, autoCatchUp, titleFamilies, targetRoleFamilies: roleFamilies, modelLadder, fallbackEngine, reasoningEffort };
 }
 
 // "Save this path to config": pins the resolved binary as semanticMatching.<engine>Command.
@@ -803,6 +845,11 @@ export async function saveSettings(ctx, form) {
     config.semanticMatching.acceptedMatchLevels = settings.acceptedMatchLevels;
     if (settings.maxReviewedPerRun != null) config.semanticMatching.maxReviewedPerRun = settings.maxReviewedPerRun;
     if (settings.includeCarriedOver != null) config.semanticMatching.includeCarriedOver = settings.includeCarriedOver;
+    if (settings.titleFamilies || settings.targetRoleFamilies) {
+      config.preferences = config.preferences && typeof config.preferences === 'object' ? config.preferences : {};
+      if (settings.titleFamilies) config.preferences.titleFamilies = settings.titleFamilies;
+      if (settings.targetRoleFamilies) config.preferences.targetRoleFamilies = settings.targetRoleFamilies;
+    }
     if (settings.autoCatchUp != null) config.autoCatchUp = { ...(config.autoCatchUp && typeof config.autoCatchUp === 'object' ? config.autoCatchUp : {}), enabled: settings.autoCatchUp };
     if (settings.modelLadder || settings.fallbackEngine !== undefined) {
       config.semanticMatching.quotaPolicy = config.semanticMatching.quotaPolicy && typeof config.semanticMatching.quotaPolicy === 'object' ? config.semanticMatching.quotaPolicy : {};

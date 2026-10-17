@@ -1229,3 +1229,54 @@ test('Settings > Pipeline has "Auto catch-up after network outage" (default on);
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test('Settings > Pipeline edits the title families and target role families as tag lists; saving writes config.preferences', async () => {
+  const root = await prepareProject();
+  const hub = await startHub(root);
+  const base = { pipelinePresent: '1', roleScopePresent: '1', includeCarriedOver: 'on', autoCatchUp: 'on', minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' };
+  try {
+    const page = (await hub.request('GET', '/settings?tab=pipeline')).text;
+    const editor = page.match(/<div class="field tag-edit" data-name="titleFamilies" id="titleFamilies-editor">([\s\S]*?)<\/div>/)[1];
+    assert.match(editor, /<li class="tag" data-tag="consulting"><span>consulting<\/span><input type="hidden" name="titleFamilies" value="consulting"><button type="button" class="tag-x" aria-label="Remove consulting">×<\/button><\/li>/, 'the defaults when config has no list');
+    assert.match(editor, /<input type="text" name="titleFamiliesAdd"/);
+    assert.match(page, /data-name="targetRoleFamilies"[\s\S]*?data-tag="AI\/ML"[\s\S]*?data-tag="consulting\/strategy"/);
+    assert.match(page, /<input type="hidden" name="roleScopePresent" value="1">/);
+
+    // Remove "quant", keep the rest, add two through the box (Enter-less text is split on commas).
+    const kept = ['data', 'analyst', 'consulting', 'strategy'];
+    await hub.form('/settings', { ...base, titleFamilies: [...kept, 'Data'], titleFamiliesAdd: 'operations research, Strategy', targetRoleFamilies: ['data', 'product management'], targetRoleFamiliesAdd: '' });
+    let config = await readConfig(root);
+    assert.deepEqual(config.preferences.titleFamilies, ['data', 'analyst', 'consulting', 'strategy', 'operations research'], 'trimmed and deduplicated ignoring case');
+    assert.deepEqual(config.preferences.targetRoleFamilies, ['data', 'product management']);
+    const saved = (await hub.request('GET', '/settings?tab=pipeline')).text;
+    assert.match(saved, /data-tag="operations research"/);
+    assert.doesNotMatch(saved.match(/data-name="titleFamilies"[\s\S]*?<\/ul>/)[0], /data-tag="quant"/);
+
+    // Errors leave the config alone.
+    const empty = await hub.form('/settings', { ...base, titleFamilies: [], targetRoleFamilies: ['data'] });
+    assert.equal(empty.status, 303);
+    assert.match(decodeURIComponent(empty.headers.location), /Title families needs at least one entry/);
+    const lone = await hub.form('/settings', { ...base, titleFamilies: ['data', 'Associate'], targetRoleFamilies: ['data'] });
+    assert.match(decodeURIComponent(lone.headers.location), /"Associate" is not a title family on its own/);
+    config = await readConfig(root);
+    assert.deepEqual(config.preferences.titleFamilies, ['data', 'analyst', 'consulting', 'strategy', 'operations research']);
+
+    // A form without the role-scope marker (an older Pipeline form) leaves both lists alone.
+    await hub.form('/settings', { pipelinePresent: '1', includeCarriedOver: 'on', minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' });
+    config = await readConfig(root);
+    assert.deepEqual(config.preferences.targetRoleFamilies, ['data', 'product management']);
+    assert.deepEqual(config.preferences.titleFamilies, ['data', 'analyst', 'consulting', 'strategy', 'operations research']);
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('validateSettings reads the tag lists only with the role-scope marker', () => {
+  const base = { minimumMatchScore: '60', acceptedMatchLevels: 'high', hubPort: '4747' };
+  assert.equal(validateSettings(base).titleFamilies, null);
+  const parsed = validateSettings({ ...base, roleScopePresent: '1', titleFamilies: 'data', titleFamiliesAdd: ' business  analyst ,', targetRoleFamilies: ['software'] });
+  assert.deepEqual(parsed.titleFamilies, ['data', 'business analyst']);
+  assert.deepEqual(parsed.targetRoleFamilies, ['software']);
+  assert.throws(() => validateSettings({ ...base, roleScopePresent: '1', titleFamilies: 'data' }), /Target role families needs at least one entry/);
+});

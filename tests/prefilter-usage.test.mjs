@@ -38,16 +38,16 @@ test('the title families and the extended exclusion list decide what an ATS boar
   assert.equal(titleRule(ats('Inside Sales Representative'), settings), 'exclude: sales');
   assert.equal(titleRule(ats('Senior Data Engineer'), settings), 'exclude: senior', 'the eligibility list is part of the pre-screen');
   assert.equal(titleRule(ats('Registered Nurse, ICU'), settings), 'exclude: nurse');
-  assert.equal(titleRule(ats('Warehouse Associate'), settings), 'no title family');
+  assert.equal(titleRule(ats('Forklift Operator'), settings), 'no title family');
   assert.equal(titleRule(ats('AI Engineer'), settings), null);
-  assert.equal(titleRule(ats('Retail Merchandiser'), settings), 'no title family', '"AI" and "BI" match whole words only');
+  assert.equal(titleRule(ats('Detail Coordinator'), settings), 'no title family', '"AI" and "BI" match whole words only');
   assert.equal(titleRule(ats('Software Engineer, Leading Edge Systems'), settings), null, '"lead" does not match "Leading"');
   assert.equal(titleRule(ats('Quant Researcher'), settings), null);
   // Curated lists only face the exclusions; Hacker News and RemoteOK need a family like the boards.
-  assert.equal(titleRule(listed('Warehouse Associate'), settings), null);
+  assert.equal(titleRule(listed('Forklift Operator'), settings), null);
   assert.equal(titleRule(listed('Quality Technician Sewing'), settings), 'exclude: technician');
-  assert.equal(titleRule({ title: 'Warehouse Associate', sourceKind: 'public_json_feed' }, settings), 'no title family');
-  assert.equal(titleRule({ title: 'Warehouse Associate', sourceKind: 'official_email_alert' }, settings), null);
+  assert.equal(titleRule({ title: 'Forklift Operator', sourceKind: 'public_json_feed' }, settings), 'no title family');
+  assert.equal(titleRule({ title: 'Forklift Operator', sourceKind: 'official_email_alert' }, settings), null);
   // Everything is configurable.
   const custom = prefilterSettings({ titleFamilies: ['warehouse'], prefilterExcludeTitleTerms: [], excludeTitleTerms: ['intern'], excludeLevelSuffixes: [] });
   assert.equal(titleRule(ats('Warehouse Associate'), custom), null);
@@ -96,7 +96,7 @@ test('full-time early-career titles are marked entry_level, a new-grad signal in
   assert.equal(early('Early Career Quantitative Analyst').level, 'entry_level');
   assert.equal(early('Entry Level Data Scientist').level, 'entry_level');
   assert.equal(early('Rotational Program, Analytics').level, 'entry_level');
-  assert.deepEqual(early('Business Analyst'), { level: 'entry_level', signal: 'analyst' }, 'a plain Analyst counts');
+  assert.deepEqual(early('Operations Analyst'), { level: 'entry_level', signal: 'analyst' }, 'a plain Analyst counts');
   assert.equal(early('Senior Analyst').level, null);
   assert.equal(early('Lead Analyst').level, null);
   assert.equal(early('Analyst III').level, null);
