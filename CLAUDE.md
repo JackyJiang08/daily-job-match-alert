@@ -298,7 +298,8 @@ disabled; do not expand them unless a task says so.
 - Pre-screen (src/prefilter.mjs), before enrichment and the budget, every
   source: titles hitting preferences.excludeTitleTerms (the eligibility list)
   + prefilterExcludeTitleTerms (head of, vice president, VP, account manager,
-  sales, sales/store associate, warehouse, retail, customer success, engagement manager, technician,
+  sales, sales/store/retail associate, retail sales, store manager, warehouse, customer success,
+  engagement manager, technician,
   nurse, driver, mechanic) + excludeLevelSuffixes (II, III,
   IV, standalone uppercase) are skipped; uncurated sources (ATS boards, HN,
   RemoteOK) must also name a preferences.titleFamilies term (whole words; the
@@ -308,14 +309,15 @@ disabled; do not expand them unless a task says so.
   phrase (new grad, early career, university, graduate program, 2027,
   rotational, associate product/program manager, APM) is exempt from the "manager" and
   level-suffix exclusions only (isEligible applies the same lift via exclusionLifted);
-  NON_FAMILY_TERMS: "associate" is never a family (dropped even if configured);
+  NON_FAMILY_TERMS: "associate" is never a family (dropped even if configured); ENTRY_PROGRAM_TERMS
+  (rotational/development/leadership/graduate/analyst/early career/associate program) are default
+  families and entry_level; a bare "retail" is not excluded (Retail Analytics passes);
   curated lists and alert emails skip the family check. A location
   assessLocation() calls non-US is skipped too. Skipped postings are not marked
   seen. meta.prefilter feeds the Run Details "Prefilter" row (per-source counts
   and a folded list: company · title · source · rule). Score bands unchanged. `detectEarlyCareer` marks job.earlyCareer
   (entry_level from the title: level I, Associate Consultant, Business Analyst,
-  Associate Product/Program Manager, APM, Consulting/Strategy Analyst, Rotational/
-  Graduate Program, Associate, Junior, Graduate,
+  Associate Product/Program Manager, APM, Consulting/Strategy Analyst, an entry program, Associate, Junior, Graduate,
   University, Early Career, Entry, Rotational, or a plain Analyst; new_grad
   when the JD also says 0-2 years / recent graduate / Class of 2027 / new
   grad); it never rewrites roleType and only ranks those postings with

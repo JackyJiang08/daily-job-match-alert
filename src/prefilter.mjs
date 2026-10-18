@@ -15,12 +15,17 @@ import { assessLocation } from './eligibility.mjs';
 import { ATS_SOURCE_KIND } from './collectors/ats-boards.mjs';
 import { SEARCH_SOURCE_KIND } from './collectors/search-discovery.mjs';
 
+export const ENTRY_PROGRAM_TERMS = ['rotational program', 'development program', 'leadership program', 'graduate program', 'analyst program', 'early career program', 'associate program'];
+
 export const DEFAULT_TITLE_FAMILIES = [
   'data', 'analytics', 'analyst', 'scientist', 'machine learning', 'ML', 'AI', 'quantitative', 'quant',
   'business intelligence', 'BI', 'data engineer', 'software engineer', 'developer', 'product analyst',
   'research', 'insights', 'decision', 'statistic', 'actuarial', 'consultant', 'strategist',
   'forward deployed engineer', 'solutions engineer', 'associate product manager', 'product manager',
   'consulting', 'strategy', 'business analyst', 'program manager', 'APM',
+  // Entry programs count as a family on their own ("Rotational Program 2027", "Leadership Development
+  // Program"); detectEarlyCareer marks them entry_level.
+  ...ENTRY_PROGRAM_TERMS,
 ];
 // "associate" is never a family on its own: it passes only beside a family word (Associate Consultant,
 // Associate Product Manager, "Associate, Strategy"), so a lone "Associate" or "Sales Associate" does not.
@@ -28,7 +33,8 @@ export const NON_FAMILY_TERMS = new Set(['associate', 'associates']);
 export const DEFAULT_ELIGIBILITY_EXCLUDES = ['senior', 'staff', 'principal', 'lead', 'manager', 'director'];
 export const DEFAULT_PREFILTER_EXCLUDES = [
   'head of', 'vice president', 'VP', 'account manager', 'sales', 'technician', 'nurse', 'driver', 'mechanic',
-  'sales associate', 'store associate', 'warehouse', 'retail', 'customer success', 'engagement manager',
+  'sales associate', 'store associate', 'retail associate', 'retail sales', 'store manager', 'warehouse',
+  'customer success', 'engagement manager',
 ];
 export const DEFAULT_LEVEL_SUFFIXES = ['II', 'III', 'IV'];
 // Gender markers German, Austrian, Swiss, and French postings put in the title: (m/w/d), (f/m/d), (w/m/d),
@@ -185,7 +191,7 @@ export function prefilterJobs(jobs, preferences = {}) {
 // ---- full-time early-career recognition (used by the review budget only; roleType is not changed)
 
 // Entry roles in product management and consulting, named as the signal ("business analyst", "APM").
-const ENTRY_ROLE = /(?<![A-Za-z0-9])(?:associate\s+consultant|associate\s+product\s+manager|associate\s+program\s+manager|business\s+analyst|consulting\s+analyst|strategy\s+analyst|rotational\s+program|graduate\s+program)(?![A-Za-z0-9])/i;
+const ENTRY_ROLE = /(?<![A-Za-z0-9])(?:associate\s+consultant|associate\s+product\s+manager|associate\s+program\s+manager|business\s+analyst|consulting\s+analyst|strategy\s+analyst|(?:rotational|development|leadership|graduate|analyst|early[\s-]+career|associate)\s+programs?)(?![A-Za-z0-9])/i;
 const APM = /(?<![A-Za-z0-9])APM(?![A-Za-z0-9])/;
 const ENTRY_TITLE = /(?<![A-Za-z0-9])(?:associate|junior|jr\.?|graduate|university|early[\s-]+career|entry(?:[\s-]+level)?|rotational)(?![A-Za-z0-9])/i;
 const LEVEL_ONE = /(?<![A-Za-z0-9])I(?![A-Za-z0-9])(?!\s*(?:\/|&))/;
@@ -196,7 +202,8 @@ const INTERN = /(?<![A-Za-z0-9])(?:intern(?:ship)?s?|co[\s-]?op)(?![A-Za-z0-9])/
 // 'new_grad' when the description (read after enrichment) names an early-career signal ("0-2 years",
 // "0 to 2 years", "recent graduate(s)", "Class of 2027", "new grad(uate)s"); 'entry_level' when only the
 // title reads entry level (level I, an entry product or consulting role such as Associate Consultant,
-// Business Analyst, APM, Strategy Analyst, a rotational or graduate program, Associate, Junior, ..., or a
+// Business Analyst, APM, Strategy Analyst, an entry program (rotational, development, leadership, graduate,
+// analyst, early career, associate), Associate, Junior, ..., or a
 // plain Analyst); null otherwise. Internships are left to their own role type, and a senior word or level
 // suffix in the title rules a posting out (Senior Consultant, Engagement Manager, Principal).
 export function detectEarlyCareer(job, preferences = {}) {

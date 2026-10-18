@@ -1240,6 +1240,7 @@ test('Settings > Pipeline edits the title families and target role families as t
     assert.match(editor, /<li class="tag" data-tag="consulting"><span>consulting<\/span><input type="hidden" name="titleFamilies" value="consulting"><button type="button" class="tag-x" aria-label="Remove consulting">×<\/button><\/li>/, 'the defaults when config has no list');
     assert.match(editor, /<input type="text" name="titleFamiliesAdd"/);
     assert.match(page, /data-name="targetRoleFamilies"[\s\S]*?data-tag="AI\/ML"[\s\S]*?data-tag="consulting\/strategy"/);
+    assert.match(editor, /data-tag="rotational program"[\s\S]*data-tag="leadership program"[\s\S]*data-tag="associate program"/, 'the entry programs are editable tags too');
     assert.match(page, /<input type="hidden" name="roleScopePresent" value="1">/);
 
     // Remove "quant", keep the rest, add two through the box (Enter-less text is split on commas).

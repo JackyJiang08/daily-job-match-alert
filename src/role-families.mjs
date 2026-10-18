@@ -14,7 +14,7 @@ export const DEFAULT_TARGET_ROLE_FAMILIES = ['data', 'AI/ML', 'software', 'produ
 
 export const ROLE_FAMILY_BUCKETS = [
   { key: 'product', label: 'product', pattern: /(?<![A-Za-z0-9])(?:product\s+(?:manager|management|owner)|program\s+manager|APM|technical\s+program)(?![A-Za-z0-9])/i },
-  { key: 'consulting', label: 'consulting', pattern: /(?<![A-Za-z0-9])(?:consult(?:ant|ants|ing)?|strateg(?:y|ies|ist|ic)|business\s+analyst|rotational\s+program|graduate\s+program)(?![A-Za-z0-9])/i },
+  { key: 'consulting', label: 'consulting', pattern: /(?<![A-Za-z0-9])(?:consult(?:ant|ants|ing)?|strateg(?:y|ies|ist|ic)|business\s+analyst)(?![A-Za-z0-9])/i },
   // The acronyms match case-sensitively so "Retail" or "html" never count; the words in any case.
   { key: 'ai_ml', label: 'AI/ML', pattern: /(?<![A-Za-z0-9])(?:AI|ML|NLP|LLM|LLMs|GenAI)(?![A-Za-z0-9])/, words: /(?<![A-Za-z0-9])(?:artificial\s+intelligence|computer\s+vision|applied\s+scientist|research\s+scientist|machine\s+learning|deep\s+learning)(?![A-Za-z0-9])/i },
   { key: 'data', label: 'data', pattern: /(?<![A-Za-z0-9])(?:data|analytics?|analysts?|scientists?|statistic(?:s|al|ian)?|quant(?:itative)?|business\s+intelligence|BI|insights|actuarial|decision)(?![A-Za-z0-9])/i },

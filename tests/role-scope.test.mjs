@@ -10,7 +10,7 @@ import { classifyRole } from '../src/classify.mjs';
 import { OUTAGE_REPAIR_MIGRATION, identifyBoard, normalizeRegistry, registerBoards } from '../src/collectors/ats-boards.mjs';
 import { main } from '../src/index.mjs';
 import { isEligible } from '../src/match.mjs';
-import { DEFAULT_PREFILTER_EXCLUDES, DEFAULT_TITLE_FAMILIES, detectEarlyCareer, prefilterJobs, prefilterSettings, titleRule } from '../src/prefilter.mjs';
+import { DEFAULT_PREFILTER_EXCLUDES, DEFAULT_TITLE_FAMILIES, ENTRY_PROGRAM_TERMS, detectEarlyCareer, prefilterJobs, prefilterSettings, titleRule } from '../src/prefilter.mjs';
 import { buildPrescreenPrompt, prescreenStage } from '../src/prescreen.mjs';
 import { runDetailsView } from '../src/report.mjs';
 import { DEFAULT_TARGET_ROLE_FAMILIES, countByRoleFamily, roleFamilyCountsText, roleFamilyOf, targetRoleFamilies, targetRoleGuidance } from '../src/role-families.mjs';
@@ -24,7 +24,8 @@ const listed = title => ({ title, sourceKind: 'public_github_list' });
 test('the default families add consulting, strategy, business analyst, and program manager; "associate" alone is never a family', () => {
   for (const term of ['consultant', 'consulting', 'strategy', 'business analyst', 'program manager', 'product manager']) assert.ok(DEFAULT_TITLE_FAMILIES.includes(term), term);
   assert.ok(!DEFAULT_TITLE_FAMILIES.some(term => term.toLowerCase() === 'associate'));
-  for (const term of ['sales associate', 'store associate', 'warehouse', 'retail', 'customer success']) assert.ok(DEFAULT_PREFILTER_EXCLUDES.includes(term), term);
+  for (const term of ['sales associate', 'store associate', 'retail associate', 'retail sales', 'store manager', 'warehouse', 'customer success']) assert.ok(DEFAULT_PREFILTER_EXCLUDES.includes(term), term);
+  assert.ok(!DEFAULT_PREFILTER_EXCLUDES.includes('retail'), 'a bare "retail" is not an exclusion');
   const settings = prefilterSettings({});
   // Beside a family word, Associate passes.
   for (const title of ['Associate Consultant', 'Associate Product Manager', 'Associate, Strategy', 'Associate Program Manager', 'Strategy Associate', 'Consulting Associate, Technology', 'Business Analyst', 'Associate Business Analyst']) {
@@ -36,7 +37,13 @@ test('the default families add consulting, strategy, business analyst, and progr
   assert.equal(titleRule(ats('Sales Associate'), settings), 'exclude: sales');
   assert.equal(titleRule(ats('Store Associate'), settings), 'exclude: store associate');
   assert.equal(titleRule(ats('Warehouse Associate, Strategy Team'), settings), 'exclude: warehouse', 'an exclusion beats the family word');
-  assert.equal(titleRule(ats('Retail Associate'), settings), 'exclude: retail');
+  assert.equal(titleRule(ats('Retail Associate'), settings), 'exclude: retail associate');
+  assert.equal(titleRule(ats('Retail Sales Associate'), settings), 'exclude: sales');
+  assert.equal(titleRule(ats('Retail Sales Consultant'), prefilterSettings({ prefilterExcludeTitleTerms: ['retail sales'] })), 'exclude: retail sales');
+  assert.equal(titleRule(ats('Store Manager'), settings), 'exclude: manager');
+  assert.equal(titleRule(ats('Store Manager, 2027 Program'), settings), 'exclude: store manager', 'the 2027 override lifts "manager" only, not "store manager"');
+  // "Retail" alone no longer excludes: a data title about retail passes.
+  for (const title of ['Data Analyst, Retail Analytics', 'Retail Data Scientist', 'Software Engineer, Retail Platform']) assert.equal(titleRule(ats(title), settings), null, title);
   assert.equal(titleRule(ats('Customer Success Associate'), settings), 'exclude: customer success');
   // The exclusions apply to curated lists too; the family check does not.
   assert.equal(titleRule(listed('Store Associate'), settings), 'exclude: store associate');
@@ -63,6 +70,35 @@ test('the final eligibility check lets an early-career "Manager" title through, 
   assert.equal(isEligible(job('Senior Associate Product Manager'), config), false, 'senior still excludes');
   assert.equal(isEligible(job('Engagement Manager'), config), false);
   assert.equal(isEligible(job('Principal Consultant'), config), false);
+});
+
+test('entry programs pass the family check on their own and read as entry level; the terms are ordinary, editable families', () => {
+  assert.deepEqual(ENTRY_PROGRAM_TERMS, ['rotational program', 'development program', 'leadership program', 'graduate program', 'analyst program', 'early career program', 'associate program']);
+  for (const term of ENTRY_PROGRAM_TERMS) assert.ok(DEFAULT_TITLE_FAMILIES.includes(term), term);
+  const settings = prefilterSettings({});
+  const samples = {
+    'Rotational Program 2027': 'rotational program',
+    'Leadership Development Program': 'development program',
+    'Technology Leadership Program': 'leadership program',
+    'Graduate Program, Operations': 'graduate program',
+    'Investment Banking Analyst Program': 'analyst program',
+    'Early Career Program - Finance': 'early career program',
+    'Associate Program, Operations': 'associate program',
+  };
+  for (const [title, signal] of Object.entries(samples)) {
+    assert.equal(titleRule(ats(title), settings), null, title);
+    assert.deepEqual(detectEarlyCareer({ title, description: 'A two-year program.' }), { level: 'entry_level', signal }, title);
+    assert.equal(classifyRole({ title, description: '' }) !== 'unknown', true, title);
+  }
+  assert.equal(classifyRole({ title: 'Leadership Development Program', description: '' }), 'entry_level');
+  // The programs are families like any other: a list without them sends the titles back to the family check.
+  const without = prefilterSettings({ titleFamilies: DEFAULT_TITLE_FAMILIES.filter(term => !ENTRY_PROGRAM_TERMS.includes(term)) });
+  assert.equal(titleRule(ats('Rotational Program 2027'), without), 'no title family');
+  assert.equal(titleRule(ats('Technology Leadership Program'), without), 'no title family');
+  assert.equal(titleRule(ats('Leadership Development Program'), without), null, '"developer" already covers "Development" through its endings');
+  // Exclusions still win over a program.
+  assert.equal(titleRule(ats('Retail Sales Associate Program'), settings), 'exclude: sales');
+  assert.equal(titleRule(ats('Senior Leadership Program Manager'), settings), 'exclude: senior');
 });
 
 // ------------------------------------------------------------------------------------------ entry level

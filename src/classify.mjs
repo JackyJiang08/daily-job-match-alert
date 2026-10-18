@@ -4,7 +4,7 @@ const NEW_GRAD = /\b(new grad(uate)?s?|graduate program|university grad(uate)?s?
 const ENTRY = /\b(entry[- ]level|junior|associate|engineer i\b|scientist i\b|analyst i\b|level 1|0\s*[-–]\s*3 years?)\b/i;
 // Entry product and consulting roles, read from the title only (a JD that mentions business analysts
 // says nothing about the posting's level).
-const ENTRY_ROLE_TITLE = /\b(business analyst|consulting analyst|strategy analyst|rotational program)\b|\bAPM\b/i;
+const ENTRY_ROLE_TITLE = /\b(business analyst|consulting analyst|strategy analyst|(rotational|development|leadership|graduate|analyst|early[- ]career|associate) programs?)\b|\bAPM\b/i;
 
 export function classifyRole(job) {
   if (job.roleType) return job.roleType;
