@@ -25,6 +25,7 @@ import { clearBudgetDeferrals, clearDeferred, deferredStatus, expireDeferred, is
 import { ageBasisInstant, correctFutureTimestamp, datePrecisionSummary, freshnessInstant, isNewSinceLastPoll, isUndated } from './posting-fields.mjs';
 import { detectEarlyCareer, isEarlyCareerPriority, prefilterJobs } from './prefilter.mjs';
 import { countByRoleFamily } from './role-families.mjs';
+import { updateReportsIndex } from './reports-index.mjs';
 import { isZapplyLink, resolveZapplyLink } from './collectors/zapply.mjs';
 import { appendUsage, summarizeUsage, usageEntries, usagePath } from './engines/usage.mjs';
 import { appendQuotaNotices, quotaNoticesPath } from './engines/quota-notices.mjs';
@@ -514,6 +515,9 @@ async function writeReportPayload(config, payload) {
   const file = reportPayloadPath(config, payload.meta.date);
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(file, JSON.stringify(payload, null, 2) + '\n');
+  // The hub's Reports list reads state/reports-index.json instead of every payload; a failure here only
+  // costs the hub one payload read (it rebuilds a stale entry), so it never fails the run.
+  await updateReportsIndex(config.root, payload).catch(error => console.warn(`Could not update state/reports-index.json: ${errorSummary(error)}`));
   return file;
 }
 

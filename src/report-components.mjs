@@ -77,9 +77,12 @@ export function renderJobCard(card) {
     `data-search="${htmlEscape(card.sort.search)}"`,
   ].join(' ');
   const badges = card.badges.length ? `<div class="badges">${card.badges.map(renderBadge).join('')}</div>` : '';
-  const description = card.description
-    ? `<details class="jd"><summary>Job Description</summary><p>${htmlEscape(card.description)}</p></details>`
-    : '';
+  // The hub embeds only the first characters of a long JD and loads the rest when the section is opened
+  // (data-jd-src, REPORTS_SCRIPT); the Desktop file always carries the whole text.
+  const description = !card.description ? ''
+    : card.descriptionSrc
+      ? `<details class="jd" data-jd-src="${htmlEscape(card.descriptionSrc)}"><summary>Job Description</summary><p>${htmlEscape(card.descriptionPreview)}</p></details>`
+      : `<details class="jd"><summary>Job Description</summary><p>${htmlEscape(card.description)}</p></details>`;
   return `<article class="job" ${attributes}>
     ${renderScoreRing(card.bestScore)}
     <div class="job-body">

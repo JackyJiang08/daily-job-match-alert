@@ -8,6 +8,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
+import { inlineAssets } from './helpers/report-hub.mjs';
 import test from 'node:test';
 import { createHubContext, createHubServer } from '../src/hub/server.mjs';
 import { detectIndent } from '../src/hub/config-file.mjs';
@@ -95,6 +96,7 @@ async function startHub(root, overrides = {}) {
   const clock = { value: overrides.now || NOW };
   const connectionCalls = [];
   const ctx = createHubContext({
+    timingLog: () => {},
     configPath: path.join(root, 'config.json'),
     port: 0,
     now: () => new Date(clock.value),
@@ -114,7 +116,7 @@ async function startHub(root, overrides = {}) {
     const req = http.request(`${base}${pathname}`, { method, headers: { host: `127.0.0.1:${ctx.port}`, ...headers } }, res => {
       const chunks = [];
       res.on('data', chunk => chunks.push(chunk));
-      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, text: Buffer.concat(chunks).toString('utf8') }));
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, text: inlineAssets(Buffer.concat(chunks).toString('utf8')) }));
     });
     req.on('error', reject);
     if (body) req.write(body);

@@ -28,6 +28,7 @@ import { HubLockedError } from './config-file.mjs';
 import { prescreenOverview } from '../prescreen.mjs';
 import { DEFAULT_TITLE_FAMILIES, NON_FAMILY_TERMS } from '../prefilter.mjs';
 import { targetRoleFamilies } from '../role-families.mjs';
+import { entryAsPayload, syncReportsIndex } from '../reports-index.mjs';
 import { acquireRunLock, releaseRunLock } from '../lock.mjs';
 
 export const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -63,14 +64,17 @@ export async function listReportDates(ctx) {
   return names.map(name => PAYLOAD_PATTERN.exec(name)?.[1]).filter(Boolean).sort().reverse();
 }
 
-// Dates with their match counts for the Reports sidebar; each payload is read from disk on every call.
+// Dates with their match counts for the Reports list, from state/reports-index.json (src/reports-index.mjs):
+// only payloads whose mtime or size changed since the index entry was written are read.
 export async function listReportSummaries(ctx) {
-  const summaries = [];
-  for (const date of await listReportDates(ctx)) {
-    const payload = await readReportPayload(ctx, date);
-    summaries.push({ date, matchCount: payload ? (payload.meta?.matchCount ?? payload.matches.length) : null, complete: payload?.complete === true });
-  }
-  return summaries;
+  const { entries } = await syncReportsIndex(ctx.root, { io: ctx.io, now: ctx.now() });
+  return entries.map(entry => ({ date: entry.date, matchCount: entry.matchCount, complete: entry.complete === true }));
+}
+
+// The newest day's run fields (last run time, result, quota event, expired login) without its payload.
+export async function latestReportSummary(ctx) {
+  const { entries } = await syncReportsIndex(ctx.root, { io: ctx.io, now: ctx.now() });
+  return entryAsPayload(entries[0] || null);
 }
 
 export function assertDate(value) {
@@ -459,8 +463,7 @@ export function waitingOnQuota(ctx, latest) {
 }
 
 export async function sidebarSummary(ctx, config) {
-  const dates = await listReportDates(ctx);
-  const latest = dates[0] ? await readReportPayload(ctx, dates[0]) : null;
+  const latest = await latestReportSummary(ctx);
   const schedule = await installedSchedule(ctx);
   const now = ctx.now();
   const timeZone = config.timeZone || 'America/Chicago';
@@ -576,6 +579,7 @@ export async function buildStatusView(ctx, config) {
       ...(ctx.autoCatchUp ? await ctx.autoCatchUp.status(state) : { running: false, nextCheckAt: null, attempts: 0, maximumAttempts: MAXIMUM_ATTEMPTS, lastCheck: null }),
     },
     outputDirectory: config.outputDirectory,
+    hub: { timings: ctx.reportTimings ? ctx.reportTimings.recent() : [], cache: ctx.reportCache ? ctx.reportCache.stats() : null },
   };
 }
 

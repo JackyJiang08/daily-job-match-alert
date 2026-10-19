@@ -2,14 +2,17 @@
 // be this machine. Path parameters are validated against strict patterns before they touch the
 // filesystem, and request bodies are capped just above the 5 MB upload limit.
 import { reviewBadge } from '../cover-letter/notes.mjs';
-import { buildReportView } from '../report.mjs';
+import { buildReportView, reviewReportJobs } from '../report.mjs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
+import zlib from 'node:zlib';
+import { ASSET_CACHE_CONTROL, ASSET_PATTERN, readAsset } from './assets.mjs';
 import { renderReportBody } from '../report-components.mjs';
 import { HubLockedError } from './config-file.mjs';
 import { parseMultipart } from './multipart.mjs';
 import {
   HubInputError, annotateConnections, assertDate, buildStatusView, claudeAuthView, clearModelAvailability, configuredCliCommands, desktopCopyPath, desktopWorkbookPath, listReportSummaries, loadTracksView, modelAvailabilityView, readErrorReport,
-  autoLettersView, readReportPayload, readSettings, resumeAtsBoard, saveAssignments, saveAutoLetters, savePrescreen, saveWeeklyReset, saveCliPath, saveSettings, selectResumeVersion, setTrackEnabled, sidebarSummary, uploadResumePdf, ModelTestBusyError, savePlan, testModel,
+  autoLettersView, latestReportSummary, readReportPayload, readSettings, resumeAtsBoard, saveAssignments, saveAutoLetters, savePrescreen, saveWeeklyReset, saveCliPath, saveSettings, selectResumeVersion, setTrackEnabled, sidebarSummary, uploadResumePdf, ModelTestBusyError, savePlan, testModel,
 } from './services.mjs';
 import { localDate } from '../time-format.mjs';
 import { LETTER_SCRIPT, ONECLICK_SCRIPT, SAMPLE_TRACK_SCRIPT, letterPanel, lettersPage, trackLabelOf } from './letter-views.mjs';
@@ -27,6 +30,14 @@ import { availabilityPath, normalizeAvailability, pruneAvailability, pruneLimits
 import { readUsage, usagePath } from '../engines/usage.mjs';
 
 const MAXIMUM_BODY_BYTES = 6 * 1024 * 1024;
+const GZIP_MINIMUM_BYTES = 1024;
+
+// If-None-Match may list several tags or "*"; weak tags (W/"…") compare by their value.
+export function etagMatches(header, etag) {
+  if (!header) return false;
+  const wanted = String(header).split(',').map(item => item.trim().replace(/^W\//, ''));
+  return wanted.includes('*') || wanted.includes(etag);
+}
 const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
 
 export function hostIsLocal(hostHeader) {
@@ -87,6 +98,28 @@ export function createHubHandler(ctx) {
     response.writeHead(status, { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'same-origin' });
     response.end(body);
   };
+  // A 200 page or text: ETag from the body, 304 when the browser already has it, gzip when it asks.
+  // Returns the sizes for the timing log.
+  const sendCacheable = (response, status, body, type, cacheControl) => {
+    const buffer = Buffer.isBuffer(body) ? body : Buffer.from(String(body), 'utf8');
+    const etag = `"${createHash('sha1').update(buffer).digest('base64url')}"`;
+    const headers = { 'content-type': type, 'cache-control': cacheControl, etag, vary: 'Accept-Encoding', 'x-content-type-options': 'nosniff', 'referrer-policy': 'same-origin' };
+    const request = response.req;
+    if (etagMatches(request?.headers?.['if-none-match'], etag)) {
+      response.writeHead(304, headers);
+      response.end();
+      return { bytes: buffer.length, encodedBytes: 0, notModified: true };
+    }
+    if (buffer.length >= GZIP_MINIMUM_BYTES && /\bgzip\b/i.test(String(request?.headers?.['accept-encoding'] || ''))) {
+      const gzipped = zlib.gzipSync(buffer, { level: 6 });
+      response.writeHead(status, { ...headers, 'content-encoding': 'gzip', 'content-length': gzipped.length });
+      response.end(request?.method === 'HEAD' ? undefined : gzipped);
+      return { bytes: buffer.length, encodedBytes: gzipped.length, notModified: false };
+    }
+    response.writeHead(status, { ...headers, 'content-length': buffer.length });
+    response.end(request?.method === 'HEAD' ? undefined : buffer);
+    return { bytes: buffer.length, encodedBytes: null, notModified: false };
+  };
   const json = (response, status, value) => send(response, status, JSON.stringify(value), 'application/json; charset=utf-8');
   const redirect = (response, location, message = null, kind = 'notice') => {
     // The query string must precede any #fragment, or browsers fold the notice into the fragment.
@@ -107,11 +140,14 @@ export function createHubHandler(ctx) {
     return { kind: quota.kind, model: quota.model || null, resetsAt: quota.resetsAt || null, message: describeQuota(quota, { timeZone }), codexAvailable: await codexAvailable() };
   }
   // Every page carries the sidebar summary; config is re-read per request so nothing is cached in-process.
-  const page = async (response, status, options) => {
+  const page = async (response, status, options, timer = null) => {
     const config = await ctx.loadConfig().catch(() => ({}));
     const timeZone = config.timeZone || 'America/Chicago';
-    const sidebar = await sidebarSummary(ctx, config).catch(() => null);
-    send(response, status, renderHubPage({ port: ctx.port, timeZone, sidebar, now: ctx.now(), ...options }));
+    const summarize = () => sidebarSummary(ctx, config).catch(() => null);
+    const sidebar = timer ? await timer.phase('sidebar', summarize) : await summarize();
+    const html = renderHubPage({ port: ctx.port, timeZone, sidebar, now: ctx.now(), ...options });
+    const sent = status === 200 ? sendCacheable(response, status, html, 'text/html; charset=utf-8', 'private, no-cache') : (send(response, status, html), { bytes: Buffer.byteLength(html), encodedBytes: null, notModified: false });
+    timer?.finish({ status: sent.notModified ? 304 : status, ...sent });
   };
 
   // High matches of a report that have no letter and a trusted company name.
@@ -119,10 +155,55 @@ export function createHubHandler(ctx) {
     return (matches || []).filter(job => !lettersByJob.has(jobIdOf(job)) && job.companyUncertain !== true && !letterCompanyFor(job).uncertain);
   }
 
+  // The parts of the day page that depend only on the payload file: the matches and meta, the
+  // eligibility/location re-check, and each card's full JD. Read once per payload mtime and size.
+  async function reportDay(date, timer = null) {
+    const file = path.join(ctx.root, 'state', `report-payload-${date}.json`);
+    const info = await ctx.io.stat(file).catch(() => null);
+    if (!info) return null;
+    const key = ctx.reportCache.dayKey(date, info);
+    const cached = ctx.reportCache.getDay(key);
+    if (cached) return cached;
+    const phase = (name, fn) => (timer ? timer.phase(name, fn) : fn());
+    const payload = await phase('payload', () => readReportPayload(ctx, date));
+    if (!payload) return null;
+    const matches = payload.matches;
+    const review = await phase('review', () => reviewReportJobs(matches));
+    // A JD loads on demand by card id; an id two cards share keeps its text in the page.
+    const descriptions = new Map();
+    const shared = new Set();
+    for (const job of matches) {
+      const id = jobIdOf(job);
+      if (descriptions.has(id)) shared.add(id);
+      else descriptions.set(id, String(job.description || '').trim());
+    }
+    return ctx.reportCache.setDay(key, { key, date, meta: payload.meta, matches, review, descriptions, shared });
+  }
+
+  // Changes the hub cannot see through its own writes: the automatic letters pass (another process) and
+  // the letter folders on disk. Cheap stats only.
+  async function lettersVersion(date, autoStatus) {
+    const lettersRoot = path.join(ctx.root, 'private', 'cover-letters');
+    const stamp = async file => (await ctx.io.stat(file).catch(() => null))?.mtimeMs ?? 0;
+    return [
+      ctx.reportCache.versions.letters,
+      await stamp(path.join(ctx.root, 'state', 'letters-auto.json')),
+      await stamp(lettersRoot),
+      await stamp(path.join(lettersRoot, date)),
+      autoStatus?.running ? `running:${(autoStatus.pending || []).join(',')}` : 'idle',
+    ].join('|');
+  }
+
+  async function configVersion() {
+    const info = await ctx.io.stat(ctx.configPath).catch(() => null);
+    return `${ctx.reportCache.versions.config}|${info?.mtimeMs ?? 0}`;
+  }
+
   async function getReports(url, response) {
+    const timer = ctx.reportTimings.start(url.pathname);
     const config = await ctx.loadConfig();
     const timeZone = config.timeZone || 'America/Chicago';
-    const dates = await listReportSummaries(ctx);
+    const dates = await timer.phase('index', () => listReportSummaries(ctx));
     const today = localDate(ctx.now(), timeZone);
     const match = /^\/reports\/(\d{4}-\d{2}-\d{2})$/.exec(url.pathname);
     // No date in the URL: open the calendar-today report when it exists, otherwise the newest one.
@@ -131,39 +212,55 @@ export function createHubHandler(ctx) {
     let desktopPath = null;
     let missingLetters = null;
     if (selected) {
-      const payload = await readReportPayload(ctx, selected);
-      if (!payload) {
-        await page(response, 404, { active: 'reports', title: 'Reports', content: reportsPage({ dates, selected: null, reportBody: null, desktopPath: null, today }), error: `No report payload for ${selected}` });
+      const day = await reportDay(selected, timer);
+      if (!day) {
+        await page(response, 404, { active: 'reports', title: 'Reports', content: reportsPage({ dates, selected: null, reportBody: null, desktopPath: null, today }), error: `No report payload for ${selected}` }, timer);
         return;
       }
-      const lettersByJob = await ctx.letterStore.lettersByJob().catch(() => new Map());
       // Postings the automatic letters pass is still working through (state/letters-auto.json).
-      const autoStatus = await autoLettersView(ctx);
-      const pending = new Set(autoStatus?.running ? autoStatus.pending : []);
-      const decorate = job => {
-        const id = jobIdOf(job);
-        const letter = lettersByJob.get(id);
-        if (!letter && pending.has(id)) {
-          return { actions: [{ button: true, disabled: true, label: 'Letter generating…', data: { autoletter: '1', job: id } }], badges: [{ key: 'letter-generating', label: 'Letter generating…', tone: 'note', title: 'The automatic cover-letter pass after the nightly run is writing this letter' }] };
-        }
-        // A saved letter gets just Download PDF (once rendered) and Open Letter. The only badge is
-        // "Check N details" when the editor flagged something the owner must confirm; how the letter was
-        // made (engines, fallbacks, applied fixes) stays in the Open Letter footer.
-        // Without a letter the card carries a one-click button that the page script drives (ONECLICK_SCRIPT).
-        const download = letter?.pdf && letter.pdfFileName ? [{ href: `/letters/${letter.date}/${letter.slug}/${encodeURIComponent(letter.pdfFileName)}`, label: 'Download PDF' }] : [];
-        const check = letter ? reviewBadge(letter.editorNotes) : null;
-        return {
-          actions: letter
-            ? [...download, { href: `/letters/${letter.date}/${letter.slug}`, label: 'Open Letter' }]
-            : [{ button: true, label: 'Generate Cover Letter', data: { oneclick: '1', date: selected, job: id } }],
-          badges: check ? [check] : [],
+      const autoStatus = await timer.phase('letters', () => autoLettersView(ctx));
+      const renderKey = [day.key, await timer.phase('letters', () => lettersVersion(selected, autoStatus)), await configVersion(), timeZone].join('#');
+      let rendered = ctx.reportCache.getRender(renderKey);
+      timer.note('cache', rendered ? 'hit' : 'miss');
+      if (!rendered) {
+        const lettersByJob = await timer.phase('letters', () => ctx.letterStore.lettersByJob().catch(() => new Map()));
+        const pending = new Set(autoStatus?.running ? autoStatus.pending : []);
+        const decorate = job => {
+          const id = jobIdOf(job);
+          const letter = lettersByJob.get(id);
+          if (!letter && pending.has(id)) {
+            return { actions: [{ button: true, disabled: true, label: 'Letter generating…', data: { autoletter: '1', job: id } }], badges: [{ key: 'letter-generating', label: 'Letter generating…', tone: 'note', title: 'The automatic cover-letter pass after the nightly run is writing this letter' }] };
+          }
+          // A saved letter gets just Download PDF (once rendered) and Open Letter. The only badge is
+          // "Check N details" when the editor flagged something the owner must confirm; how the letter was
+          // made (engines, fallbacks, applied fixes) stays in the Open Letter footer.
+          // Without a letter the card carries a one-click button that the page script drives (ONECLICK_SCRIPT).
+          const download = letter?.pdf && letter.pdfFileName ? [{ href: `/letters/${letter.date}/${letter.slug}/${encodeURIComponent(letter.pdfFileName)}`, label: 'Download PDF' }] : [];
+          const check = letter ? reviewBadge(letter.editorNotes) : null;
+          return {
+            actions: letter
+              ? [...download, { href: `/letters/${letter.date}/${letter.slug}`, label: 'Open Letter' }]
+              : [{ button: true, label: 'Generate Cover Letter', data: { oneclick: '1', date: selected, job: id } }],
+            badges: check ? [check] : [],
+          };
         };
-      };
-      reportBody = renderReportBody(buildReportView(payload.matches, { timeZone, ...payload.meta }, { embedded: true, decorate }));
+        const lazy = { src: card => (day.shared.has(card.id) ? null : `/reports/${selected}/jd/${card.id}`) };
+        const body = await timer.phase('render', () => renderReportBody(buildReportView(day.matches, { timeZone, ...day.meta }, { embedded: true, decorate, review: day.review, lazyDescription: lazy })));
+        rendered = ctx.reportCache.setRender(renderKey, { reportBody: body, missingCount: missingLetterJobs(day.matches, lettersByJob).length });
+      }
+      reportBody = rendered.reportBody;
       desktopPath = desktopCopyPath(config, selected);
-      missingLetters = { count: missingLetterJobs(payload.matches, lettersByJob).length, running: Boolean(autoStatus?.running), done: autoStatus?.done || 0, planned: autoStatus?.planned || 0 };
+      missingLetters = { count: rendered.missingCount, running: Boolean(autoStatus?.running), done: autoStatus?.done || 0, planned: autoStatus?.planned || 0 };
     }
-    await page(response, 200, { active: 'reports', title: selected ? `Report ${selected}` : 'Reports', content: reportsPage({ dates, selected, reportBody, desktopPath, today, missingLetters }), script: REPORTS_SCRIPT + ONECLICK_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
+    await page(response, 200, { active: 'reports', title: selected ? `Report ${selected}` : 'Reports', content: reportsPage({ dates, selected, reportBody, desktopPath, today, missingLetters }), script: REPORTS_SCRIPT + ONECLICK_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' }, timer);
+  }
+
+  // GET /reports/<date>/jd/<card id>: the full Job Description of one card, exactly the text the page
+  // used to embed. 404 when the posting is not (or no longer) in that day's report.
+  async function getJobDescription(date, id, response) {
+    const day = await reportDay(assertDate(date));
+    if (!day || !day.descriptions.has(id)) return send(response, 404, 'Not found', 'text/plain; charset=utf-8');
+    return sendCacheable(response, 200, day.descriptions.get(id), 'text/plain; charset=utf-8', 'private, no-cache');
   }
 
   async function getResumes(url, response) {
@@ -182,7 +279,7 @@ export function createHubHandler(ctx) {
     const settings = await readSettings(ctx);
     const config = await ctx.loadConfig().catch(() => ({}));
     const probed = ctx.connections ? await ctx.connections.status({ commands: configuredCliCommands(config) }).catch(() => null) : null;
-    const latest = (await listReportSummaries(ctx))[0]?.date ? await readReportPayload(ctx, (await listReportSummaries(ctx))[0].date) : null;
+    const latest = await latestReportSummary(ctx);
     const connections = annotateConnections(probed, claudeAuthView(ctx, latest));
     const timeZone = config.timeZone || 'America/Chicago';
     const readiness = await ctx.letterStore.readiness();
@@ -471,6 +568,14 @@ export function createHubHandler(ctx) {
       if (request.method === 'GET' || request.method === 'HEAD') {
         if (url.pathname === '/') return redirect(response, '/reports');
         if (url.pathname === '/reports' || /^\/reports\/\d{4}-\d{2}-\d{2}$/.test(url.pathname)) return await getReports(url, response);
+        const jdMatch = /^\/reports\/(\d{4}-\d{2}-\d{2})\/jd\/([a-f0-9]{16})$/.exec(url.pathname);
+        if (jdMatch) return await getJobDescription(jdMatch[1], jdMatch[2], response);
+        const assetMatch = ASSET_PATTERN.exec(url.pathname);
+        if (assetMatch) {
+          const asset = readAsset(assetMatch[1]);
+          if (!asset) return send(response, 404, 'Not found', 'text/plain; charset=utf-8');
+          return sendCacheable(response, 200, asset.body, asset.type, ASSET_CACHE_CONTROL);
+        }
         if (url.pathname === '/resumes') return await getResumes(url, response);
         if (url.pathname === '/status') return await getStatus(url, response);
         if (url.pathname === '/status/run.json') return json(response, 200, await buildStatusView(ctx, await ctx.loadConfig()));
@@ -496,7 +601,12 @@ export function createHubHandler(ctx) {
         if (url.pathname === '/healthz') return json(response, 200, { ok: true });
         return await page(response, 404, { active: '', title: 'Not found', content: '<h1 class="hub-title">Not found</h1>' });
       }
-      if (request.method === 'POST') return await handlePost(url, request, response);
+      if (request.method === 'POST') {
+        await handlePost(url, request, response);
+        // A Settings save can change what a report page shows (time zone, output folder, tracks).
+        if (url.pathname.startsWith('/settings') && response.statusCode < 400) ctx.reportCache.invalidate('config');
+        return;
+      }
       return send(response, 405, 'Method not allowed', 'text/plain; charset=utf-8');
     } catch (error) {
       const wantsJson = url.pathname === '/run' || url.pathname === '/letters/generate' || url.pathname === '/letters/save' || url.pathname === '/letters/rename' || url.pathname === '/letters/oneclick' || url.pathname === '/settings/cover-letter/sample-track' || url.pathname.endsWith('.json');

@@ -15,6 +15,9 @@ import { createConnectionsProbe } from './connections.mjs';
 import { describeConnections } from '../engines/index.mjs';
 import { createLetterStore } from '../cover-letter/store.mjs';
 import { createLetterJobs } from './letter-jobs.mjs';
+import { createTimingLog } from './report-timing.mjs';
+import { createReportCache } from './report-cache.mjs';
+import { refreshIndexLetters } from '../reports-index.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -47,7 +50,24 @@ export function createHubContext(options) {
     root, io, now,
     extractText: async file => ctx.extractText(file, { pdftotextCommand: (await ctx.loadConfig().catch(() => ({}))).resumes?.pdftotextCommand || 'pdftotext', minimumCharacters: 50 }),
   });
+  // Rendered report days (src/hub/report-cache.mjs). A saved or renamed letter drops the renders and
+  // updates the letter count in state/reports-index.json, whichever process (the hub, the nightly letters
+  // pass) wrote it.
+  ctx.reportCache = options.reportCache || createReportCache({ now });
+  for (const method of ['saveLetter', 'renameLetter']) {
+    const original = ctx.letterStore[method];
+    if (typeof original !== 'function') continue;
+    ctx.letterStore[method] = async (...args) => {
+      const result = await original(...args);
+      ctx.reportCache.invalidate('letters');
+      const date = method === 'saveLetter' ? args[0]?.date : args[0];
+      await refreshIndexLetters(root, date, { io, now: now() }).catch(() => {});
+      return result;
+    };
+  }
   ctx.letterEngine = options.letterEngine || null;
+  // Stage timings of the Reports pages: one hub log line per request, the last 20 on Status (Hub card).
+  ctx.reportTimings = options.reportTimings || createTimingLog({ log: options.timingLog || (line => console.log(line)) });
   ctx.letterJobs = options.letterJobs || createLetterJobs({ now });
   // Desktop notification from the hub itself (plan changes seen by the probe); a no-op off macOS.
   ctx.notify = options.notify || (async text => {
@@ -72,6 +92,8 @@ export function createHubContext(options) {
   ctx.runManager = options.runManager || createRunManager({
     root, configPath, hubDirectory, io, now, pidAlive,
     spawn: options.spawn, nodeBinary: options.nodeBinary, entrypoint: options.entrypoint,
+    // A finished Run Now rewrote the day payload: drop the cached days and renders.
+    onFinished: async () => { ctx.reportCache.invalidate('run'); },
     ...(options.platform ? { platform: options.platform } : {}),
   });
   // Checks every 10 minutes for a run the network cut short; startHub starts the timer.

@@ -254,6 +254,10 @@ test('end to end: meta.roleFamilies counts what reached the prescreen, the revie
     const matched = Object.values(byKey).reduce((sum, row) => sum + row.matched, 0);
     assert.equal(matched, payload.matches.length);
     assert.ok(payload.meta.prefilter.titleExcluded.some(item => item.title === 'Associate' && item.rule === 'no title family'));
+    // The run also wrote the hub's reports index entry for the day.
+    const index = JSON.parse(await fs.readFile(path.join(root, 'state', 'reports-index.json'), 'utf8'));
+    assert.equal(index.dates['2026-10-16'].matchCount, payload.matches.length);
+    assert.equal(index.dates['2026-10-16'].complete, payload.complete === true);
     const html = await fs.readFile(path.join(root, 'output', (await fs.readdir(path.join(root, 'output')))[0], (await fs.readdir(path.join(root, 'output', (await fs.readdir(path.join(root, 'output')))[0]))).find(name => name.endsWith('.html'))), 'utf8');
     assert.match(html, /Candidates by role family/);
   } finally {

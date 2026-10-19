@@ -39,8 +39,25 @@ disabled; do not expand them unless a task says so.
   `node src/index.mjs` with DAILY_JOB_MATCH_ALERT_TRIGGER=manual under the
   run lock), Settings (five keys, surgical config.json edit under the lock).
 - The hub only reads pipeline artifacts; it writes config.json, private/
-  (gitignored), and state/ats-boards.json (the ATS board registry, when a
-  dormant board is resumed from Status). Status's Sources card reads that
+  (gitignored), state/ats-boards.json (the ATS board registry, when a
+  dormant board is resumed from Status), and state/reports-index.json.
+- Reports speed (2026-10-19): src/reports-index.mjs keeps state/reports-index.json (per date: generatedAt,
+  matchCount, deferredCount, carriedCount, letterCount, complete, sidebar fields, payloadMtimeMs/Size,
+  lettersMtimeMs); the pipeline's writeReportPayload calls updateReportsIndex, the wrapped
+  ctx.letterStore.saveLetter/renameLetter call refreshIndexLetters; syncReportsIndex (list, sidebar,
+  Settings) only stats and re-reads a payload whose mtime/size changed (first call builds it).
+  src/hub/report-cache.mjs: day layer (date|mtime|size|run version → matches, meta, reviewReportJobs
+  result, card-id → JD) and render layer (+ letters version: counter, letters-auto.json and letter dir
+  mtimes, auto pass pending; + config version: counter, config.json mtime); invalidate('run') from
+  runManager onFinished, 'letters' from the store wrapper, 'config' after any POST /settings*. Day page:
+  JDs over LAZY_DESCRIPTION_CHARACTERS (300 code points) render data-jd-src + preview, JD_LOADER_SCRIPT
+  fetches GET /reports/<date>/jd/<card id> (text/plain, exact text); Desktop HTML keeps full JDs.
+  sendCacheable: sha1 ETag, If-None-Match → 304, gzip ≥ 1 KB, cache-control private, no-cache; CSS/JS
+  served from src/hub/assets.mjs (/assets/hub-<hash>.css|js, immutable 1 year). src/hub/report-timing.mjs
+  logs "[hub] GET … (index · payload · review · letters · render · sidebar) size, gzip, cache" and keeps 20
+  for the Status Hub card. tests/fixtures/snapshots/*.html were rendered by the pre-change code;
+  tests/report-speed.test.mjs inlines the assets (tests/helpers/report-hub.mjs inlineAssets), strips
+  JD_LOADER_SCRIPT, and expands the JD sections to compare byte for byte. Status's Sources card reads that
   registry plus the source catalog (src/collectors/catalog.mjs) and the
   latest payload's per-source counts. POSTs require a loopback Host/Origin;
   uploads are .pdf ≤ 5 MB; path params are pattern-checked. Never render

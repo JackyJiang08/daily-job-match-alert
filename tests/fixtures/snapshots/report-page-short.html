@@ -1,0 +1,594 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Report 2026-10-15 — Daily Job Match Alert Hub</title>
+<style>
+:root{
+  color-scheme: light dark;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* Type scale: page heading, card title, body, meta. */
+  --fs-page: 22px;
+  --fs-title: 17px;
+  --fs-body: 14px;
+  --fs-meta: 12px;
+  --lh: 1.5;
+  /* One accent, one neutral ramp. */
+  --accent: #0f766e;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(15, 118, 110, 0.10);
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --ink: #1c2430;
+  --ink-2: #4b5563;
+  --ink-3: #6b7280;
+  --line: #e3e7ec;
+  --line-2: #cfd5dd;
+  --ring-track: #e5e9ee;
+  /* Semantic badge tones. */
+  --note-bg: #fbf3d5;
+  --note-ink: #6b5300;
+  --warn-bg: #fdebd3;
+  --warn-ink: #8a4b00;
+  --bad-bg: #fbe3e3;
+  --bad-ink: #8b1d1d;
+  /* Shape and rhythm. */
+  --radius: 10px;
+  --radius-sm: 6px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 40px;
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5l3.5 3.5 3.5-3.5' fill='none' stroke='%236b7280' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+@media (prefers-color-scheme: dark){:root{
+  --accent: #2dd4bf;
+  --accent-ink: #04211e;
+  --accent-soft: rgba(45, 212, 191, 0.14);
+  --bg: #0f1318;
+  --surface: #171c23;
+  --ink: #e6e9ee;
+  --ink-2: #b4bcc8;
+  --ink-3: #8a94a3;
+  --line: #252c36;
+  --line-2: #333c48;
+  --ring-track: #2a323d;
+  --note-bg: #3a3412;
+  --note-ink: #e8d57a;
+  --warn-bg: #3a2a12;
+  --warn-ink: #f2c184;
+  --bad-bg: #3d1a1a;
+  --bad-ink: #f3a9a9;
+  --shadow: none;
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5l3.5 3.5 3.5-3.5' fill='none' stroke='%238a94a3' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:var(--fs-body)/var(--lh) var(--font)}
+a{color:inherit}
+.page{max-width:920px;margin:0 auto;padding:var(--space-5) var(--space-4) var(--space-6)}
+
+.masthead{border-bottom:1px solid var(--line);padding-bottom:var(--space-3);margin-bottom:var(--space-4)}
+.masthead h1{margin:0;font-size:var(--fs-page);font-weight:650;letter-spacing:-0.01em;line-height:1.25}
+.masthead .sub{margin:var(--space-1) 0 0;font-size:var(--fs-body);color:var(--ink-2)}
+.masthead .quota-note{color:var(--warn-ink);font-weight:600}
+
+.banner{margin:0 0 var(--space-4);padding:var(--space-3) var(--space-4);border-radius:var(--radius);background:var(--warn-bg);color:var(--warn-ink);font-size:var(--fs-body)}
+.toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2);margin:0 0 var(--space-4)}
+/* One control style for every text input and select, in the report toolbar and in the hub forms. */
+.control-input,.toolbar input,.toolbar select{font:inherit;font-size:var(--fs-body);line-height:1.3;color:var(--ink);background:var(--surface);border:1px solid var(--line-2);border-radius:var(--radius-sm);padding:6px 9px;min-height:32px;box-sizing:border-box}
+select.control-input,.toolbar select{appearance:none;-webkit-appearance:none;background-image:var(--chevron);background-repeat:no-repeat;background-position:right 9px center;padding-right:28px;cursor:pointer}
+select.control-input:focus,.control-input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+.toolbar input[type=search]{flex:1 1 200px;min-width:160px}
+.toolbar select{flex:0 0 auto}
+.toolbar .control{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-meta);color:var(--ink-3)}
+.toolbar .control select{font-size:var(--fs-body)}
+.toolbar input:focus,.toolbar select:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+.toolbar .count{margin-left:auto;font-size:var(--fs-meta);color:var(--ink-3);font-variant-numeric:tabular-nums}
+.toolbar.quiet{gap:var(--space-1) var(--space-2);margin-bottom:var(--space-3);opacity:.9}
+.toolbar.quiet .control select,.toolbar.quiet input,.toolbar.quiet select{font-size:var(--fs-meta);min-height:28px;padding:4px 7px;background:transparent}
+.toolbar.quiet input[type=search]{flex-basis:160px}
+.toolbar.quiet .count{display:none}
+
+.jobs{display:flex;flex-direction:column;gap:var(--space-3);margin:0;padding:0;list-style:none}
+.job{display:grid;grid-template-columns:52px 1fr;gap:var(--space-4);align-items:start;padding:var(--space-4);background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
+.job[hidden]{display:none}
+.group-title{margin:var(--space-5) 0 var(--space-1);font-size:var(--fs-title);font-weight:650}
+.group-count{color:var(--ink-2);font-weight:400}
+.group-note{margin:0 0 var(--space-3);font-size:var(--fs-body);color:var(--ink-2)}
+.ring{--score:0;position:relative;width:52px;height:52px;border-radius:50%;background:conic-gradient(var(--accent) calc(var(--score) * 1%),var(--ring-track) 0);display:grid;place-items:center}
+.ring::before{content:"";position:absolute;inset:5px;border-radius:50%;background:var(--surface)}
+.ring b{position:relative;font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-0.01em}
+.job-body{min-width:0}
+.job-title{margin:0;font-size:var(--fs-title);font-weight:650;line-height:1.3;overflow-wrap:anywhere}
+.job-title a{text-decoration:none}
+.job-title a:hover{text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:2px}
+.job-meta{margin:2px 0 var(--space-2);font-size:var(--fs-body);color:var(--ink-2);overflow-wrap:anywhere}
+.scores{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2) var(--space-3);font-size:var(--fs-meta);color:var(--ink-2);font-variant-numeric:tabular-nums}
+.scores .track b{color:var(--ink);font-weight:650}
+.scores .track.best b{color:var(--accent)}
+.scores .sep{color:var(--line-2);margin:0 -4px}
+.recommend{display:inline-block;background:var(--accent);color:var(--accent-ink);border-radius:999px;padding:3px 10px;font-size:var(--fs-meta);font-weight:650;letter-spacing:.01em;white-space:nowrap}
+.badges{display:flex;flex-wrap:wrap;gap:6px;margin-top:var(--space-2)}
+.badge{display:inline-block;font-size:11px;font-weight:600;line-height:1.5;border-radius:var(--radius-sm);padding:1px 7px;background:var(--note-bg);color:var(--note-ink);white-space:nowrap}
+.badge-warn{background:var(--warn-bg);color:var(--warn-ink)}
+.badge-bad{background:var(--bad-bg);color:var(--bad-ink)}
+
+.facts-label{margin:var(--space-3) 0 var(--space-1);font-size:var(--fs-meta);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.facts{margin:0;padding:0;list-style:none}
+.facts li{position:relative;padding-left:14px;line-height:1.45;overflow-wrap:anywhere}
+.facts li::before{content:"";position:absolute;left:0;top:.62em;width:5px;height:5px;border-radius:50%;background:var(--accent)}
+.facts.gaps li::before{background:transparent;border:1px solid var(--ink-3);width:4px;height:4px}
+details.more{margin-top:2px}
+details.more>summary{list-style:none;cursor:pointer;font-size:var(--fs-meta);color:var(--accent);padding-left:14px}
+details.more>summary::-webkit-details-marker{display:none}
+details.more[open]>summary{display:none}
+details.jd{margin-top:var(--space-3)}
+details.jd>summary{cursor:pointer;font-size:var(--fs-meta);color:var(--ink-3)}
+details.jd p{margin:var(--space-2) 0 0;padding:var(--space-3);max-height:360px;overflow:auto;white-space:pre-wrap;font-size:var(--fs-meta);line-height:1.5;color:var(--ink-2);background:var(--bg);border-radius:var(--radius-sm)}
+.alternates{margin:var(--space-2) 0 0;font-size:var(--fs-meta);color:var(--ink-3);overflow-wrap:anywhere}
+.actions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-3);margin-top:var(--space-3)}
+.apply{display:inline-block;background:var(--accent);color:var(--accent-ink);text-decoration:none;font-weight:650;font-size:var(--fs-body);padding:7px 13px;border-radius:var(--radius-sm)}
+.apply:hover{filter:brightness(1.06)}
+.actions .meta{font-size:var(--fs-meta);color:var(--ink-3)}
+
+.empty{padding:var(--space-6) var(--space-4);text-align:center;background:var(--surface);border:1px dashed var(--line-2);border-radius:var(--radius);color:var(--ink-3)}
+.empty[hidden]{display:none}
+
+details.run{margin-top:var(--space-6);padding-top:var(--space-3);border-top:1px solid var(--line);font-size:var(--fs-meta);color:var(--ink-2)}
+details.run>summary{cursor:pointer;font-weight:600;color:var(--ink-2)}
+.run dl{display:grid;grid-template-columns:max-content 1fr;gap:var(--space-1) var(--space-4);margin:var(--space-3) 0 0}
+.run dt{color:var(--ink-3)}
+.run dd{margin:0;color:var(--ink);overflow-wrap:anywhere}
+.run dd ul{margin:2px 0 0;padding-left:16px}
+details.run-list[open]>summary{display:block}
+details.run-list ul{max-height:320px;overflow:auto}
+.run dd li{margin:0}
+.foot{margin-top:var(--space-5);font-size:var(--fs-meta);color:var(--ink-3)}
+
+@media (max-width:640px){
+  .page{padding:var(--space-4) var(--space-3) var(--space-5)}
+  .job{grid-template-columns:44px 1fr;gap:var(--space-3);padding:var(--space-3)}
+  .ring{width:44px;height:44px}.ring::before{inset:4px}.ring b{font-size:13px}
+  .toolbar .count{margin-left:0;flex-basis:100%}
+  .run dl{grid-template-columns:1fr;gap:0}
+  .run dt{margin-top:var(--space-2)}
+}
+@media print{
+  body{background:#fff}
+  .toolbar,.foot{display:none}
+  .job{break-inside:avoid;box-shadow:none}
+}
+
+.hub{display:grid;grid-template-columns:200px minmax(0,1fr);min-height:100vh}
+.hub-nav{position:sticky;top:0;height:100vh;overflow:auto;display:flex;flex-direction:column;border-right:1px solid var(--line);padding:var(--space-5) var(--space-3) var(--space-4);background:var(--surface)}
+.hub-nav .brand{font-size:var(--fs-body);font-weight:650;margin:0 0 var(--space-4) var(--space-3);line-height:1.5;white-space:nowrap}
+.hub-nav a{display:block;padding:6px var(--space-2) 6px 9px;margin:0 0 2px;border-left:3px solid transparent;border-radius:0 var(--radius-sm) var(--radius-sm) 0;text-decoration:none;color:var(--ink-2);font-size:var(--fs-body);line-height:1.5}
+.hub-nav a.active{background:var(--accent-soft);color:var(--accent);font-weight:650;border-left-color:var(--accent)}
+.hub-nav a:hover{color:var(--ink)}
+.hub-nav .mini{margin:auto 0 0 var(--space-3);padding-top:var(--space-4);border-top:1px solid var(--line);font-size:11px;line-height:1.5;color:var(--ink-3)}
+.hub-nav .mini b{display:block;font-weight:600;color:var(--ink-2)}
+.hub-nav .mini .ok{color:var(--accent)}.hub-nav .mini .bad{color:var(--bad-ink)}.hub-nav .mini .warn{color:var(--warn-ink)}
+.hub-nav .mini .rel{white-space:nowrap}.hub-nav .mini .rel.overdue{color:var(--bad-ink);font-weight:600}
+.hub-main{padding:var(--space-5) var(--space-5) var(--space-6);min-width:0}
+.hub-content{max-width:1280px;margin:0}
+.hub-main .page{padding:0;margin:0;max-width:none}
+.hub-title{margin:0 0 var(--space-4);font-size:var(--fs-page);font-weight:650;letter-spacing:-0.01em}
+.hub-sub{margin:calc(-1 * var(--space-3)) 0 var(--space-4);font-size:var(--fs-body);color:var(--ink-2)}
+.flash{margin:0 0 var(--space-4);padding:var(--space-3) var(--space-4);border-radius:var(--radius);font-size:var(--fs-body)}
+.flash.notice{background:var(--accent-soft);color:var(--accent)}
+.flash.error{background:var(--bad-bg);color:var(--bad-ink)}
+.split{display:grid;grid-template-columns:232px minmax(0,1fr);gap:var(--space-4);align-items:start}
+.split aside{position:sticky;top:var(--space-4);max-height:calc(100vh - 2 * var(--space-4));overflow:auto;display:flex;flex-direction:column}
+.datetools{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-1) var(--space-2);padding:0 var(--space-2) var(--space-2);font-size:var(--fs-meta);color:var(--ink-3)}
+.datetools .today-link{text-decoration:none;color:var(--accent);font-weight:650}
+.datetools label{display:inline-flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap}
+.datelist{margin:0;padding:0;list-style:none;font-size:var(--fs-body)}
+.datelist .month{position:sticky;top:0;z-index:1;margin:0;padding:var(--space-2) var(--space-2) var(--space-1);background:var(--bg);font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2)}
+.datelist .month-toggle{display:flex;align-items:center;gap:6px;width:100%;margin:0;padding:0;border:0;background:none;font:inherit;color:inherit;letter-spacing:inherit;text-transform:inherit;cursor:pointer;text-align:left}
+.datelist .month-toggle::before{content:"";width:5px;height:5px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg);margin:-2px 2px 0 0;transition:transform .12s}
+.datelist .month[data-collapsed="1"] .month-toggle::before{transform:rotate(-45deg);margin:0 2px 0 0}
+.datelist li[hidden]{display:none}
+.datelist a{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:baseline;gap:2px 6px;padding:6px var(--space-2);border-radius:var(--radius-sm);text-decoration:none;color:var(--ink-2)}
+.datelist a>span:first-child{margin-right:auto;white-space:nowrap}
+.datelist a .n{color:var(--ink-3);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:var(--fs-meta);text-align:right}
+.datelist a.active{background:var(--accent-soft);color:var(--accent);font-weight:650}
+.datelist a.active .n{color:var(--accent)}
+.datelist a.today:not(.active){color:var(--ink);font-weight:650}
+.datelist a.quiet{color:var(--ink-3)}
+.datelist .tag{font-size:10px;font-weight:600;line-height:1.4;border-radius:var(--radius-sm);padding:0 5px;background:var(--line);color:var(--ink-3);white-space:nowrap}
+.datelist a.active .tag{background:var(--accent-soft);color:var(--accent)}
+.report-head{display:flex;justify-content:flex-end;gap:var(--space-2);margin:0 0 var(--space-2)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:var(--space-4);margin:0 0 var(--space-3);box-shadow:var(--shadow)}
+.card h2{margin:0 0 var(--space-1);font-size:var(--fs-title);font-weight:650}
+.card h3{margin:var(--space-3) 0 var(--space-1);font-size:var(--fs-meta);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.kv{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:var(--space-1) var(--space-4);margin:var(--space-2) 0 0;font-size:var(--fs-body)}
+.kv dt{color:var(--ink-3)}
+.kv dd{margin:0;overflow-wrap:anywhere}
+.kv .plain-list{margin:2px 0;padding-left:16px;font-size:var(--fs-meta)}
+.notice-list li{margin:0 0 4px}
+.notice-list q{font-size:var(--fs-meta);color:var(--ink-2)}
+.kv code,.mono{font-family:var(--font-mono);font-size:var(--fs-meta)}
+.row{display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center;margin-top:var(--space-3)}
+.btn{display:inline-block;background:var(--accent);color:var(--accent-ink);border:0;border-radius:var(--radius-sm);padding:7px 13px;font:inherit;font-size:var(--fs-body);font-weight:650;cursor:pointer;text-decoration:none;line-height:1.3}
+.btn.secondary{background:transparent;color:var(--ink-2);border:1px solid var(--line-2)}
+.btn.small{padding:4px 10px;font-size:var(--fs-meta)}
+.btn.danger{background:var(--bad-bg);color:var(--bad-ink)}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+.badge-good{background:var(--accent-soft);color:var(--accent)}
+.badge-muted{background:var(--line);color:var(--ink-3)}
+.file{display:inline-flex;align-items:center;gap:var(--space-2)}
+.file input[type=file]{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden}
+.file .file-name{font-size:var(--fs-meta);color:var(--ink-3);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.radio-row{display:flex;flex-wrap:wrap;gap:var(--space-3)}
+.radio-row label{display:inline-flex;align-items:center;gap:6px}
+.conn{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:var(--space-2) var(--space-4);font-size:var(--fs-body)}
+.conn dt{color:var(--ink-3)}.conn dd{margin:0}
+.conn .badge{vertical-align:middle}
+fieldset.group{min-inline-size:0;border:1px solid var(--line);border-radius:var(--radius);padding:var(--space-3) var(--space-4) var(--space-2);margin:0 0 var(--space-3)}
+fieldset.group legend{font-size:var(--fs-meta);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);padding:0 6px}
+.field{display:block;margin:0 0 var(--space-3);font-size:var(--fs-body)}
+.field>span{display:block;font-size:var(--fs-meta);color:var(--ink-3);margin-bottom:4px}
+.field input[type=text],.field input[type=number],.field input[type=email],.field select{font:inherit;font-size:var(--fs-body);line-height:1.3;color:var(--ink);background:var(--surface);border:1px solid var(--line-2);border-radius:var(--radius-sm);padding:6px 9px;min-height:32px;min-width:240px;max-width:100%;box-sizing:border-box}
+.field select{appearance:none;-webkit-appearance:none;background-image:var(--chevron);background-repeat:no-repeat;background-position:right 9px center;padding-right:28px;cursor:pointer}
+.field input:focus,.field select:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+.radio-row .badge{margin-left:4px}
+.engine-warning{margin:var(--space-1) 0 0;font-size:var(--fs-meta);color:var(--warn-ink)}
+.field label.check{display:inline-flex;align-items:center;gap:6px;margin-right:var(--space-3)}
+.inline{display:inline}
+.form-foot{font-size:var(--fs-meta);color:var(--ink-3);margin:var(--space-2) 0 0}
+.tag-list{display:flex;flex-wrap:wrap;gap:4px;list-style:none;margin:var(--space-1) 0;padding:0}
+.tag-add{max-width:22em}
+table.plain{border-collapse:collapse;width:100%;font-size:var(--fs-body)}
+table.plain th,table.plain td{text-align:left;padding:6px var(--space-2);border-bottom:1px solid var(--line);vertical-align:top}
+table.plain th{font-size:var(--fs-meta);color:var(--ink-3);font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+pre.log{background:var(--bg);border:1px solid var(--line);border-radius:var(--radius-sm);padding:var(--space-3);max-height:360px;overflow:auto;font-family:var(--font-mono);font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere;margin:var(--space-2) 0 0}
+details.day{margin:var(--space-2) 0}
+details.day>summary{cursor:pointer;font-size:var(--fs-body)}
+.count-zero{color:var(--ink-3)}
+.count-some{color:var(--warn-ink);font-weight:650}
+.muted{color:var(--ink-3)}
+[hidden]{display:none!important}
+@media (max-width:760px){.hub{grid-template-columns:1fr}.hub-nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line);flex-direction:row;flex-wrap:wrap;gap:4px;padding:var(--space-3)}.hub-nav .brand,.hub-nav .mini{flex-basis:100%;margin:0}.hub-nav .mini{border-top:0;padding-top:var(--space-2)}.split{grid-template-columns:1fr}.split aside{position:static;max-height:none}.hub-main{padding:var(--space-4) var(--space-3)}}
+
+.letter-head{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--space-4);align-items:start}
+.letter-head .kv{margin:0}
+.letter-controls{min-width:280px}
+.para-row{display:grid;grid-template-columns:28px minmax(0,1fr);gap:var(--space-2);align-items:start;margin:0 0 var(--space-2)}
+.para-row .num{font-size:var(--fs-meta);color:var(--ink-3);padding-top:9px;text-align:right;font-variant-numeric:tabular-nums}
+.para{width:100%;min-height:96px;font:inherit;font-size:var(--fs-body);line-height:var(--lh);color:var(--ink);background:var(--surface);border:1px solid var(--line-2);border-radius:var(--radius-sm);padding:var(--space-2) var(--space-3);resize:vertical;box-sizing:border-box;margin:0}
+.para:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+.issues{margin:var(--space-2) 0 0;padding:0;list-style:none;font-size:var(--fs-meta)}
+.issues li{padding:2px 0;color:var(--warn-ink)}
+.letter-counts{font-size:var(--fs-meta);color:var(--ink-2);margin:0 0 var(--space-3)}
+.letter-foot{font-size:var(--fs-meta);color:var(--ink-3);margin:var(--space-3) 0 0}
+.letter-status{font-size:var(--fs-body);color:var(--ink-2);margin:var(--space-2) 0 0}
+.letter-status.error{color:var(--bad-ink)}
+details.notes{margin:var(--space-2) 0 0;font-size:var(--fs-meta)}
+details.notes>summary{cursor:pointer;color:var(--ink-2);font-weight:600}
+.two-col{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 var(--space-4)}
+.two-col .field input{min-width:0;width:100%}
+.table-scroll{overflow-x:auto;margin:0 0 var(--space-3)}
+table.material{border-collapse:collapse;width:100%;min-width:800px;table-layout:fixed;font-size:var(--fs-body)}
+table.material td{padding:6px var(--space-2) 6px 0;border-bottom:1px solid var(--line);vertical-align:middle;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;height:46px}
+table.material td.meta{font-size:var(--fs-meta);color:var(--ink-3)}
+table.material td.actions{text-align:right;padding-right:0}
+table.material .c-track{width:160px}table.material .c-chars{width:120px}table.material .c-time{width:170px}table.material .c-actions{width:190px}
+table.material select{min-width:0;width:100%;max-width:150px}
+table.material .file{vertical-align:middle}
+table.material .file .file-name{max-width:100px}
+.upload-row{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2) var(--space-4)}
+.upload-row .track-for{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-meta);color:var(--ink-3)}
+.upload-row .track-for select{min-width:140px}
+.sample-limit{font-size:var(--fs-meta);color:var(--warn-ink);margin:0 0 var(--space-2)}
+@media (max-width:760px){.two-col{grid-template-columns:1fr}.letter-head{grid-template-columns:1fr}.letter-controls{min-width:0}}
+
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:0 0 var(--space-4)}
+.tabs a{padding:8px 14px;text-decoration:none;color:var(--ink-2);border-bottom:2px solid transparent;margin-bottom:-1px;font-weight:600}
+.tabs a.active{color:var(--accent);border-bottom-color:var(--accent)}
+.section-title{font-size:var(--fs-title);margin:var(--space-2) 0 var(--space-2);display:flex;align-items:baseline;gap:var(--space-3);flex-wrap:wrap}
+.section-note{font-size:var(--fs-meta);font-weight:400;color:var(--ink-3)}
+.pair-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-3);align-items:start}
+.sub-card,.model-card{margin:0;padding:var(--space-3)}
+.sub-card{display:grid;grid-template-columns:minmax(0,0.9fr) minmax(0,1.3fr);gap:var(--space-3)}
+.sub-details .conn{margin:0;font-size:var(--fs-meta)}
+.sub-details .kv{font-size:var(--fs-meta);gap:2px var(--space-3)}
+.nowrap{white-space:nowrap}
+.sub-head{display:flex;justify-content:space-between;align-items:center}
+.sub-head h3,.model-card h3{margin:0}
+.plan-name{margin:2px 0 0;font-size:26px;font-weight:700;line-height:1.2}
+.plan-name .badge{vertical-align:middle;font-size:var(--fs-meta)}
+.plan-meta{margin:0 0 var(--space-1);font-size:var(--fs-meta);color:var(--ink-3)}
+.plan-change{margin:0 0 var(--space-1);font-weight:600;color:var(--warn-ink)}
+.sub-kv{margin-top:var(--space-1)}
+.sub-usage{margin:0;padding-left:0;list-style:none}
+.small-input{width:7em;min-height:28px;padding:3px 7px}
+.alias{color:var(--ink-3);font-size:var(--fs-meta);font-weight:400}
+.models-table td,.models-table th,.assignments td,.assignments th{font-size:var(--fs-body);vertical-align:top;padding:4px 6px}
+.models-table th{font-size:var(--fs-meta)}
+.models-table .mono,.assignments .mono{white-space:nowrap}
+.models-table .mono{font-size:var(--fs-meta)}
+.models-table th{letter-spacing:.02em}
+.row-action{text-align:right}
+.link-button{background:none;border:0;padding:0;color:var(--accent);font:inherit;font-size:var(--fs-meta);cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.new-version{display:inline-block;font-size:var(--fs-meta);font-weight:600;color:var(--warn-ink)}
+.stage{display:inline-block;font-size:var(--fs-meta);border:1px solid var(--line-2);border-radius:var(--radius-sm);padding:0 6px;margin:1px 0;color:var(--ink-2)}
+.models-table td:last-child{min-width:7.5em}
+.stage.primary{border-color:var(--accent);color:var(--accent)}
+.badge-muted{background:var(--line);color:var(--ink-2)}
+.all-models summary{cursor:pointer;font-size:var(--fs-meta);color:var(--accent);margin-top:var(--space-1)}
+.assignments-card{margin-top:var(--space-3);padding:var(--space-3)}
+.assignments-card h2{margin:0 0 var(--space-2)}
+.assignments select.control-input{min-height:30px;padding:3px 26px 3px 8px;font-size:var(--fs-body)}
+.chain-edit{display:flex;flex-wrap:wrap;align-items:center;gap:4px}
+.chain-tags{display:contents;list-style:none;margin:0;padding:0}
+.tag{display:inline-flex;align-items:center;gap:4px;font-size:var(--fs-meta);background:var(--accent-soft);border-radius:var(--radius-sm);padding:2px 7px}
+.tag.head{background:var(--line)}
+.tag.off{background:var(--line);color:var(--ink-3)}
+.tag.off .mono{text-decoration:line-through}
+.tag-x{border:0;background:none;color:var(--ink-3);cursor:pointer;font-size:14px;line-height:1;padding:0 2px}
+.chain-edit .arrow{color:var(--ink-3)}
+.chain-add{width:6.5em;min-height:26px !important;font-size:var(--fs-meta) !important}
+.check.small{font-size:var(--fs-meta);font-weight:400}
+.stage-off{opacity:.65}
+@media (max-width:1000px){.pair-grid{grid-template-columns:1fr}}
+@media (max-width:640px){.sub-card{grid-template-columns:1fr}}
+</style></head>
+<body><div class="hub"><nav class="hub-nav"><p class="brand">Job Match Hub</p><a href="/reports" class="active">Reports</a><a href="/resumes">Resumes</a><a href="/letters">Letters</a><a href="/status">Status</a><a href="/settings">Settings</a><div class="mini"><b>Last run</b><span class="ok">✓</span> Oct 16, 8:00 PM<b>Next run</b><span id="next-run" data-at="2026-10-18T01:00:00.000Z" data-overdue-suffix="">Oct 17, 8:00 PM · <span class="rel">in 10h</span></span></div></nav>
+<main class="hub-main"><div class="hub-content"><div class="split"><aside id="date-column"><div class="datetools"><a class="today-link" href="/reports/2026-10-17" id="today-link" title="Today's report (2026-10-17)">Today</a><label><input type="checkbox" id="only-matches"> Only days with matches</label></div><ul class="datelist" id="datelist"><li class="month" data-month="2026-10" data-current="1">October 2026</li><li data-month="2026-10"><a href="/reports/2026-10-17" class="today" title="2026-10-17 (today)"><span>Sat, Oct 17</span><span class="n">4 matches</span><span class="tag" data-tag="today">Today</span></a></li><li data-month="2026-10" data-empty="1"><a href="/reports/2026-10-16" class="quiet" title="2026-10-16"><span>Fri, Oct 16</span><span class="n">0 matches</span></a></li><li data-month="2026-10"><a href="/reports/2026-10-15" class="active" title="2026-10-15"><span>Thu, Oct 15</span><span class="n">1 match</span></a></li></ul></aside><section><div class="report-head"><form class="inline" method="post" action="/letters/missing" id="missing-letters-form"><input type="hidden" name="date" value="2026-10-15"><button class="btn small" type="submit" id="missing-letters" title="Write a letter for every high match on this date that has none and a trusted company name">Generate Missing Letters (1)</button></form><a class="btn secondary small" href="/desktop/2026-10-15" target="_blank" rel="noopener noreferrer" title="ROOT/output/2026-10-15/Daily Job Match Alert - 2026-10-15.html">Open Desktop Copy</a><a class="btn secondary small" href="/desktop/2026-10-15/xlsx" title="Download the Desktop workbook">Download XLSX</a></div><div class="page"><header class="masthead"><h1>October 15, 2026</h1><p class="sub">1 match · posted within the last 24 hours · Ran Oct 14, 8:00 PM</p></header>
+
+
+<form class="toolbar quiet" id="toolbar" autocomplete="off">
+    <input type="search" id="q" placeholder="Search company or title" aria-label="Search company or title">
+    <label class="control"><span>Sort by</span><select id="sort"><option value="score" selected>Best Score</option><option value="company">Company</option><option value="posted">Posted Time</option></select></label>
+    <select id="role" aria-label="Role type"><option value="">All Role Types</option><option value="new_grad">New Grad</option></select>
+    <label class="control"><span>Resume</span><select id="track"><option value="">All Resumes</option><option value="data">Data</option><option value="llm">LLM</option></select></label>
+    <span class="count" id="count">1 shown</span>
+  </form>
+<section class="jobs" id="jobs"><article class="job" data-score="87" data-company="example corp 7" data-posted="1792245600000" data-role="new_grad" data-track="data" data-search="example corp 7 data analyst 7">
+    <div class="ring" style="--score:87" role="img" aria-label="Best score 87"><b>87</b></div>
+    <div class="job-body">
+      <h2 class="job-title"><a target="_blank" rel="noopener noreferrer" href="https://jobs.example.com/7">Data Analyst 7</a></h2>
+      <p class="job-meta">Example Corp 7 · Remote - US · New Grad</p>
+      <div class="scores"><span class="track best" data-track="data">Data <b>87</b></span><span class="sep">·</span><span class="track" data-track="llm">LLM <b>60</b></span><span class="recommend">Apply with Data Resume</span></div>
+      
+      <div class="facts-label">Why It Matches</div><ul class="facts reasons"><li>SQL</li><li>Python</li></ul>
+      <div class="facts-label">Gaps / Verify</div><ul class="facts gaps"><li>JD skill not found in resume: dbt</li></ul>
+      <details class="jd"><summary>Job Description</summary><p>About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience. About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience. About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience. About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience. About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience. About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience.</p></details>
+      
+      <div class="actions"><a class="apply" target="_blank" rel="noopener noreferrer" href="https://jobs.example.com/7">Open Posting</a><button type="button" class="btn secondary small" data-oneclick="1" data-date="2026-10-15" data-job="096e95146e7b7b15">Generate Cover Letter</button><span class="meta" title="Date only: the source reports no time of day">Posted Oct 17 (date only) · Example Board</span></div>
+    </div>
+  </article></section><div class="empty" id="no-results" hidden>No matches for the current filters.</div>
+<details class="run" id="run-details"><summary>Run Details</summary><dl><dt>Application date</dt><dd>October 15, 2026</dd><dt>Lookback window</dt><dd>24 hours</dd><dt>Resume tracks</dt><dd>Data, LLM</dd><dt>Scoring model</dt><dd>local_only</dd><dt>Postings</dt><dd>3 reviewed · 1 matched</dd><dt>Trigger</dt><dd>scheduled</dd><dt>Updates today</dt><dd>Daily update #1 · last updated Oct 14, 2026, 8:00 PM</dd><dt>Status</dt><dd>No semantic review ran; scores are local triage only<ul><li>No pipeline warnings</li></ul></dd></dl></details>
+<footer class="foot">Generated locally. Scores are triage aids, not facts. Verify eligibility, posting date, and JD before applying. No applications were submitted.</footer></div></section></div></div></main></div>
+<script>
+(function () {
+  // The main list and the carried-over group sort and filter separately; the count covers both.
+  var lists = Array.prototype.slice.call(document.querySelectorAll('section.jobs'));
+  var toolbar = document.getElementById('toolbar');
+  if (!lists.length || !toolbar) return;
+  var cards = [];
+  lists.forEach(function (list) { cards = cards.concat(Array.prototype.slice.call(list.querySelectorAll('.job'))); });
+  var q = document.getElementById('q');
+  var sort = document.getElementById('sort');
+  var role = document.getElementById('role');
+  var track = document.getElementById('track');
+  var count = document.getElementById('count');
+  var none = document.getElementById('no-results');
+  function num(card, key) { var value = parseFloat(card.dataset[key]); return isNaN(value) ? -Infinity : value; }
+  function byScore(a, b) { return num(b, 'score') - num(a, 'score'); }
+  var sorters = {
+    score: byScore,
+    company: function (a, b) { return (a.dataset.company || '').localeCompare(b.dataset.company || '') || byScore(a, b); },
+    posted: function (a, b) { return num(b, 'posted') - num(a, 'posted') || byScore(a, b); }
+  };
+  function apply() {
+    var term = (q.value || '').trim().toLowerCase();
+    var wantRole = role.value;
+    var wantTrack = track.value;
+    var shown = 0;
+    cards.slice().sort(sorters[sort.value] || byScore).forEach(function (card) {
+      var ok = (!wantRole || card.dataset.role === wantRole)
+        && (!wantTrack || card.dataset.track === wantTrack)
+        && (!term || (card.dataset.search || '').indexOf(term) >= 0);
+      card.hidden = !ok;
+      if (ok) shown += 1;
+      card.parentNode.appendChild(card);
+    });
+    if (count) count.textContent = shown === cards.length ? cards.length + ' shown' : shown + ' of ' + cards.length + ' shown';
+    if (none) none.hidden = shown > 0;
+  }
+  [q, sort, role, track].forEach(function (control) {
+    if (!control) return;
+    control.addEventListener('input', apply);
+    control.addEventListener('change', apply);
+  });
+  toolbar.addEventListener('submit', function (event) { event.preventDefault(); });
+})();
+
+(function () {
+  document.querySelectorAll('.file input[type=file]').forEach(function (input) {
+    var label = input.closest('.file');
+    var name = label && label.querySelector('.file-name');
+    input.addEventListener('change', function () {
+      if (name) name.textContent = input.files && input.files[0] ? input.files[0].name : 'No file chosen';
+    });
+  });
+  // Sidebar "Next run" countdown, refreshed every minute; mirrors formatRelativeTime in time-format.mjs.
+  var next = document.getElementById('next-run');
+  var rel = next && next.querySelector('.rel');
+  if (next && rel && next.dataset.at) {
+    var at = new Date(next.dataset.at).getTime();
+    function relative() {
+      var diff = at - Date.now();
+      if (diff <= -1800000) return 'overdue';
+      if (diff <= 0) return 'due now';
+      var minutes = Math.ceil(diff / 60000);
+      if (minutes < 60) return 'in ' + minutes + 'm';
+      var hours = Math.floor(minutes / 60);
+      if (hours < 24) return 'in ' + hours + 'h' + (minutes % 60 ? ' ' + (minutes % 60) + 'm' : '');
+      var days = Math.floor(hours / 24);
+      return 'in ' + days + 'd' + (hours % 24 ? ' ' + (hours % 24) + 'h' : '');
+    }
+    var suffix = next.dataset.overdueSuffix || '';
+    function tick() { var text = relative(); rel.textContent = text === 'overdue' ? text + suffix : text; rel.classList.toggle('overdue', text === 'overdue'); }
+    tick();
+    setInterval(tick, 60000);
+  }
+  // A run in progress: keep the elapsed time ticking too.
+  var running = document.getElementById('running-elapsed');
+  var since = next && next.dataset.since ? new Date(next.dataset.since).getTime() : null;
+  if (running && since) {
+    function elapsed() { var m = Math.max(0, Math.floor((Date.now() - since) / 60000)); if (m < 60) return m + 'm'; var h = Math.floor(m / 60); return h < 24 ? h + 'h' + (m % 60 ? ' ' + (m % 60) + 'm' : '') : Math.floor(h / 24) + 'd' + (h % 24 ? ' ' + (h % 24) + 'h' : ''); }
+    setInterval(function () { running.textContent = elapsed(); }, 60000);
+  }
+})();
+
+(function () {
+  var list = document.getElementById('datelist');
+  var toggle = document.getElementById('only-matches');
+  var today = document.getElementById('today-link');
+  var column = document.getElementById('date-column');
+  if (!list || !toggle) return;
+  var key = 'hub.reports.onlyMatches';
+  var monthsKey = 'hub.reports.months';
+  var active = list.querySelector('a.active');
+  var activeMonth = active ? active.closest('li').dataset.month : null;
+  // Open/closed state per month; the current month is always open and the month holding the selected
+  // date opens for this page view without being remembered.
+  var months = {};
+  try { months = JSON.parse(localStorage.getItem(monthsKey) || '{}') || {}; } catch (e) { months = {}; }
+  var collapsed = {};
+  list.querySelectorAll('li.month').forEach(function (heading) {
+    var month = heading.dataset.month;
+    if (heading.dataset.current === '1') { collapsed[month] = false; return; }
+    collapsed[month] = months[month] === 'open' ? false : months[month] === 'closed' ? true : heading.dataset.collapsed === '1';
+    if (month === activeMonth) collapsed[month] = false;
+  });
+  function apply() {
+    var only = toggle.checked;
+    try { localStorage.setItem(key, only ? '1' : '0'); } catch (e) {}
+    var monthsWithDays = {};
+    list.querySelectorAll('li:not(.month)').forEach(function (item) {
+      var shown = !(only && item.dataset.empty === '1');
+      if (shown) monthsWithDays[item.dataset.month] = true;
+      item.hidden = !shown || collapsed[item.dataset.month] === true;
+    });
+    list.querySelectorAll('li.month').forEach(function (heading) {
+      var month = heading.dataset.month;
+      heading.hidden = !monthsWithDays[month];
+      if (collapsed[month]) heading.dataset.collapsed = '1'; else delete heading.dataset.collapsed;
+      var button = heading.querySelector('.month-toggle');
+      if (button) button.setAttribute('aria-expanded', collapsed[month] ? 'false' : 'true');
+    });
+  }
+  list.addEventListener('click', function (event) {
+    var button = event.target.closest('.month-toggle');
+    if (!button) return;
+    var month = button.closest('li').dataset.month;
+    collapsed[month] = !collapsed[month];
+    months[month] = collapsed[month] ? 'closed' : 'open';
+    try { localStorage.setItem(monthsKey, JSON.stringify(months)); } catch (e) {}
+    apply();
+  });
+  try { toggle.checked = localStorage.getItem(key) === '1'; } catch (e) {}
+  toggle.addEventListener('change', apply);
+  apply();
+  if (today && column) today.addEventListener('click', function () { column.scrollTop = 0; });
+  if (active && column && active.offsetTop > column.clientHeight - 40) column.scrollTop = active.offsetTop - 80;
+})();
+
+(function () {
+  // While the automatic pass is writing letters, refresh the page every 30 seconds to pick them up.
+  if (document.querySelector('[data-autoletter]')) setTimeout(function () { window.location.reload(); }, 30000);
+  var buttons = Array.prototype.slice.call(document.querySelectorAll('button[data-oneclick]'));
+  if (!buttons.length) return;
+  var BUSY_TITLE = 'Another cover letter is generating; wait for it to finish';
+  var active = null;
+  function post(url, fields) {
+    var params = new URLSearchParams(); Object.keys(fields).forEach(function (key) { params.append(key, fields[key]); });
+    return fetch(url, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: params.toString() }).then(function (r) { return r.json().then(function (data) { data.httpStatus = r.status; return data; }); });
+  }
+  function cardOf(button) { return button.closest('.job'); }
+  function noteOn(button, text) {
+    var actions = button.closest('.actions');
+    var note = actions && actions.querySelector('.letter-note');
+    if (!note && actions) { note = document.createElement('span'); note.className = 'meta letter-note'; note.setAttribute('data-letter-note', ''); actions.appendChild(note); }
+    if (note) { note.textContent = text || ''; note.hidden = !text; }
+  }
+  function setBusy(busy, job) {
+    buttons.forEach(function (button) {
+      if (button.dataset.state === 'generating' || button.dataset.state === 'ready') return;
+      button.disabled = busy;
+      button.title = busy ? BUSY_TITLE : '';
+    });
+  }
+  function matching(job) {
+    return buttons.find(function (button) { return job && button.dataset.date === job.date && button.dataset.job === job.jobId; }) || null;
+  }
+  function markGenerating(button) {
+    button.dataset.state = 'generating'; button.disabled = true; button.textContent = 'Generating…'; button.title = '';
+    noteOn(button, '');
+  }
+  function markReady(button, result) {
+    button.dataset.state = 'ready';
+    var open = document.createElement('a'); open.className = 'btn secondary small'; open.href = result.openUrl; open.textContent = 'Open Letter';
+    var download = document.createElement('a'); download.className = 'btn secondary small'; download.href = result.downloadUrl; download.textContent = 'Download PDF';
+    button.replaceWith(download, open);
+    buttons = buttons.filter(function (item) { return item !== button; });
+    var card = open.closest('.job');
+    var badges = card && card.querySelector('.badges');
+    if (card && !badges) { badges = document.createElement('div'); badges.className = 'badges'; card.querySelector('.scores').insertAdjacentElement('afterend', badges); }
+    // Only a letter with details to confirm gets a badge: "Check N details", the items on hover.
+    if (badges && result.checkBadge && !badges.querySelector('[data-badge="letter-check"]')) { var badge = document.createElement('span'); badge.className = 'badge badge-warn'; badge.setAttribute('data-badge', 'letter-check'); badge.textContent = result.checkBadge.label; badge.title = result.checkBadge.title; badges.appendChild(badge); }
+    var anchor = document.createElement('a'); anchor.href = result.downloadUrl; anchor.download = ''; anchor.hidden = true; document.body.appendChild(anchor); anchor.click(); anchor.remove();
+  }
+  function markFailed(button, message, quota) {
+    button.dataset.state = ''; button.disabled = false; button.textContent = 'Generate Cover Letter'; button.title = '';
+    // message is already a humanized line from the hub; quota carries the reset and the Codex option.
+    noteOn(button, (quota && quota.message ? quota.message : (message || 'Generation failed (unknown error); details in the hub log')) + (quota && !quota.codexAvailable && quota.kind && quota.kind !== 'auth_expired' ? '. Try again after the reset, or sign in to Codex to generate with ChatGPT.' : ''));
+    var actions = button.closest('.actions');
+    var old = actions && actions.querySelector('[data-codex]');
+    if (old) old.remove();
+    if (quota && quota.codexAvailable && actions) {
+      var codex = document.createElement('button'); codex.type = 'button'; codex.className = 'btn secondary small'; codex.setAttribute('data-codex', '1'); codex.textContent = 'Generate with Codex';
+      codex.addEventListener('click', function () { codex.remove(); start(button, 'codex'); });
+      button.insertAdjacentElement('afterend', codex);
+    }
+  }
+  function poll() {
+    fetch('/letters/oneclick.json', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (job) {
+      var button = matching(job);
+      if (job.state === 'generating') {
+        if (button && button.dataset.state !== 'generating') markGenerating(button);
+        setBusy(true, job);
+        setTimeout(poll, 1500);
+        return;
+      }
+      if (button && button.dataset.state === 'generating') {
+        if (job.state === 'ready' && job.result) markReady(button, job.result);
+        else markFailed(button, job.error, job.quota || job.errorKind === 'auth_expired' ? { kind: job.quota ? job.quota.kind : 'auth_expired', message: job.error, codexAvailable: job.codexAvailable === true } : null);
+      }
+      active = null;
+      setBusy(false, null);
+    }).catch(function () { setTimeout(poll, 3000); });
+  }
+  function start(button, engine) {
+    if (button.disabled) return;
+    markGenerating(button);
+    setBusy(true, null);
+    var fields = { date: button.dataset.date, job: button.dataset.job };
+    if (engine) fields.engine = engine;
+    post('/letters/oneclick', fields).then(function (data) {
+      if (data.state === 'confirm' && data.panelUrl) { window.location.href = data.panelUrl; return; }
+      if (data.httpStatus !== 202) { markFailed(button, data.error, data.quota || (data.kind === 'auth_expired' ? { kind: 'auth_expired', message: data.error, codexAvailable: data.codexAvailable === true } : null)); if (data.httpStatus === 409) { setBusy(true, data.job); setTimeout(poll, 1500); } else { setBusy(false, null); } return; }
+      active = data.id;
+      setTimeout(poll, 1000);
+    }).catch(function (error) { markFailed(button, error.message); setBusy(false, null); });
+  }
+  buttons.forEach(function (button) { button.addEventListener('click', function () { start(button, null); }); });
+  poll();
+})();
+</script>
+</body></html>

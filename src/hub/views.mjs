@@ -1,6 +1,8 @@
 // Hub pages. The shell adds a sticky left navigation around content built from the same components and
 // tokens as the Desktop report (report-components.mjs / report-theme.mjs), so both look alike in light
 // and dark mode. Every timestamp is shown in config.timeZone; resume text is never rendered here.
+import { assetPath } from './assets.mjs';
+import { formatBytes, phasesText } from './report-timing.mjs';
 import { REPORT_SCRIPT, REPORT_STYLES } from '../report-theme.mjs';
 import { formatCount, formatDateLabel, formatElapsed, formatLocalDateTime, formatLocalDay, formatLocalShort, formatRelativeTime } from '../time-format.mjs';
 import { planLabel } from '../engines/quota.mjs';
@@ -190,10 +192,10 @@ export function renderHubPage({ active, title, content, notice = '', error = '',
   ].join('');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${htmlEscape(title)} — ${htmlEscape(HUB_TITLE)}</title>
-<style>${REPORT_STYLES}${HUB_STYLES}${LETTER_STYLES}${MODEL_SETTINGS_STYLES}</style></head>
+<link rel="stylesheet" href="${assetPath(`${REPORT_STYLES}${HUB_STYLES}${LETTER_STYLES}${MODEL_SETTINGS_STYLES}`, 'css')}"></head>
 <body><div class="hub"><nav class="hub-nav"><p class="brand">${htmlEscape(HUB_BRAND)}</p>${nav}${renderMiniStatus(sidebar, timeZone, now)}</nav>
 <main class="hub-main"><div class="hub-content">${flash}${content}</div></main></div>
-<script>${REPORT_SCRIPT}${HUB_SCRIPT}${script}</script>
+<script src="${assetPath(`${REPORT_SCRIPT}${HUB_SCRIPT}${script}`, 'js')}"></script>
 </body></html>`;
 }
 
@@ -265,7 +267,30 @@ export function reportsPage({ dates, selected, reportBody, desktopPath, today, m
   return `<div class="split"><aside id="date-column">${list}</aside><section>${body}</section></div>`;
 }
 
-export const REPORTS_SCRIPT = `
+// The on-demand JD loader (see report.mjs lazyDescription); the rest of REPORTS_SCRIPT is unchanged.
+export const JD_LOADER_SCRIPT = `
+(function () {
+  // A long Job Description arrives as its first 300 characters; opening it loads the full text once
+  // (GET /reports/<date>/jd/<card id>) and the section then reads exactly as before.
+  document.addEventListener('toggle', function (event) {
+    var details = event.target;
+    if (!details || !details.open || !details.matches || !details.matches('details.jd[data-jd-src]')) return;
+    var src = details.getAttribute('data-jd-src');
+    if (details.getAttribute('data-jd-loading')) return;
+    details.setAttribute('data-jd-loading', '1');
+    fetch(src, { headers: { accept: 'text/plain' } }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.text();
+    }).then(function (text) {
+      details.querySelector('p').textContent = text;
+      details.removeAttribute('data-jd-src');
+      details.removeAttribute('data-jd-loading');
+    }).catch(function () { details.removeAttribute('data-jd-loading'); });
+  }, true);
+})();
+`;
+
+export const REPORTS_SCRIPT = JD_LOADER_SCRIPT + `
 (function () {
   var list = document.getElementById('datelist');
   var toggle = document.getElementById('only-matches');
@@ -562,7 +587,22 @@ export function statusPage({ status, timeZone }) {
   ${autoLettersCard(status.autoLetters, timeZone)}
   ${sourcesCard(status.sources || [], timeZone)}
   <article class="card"><h2>Warnings</h2><p class="muted">Last 7 report dates.</p>${status.days.length ? status.days.map(dayRow).join('') : '<p class="muted">No reports yet.</p>'}</article>
-  <article class="card"><h2>Error Reports</h2>${errors}</article>`;
+  <article class="card"><h2>Error Reports</h2>${errors}</article>
+  ${hubCard(status.hub, timeZone)}`;
+}
+
+// Hub card: the last Reports page requests with their stage timings, sizes, and render-cache result.
+function hubCard(hub, timeZone) {
+  if (!hub) return '';
+  const rows = (hub.timings || []).map(record => `<tr><td>${htmlEscape(formatLocalDateTime(record.at, timeZone))}</td><td class="mono">${htmlEscape(record.path)}</td><td>${record.notModified ? '304' : Number(record.status)}</td><td>${Number(record.totalMs)} ms</td><td>${htmlEscape(phasesText(record.phases) || '—')}</td><td>${record.notModified ? '—' : `${htmlEscape(formatBytes(record.bytes))}${record.encodedBytes != null ? ` <span class="muted">(gzip ${htmlEscape(formatBytes(record.encodedBytes))})</span>` : ''}`}</td><td>${htmlEscape(record.cache || '—')}</td></tr>`).join('');
+  const cache = hub.cache || {};
+  const last = cache.invalidations?.[0];
+  const cacheLine = `${Number(cache.renderHits || 0)} hit(s), ${Number(cache.renderMisses || 0)} miss(es) · ${Number(cache.renders || 0)} render(s) and ${Number(cache.days || 0)} day(s) held${last ? ` · last cleared ${htmlEscape(formatLocalDateTime(last.at, timeZone))} (${htmlEscape(last.reason)})` : ''}`;
+  return `<article class="card" id="hub-card"><h2>Hub</h2>
+  <p class="muted">Report page requests since the hub started (newest first; also in the hub log). Stages: reports index, payload read, eligibility and location re-check, letter status scan, HTML render, sidebar.</p>
+  <dl class="kv"><dt>Render cache</dt><dd id="hub-cache">${cacheLine}</dd></dl>
+  ${rows ? `<table class="plain" id="hub-timings"><tr><th>When</th><th>Page</th><th>Status</th><th>Total</th><th>Stages</th><th>Size</th><th>Cache</th></tr>${rows}</table>` : '<p class="muted" id="hub-timings">No report requests yet.</p>'}
+</article>`;
 }
 
 export const STATUS_SCRIPT = `

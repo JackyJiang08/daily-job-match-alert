@@ -8,6 +8,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
+import { inlineAssets } from './helpers/report-hub.mjs';
 import test from 'node:test';
 import { MAX_WORDS, MIN_WORDS, assembleLetter, buildCondensePrompt, buildCoverLetterPrompt, buildReviewPrompt, deriveFileNamePrefix, graduationTerms, letterDate, letterFileName, letterRules, missingRequirements, sanitizeCompany, selectSamples, validateParagraphs } from '../src/cover-letter/compose.mjs';
 import { condenseCoverLetter, generateCoverLetter, reviewCoverLetter } from '../src/cover-letter/generate.mjs';
@@ -387,6 +388,7 @@ async function prepareProject() {
 
 async function startHub(root, overrides = {}) {
   const ctx = createHubContext({
+    timingLog: () => {},
     configPath: path.join(root, 'config.json'), port: 0, now: () => new Date(NOW), homedir: root,
     pidAlive: () => false, spawn: () => Object.assign(new EventEmitter(), { pid: 1, stdout: new PassThrough(), stderr: new PassThrough() }),
     extractText: async () => 'Extracted sample text that is long enough to count as a real sample letter body.',
@@ -402,7 +404,7 @@ async function startHub(root, overrides = {}) {
     const req = http.request(`${base}${pathname}`, { method, headers: { host: `127.0.0.1:${ctx.port}`, ...headers } }, res => {
       const chunks = [];
       res.on('data', chunk => chunks.push(chunk));
-      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, buffer: Buffer.concat(chunks), text: Buffer.concat(chunks).toString('utf8') }));
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, buffer: Buffer.concat(chunks), text: inlineAssets(Buffer.concat(chunks).toString('utf8')) }));
     });
     req.on('error', reject);
     if (body) req.write(body);

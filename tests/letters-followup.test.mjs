@@ -9,6 +9,7 @@ import fs from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { inlineAssets } from './helpers/report-hub.mjs';
 import test from 'node:test';
 import { autoLetterSettings, readLettersBacklog, readLettersStatus, runAutoLetters } from '../src/auto-letters.mjs';
 import { classifyEditorNotes, reviewBadge } from '../src/cover-letter/notes.mjs';
@@ -69,6 +70,7 @@ async function contextFor(root, { behaviour = null, gate = null, editorIssues = 
     },
   });
   const ctx = createHubContext({
+    timingLog: () => {},
     configPath: path.join(root, 'config.json'), port: 0, now: () => new Date(NOW), homedir: root, chromeCommand: false,
     // The letters lock is "held" while this process holds it.
     pidAlive: pid => pid === process.pid, letterEngine: engineFor(),
@@ -88,7 +90,7 @@ async function startServer(ctx) {
     const req = http.request(`http://127.0.0.1:${ctx.port}${pathname}`, { method, headers: { host: `127.0.0.1:${ctx.port}`, ...(body ? { 'content-type': 'application/x-www-form-urlencoded' } : {}) } }, res => {
       const chunks = [];
       res.on('data', chunk => chunks.push(chunk));
-      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, text: Buffer.concat(chunks).toString('utf8') }));
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, text: inlineAssets(Buffer.concat(chunks).toString('utf8')) }));
     });
     req.on('error', reject);
     if (body) req.write(new URLSearchParams(body).toString());

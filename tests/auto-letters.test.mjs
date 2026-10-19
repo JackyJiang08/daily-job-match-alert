@@ -60,6 +60,7 @@ async function contextFor(root, { codexConnected = true, behaviour = null, calls
     },
   });
   const ctx = createHubContext({
+    timingLog: () => {},
     configPath: path.join(root, 'config.json'), now: () => new Date(NOW), homedir: root, chromeCommand: false,
     pidAlive: () => false, letterEngine: engineFor(),
     describeConnections: async () => ({ claude: { installed: true, connected: true, detail: 'Claude · Max' }, codex: { installed: true, connected: codexConnected, detail: 'Codex · ChatGPT' } }),

@@ -54,22 +54,28 @@ export function locationNotStated(job) {
   return job.eligibility?.location?.verdict === 'unverified' && !usEvidenceInDescription(job.description);
 }
 
-function displayGaps(job) {
-  const stated = !locationNotStated(job);
+// The render-time re-check for each posting, computed once per report: the hub keeps it with its render
+// cache so it is not repeated on every page load. Indexed like `jobs`.
+export function reviewReportJobs(jobs) {
+  return jobs.map(job => ({ locationNotStated: locationNotStated(job) }));
+}
+
+function displayGaps(job, review = null) {
+  const stated = !(review ? review.locationNotStated : locationNotStated(job));
   return (job.gaps || []).map(String)
     .filter(gap => !(stated && (gap === LOCATION_UNVERIFIED_GAP || gap === LEGACY_LOCATION_GAP)))
     .map(gap => (gap === LEGACY_LOCATION_GAP ? LOCATION_UNVERIFIED_GAP : gap));
 }
 
 // Semantic markers shown as small badges instead of text prefixes.
-export function jobBadges(job) {
+export function jobBadges(job, review = null) {
   const badges = [];
   const unreviewed = job.matchLevel === 'unreviewed' || job.scoringEngine === 'local_fallback';
   if (unreviewed) badges.push({ key: 'unreviewed', label: 'Unreviewed', tone: 'warn', title: 'Semantic review was unavailable; the local triage score was kept' });
   else if (job.semanticReviewed && job.matchLevel && job.matchLevel !== 'high') {
     badges.push({ key: `match-${job.matchLevel}`, label: `Match: ${job.matchLevel}`, tone: 'note' });
   }
-  if (locationNotStated(job)) {
+  if (review ? review.locationNotStated : locationNotStated(job)) {
     badges.push({ key: 'location-unverified', label: LOCATION_NOT_STATED_LABEL, tone: 'note', title: LOCATION_NOT_STATED_TITLE });
   }
   if (companyIsUncertain(job)) {
@@ -117,7 +123,7 @@ function footnote(job, timeZone) {
   return { text: parts.join(' · '), title };
 }
 
-export function cardView(job, tracks, timeZone = null, decorate = null) {
+export function cardView(job, tracks, timeZone = null, decorate = null, review = null) {
   const scores = tracks.map(track => ({ id: track.id, label: track.label, value: trackScore(job, track.id), best: track.id === job.recommendedTrack }));
   if (!scores.some(score => score.best) && scores.length) {
     const top = scores.reduce((best, score) => (score.value > best.value ? score : best), scores[0]);
@@ -141,9 +147,9 @@ export function cardView(job, tracks, timeZone = null, decorate = null) {
     scores,
     recommendedTrack,
     recommendation: recommendedLabel ? `Apply with ${recommendedLabel} Resume` : 'No Resume Recommended',
-    badges: [...jobBadges(job), ...(Array.isArray(extra.badges) ? extra.badges : [])],
+    badges: [...jobBadges(job, review), ...(Array.isArray(extra.badges) ? extra.badges : [])],
     reasons: (job.reasons || []).map(String),
-    gaps: displayGaps(job),
+    gaps: displayGaps(job, review),
     description: String(job.description || '').trim(),
     footnote: note.text,
     footnoteTitle: note.title,
@@ -345,6 +351,20 @@ export function runDetailsView(jobs, meta, tracks) {
   return { rows };
 }
 
+// lazyDescription { limit, src(card) }: a JD longer than `limit` characters (code points, so an emoji is
+// never cut in half) keeps only its first `limit` in the page plus the URL the full text loads from;
+// src returning null keeps the whole text.
+export const LAZY_DESCRIPTION_CHARACTERS = 300;
+
+function lazyDescription(card, { limit = LAZY_DESCRIPTION_CHARACTERS, src }) {
+  const characters = Array.from(card.description || '');
+  if (characters.length <= limit) return;
+  const url = typeof src === 'function' ? src(card) : null;
+  if (!url) return;
+  card.descriptionPreview = characters.slice(0, limit).join('');
+  card.descriptionSrc = url;
+}
+
 // The view object consumed by report-components; the hub renders the same view inside its shell.
 // "1 match · Ran Sep 12, 8:00 PM"; the run time comes from the pipeline's own meta.completedAt.
 // "posted within the last 24 hours" / "last 2 days" from the oldest posting date actually in the report,
@@ -377,7 +397,9 @@ export function mastheadSubtitle(jobs, meta, { withDate = true } = {}) {
 // `embedded: true`, which titles the masthead with the date instead of repeating the product name.
 export function buildReportView(jobs, meta, options = {}) {
   const tracks = reportTracks(meta, jobs);
-  const allCards = jobs.map(job => cardView(job, tracks, meta.timeZone, options.decorate));
+  const review = Array.isArray(options.review) && options.review.length === jobs.length ? options.review : null;
+  const allCards = jobs.map((job, index) => cardView(job, tracks, meta.timeZone, options.decorate, review ? review[index] : null));
+  if (options.lazyDescription) for (const card of allCards) lazyDescription(card, options.lazyDescription);
   // The main list holds this run's window; postings the review budget carried from an earlier run are
   // a separate group under it.
   const cards = allCards.filter(card => !card.carriedOver);
