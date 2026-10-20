@@ -57,6 +57,20 @@ async function readJson(io, file, fallback = null) {
   try { return JSON.parse(await io.readFile(file, 'utf8')); } catch { return fallback; }
 }
 
+// state/state.json for the hub's read-only views (Status, the plan-change banner, Settings) without its
+// seen map, which is most of the file (tens of megabytes): parsed once per mtime and size, then shared.
+// Callers treat the object as read-only.
+export async function readStateView(ctx) {
+  const file = path.join(ctx.root, 'state', 'state.json');
+  const info = await ctx.io.stat(file).catch(() => null);
+  if (!info) return {};
+  const key = `${info.mtimeMs}|${info.size}`;
+  if (ctx.stateView?.key === key) return ctx.stateView.value;
+  const { seen, ...value } = await readJson(ctx.io, file, {}) || {};
+  ctx.stateView = { key, value };
+  return value;
+}
+
 // ---------------------------------------------------------------------------------------------- reports
 
 export async function listReportDates(ctx) {
@@ -366,7 +380,7 @@ export async function currentPlans(ctx, config) {
 // A plan change worth a banner: reported by the newest run (meta.planChange), or seen by the hub's own
 // probe against the plan the pipeline last recorded. Cleared once Settings is opened after it.
 export async function planChangeView(ctx, config, latest, plans) {
-  const state = await readJson(ctx.io, path.join(ctx.root, 'state', 'state.json'), {}) || {};
+  const state = await readStateView(ctx);
   const recorded = state.observedPlans?.claude?.type || null;
   let change = latest?.meta?.planChange || null;
   if (plans?.claude && recorded && plans.claude !== recorded && (!change || change.to !== plans.claude)) {
@@ -511,7 +525,7 @@ export async function buildStatusView(ctx, config, timer = null) {
 }
 
 async function statusViewFrom(ctx, config, { now, entries, latest }) {
-  const state = await readJson(ctx.io, path.join(ctx.root, 'state', 'state.json'), {}) || {};
+  const state = await readStateView(ctx);
   const latestDate = entries[0]?.date || null;
   const lastUpdatedAt = latest?.meta?.completedAt || latest?.meta?.lastUpdatedAt || latest?.meta?.generatedAt || null;
 
@@ -724,7 +738,7 @@ export async function readSettings(ctx) {
     payloadRetentionDays: retentionDays(config),
     editorReview: config.coverLetter?.editorReview !== false,
     autoLetters: autoLetterSettings(config),
-    prescreen: prescreenOverview(config, await readJson(ctx.io, path.join(ctx.root, 'state', 'state.json'), {}) || {}),
+    prescreen: prescreenOverview(config, await readStateView(ctx)),
     hubPort: Number(config.hub?.port || 4747),
   };
 }

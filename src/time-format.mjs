@@ -2,13 +2,17 @@
 // "Sep 13, 2026, 8:00 PM" style, never in UTC. Shared by the Desktop report and the hub.
 export const DEFAULT_TIME_ZONE = 'America/Chicago';
 
+const SAFE_ZONES = new Map();
 function safeZone(timeZone) {
+  const zone = timeZone || DEFAULT_TIME_ZONE;
+  if (SAFE_ZONES.has(zone)) return SAFE_ZONES.get(zone);
+  let safe = DEFAULT_TIME_ZONE;
   try {
-    new Intl.DateTimeFormat('en-US', { timeZone: timeZone || DEFAULT_TIME_ZONE });
-    return timeZone || DEFAULT_TIME_ZONE;
-  } catch {
-    return DEFAULT_TIME_ZONE;
-  }
+    new Intl.DateTimeFormat('en-US', { timeZone: zone });
+    safe = zone;
+  } catch {}
+  SAFE_ZONES.set(zone, safe);
+  return safe;
 }
 
 function parse(value) {
@@ -47,8 +51,15 @@ export function formatDateLabel(date) {
 }
 
 // YYYY-MM-DD of `now` in the zone
+// One formatter per zone: building an Intl.DateTimeFormat costs far more than formatting with it.
+const DATE_FORMATTERS = new Map();
+function dateFormatter(zone) {
+  if (!DATE_FORMATTERS.has(zone)) DATE_FORMATTERS.set(zone, new Intl.DateTimeFormat('en-US', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }));
+  return DATE_FORMATTERS.get(zone);
+}
+
 export function localDate(now, timeZone) {
-  const parts = new Intl.DateTimeFormat('en-US', { timeZone: safeZone(timeZone), year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now);
+  const parts = dateFormatter(safeZone(timeZone)).formatToParts(now);
   const value = type => parts.find(part => part.type === type)?.value;
   return `${value('year')}-${value('month')}-${value('day')}`;
 }

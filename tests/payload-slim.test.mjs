@@ -15,6 +15,7 @@ import { isEligible } from '../src/match.mjs';
 import { maintainPayloads } from '../src/payload-maintenance.mjs';
 import { SLIM_JOB_FIELDS, archivePayload, payloadFilePath, readPayloadFile, retentionDays, slimPayload, wentToFinalReview, writePayloadFile } from '../src/payload-store.mjs';
 import { main as compactMain } from '../src/payloads-compact.mjs';
+import { usageWindow } from '../src/engines/usage.mjs';
 import { buildHtml } from '../src/report.mjs';
 import { readReportsIndex, syncReportsIndex, updateReportsIndex } from '../src/reports-index.mjs';
 import { readStatusSummary, refreshStatusLetters, statusSummaryPath, updateStatusSummary } from '../src/status-summary.mjs';
@@ -398,4 +399,35 @@ test('Settings → Pipeline: the retention period is shown, saved to config.repo
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });
   }
+});
+
+test('Status reads state/state.json once per change and without its seen map; the usage window gives the same totals', async () => {
+  const root = await prepareReportProject();
+  await addStatusFixture(root, { writePayload, fixturePayload, selectedMatches });
+  const statePath = path.join(root, 'state', 'state.json');
+  const state = JSON.parse(await fs.readFile(statePath, 'utf8'));
+  await fs.writeFile(statePath, JSON.stringify({ ...state, seen: { 'https://jobs.example.com/x': { completed: true } } }));
+  const stateReads = [];
+  const io = { ...fs, readFile: (file, ...rest) => { if (String(file) === statePath) stateReads.push(file); return fs.readFile(file, ...rest); } };
+  const hub = await startReportHub(root, { context: { io } });
+  try {
+    const first = await hub.request('/status');
+    await hub.request('/status');
+    await hub.request('/settings?tab=pipeline');
+    assert.equal(stateReads.length, 1, 'parsed once for Status, the plan banner, and Settings');
+    assert.equal(hub.ctx.stateView.value.seen, undefined);
+    assert.equal(hub.ctx.stateView.value.lastSuccessfulRun, '2026-10-17T01:00:00.000Z');
+    await fs.writeFile(statePath, JSON.stringify({ ...state, lastSuccessfulRun: '2026-10-17T02:00:00.000Z' }));
+    await hub.request('/status');
+    assert.equal(stateReads.length, 2, 'a changed file is read again');
+    assert.equal(withoutHubCard(normalizeHtml(inlineAssets(first.text), { port: hub.port(), root })), await fs.readFile(new URL('status-page.html', snapshots), 'utf8'));
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+  const at = hours => new Date(Date.parse('2026-10-17T12:00:00Z') - hours * 3_600_000).toISOString();
+  const entries = [0, 5, 13, 30, 47, 70, 100, 170, 200].map((hours, index) => ({ at: at(hours), purpose: 'review', model: 'claude-opus-5-5', engine: 'claude', calls: 1, input: 10 + index, output: 5, cacheRead: 0, cacheCreation: 0, reasoning: 0 }));
+  const window = usageWindow({ entries }, { now: new Date('2026-10-17T12:00:00Z'), timeZone: 'America/Chicago', days: 7 });
+  assert.deepEqual(window.nights.map(night => [night.date, night.calls]), [['2026-10-11', 0], ['2026-10-12', 0], ['2026-10-13', 1], ['2026-10-14', 1], ['2026-10-15', 1], ['2026-10-16', 2], ['2026-10-17', 2]], 'the values the earlier implementation gave');
+  assert.equal(window.total.calls, 7);
 });

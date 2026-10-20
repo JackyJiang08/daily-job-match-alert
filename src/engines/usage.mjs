@@ -151,8 +151,14 @@ export function summarizeUsage(entries) {
 export function usageWindow(record, { now = new Date(), timeZone = null, days = 7 } = {}) {
   const dates = [];
   for (let offset = days - 1; offset >= 0; offset -= 1) dates.push(localDate(new Date(now.getTime() - offset * 86_400_000), timeZone || 'America/Chicago'));
-  const inWindow = (record?.entries || []).filter(entry => dates.includes(localDate(new Date(entry.at), timeZone || 'America/Chicago')));
-  const nights = dates.map(date => ({ date, ...summarizeUsage(inWindow.filter(entry => localDate(new Date(entry.at), timeZone || 'America/Chicago') === date)).total }));
+  // Each entry's local date is worked out once (the Status page reads hundreds of entries).
+  const dayByAt = new Map();
+  const dayOf = entry => {
+    if (!dayByAt.has(entry.at)) dayByAt.set(entry.at, localDate(new Date(entry.at), timeZone || 'America/Chicago'));
+    return dayByAt.get(entry.at);
+  };
+  const inWindow = (record?.entries || []).filter(entry => dates.includes(dayOf(entry)));
+  const nights = dates.map(date => ({ date, ...summarizeUsage(inWindow.filter(entry => dayOf(entry) === date)).total }));
   return { ...summarizeUsage(inWindow), nights, days };
 }
 

@@ -62,6 +62,9 @@ disabled; do not expand them unless a task says so.
   date/mtime/size do not match the index). GET /status is timed (index · status summary · status data ·
   render · sidebar) into the same timing log as the Reports pages. tests/fixtures/snapshots/status-page.html
   (pre-change code, Hub card stripped by tests/helpers/status-fixture.mjs withoutHubCard).
+  readStateView(ctx) parses state/state.json (≈90 MB, mostly `seen`) once per mtime/size and drops `seen`
+  (Status, plan banner, Settings; read-only). usageWindow computes each entry's local date once, and
+  time-format.mjs caches safeZone and the date formatter per zone.
 - Reports speed (2026-10-19): src/reports-index.mjs keeps state/reports-index.json (per date: generatedAt,
   matchCount, deferredCount, carriedCount, letterCount, complete, sidebar fields, payloadMtimeMs/Size,
   lettersMtimeMs); the pipeline's writeReportPayload calls updateReportsIndex, the wrapped
