@@ -8,7 +8,10 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { createHubContext, createHubServer } from '../../src/hub/server.mjs';
 import { jobIdOf } from '../../src/hub/letters.mjs';
+import assert from 'node:assert/strict';
 import { readAsset } from '../../src/hub/assets.mjs';
+import { JD_LOADER_SCRIPT } from '../../src/hub/views.mjs';
+import { htmlEscape } from '../../src/utils.mjs';
 
 export const NOW = '2026-10-17T15:00:00Z';
 export const DATES = ['2026-10-15', '2026-10-16', '2026-10-17'];
@@ -117,4 +120,28 @@ export function inlineAssets(html) {
   return String(html)
     .replace(/<link rel="stylesheet" href="\/assets\/(hub-[a-f0-9]{16}\.css)">/g, (all, name) => `<style>${readAsset(name)?.body.toString('utf8') ?? ''}</style>`)
     .replace(/<script src="\/assets\/(hub-[a-f0-9]{16}\.js)"><\/script>/g, (all, name) => `<script>${readAsset(name)?.body.toString('utf8') ?? ''}</script>`);
+}
+
+export const LAZY = /<details class="jd" data-jd-src="([^"]+)"><summary>Job Description<\/summary><p>([\s\S]*?)<\/p><\/details>/g;
+
+// The page as it was before the change: assets inline, the JD loader taken out of the page script, and
+// every lazy JD replaced by its full text from the JD route, embedded the way the old page embedded it.
+export async function asBefore(hub, html, root) {
+  let text = inlineAssets(html);
+  assert.ok(text.includes(JD_LOADER_SCRIPT));
+  text = text.replace(JD_LOADER_SCRIPT, '');
+  const lazy = [...text.matchAll(LAZY)];
+  for (const [whole, src] of lazy) {
+    const reply = await hub.request(src);
+    assert.equal(reply.status, 200, src);
+    text = text.replace(whole, `<details class="jd"><summary>Job Description</summary><p>${htmlEscape(reply.text)}</p></details>`);
+  }
+  return { text: normalizeHtml(text, { port: hub.port(), root }), lazy };
+}
+
+// A spy on the hub's file reads: how many day payloads were read.
+export function countingIo() {
+  const reads = [];
+  const io = { ...fs, readFile: (file, ...rest) => { if (/report-payload-/.test(String(file))) reads.push(path.basename(String(file))); return fs.readFile(file, ...rest); } };
+  return { io, reads };
 }

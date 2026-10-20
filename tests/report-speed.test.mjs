@@ -12,36 +12,11 @@ import { ASSET_CACHE_CONTROL } from '../src/hub/assets.mjs';
 import { createReportCache } from '../src/hub/report-cache.mjs';
 import { createTimingLog, timingLine } from '../src/hub/report-timing.mjs';
 import { etagMatches } from '../src/hub/routes.mjs';
-import { JD_LOADER_SCRIPT } from '../src/hub/views.mjs';
 import { refreshIndexLetters, readReportsIndex, reportsIndexPath, syncReportsIndex, updateReportsIndex } from '../src/reports-index.mjs';
 import { htmlEscape } from '../src/utils.mjs';
-import { DATES, fixtureJob, fixturePayload, inlineAssets, normalizeHtml, prepareReportProject, selectedMatches, startReportHub, writePayload } from './helpers/report-hub.mjs';
+import { DATES, LAZY, asBefore, countingIo, fixtureJob, fixturePayload, inlineAssets, prepareReportProject, selectedMatches, startReportHub, writePayload } from './helpers/report-hub.mjs';
 
 const snapshots = new URL('./fixtures/snapshots/', import.meta.url);
-const LAZY = /<details class="jd" data-jd-src="([^"]+)"><summary>Job Description<\/summary><p>([\s\S]*?)<\/p><\/details>/g;
-
-// The page as it was before the change: assets inline, the JD loader taken out of the page script, and
-// every lazy JD replaced by its full text from the JD route, embedded the way the old page embedded it.
-async function asBefore(hub, html, root) {
-  let text = inlineAssets(html);
-  assert.ok(text.includes(JD_LOADER_SCRIPT));
-  text = text.replace(JD_LOADER_SCRIPT, '');
-  const lazy = [...text.matchAll(LAZY)];
-  for (const [whole, src] of lazy) {
-    const reply = await hub.request(src);
-    assert.equal(reply.status, 200, src);
-    text = text.replace(whole, `<details class="jd"><summary>Job Description</summary><p>${htmlEscape(reply.text)}</p></details>`);
-  }
-  return { text: normalizeHtml(text, { port: hub.port(), root }), lazy };
-}
-
-// A spy on the hub's file reads: how many day payloads were read.
-function countingIo() {
-  const reads = [];
-  const io = { ...fs, readFile: (file, ...rest) => { if (/report-payload-/.test(String(file))) reads.push(path.basename(String(file))); return fs.readFile(file, ...rest); } };
-  return { io, reads };
-}
-
 async function withHub(fn, options = {}) {
   const root = await prepareReportProject();
   const spy = countingIo();

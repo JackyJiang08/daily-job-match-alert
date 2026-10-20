@@ -10,20 +10,17 @@
 //   longer matches (or that is missing: the first call builds the whole index from the payloads once),
 //   recounts letters whose date directory changed, drops dates whose payload is gone, and writes the
 //   file back only when something changed. Stats are cheap; no payload is read once the index is current.
+//   A payload stored as .json.gz (src/payload-store.mjs) is read the same way; the entry records the form.
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { listPayloadFiles, payloadReviewedCount, readPayloadFile, resolvePayloadFile } from './payload-store.mjs';
 
-export const REPORTS_INDEX_VERSION = 1;
-const PAYLOAD_PATTERN = /^report-payload-(\d{4}-\d{2}-\d{2})\.json$/;
+export const REPORTS_INDEX_VERSION = 2;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const COMPANY_PATTERN = /^[A-Za-z0-9]{1,80}$/;
 
 export function reportsIndexPath(root) {
   return path.join(root, 'state', 'reports-index.json');
-}
-
-function payloadPath(root, date) {
-  return path.join(root, 'state', `report-payload-${date}.json`);
 }
 
 function lettersDatePath(root, date) {
@@ -67,7 +64,7 @@ export async function countLetters(root, date, io = fs) {
 
 // The entry for one payload. An unreadable or malformed payload still gets an entry (no counts), the
 // same as the list showed before.
-export function indexEntry(date, payload, { mtimeMs = null, size = null, letters = { count: 0, mtimeMs: null } } = {}) {
+export function indexEntry(date, payload, { mtimeMs = null, size = null, gzip = false, letters = { count: 0, mtimeMs: null } } = {}) {
   const valid = Boolean(payload?.meta?.date) && Array.isArray(payload?.matches);
   const meta = valid ? payload.meta : {};
   return {
@@ -80,18 +77,24 @@ export function indexEntry(date, payload, { mtimeMs = null, size = null, letters
     deferredCount: valid ? Number(meta.deferredCount || 0) : null,
     carriedCount: valid ? payload.matches.filter(job => job?.carriedOver).length : null,
     letterCount: letters.count,
+    // meta.matchCount as written (the Status page's last 7 days show it, or nothing when absent).
+    metaMatchCount: valid ? (meta.matchCount ?? null) : null,
+    reviewedCount: valid ? payloadReviewedCount(payload) : null,
+    warningsCount: valid && Array.isArray(meta.warnings) ? meta.warnings.length : 0,
     complete: valid && payload.complete === true,
     quotaLastEvent: meta.quota?.lastEvent || null,
     quotaEvents: Array.isArray(meta.quota?.events) ? meta.quota.events : [],
     authExpired: meta.authExpired || null,
+    form: valid ? (payload.storage?.form || 'full') : null,
+    gzip,
     payloadMtimeMs: mtimeMs,
     payloadSize: size,
     lettersMtimeMs: letters.mtimeMs,
   };
 }
 
-async function readPayloadFile(io, file) {
-  try { return JSON.parse(await io.readFile(file, 'utf8')); } catch { return null; }
+async function readPayloadOrNull(root, date, io) {
+  try { return (await readPayloadFile(root, date, io))?.payload || null; } catch { return null; }
 }
 
 function emptyIndex() {
@@ -102,9 +105,9 @@ function emptyIndex() {
 export async function updateReportsIndex(root, payload, { io = fs, now = new Date() } = {}) {
   const date = payload?.meta?.date;
   if (!DATE_PATTERN.test(String(date || ''))) return null;
-  const info = await statOrNull(io, payloadPath(root, date));
+  const resolved = await resolvePayloadFile(root, date, io);
   const index = (await readReportsIndex(root, io)) || emptyIndex();
-  index.dates[date] = indexEntry(date, payload, { mtimeMs: info?.mtimeMs ?? null, size: info?.size ?? null, letters: await countLetters(root, date, io) });
+  index.dates[date] = indexEntry(date, payload, { mtimeMs: resolved?.info.mtimeMs ?? null, size: resolved?.info.size ?? null, gzip: resolved?.gzip === true, letters: await countLetters(root, date, io) });
   index.updatedAt = now.toISOString();
   await writeReportsIndex(root, index, io);
   return index.dates[date];
@@ -125,19 +128,18 @@ export async function refreshIndexLetters(root, date, { io = fs, now = new Date(
 // The hub's read: entries newest first, the index brought up to date first. `rebuilt` lists the dates
 // whose payload had to be read.
 export async function syncReportsIndex(root, { io = fs, now = new Date() } = {}) {
-  let names = [];
-  try { names = await io.readdir(path.join(root, 'state')); } catch (error) { if (error?.code !== 'ENOENT') throw error; }
-  const dates = names.map(name => PAYLOAD_PATTERN.exec(name)?.[1]).filter(Boolean).sort().reverse();
+  const files = await listPayloadFiles(root, io);
+  const dates = files.map(item => item.date);
   const stored = await readReportsIndex(root, io);
   const index = stored || emptyIndex();
   let changed = !stored;
   const rebuilt = [];
-  for (const date of dates) {
-    const info = await statOrNull(io, payloadPath(root, date));
+  for (const { date, file, gzip } of files) {
+    const info = await statOrNull(io, file);
     const entry = index.dates[date];
-    if (!entry || !info || entry.payloadMtimeMs !== info.mtimeMs || entry.payloadSize !== info.size) {
-      const payload = await readPayloadFile(io, payloadPath(root, date));
-      index.dates[date] = indexEntry(date, payload, { mtimeMs: info?.mtimeMs ?? null, size: info?.size ?? null, letters: await countLetters(root, date, io) });
+    if (!entry || !info || entry.payloadMtimeMs !== info.mtimeMs || entry.payloadSize !== info.size || entry.gzip !== gzip) {
+      const payload = await readPayloadOrNull(root, date, io);
+      index.dates[date] = indexEntry(date, payload, { mtimeMs: info?.mtimeMs ?? null, size: info?.size ?? null, gzip, letters: await countLetters(root, date, io) });
       rebuilt.push(date);
       changed = true;
       continue;

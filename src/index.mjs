@@ -26,6 +26,9 @@ import { ageBasisInstant, correctFutureTimestamp, datePrecisionSummary, freshnes
 import { detectEarlyCareer, isEarlyCareerPriority, prefilterJobs } from './prefilter.mjs';
 import { countByRoleFamily } from './role-families.mjs';
 import { updateReportsIndex } from './reports-index.mjs';
+import { listPayloadFiles, payloadFilePath, payloadReviewedCount, readPayloadFile, reportJobKey, retentionDays, slimPayload, writePayloadFile } from './payload-store.mjs';
+import { maintainPayloads } from './payload-maintenance.mjs';
+import { updateStatusSummary } from './status-summary.mjs';
 import { isZapplyLink, resolveZapplyLink } from './collectors/zapply.mjs';
 import { appendUsage, summarizeUsage, usageEntries, usagePath } from './engines/usage.mjs';
 import { appendQuotaNotices, quotaNoticesPath } from './engines/quota-notices.mjs';
@@ -42,7 +45,6 @@ import { HOLD_GRACE_MS, availabilityPath, markModelUnavailable, markModelUsed, m
 
 const execFileAsync = promisify(execFile);
 const REPORT_PAYLOAD_PREFIX = 'report-payload-';
-const REPORT_PAYLOAD_PATTERN = /^report-payload-(\d{4}-\d{2}-\d{2})\.json$/;
 export const DEFAULT_MAX_REVIEWED_PER_RUN = 60;
 // A deferred posting may wait this long beyond the lookback window before it leaves the backlog unscored.
 export const DEFAULT_DEFERRAL_GRACE_HOURS = 24;
@@ -467,8 +469,7 @@ export async function reviewedInLastDays(config, date, todayCount, now = new Dat
     const timestamp = new Date(`${other}T23:59:59Z`).getTime();
     if (!Number.isFinite(timestamp) || timestamp < cutoff) continue;
     try {
-      const payload = JSON.parse(await fs.readFile(reportPayloadPath(config, other), 'utf8'));
-      total += Array.isArray(payload?.reviewed) ? payload.reviewed.length : 0;
+      total += payloadReviewedCount((await readPayloadFile(config.root, other))?.payload);
     } catch {}
   }
   return total;
@@ -496,57 +497,45 @@ export function reportPayloadPath(config, date) {
   return path.join(config.root, 'state', `${REPORT_PAYLOAD_PREFIX}${date}.json`);
 }
 
+// A payload past 30 days is stored gzipped (src/payload-store.mjs); either form is read here.
 export async function readReportPayload(config, date) {
-  let raw;
-  try {
-    raw = await fs.readFile(reportPayloadPath(config, date), 'utf8');
-  } catch (error) {
-    if (error.code === 'ENOENT') return null;
-    throw error;
-  }
-  const payload = JSON.parse(raw);
+  const read = await readPayloadFile(config.root, date);
+  if (!read) return null;
+  const payload = read.payload;
   if (!payload?.meta?.date || !Array.isArray(payload.matches) || !Array.isArray(payload.reviewed)) {
     throw new Error('payload lacks meta.date, matches[], or reviewed[]');
   }
   return payload;
 }
 
+// The stored payload is slim (src/payload-store.mjs): full JDs only for the postings that went to the final
+// review; the run keeps working on its full in-memory copy.
 async function writeReportPayload(config, payload) {
-  const file = reportPayloadPath(config, payload.meta.date);
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  await fs.writeFile(file, JSON.stringify(payload, null, 2) + '\n');
-  // The hub's Reports list reads state/reports-index.json instead of every payload; a failure here only
-  // costs the hub one payload read (it rebuilds a stale entry), so it never fails the run.
-  await updateReportsIndex(config.root, payload).catch(error => console.warn(`Could not update state/reports-index.json: ${errorSummary(error)}`));
+  const stored = slimPayload(payload);
+  const { file } = await writePayloadFile(config.root, stored);
+  // The hub's Reports list and Status page read state/reports-index.json and state/status-summary.json
+  // instead of the payloads; a failure here only costs the hub one payload read (it rebuilds a stale
+  // entry), so it never fails the run.
+  await updateReportsIndex(config.root, stored).catch(error => console.warn(`Could not update state/reports-index.json: ${errorSummary(error)}`));
+  await updateStatusSummary(config.root, stored).catch(error => console.warn(`Could not update state/status-summary.json: ${errorSummary(error)}`));
   return file;
 }
 
 export async function listReportPayloadDates(config) {
-  let names;
-  try {
-    names = await fs.readdir(path.join(config.root, 'state'));
-  } catch (error) {
-    if (error.code === 'ENOENT') return [];
-    throw error;
-  }
-  return names.map(name => name.match(REPORT_PAYLOAD_PATTERN)?.[1]).filter(Boolean).sort();
+  return (await listPayloadFiles(config.root)).map(item => item.date).sort();
 }
 
-// Payload files age out with the seen state: a day older than the retention window is never rerun.
-export async function pruneReportPayloads(config, now = new Date(), retentionDays = 90) {
-  const cutoff = new Date(now.getTime() - Number(retentionDays) * 24 * 60 * 60 * 1000);
-  let removed = 0;
-  for (const date of await listReportPayloadDates(config)) {
-    const timestamp = new Date(`${date}T23:59:59Z`).getTime();
-    if (!Number.isFinite(timestamp) || timestamp >= cutoff.getTime()) continue;
-    await fs.rm(reportPayloadPath(config, date), { force: true });
-    removed += 1;
-  }
-  return removed;
+// Payloads past 30 days are gzipped and, past the retention period (Settings → Pipeline, default 90 days,
+// the same as the seen state), cut to their matches and Run Summary (src/payload-maintenance.mjs).
+export async function compactAgedPayloads(config, now = new Date()) {
+  return maintainPayloads(config.root, { now, retention: retentionDays(config), mode: 'aged' });
 }
 
-export function reportJobKey(job) {
-  return sha256(canonicalUrl(job.finalUrl || job.url) || job.finalUrl || job.url);
+export { reportJobKey };
+
+async function removeReportPayload(config, date) {
+  await fs.rm(payloadFilePath(config.root, date), { force: true });
+  await fs.rm(payloadFilePath(config.root, date, { gzip: true }), { force: true });
 }
 
 // When the same posting is reported twice in one day, keep the copy with more information: a semantic
@@ -618,7 +607,7 @@ export async function recoverIncompleteReports(config, state, options = {}) {
       payload = await readReportPayload(config, date);
     } catch (error) {
       warnings.push(createWarning('report', 'report payload', `Discarded an unreadable ${REPORT_PAYLOAD_PREFIX}${date}.json: ${errorSummary(error)}`));
-      await fs.rm(reportPayloadPath(config, date), { force: true });
+      await removeReportPayload(config, date);
       continue;
     }
     if (!payload || payload.complete === true) continue;
@@ -1216,7 +1205,7 @@ async function runPipeline(config, clock, options = {}) {
     for (const alternate of job.alternates || []) markJobSeen(state, { url: alternate.url, enrichment: 'near_duplicate' }, now.toISOString());
   }
   pruneSeen(state, now, 90);
-  await pruneReportPayloads(config, now, 90);
+  await compactAgedPayloads(config, now).catch(error => console.warn(`Could not compact the older report payloads: ${errorSummary(error)}`));
   // A run this Mac's network cut short is recorded as incomplete for the hub's auto catch-up (see
   // src/hub/auto-catchup.mjs); any run that did collect clears the record.
   recordIncompleteRun(state, incompleteRunReason({ networkOutage, sourceStats }), { now, runDate, trigger });

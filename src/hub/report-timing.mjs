@@ -1,7 +1,7 @@
-// Per-request timings for the Reports pages. Every request to /reports or /reports/<date> records how long
-// each stage took (the reports index, reading the payload, the eligibility and location re-check, the
-// letter status scan, the HTML render, the sidebar), the response size before and after gzip, and whether
-// the render cache answered. One line goes to the hub log; the last REPORT_TIMING_LIMIT requests are kept
+// Per-request timings for the Reports pages and the Status page. Every request to /reports, /reports/<date>,
+// or /status records how long each stage took (the reports index, reading the payload, the eligibility and
+// location re-check, the letter status scan, the Status summary and the rest of the Status data, the HTML
+// render, the sidebar), the response size before and after gzip, and whether the render cache answered. One line goes to the hub log; the last REPORT_TIMING_LIMIT requests are kept
 // in memory for the Status page's Hub card.
 import { performance } from 'node:perf_hooks';
 
@@ -11,6 +11,8 @@ export const TIMING_PHASES = [
   { key: 'payload', label: 'payload' },
   { key: 'review', label: 'review' },
   { key: 'letters', label: 'letters' },
+  { key: 'summary', label: 'status summary' },
+  { key: 'status', label: 'status data' },
   { key: 'render', label: 'render' },
   { key: 'sidebar', label: 'sidebar' },
 ];

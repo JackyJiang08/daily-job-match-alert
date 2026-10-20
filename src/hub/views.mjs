@@ -599,9 +599,9 @@ function hubCard(hub, timeZone) {
   const last = cache.invalidations?.[0];
   const cacheLine = `${Number(cache.renderHits || 0)} hit(s), ${Number(cache.renderMisses || 0)} miss(es) · ${Number(cache.renders || 0)} render(s) and ${Number(cache.days || 0)} day(s) held${last ? ` · last cleared ${htmlEscape(formatLocalDateTime(last.at, timeZone))} (${htmlEscape(last.reason)})` : ''}`;
   return `<article class="card" id="hub-card"><h2>Hub</h2>
-  <p class="muted">Report page requests since the hub started (newest first; also in the hub log). Stages: reports index, payload read, eligibility and location re-check, letter status scan, HTML render, sidebar.</p>
+  <p class="muted">Reports and Status page requests since the hub started (newest first; also in the hub log). Stages: reports index, payload read, eligibility and location re-check, letter status scan, Status summary and the rest of the Status data, HTML render, sidebar.</p>
   <dl class="kv"><dt>Render cache</dt><dd id="hub-cache">${cacheLine}</dd></dl>
-  ${rows ? `<table class="plain" id="hub-timings"><tr><th>When</th><th>Page</th><th>Status</th><th>Total</th><th>Stages</th><th>Size</th><th>Cache</th></tr>${rows}</table>` : '<p class="muted" id="hub-timings">No report requests yet.</p>'}
+  ${rows ? `<table class="plain" id="hub-timings"><tr><th>When</th><th>Page</th><th>Status</th><th>Total</th><th>Stages</th><th>Size</th><th>Cache</th></tr>${rows}</table>` : '<p class="muted" id="hub-timings">No Reports or Status requests yet.</p>'}
 </article>`;
 }
 
@@ -728,6 +728,7 @@ export function settingsPage({ settings, connections = null, timeZone, coverLett
     </fieldset>
     <fieldset class="group"><legend>Reports</legend>
       <div class="field"><label class="check"><input type="checkbox" name="xlsxRequired"${settings.xlsxRequired ? ' checked' : ''}> Require XLSX Workbook (fail the run when it cannot be written)</label></div>
+      <label class="field" id="payload-retention"><span>Keep full day payloads for (days)</span><input type="number" name="payloadRetentionDays" class="control-input" min="31" max="3650" step="1" value="${Number(settings.payloadRetentionDays ?? 90)}" required><span class="muted">Older days keep only their matches and the Run Summary. Payloads over 30 days old are stored gzipped; the Reports pages read both.</span></label>
     </fieldset>
     <fieldset class="group"><legend>Hub</legend>
       <label class="field"><span>Port (takes effect after the hub restarts)</span><input type="number" name="hubPort" class="control-input" min="1024" max="65535" step="1" value="${Number(settings.hubPort)}" required></label>

@@ -40,7 +40,28 @@ disabled; do not expand them unless a task says so.
   run lock), Settings (five keys, surgical config.json edit under the lock).
 - The hub only reads pipeline artifacts; it writes config.json, private/
   (gitignored), state/ats-boards.json (the ATS board registry, when a
-  dormant board is resumed from Status), and state/reports-index.json.
+  dormant board is resumed from Status), state/reports-index.json, and
+  state/status-summary.json.
+- Payload size (2026-10-20): src/payload-store.mjs owns every payload read and write (.json or
+  .json.gz; the plain file wins when both exist). writeReportPayload stores slimPayload(payload): only
+  postings that went to the final review (semanticReviewed, unreviewed/local_fallback, or a local_only
+  isSemanticCandidate) and the matches keep the JD; the rest of `reviewed` keep SLIM_JOB_FIELDS plus
+  exclusionReason and jdOmitted (finalUrl/originalUrl dropped when equal to url); meta.prefilter.titleExcluded
+  and meta.prescreen.dropped are cut to a few fields. The run keeps its full in-memory copy (the Desktop
+  HTML renders the same). payload.storage = { form: slim | archived, version }. src/payload-maintenance.mjs
+  maintainPayloads: gzip after GZIP_AFTER_DAYS (30), archivePayload after config.reports.payloadRetentionDays
+  (default 90, 31–3650, Settings → Pipeline; matches + RUN_SUMMARY_META_FIELDS, reviewed [] with
+  storage.reviewedCount). The nightly run calls compactAgedPayloads (mode 'aged', replaces the old 90-day
+  delete); `npm run payloads:compact [-- --dry-run]` (src/payloads-compact.mjs) runs mode 'all' under the run
+  lock, backs each rewritten file up gzipped to state/backups/payloads-<time>/, prints sizes. A file the
+  index already records in its target form is skipped unread.
+- Status page (2026-10-20): buildStatusView(ctx, config, timer) reads syncReportsIndex entries (days:
+  warningsCount, metaMatchCount) and src/status-summary.mjs loadStatusSummary (state/status-summary.json:
+  STATUS_META_FIELDS of the newest payload, letterCount; written by writeReportPayload, the maintenance, and
+  refreshStatusLetters in the letter-store wrapper; rebuilt from the newest payload once when its
+  date/mtime/size do not match the index). GET /status is timed (index · status summary · status data ·
+  render · sidebar) into the same timing log as the Reports pages. tests/fixtures/snapshots/status-page.html
+  (pre-change code, Hub card stripped by tests/helpers/status-fixture.mjs withoutHubCard).
 - Reports speed (2026-10-19): src/reports-index.mjs keeps state/reports-index.json (per date: generatedAt,
   matchCount, deferredCount, carriedCount, letterCount, complete, sidebar fields, payloadMtimeMs/Size,
   lettersMtimeMs); the pipeline's writeReportPayload calls updateReportsIndex, the wrapped
@@ -361,8 +382,8 @@ disabled; do not expand them unless a task says so.
   as zero: usage.parseEmpty → one "usage parse empty" warning per run (hub
   letters log it). Run Summary: "Reviewed jobs (this run)" (meta.
   reviewedInRun) and "Reviewed (last 90 days)" (meta.reviewedLast90Days,
-  from the stored day payloads; no longer history exists, so no all-time
-  claim).
+  from the stored day payloads, archived ones by storage.reviewedCount; no
+  all-time claim).
 - Prescreen (src/prescreen.mjs, src/resume-digest.mjs, src/prescreen-text.mjs):
   prescreenStage runs between the local evaluation and applyReviewBudget. Resume
   digests (~1,200 chars, extracted locally, resumes/{id}.digest.md with a sha256

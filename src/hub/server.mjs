@@ -18,6 +18,7 @@ import { createLetterJobs } from './letter-jobs.mjs';
 import { createTimingLog } from './report-timing.mjs';
 import { createReportCache } from './report-cache.mjs';
 import { refreshIndexLetters } from '../reports-index.mjs';
+import { refreshStatusLetters } from '../status-summary.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -51,7 +52,7 @@ export function createHubContext(options) {
     extractText: async file => ctx.extractText(file, { pdftotextCommand: (await ctx.loadConfig().catch(() => ({}))).resumes?.pdftotextCommand || 'pdftotext', minimumCharacters: 50 }),
   });
   // Rendered report days (src/hub/report-cache.mjs). A saved or renamed letter drops the renders and
-  // updates the letter count in state/reports-index.json, whichever process (the hub, the nightly letters
+  // updates the letter count in state/reports-index.json and state/status-summary.json, whichever process (the hub, the nightly letters
   // pass) wrote it.
   ctx.reportCache = options.reportCache || createReportCache({ now });
   for (const method of ['saveLetter', 'renameLetter']) {
@@ -62,6 +63,7 @@ export function createHubContext(options) {
       ctx.reportCache.invalidate('letters');
       const date = method === 'saveLetter' ? args[0]?.date : args[0];
       await refreshIndexLetters(root, date, { io, now: now() }).catch(() => {});
+      await refreshStatusLetters(root, date, { io, now: now() }).catch(() => {});
       return result;
     };
   }

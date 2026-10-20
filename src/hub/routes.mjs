@@ -4,6 +4,7 @@
 import { reviewBadge } from '../cover-letter/notes.mjs';
 import { buildReportView, reviewReportJobs } from '../report.mjs';
 import path from 'node:path';
+import { resolvePayloadFile } from '../payload-store.mjs';
 import { createHash } from 'node:crypto';
 import zlib from 'node:zlib';
 import { ASSET_CACHE_CONTROL, ASSET_PATTERN, readAsset } from './assets.mjs';
@@ -158,8 +159,8 @@ export function createHubHandler(ctx) {
   // The parts of the day page that depend only on the payload file: the matches and meta, the
   // eligibility/location re-check, and each card's full JD. Read once per payload mtime and size.
   async function reportDay(date, timer = null) {
-    const file = path.join(ctx.root, 'state', `report-payload-${date}.json`);
-    const info = await ctx.io.stat(file).catch(() => null);
+    // The plain or the gzipped file (src/payload-store.mjs); either one's mtime and size key the day.
+    const info = (await resolvePayloadFile(ctx.root, date, ctx.io))?.info;
     if (!info) return null;
     const key = ctx.reportCache.dayKey(date, info);
     const cached = ctx.reportCache.getDay(key);
@@ -269,10 +270,14 @@ export function createHubHandler(ctx) {
     await page(response, 200, { active: 'resumes', title: 'Resumes', content: resumesPage({ tracksView, timeZone }), notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
   }
 
+  // Timed like the Reports pages (index, status summary, the other status data, render, sidebar), so the
+  // Hub card shows what the Status page costs.
   async function getStatus(url, response) {
+    const timer = ctx.reportTimings.start(url.pathname);
     const config = await ctx.loadConfig();
-    const status = await buildStatusView(ctx, config);
-    await page(response, 200, { active: 'status', title: 'Status', content: statusPage({ status, timeZone: status.timeZone }).replace('id="run-card"', `id="run-card" data-time-zone="${status.timeZone}"`), script: STATUS_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
+    const status = await buildStatusView(ctx, config, timer);
+    const content = await timer.phase('render', () => statusPage({ status, timeZone: status.timeZone }).replace('id="run-card"', `id="run-card" data-time-zone="${status.timeZone}"`));
+    await page(response, 200, { active: 'status', title: 'Status', content, script: STATUS_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' }, timer);
   }
 
   async function getSettings(url, response) {

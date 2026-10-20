@@ -29,13 +29,14 @@ import { prescreenOverview } from '../prescreen.mjs';
 import { DEFAULT_TITLE_FAMILIES, NON_FAMILY_TERMS } from '../prefilter.mjs';
 import { targetRoleFamilies } from '../role-families.mjs';
 import { entryAsPayload, syncReportsIndex } from '../reports-index.mjs';
+import { MAXIMUM_RETENTION_DAYS, MINIMUM_RETENTION_DAYS, listPayloadFiles, readPayloadFile, retentionDays } from '../payload-store.mjs';
+import { loadStatusSummary, summaryAsPayload } from '../status-summary.mjs';
 import { acquireRunLock, releaseRunLock } from '../lock.mjs';
 
 export const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 export const ERROR_FILE_PATTERN = /^ERROR-\d{4}-\d{2}-\d{2}\.html$/;
 export const MAXIMUM_PDF_BYTES = 5 * 1024 * 1024;
 export const KEEP_PDF_VERSIONS = 5;
-const PAYLOAD_PATTERN = /^report-payload-(\d{4}-\d{2}-\d{2})\.json$/;
 const MODEL_PATTERN = /^[a-z0-9][a-z0-9._\-]{0,63}(\[1m\])?$/i;
 const MATCH_LEVELS = ['high', 'medium', 'low'];
 
@@ -59,9 +60,7 @@ async function readJson(io, file, fallback = null) {
 // ---------------------------------------------------------------------------------------------- reports
 
 export async function listReportDates(ctx) {
-  let names = [];
-  try { names = await ctx.io.readdir(path.join(ctx.root, 'state')); } catch (error) { if (error?.code !== 'ENOENT') throw error; }
-  return names.map(name => PAYLOAD_PATTERN.exec(name)?.[1]).filter(Boolean).sort().reverse();
+  return (await listPayloadFiles(ctx.root, ctx.io)).map(item => item.date);
 }
 
 // Dates with their match counts for the Reports list, from state/reports-index.json (src/reports-index.mjs):
@@ -84,7 +83,9 @@ export function assertDate(value) {
 
 export async function readReportPayload(ctx, date) {
   assertDate(date);
-  const payload = await readJson(ctx.io, path.join(ctx.root, 'state', `report-payload-${date}.json`));
+  // Either form: a payload past 30 days is stored as .json.gz (src/payload-store.mjs).
+  let payload = null;
+  try { payload = (await readPayloadFile(ctx.root, date, ctx.io))?.payload || null; } catch {}
   if (!payload?.meta?.date || !Array.isArray(payload.matches)) return null;
   return payload;
 }
@@ -498,12 +499,20 @@ async function sidebarPlanLines(ctx, config, now, timeZone) {
   };
 }
 
-export async function buildStatusView(ctx, config) {
+// Reads state/reports-index.json (dates, match and warning counts) and state/status-summary.json (the
+// newest run's fields), never a whole payload once both are current. `timer` (src/hub/report-timing.mjs)
+// records the index, summary, and remaining status stages for the Hub card.
+export async function buildStatusView(ctx, config, timer = null) {
+  const phase = (name, fn) => (timer ? timer.phase(name, fn) : fn());
   const now = ctx.now();
+  const { entries } = await phase('index', () => syncReportsIndex(ctx.root, { io: ctx.io, now }));
+  const { summary } = await phase('summary', () => loadStatusSummary(ctx.root, entries[0] || null, { io: ctx.io, now }));
+  return phase('status', () => statusViewFrom(ctx, config, { now, entries, latest: summaryAsPayload(summary) }));
+}
+
+async function statusViewFrom(ctx, config, { now, entries, latest }) {
   const state = await readJson(ctx.io, path.join(ctx.root, 'state', 'state.json'), {}) || {};
-  const dates = await listReportDates(ctx);
-  const latestDate = dates[0] || null;
-  const latest = latestDate ? await readReportPayload(ctx, latestDate) : null;
+  const latestDate = entries[0]?.date || null;
   const lastUpdatedAt = latest?.meta?.completedAt || latest?.meta?.lastUpdatedAt || latest?.meta?.generatedAt || null;
 
   const lastRun = {
@@ -535,11 +544,10 @@ export async function buildStatusView(ctx, config) {
   const plans = await currentPlans(ctx, config);
 
   const days = [];
-  for (const date of dates.slice(0, 7)) {
-    const payload = await readReportPayload(ctx, date);
-    const file = path.join(config.outputDirectory, date, 'warnings.txt');
+  for (const entry of entries.slice(0, 7)) {
+    const file = path.join(config.outputDirectory, entry.date, 'warnings.txt');
     const text = await ctx.io.readFile(file, 'utf8').catch(() => null);
-    days.push({ date, count: payload?.meta?.warnings?.length || 0, matchCount: payload?.meta?.matchCount ?? null, warningsFile: file, warningsText: text });
+    days.push({ date: entry.date, count: entry.valid ? Number(entry.warningsCount || 0) : 0, matchCount: entry.valid ? (entry.metaMatchCount ?? null) : null, warningsFile: file, warningsText: text });
   }
 
   const errors = [];
@@ -713,6 +721,7 @@ export async function readSettings(ctx) {
     models,
     modelChoices: choicesFromCatalog(catalog),
     xlsxRequired: config.reports?.xlsx?.required === true,
+    payloadRetentionDays: retentionDays(config),
     editorReview: config.coverLetter?.editorReview !== false,
     autoLetters: autoLetterSettings(config),
     prescreen: prescreenOverview(config, await readJson(ctx.io, path.join(ctx.root, 'state', 'state.json'), {}) || {}),
@@ -774,6 +783,10 @@ export function validateSettings(form, { catalog = DEFAULT_CATALOG } = {}) {
   const budgetGiven = form.maxReviewedPerRun != null && String(form.maxReviewedPerRun).trim() !== '';
   const maxReviewedPerRun = budgetGiven ? Number(form.maxReviewedPerRun) : null;
   if (budgetGiven && (!Number.isInteger(maxReviewedPerRun) || maxReviewedPerRun < 0 || maxReviewedPerRun > 5000)) errors.push('Max reviewed per run must be a whole number from 0 (no limit) to 5000');
+  // Optional as well: how long a payload keeps more than its matches and Run Summary (src/payload-store.mjs).
+  const retentionGiven = form.payloadRetentionDays != null && String(form.payloadRetentionDays).trim() !== '';
+  const payloadRetentionDays = retentionGiven ? Number(form.payloadRetentionDays) : null;
+  if (retentionGiven && (!Number.isInteger(payloadRetentionDays) || payloadRetentionDays < MINIMUM_RETENTION_DAYS || payloadRetentionDays > MAXIMUM_RETENTION_DAYS)) errors.push(`Payload retention must be a whole number of days from ${MINIMUM_RETENTION_DAYS} to ${MAXIMUM_RETENTION_DAYS}`);
   // Quota policy fields are optional too; quotaPresent marks a form that carries the fallback checkbox.
   // The ladder comes from the reorderable list (one modelLadder value per checked row, in order; ladderPresent
   // marks the form) or, from older callers, a comma-separated string. Every step must be a Claude model in
@@ -812,7 +825,7 @@ export function validateSettings(form, { catalog = DEFAULT_CATALOG } = {}) {
     if (lone) errors.push(`"${lone}" is not a title family on its own; it passes beside a family word (Associate Consultant, Associate Product Manager)`);
   }
   if (errors.length) throw new HubInputError(errors.join('; '));
-  return { minimumMatchScore, acceptedMatchLevels: MATCH_LEVELS.filter(level => levels.includes(level)), engine, model, xlsxRequired, editorReview, hubPort, maxReviewedPerRun, includeCarriedOver, autoCatchUp, titleFamilies, targetRoleFamilies: roleFamilies, modelLadder, fallbackEngine, reasoningEffort };
+  return { minimumMatchScore, acceptedMatchLevels: MATCH_LEVELS.filter(level => levels.includes(level)), engine, model, xlsxRequired, editorReview, hubPort, maxReviewedPerRun, payloadRetentionDays, includeCarriedOver, autoCatchUp, titleFamilies, targetRoleFamilies: roleFamilies, modelLadder, fallbackEngine, reasoningEffort };
 }
 
 // "Save this path to config": pins the resolved binary as semanticMatching.<engine>Command.
@@ -874,6 +887,7 @@ export async function saveSettings(ctx, form) {
     config.reports = config.reports && typeof config.reports === 'object' ? config.reports : {};
     config.reports.xlsx = config.reports.xlsx && typeof config.reports.xlsx === 'object' ? config.reports.xlsx : {};
     config.reports.xlsx.required = settings.xlsxRequired;
+    if (settings.payloadRetentionDays != null) config.reports.payloadRetentionDays = settings.payloadRetentionDays;
     config.hub = config.hub && typeof config.hub === 'object' ? config.hub : {};
     if (settings.editorReview != null) {
       config.coverLetter = config.coverLetter && typeof config.coverLetter === 'object' ? config.coverLetter : {};

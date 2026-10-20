@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { dedupeByFinalUrl, main, mergeReviewedJobs, preferReportJob, pruneReportPayloads, recoverIncompleteReports, reportPayloadPath } from '../src/index.mjs';
+import { compactAgedPayloads, dedupeByFinalUrl, main, mergeReviewedJobs, preferReportJob, readReportPayload, recoverIncompleteReports, reportPayloadPath } from '../src/index.mjs';
 
 const fixtures = new URL('./fixtures/', import.meta.url);
 const NOW = '2026-08-27T12:00:00Z';
@@ -222,9 +222,18 @@ test('recoverIncompleteReports rebuilds an earlier incomplete day, skips today, 
     assert.equal((await readJson(earlier)).complete, false, 'a failed rebuild keeps the day incomplete');
     assert.match(failing[0].message, /kept for the next run.*disk full/);
 
-    await fs.writeFile(reportPayloadPath(config, '2026-05-01'), JSON.stringify({ meta: { date: '2026-05-01' }, matches: [], reviewed: [], complete: true }));
-    assert.equal(await pruneReportPayloads(config, new Date('2026-08-27T20:00:00Z'), 90), 1);
+    // Past the retention period a payload is no longer deleted: it keeps its matches and Run Summary, gzipped.
+    await fs.writeFile(reportPayloadPath(config, '2026-05-01'), JSON.stringify({ meta: { date: '2026-05-01', matchCount: 1, sourceCounts: [{ name: 'x' }] }, matches: [job], reviewed: [job, { url: 'https://jobs.example.com/other' }], complete: true }));
+    const rows = await compactAgedPayloads(config, new Date('2026-08-27T20:00:00Z'));
+    assert.deepEqual(rows.map(row => [row.date, row.action, row.form, row.gzip]), [['2026-05-01', 'compacted', 'archived', true]], 'only the payload past 30 days is touched');
     assert.equal(await exists(reportPayloadPath(config, '2026-05-01')), false);
+    assert.ok(await exists(`${reportPayloadPath(config, '2026-05-01')}.gz`));
+    const archived = await readReportPayload(config, '2026-05-01');
+    assert.deepEqual(archived.matches, [job]);
+    assert.deepEqual(archived.reviewed, []);
+    assert.equal(archived.storage.reviewedCount, 2);
+    assert.equal(archived.meta.sourceCounts, undefined, 'Run Details lists are dropped');
+    assert.equal(archived.meta.matchCount, 1);
     assert.ok(await exists(earlier));
   } finally {
     await fs.rm(root, { recursive: true, force: true });

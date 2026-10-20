@@ -1,0 +1,42 @@
+{
+  "engine": "claude",
+  "scoringModel": "claude-opus-5-5",
+  "candidateCount": 40,
+  "reviewedThisRun": 30,
+  "maxReviewedPerRun": 30,
+  "expiredBacklogCount": 3,
+  "runsToday": 2,
+  "funnel": { "candidates": 40, "prescreened": 40, "passed": 32, "reviewed": 30, "matched": 4 },
+  "usage": {
+    "byModel": { "claude-opus-5-5": { "calls": 6, "input": 1200, "output": 5400, "cacheRead": 9000, "cacheCreation": 15000, "reasoning": 800, "engine": "claude", "effort": null } },
+    "byPurpose": {
+      "prescreen": { "calls": 2, "input": 400, "output": 900, "cacheRead": 0, "cacheCreation": 0, "reasoning": 100 },
+      "review": { "calls": 4, "input": 800, "output": 4500, "cacheRead": 9000, "cacheCreation": 15000, "reasoning": 700 }
+    },
+    "total": { "calls": 6, "input": 1200, "output": 5400, "cacheRead": 9000, "cacheCreation": 15000, "reasoning": 800 }
+  },
+  "prescreen": {
+    "enabled": true, "threshold": 55, "shadowRuns": 3, "shadowRunsDone": 2, "enforce": false, "engine": "claude", "model": "claude-haiku-4-5", "effort": null,
+    "label": "Prescreen", "status": "ok", "mode": "shadow", "candidates": 40, "scored": 40, "passed": 32, "wouldDrop": 8, "droppedCount": 0,
+    "dropped": [], "finalMatches": 4, "lost": 0, "recall": 1, "lostTitles": [], "readyToEnforce": false
+  },
+  "quota": {
+    "events": [{ "at": "2026-10-17T01:20:00.000Z", "kind": "modelWeeklyLimit", "model": "claude-fable-5-1", "action": "fallback-model", "detail": "switched to claude-opus-5-5", "resetsAt": "2026-10-20T00:00:00.000Z" }],
+    "lastEvent": { "at": "2026-10-17T01:20:00.000Z", "kind": "modelWeeklyLimit", "model": "claude-fable-5-1", "action": "fallback-model", "detail": "switched to claude-opus-5-5", "resetsAt": "2026-10-20T00:00:00.000Z" },
+    "effectiveEngine": "claude", "effectiveModel": "claude-opus-5-5", "configuredModel": "claude-fable-5-1",
+    "modelLadder": ["claude-fable-5-1", "claude-opus-5-5"], "fallbackEngine": "codex", "deferredByQuota": 0, "banner": null
+  },
+  "budgetAlert": { "message": "Candidates inside the lookback window have exceeded the review budget for 3 nights in a row (40, 41, 40); raise semanticMatching.maxReviewedPerRun or tighten the prefilter" },
+  "budgetHistory": [{ "date": "2026-10-17", "at": "2026-10-17T01:00:00.000Z", "candidates": 40, "inWindow": 38, "limit": 30, "reviewed": 30 }],
+  "warnings": [
+    { "stage": "llm", "source": "review budget", "message": "deferred 10 postings to the next run (review limit 30 per run); they are not marked as seen", "level": "info" },
+    { "stage": "collector", "source": "Example Board", "message": "First poll recorded 12 posting(s) as already seen (baseline)", "level": "info" }
+  ],
+  "sourceCounts": [
+    { "name": "SimplifyJobs Summer Internships", "kind": "builtin", "ok": true, "count": 120, "error": null },
+    { "name": "SimplifyJobs New Grad", "kind": "builtin", "ok": false, "count": 0, "error": "HTTP 503" },
+    { "name": "Hacker News Who is Hiring", "kind": "builtin", "ok": true, "count": 7, "error": null }
+  ],
+  "planChange": null,
+  "authExpired": null
+}
