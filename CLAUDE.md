@@ -58,7 +58,7 @@ disabled; do not expand them unless a task says so.
   data-banner="integrity" + warning); hub startHub runs checkHubIntegrity (ctx.integrity) and Status shows
   integrityView (live seen count of the cached state view, the newest run's seenDrop, state.json read from a
   backup, still-corrupt files). src/backup.mjs + src/zip.mjs (own zip writer/reader, CRC-checked, no ZIP64):
-  createBackup → <config.backup.directory | ~/Library/Application Support/daily-job-match-alert/backups>/
+  createBackup → <config.backup.directory | ~/Library/Application Support/daily-job-match-alert/backups (macOS; XDG data dir on Linux)>/
   daily-job-match-alert-backup-<local date>-<HHMMSS>.zip with backup-manifest.json, keep 7; isBackedUp skips
   payloads, logs/, state/backups/, .N copies, .corrupt-, .tmp, .lock. main() autoBackupAfterRun after the
   letters phase: triggers scheduled/catchup/auto_catchup only, once per local day, under the run lock (tests

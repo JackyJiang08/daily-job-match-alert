@@ -18,6 +18,7 @@ import { hostIsLocal, originIsLocal } from '../src/hub/routes.mjs';
 import { formatDateLabel, formatLocalDateTime, formatLocalShort, formatRelativeTime, localDate } from '../src/time-format.mjs';
 import { createConnectionsProbe } from '../src/hub/connections.mjs';
 import { sha256 } from '../src/utils.mjs';
+import { waitFor } from './helpers/wait-for.mjs';
 
 const NOW = '2026-08-27T12:00:00Z';
 const fixtures = new URL('./fixtures/', import.meta.url);
@@ -404,19 +405,20 @@ test('Run Now is refused while the pipeline lock is held, then spawns the pipeli
     child.stderr.write('Resume tracks: Data, LLM\n');
     for (let index = 0; index < 60; index += 1) child.stdout.write(`line ${index}\n`);
     child.stdout.write(`${JSON.stringify({ meta: { matchCount: 3 } })}\n`);
-    await new Promise(resolve => setTimeout(resolve, 20));
-    const running = JSON.parse((await hub.request('GET', '/status/run.json')).text);
+    const running = await waitFor(async () => { const view = JSON.parse((await hub.request('GET', '/status/run.json')).text); return view.run.tail.length === 50 && view; }, { message: 'the run output' });
     assert.equal(running.run.running, true);
     assert.equal(running.run.tail.length, 50, 'the tail is capped at 50 lines');
     child.emit('close', 0);
-    await new Promise(resolve => setTimeout(resolve, 20));
+    // The finished run is recorded in runs.json (an fsynced write) after the process closed.
+    const runsFile = path.join(root, 'private', 'hub', 'runs.json');
+    await waitFor(async () => JSON.parse(await fs.readFile(runsFile, 'utf8')).length > 0, { message: 'runs.json' });
     const done = JSON.parse((await hub.request('GET', '/status/run.json')).text);
     assert.equal(done.run.running, false);
     assert.equal(done.run.exitCode, 0);
     assert.equal(done.run.matchCount, 3);
     assert.equal(done.runNow.available, true);
     assert.match(await fs.readFile(done.run.logPath, 'utf8'), /line 59/);
-    const runs = JSON.parse(await fs.readFile(path.join(root, 'private', 'hub', 'runs.json'), 'utf8'));
+    const runs = JSON.parse(await fs.readFile(runsFile, 'utf8'));
     assert.equal(runs[0].trigger, 'manual');
   } finally {
     await hub.close();

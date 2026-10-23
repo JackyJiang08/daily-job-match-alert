@@ -14,6 +14,7 @@ import { createTimingLog, timingLine } from '../src/hub/report-timing.mjs';
 import { etagMatches } from '../src/hub/routes.mjs';
 import { refreshIndexLetters, readReportsIndex, reportsIndexPath, syncReportsIndex, updateReportsIndex } from '../src/reports-index.mjs';
 import { htmlEscape } from '../src/utils.mjs';
+import { waitFor } from './helpers/wait-for.mjs';
 import { DATES, LAZY, asBefore, countingIo, fixtureJob, fixturePayload, inlineAssets, prepareReportProject, selectedMatches, startReportHub, writePayload } from './helpers/report-hub.mjs';
 
 const snapshots = new URL('./fixtures/snapshots/', import.meta.url);
@@ -223,7 +224,8 @@ test('render cache: a repeat load is a hit with no payload read, letter scan, re
     await hub.ctx.runManager.start();
     const versionBefore = hub.ctx.reportCache.versions.run;
     children[0].emit('close', 0);
-    await new Promise(resolve => setTimeout(resolve, 30));
+    // The cache is dropped once the finished run is recorded (an fsynced write), not at the close itself.
+    await waitFor(() => hub.ctx.reportCache.versions.run > versionBefore, { message: 'the run version bump' });
     assert.equal(hub.ctx.reportCache.versions.run, versionBefore + 1);
     const afterRun = await load();
     assert.equal(afterRun.record.cache, 'miss');

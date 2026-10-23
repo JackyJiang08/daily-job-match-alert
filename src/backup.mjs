@@ -28,13 +28,17 @@ const PAYLOAD_NAME = /^report-payload-\d{4}-\d{2}-\d{2}\.json(\.gz)?$/;
 // Files whose replaced copy a restore keeps as <file>.1 (src/json-file.mjs).
 const ROTATED = new Set(['state/state.json', 'state/ats-boards.json']);
 
-export function defaultBackupDirectory(home = os.homedir()) {
-  return path.join(home, 'Library', 'Application Support', 'daily-job-match-alert', 'backups');
+// ~/Library/Application Support on macOS; elsewhere (Linux CI, a Linux box) the XDG data directory,
+// $XDG_DATA_HOME or ~/.local/share.
+export function defaultBackupDirectory(home = os.homedir(), { platform = process.platform, env = process.env } = {}) {
+  if (platform === 'darwin') return path.join(home, 'Library', 'Application Support', 'daily-job-match-alert', 'backups');
+  const dataHome = env.XDG_DATA_HOME && path.isAbsolute(env.XDG_DATA_HOME) ? env.XDG_DATA_HOME : path.join(home, '.local', 'share');
+  return path.join(dataHome, 'daily-job-match-alert', 'backups');
 }
 
-export function resolveBackupDirectory(config, { home = os.homedir() } = {}) {
+export function resolveBackupDirectory(config, { home = os.homedir(), platform = process.platform, env = process.env } = {}) {
   const configured = typeof config?.backup?.directory === 'string' ? config.backup.directory.trim() : '';
-  if (!configured) return defaultBackupDirectory(home);
+  if (!configured) return defaultBackupDirectory(home, { platform, env });
   if (configured === '~' || configured.startsWith('~/')) return path.join(home, configured.slice(2));
   return path.isAbsolute(configured) ? configured : path.resolve(config.root || '.', configured);
 }

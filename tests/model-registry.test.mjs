@@ -17,6 +17,7 @@ import { markModelUnavailable, markModelUsed, markWeeklyLimit, modelStatus, norm
 import { planView } from '../src/engines/plans.mjs';
 import { chatgptPlanFromAuthFile, planFromIdToken } from '../src/engines/chatgpt-plan.mjs';
 import { statusText } from '../src/hub/model-settings.mjs';
+import { waitFor } from './helpers/wait-for.mjs';
 
 const fixtures = new URL('./fixtures/', import.meta.url);
 const NOW = new Date('2026-10-06T22:00:00Z');
@@ -74,9 +75,7 @@ test('the Claude CLI receives the registry alias, and the id it actually ran is 
     const reviewRunner = async (command, args) => (args.includes('--json-schema') ? { stdout: JSON.stringify({ ...envelopeFixture.envelope, structured_output: { results: [] }, result: 'MODEL ANSWER TEXT', session_id: 'SECRET-SESSION', uuid: 'SECRET-UUID' }), stderr: '' } : runner(command, args));
     const reviewer = createClaudeEngine({ model: 'opus', runner: reviewRunner, resolveCommand: async () => ({ found: true, command: '/fake/claude', source: 'config' }), envelopeLog });
     await reviewer.reviewBatch('{}', { type: 'object' }, {});
-    let captured = null;
-    for (let attempt = 0; attempt < 20 && !captured; attempt += 1) { captured = await fs.readFile(envelopeLog, 'utf8').catch(() => null); if (!captured) await new Promise(resolve => setTimeout(resolve, 10)); }
-    assert.ok(captured, 'the redacted envelope is written');
+    const captured = await waitFor(() => fs.readFile(envelopeLog, 'utf8').catch(() => null), { message: 'the redacted envelope' });
     assert.deepEqual(Object.keys(JSON.parse(captured).envelope.modelUsage), ['claude-fable-5-1']);
     assert.doesNotMatch(captured, /SECRET-SESSION|SECRET-UUID|MODEL ANSWER TEXT|structured_output/);
     assert.deepEqual(Object.keys(redactEnvelope({ result: 'x', session_id: 'y', usage: {}, modelUsage: {}, type: 'result' })).sort(), ['modelUsage', 'type', 'usage']);

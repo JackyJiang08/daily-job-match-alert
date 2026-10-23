@@ -349,7 +349,10 @@ test('backup: private/, state/, and config.json go into a dated zip without payl
   const config = { root, timeZone: 'America/Chicago', backup: { directory: './backups' } };
   try {
     assert.equal(resolveBackupDirectory(config, { home: '/Users/jane' }), path.join(root, 'backups'));
-    assert.equal(resolveBackupDirectory({ root }, { home: '/Users/jane' }), '/Users/jane/Library/Application Support/daily-job-match-alert/backups');
+    assert.equal(resolveBackupDirectory({ root }, { home: '/Users/jane', platform: 'darwin' }), '/Users/jane/Library/Application Support/daily-job-match-alert/backups');
+    assert.equal(resolveBackupDirectory({ root }, { home: '/home/jane', platform: 'linux', env: {} }), '/home/jane/.local/share/daily-job-match-alert/backups', 'no macOS path on Linux');
+    assert.equal(resolveBackupDirectory({ root }, { home: '/home/jane', platform: 'linux', env: { XDG_DATA_HOME: '/data/jane' } }), '/data/jane/daily-job-match-alert/backups');
+    assert.equal(resolveBackupDirectory({ root }, { home: '/home/jane', platform: 'linux', env: { XDG_DATA_HOME: 'relative' } }), '/home/jane/.local/share/daily-job-match-alert/backups', 'a relative XDG_DATA_HOME is ignored, as the spec says');
     assert.equal(resolveBackupDirectory({ root, backup: { directory: '~/Backups/alert' } }, { home: '/Users/jane' }), '/Users/jane/Backups/alert');
     const expected = ['config.json', 'private/cover-letter/profile.json', 'private/cover-letters/2026-08-27/ExampleCorp/Jane_Doe_Cover_Letter_ExampleCorp.pdf', 'private/hub/runs.json', 'state/ats-boards.json', 'state/ats-snapshots.json', 'state/resume-sources.json', 'state/state.json'];
     assert.deepEqual(await collectBackupFiles(root), expected);
@@ -362,8 +365,10 @@ test('backup: private/, state/, and config.json go into a dated zip without payl
     assert.deepEqual(manifest.files.map(file => file.path).sort(), expected);
     assert.ok(!entries.some(entry => /report-payload|\/logs\/|\.log$|state\/backups|state\.json\.1/.test(entry.name)), 'no payload, log, payload backup, or rolling copy');
     // The system unzip reads the archive and agrees on the contents.
-    const { stdout } = await execFileAsync('unzip', ['-Z1', backup.file]).catch(() => ({ stdout: null }));
-    if (stdout != null) assert.deepEqual(stdout.trim().split('\n').sort(), ['backup-manifest.json', ...expected].sort());
+    // (Info-ZIP unzip ships with macOS and the Ubuntu CI image; the check is not optional.)
+    const { stdout } = await execFileAsync('unzip', ['-Z1', backup.file]);
+    assert.deepEqual(stdout.trim().split('\n').sort(), ['backup-manifest.json', ...expected].sort());
+    await execFileAsync('unzip', ['-tq', backup.file]);
 
     const originals = Object.fromEntries(await Promise.all(expected.map(async relative => [relative, await fs.readFile(path.join(root, relative))])));
     const modes = Object.fromEntries(await Promise.all(expected.map(async relative => [relative, (await fs.stat(path.join(root, relative))).mode & 0o777])));
@@ -454,7 +459,8 @@ test('Status Runs card shows the newest backup time and size', async () => {
   const hub = await startReportHub(root);
   try {
     assert.match((await hub.request('/status')).text, /<dt>Backup<\/dt><dd id="backup-line">No backup yet/);
-    const directory = path.join(root, 'Library', 'Application Support', 'daily-job-match-alert', 'backups');
+    // The platform default under the hub's home (the project root here), as the hub resolves it.
+    const directory = resolveBackupDirectory({ root }, { home: root });
     await fs.mkdir(directory, { recursive: true });
     const file = path.join(directory, 'daily-job-match-alert-backup-2026-10-16-200500.zip');
     await fs.writeFile(file, Buffer.alloc(3 * 1024 * 1024 + 200 * 1024));
