@@ -36,14 +36,21 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { workdayPostedOn } from '../enrich.mjs';
 import { canonicalUrl, cleanText, isoDate, mapLimit, normalizeLocation, sha256 } from '../utils.mjs';
+import { localDate } from '../time-format.mjs';
 import { createWarning, errorCause, errorSummary, isNetworkError } from '../warnings.mjs';
 import { NEW_SINCE_LAST_POLL, freshnessInstant } from '../posting-fields.mjs';
 import { STATE_BACKUP_GENERATIONS, readJsonWithBackups, writeJsonAtomic } from '../json-file.mjs';
 
 export const ATS_KINDS = { greenhouse: 'Greenhouse', lever: 'Lever', ashby: 'Ashby', workday: 'Workday', smartrecruiters: 'SmartRecruiters' };
 export const ATS_SOURCE_KIND = 'public_ats_board';
-// A board that fails this many nights in a row stops being polled until someone resumes it.
+// A board that fails this many nights in a row stops being polled (dormant) until it answers a probe or
+// someone resumes it.
 export const DORMANT_AFTER_FAILURES = 7;
+// A dormant board (still enabled) is probed with one light request every DORMANT_PROBE_DAYS, counted from
+// when it went dormant or its last probe; one that answers resumes polling on its own. The grace lets the
+// nightly run on the 30th day probe a board that went dormant a few seconds later in the evening.
+export const DORMANT_PROBE_DAYS = 30;
+export const DORMANT_PROBE_GRACE_HOURS = 6;
 // One poll per board per night: a same-day rerun leaves a board alone if it was polled this recently.
 export const DEFAULT_MINIMUM_POLL_HOURS = 20;
 // A board with no new posting for this long is "quiet" and polled weekly instead of nightly.
@@ -398,6 +405,69 @@ export function boardLabel(board) {
   const vendor = ATS_KINDS[board.kind] || titleCase(board.kind);
   const company = board.company || titleCase(board.token || board.slug || board.tenant || board.key.split(':')[1]);
   return `${vendor} · ${company}`;
+}
+
+// When a dormant board is next probed (ISO), or null for a board that is not dormant or was disabled.
+export function nextDormantProbeAt(board, { days = DORMANT_PROBE_DAYS } = {}) {
+  if (!board?.dormant || board.enabled === false) return null;
+  const basis = [board.lastProbeAt, board.dormantSince].map(value => Date.parse(value || '')).filter(Number.isFinite);
+  const from = basis.length ? Math.max(...basis) : 0;
+  return new Date(from + Number(days) * 24 * 60 * 60 * 1000).toISOString();
+}
+
+export function dormantProbeDue(board, now = new Date(), options = {}) {
+  const next = nextDormantProbeAt(board, options);
+  return Boolean(next) && now.getTime() >= Date.parse(next) - DORMANT_PROBE_GRACE_HOURS * 60 * 60 * 1000;
+}
+
+// The light request: the list endpoint without descriptions (Greenhouse), one posting (Lever,
+// SmartRecruiters, Workday), or the board endpoint (Ashby has no smaller one). Only the HTTP status is
+// read. { ok, status, error, network }.
+export async function probeBoard(board, { fetchImpl = fetch, headers = {}, timeoutMs = 15000 } = {}) {
+  const request = { headers: { 'user-agent': 'DailyJobMatchAlert/0.1', ...headers, accept: 'application/json' } };
+  let url = board.apiUrl;
+  try {
+    const parsed = new URL(board.apiUrl);
+    if (board.kind === 'greenhouse') parsed.searchParams.delete('content');
+    if (board.kind === 'lever' || board.kind === 'smartrecruiters') parsed.searchParams.set('limit', '1');
+    url = parsed.toString();
+  } catch {}
+  if (board.kind === 'workday') Object.assign(request, { method: 'POST', headers: { ...request.headers, 'content-type': 'application/json' }, body: JSON.stringify({ appliedFacets: {}, limit: 1, offset: 0, searchText: '' }) });
+  try {
+    const response = await fetchWithTimeout(url, request, Number(timeoutMs) || 15000, fetchImpl);
+    await response.body?.cancel?.().catch(() => {});
+    return response.ok ? { ok: true, status: response.status, error: null, network: false } : { ok: false, status: response.status, error: `HTTP ${response.status}`, network: false };
+  } catch (error) {
+    return { ok: false, status: null, error: errorSummary(error), network: isNetworkError(error) };
+  }
+}
+
+// Probes every enabled dormant board whose probe is due. One that answers resumes (dormant cleared, failures
+// reset, an info line); the rest stay dormant until the next probe. Returns { probed, resumed, failed }.
+export async function probeDormantBoards(registry, { now = new Date(), fetchImpl = fetch, headers = {}, timeoutMs, concurrency = 3, warnings = [], days = DORMANT_PROBE_DAYS, timeZone = null } = {}) {
+  const due = Object.values(registry.boards).filter(board => dormantProbeDue(board, now, { days }));
+  const resumed = [];
+  const failed = [];
+  await mapLimit(due, concurrency, async board => {
+    const probe = await probeBoard(board, { fetchImpl, headers, timeoutMs });
+    const since = board.dormantSince;
+    board.lastProbeAt = now.toISOString();
+    board.lastProbeResult = probe.ok ? `HTTP ${probe.status}` : probe.error;
+    if (probe.ok) {
+      Object.assign(board, { dormant: false, dormantSince: null, consecutiveFailures: 0, lastError: null, lastErrorCode: null, etag: null, lastModified: null, resumedAt: now.toISOString(), resumedBy: 'probe' });
+      resumed.push(board.key);
+      const days = since ? Math.round((now.getTime() - Date.parse(since)) / 86_400_000) : null;
+      warnings.push(createWarning('collector', boardLabel(board), `answered the ${DORMANT_PROBE_DAYS}-day probe of a dormant board (HTTP ${probe.status}${days != null ? `, dormant for ${days} days` : ''}); polling resumes from the next run`, 'info'));
+    } else {
+      failed.push({ key: board.key, label: boardLabel(board), error: probe.error });
+    }
+  });
+  if (failed.length) {
+    failed.sort((a, b) => a.label.localeCompare(b.label));
+    const next = nextDormantProbeAt(registry.boards[failed[0].key], { days });
+    warnings.push(createWarning('collector', 'ATS boards', `probed ${due.length} dormant board(s); ${failed.length} still failing and stay dormant until the next probe${next ? ` (${localDate(new Date(next), timeZone)})` : ''}: ${failed.slice(0, 8).map(item => `${item.label} (${item.error})`).join(', ')}${failed.length > 8 ? ', …' : ''}`, 'info'));
+  }
+  return { probed: due.length, resumed, failed };
 }
 
 export function resumeBoard(registry, key) {
@@ -823,7 +893,7 @@ export async function collectAtsBoards({ registry, snapshots = null, settings = 
       board.dormant = true;
       board.dormantSince = now.toISOString();
       result.dormant = true;
-      note += `; marked dormant after ${DORMANT_AFTER_FAILURES} consecutive failures, resume it from the hub Status page`;
+      note += `; marked dormant after ${DORMANT_AFTER_FAILURES} consecutive failures, probed again in ${DORMANT_PROBE_DAYS} days, or resume it from the hub Status page`;
     }
     warnings.push(createWarning('collector', result.label, `${board.lastError} (${note}); the other sources were not affected`));
   }
@@ -879,6 +949,15 @@ export async function collectAtsBoards({ registry, snapshots = null, settings = 
     if (persisting) for (const entry of stillFailed) excuse(entry);
   }
   for (const entry of failures) if (entry.result.ok === false && !entry.result.outage) recordFailure(entry);
+  // Dormant boards due for their 30-day probe; skipped while this Mac's network is down (a probe then would
+  // only push the next one a month out).
+  const probes = outage?.persisting
+    ? { probed: 0, resumed: [], failed: [], skipped: 'network outage' }
+    : await probeDormantBoards(registry, { now, fetchImpl, headers, timeoutMs: network.timeoutMs, concurrency, warnings, timeZone, ...(Number(settings.dormantProbeDays) > 0 ? { days: Number(settings.dormantProbeDays) } : {}) });
+  for (const key of probes.resumed) {
+    const result = results.find(item => item.key === key);
+    if (result) Object.assign(result, { dormant: false, resumed: true });
+  }
   results.sort((a, b) => a.label.localeCompare(b.label));
-  return { jobs, baseline, results, snapshots: store, outage };
+  return { jobs, baseline, results, snapshots: store, outage, probes };
 }

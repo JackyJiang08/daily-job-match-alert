@@ -15,7 +15,7 @@ import { ENGINE_DEFAULT_MODELS, ENGINE_IDS, ENGINE_LABELS, createEngine, normali
 import { readConfigFile, updateConfigFile } from './config-file.mjs';
 import { readLockStatus } from './run.mjs';
 import { MAXIMUM_ATTEMPTS, autoCatchUpEnabled } from './auto-catchup.mjs';
-import { boardLabel, readRegistry, resumeBoard, writeRegistry } from '../collectors/ats-boards.mjs';
+import { DORMANT_PROBE_GRACE_HOURS, boardLabel, nextDormantProbeAt, readRegistry, resumeBoard, writeRegistry } from '../collectors/ats-boards.mjs';
 import { builtinSources } from '../collectors/catalog.mjs';
 import { WEEKDAYS, availabilityPath, markModelUnavailable, markModelUsed, markWeeklyLimit, pruneAvailability, pruneLimits, readAvailability, weeklyResetOf, writeAvailability } from '../engines/model-availability.mjs';
 import { classifyEngineError, humanizeEngineError } from '../engines/engine-errors.mjs';
@@ -703,6 +703,14 @@ export async function sourcesView(ctx, config, latest) {
   }
   const registry = await readJson(ctx.io, atsRegistryPath(ctx), null);
   const boards = Object.values(registry?.boards || {}).filter(board => board && typeof board === 'object');
+  // A dormant board's next probe is the first nightly run once its 30 days are up (src/collectors/ats-boards.mjs).
+  const schedule = boards.some(board => board.dormant) ? await installedSchedule(ctx) : null;
+  const probeRun = board => {
+    const due = nextDormantProbeAt(board);
+    if (!due) return null;
+    const from = new Date(Math.max(Date.parse(due) - DORMANT_PROBE_GRACE_HOURS * 60 * 60 * 1000, ctx.now().getTime()));
+    return nextScheduledRun(from, config.timeZone || 'America/Chicago', schedule.hour, schedule.minute)?.toISOString() || due;
+  };
   boards.sort((a, b) => boardLabel(a).localeCompare(boardLabel(b)));
   for (const board of boards) {
     const label = boardLabel(board);
@@ -711,6 +719,7 @@ export async function sourcesView(ctx, config, latest) {
       key: board.key, label, kind: board.kind, enabled: board.enabled !== false,
       lastSuccessAt: board.lastSuccessAt || null, newCount: stat ? Number(stat.count || 0) : (board.lastNewCount ?? null), jobCount: board.lastJobCount ?? null,
       baselineCount: board.baselineCount ?? null, baselinedAt: board.baselinedAt || null, dormant: board.dormant === true, dormantSince: board.dormantSince || null, quiet: board.quiet === true, lastNewAt: board.lastNewAt || null,
+      nextProbeAt: probeRun(board), lastProbeAt: board.lastProbeAt || null, lastProbeResult: board.lastProbeResult || null, resumedAt: board.resumedBy === 'probe' ? board.resumedAt || null : null,
       error: board.lastError || null, skipped: stat?.skipped || null, consecutiveFailures: Number(board.consecutiveFailures || 0), boardUrl: board.boardUrl || null, origin: board.origin || null,
       // Unreachable during a network outage on this Mac: the reason shows, but it is not the board's failure.
       outage: stat?.outage === true ? (stat.error || board.lastOutageError || 'network unavailable') : null,

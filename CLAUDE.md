@@ -120,7 +120,13 @@ disabled; do not expand them unless a task says so.
   lists via catalog.mjs, Hacker News hiring, RemoteOK, search discovery, email files) and ATS
   boards discovered from posting URLs (ats-boards.mjs, registry in
   state/ats-boards.json; quiet after 30 days without new postings → weekly
-  polls; dormant after 7 consecutive failures).
+  polls; dormant after 7 consecutive failures). Dormant probe (2026-10-23): collectAtsBoards ends with
+  probeDormantBoards (skipped when outage.persisting): enabled dormant boards past nextDormantProbeAt
+  (max(dormantSince, lastProbeAt) + DORMANT_PROBE_DAYS 30, DORMANT_PROBE_GRACE_HOURS 6 early;
+  sources.atsBoards.dormantProbeDays overrides) get probeBoard (one request: Greenhouse without content,
+  Lever/SmartRecruiters limit=1, Workday POST limit 1, Ashby as is; status only). 2xx → dormant cleared,
+  failures reset, resumedBy 'probe', info warning, polled from the next run; else lastProbeAt/lastProbeResult
+  and one aggregated info line. Status Sources row: "Next probe <first scheduled run after due>" + last probe.
 - Baseline rule: the first poll of a board or list marks only postings older
   than lookbackHours as seen (`baseline: true`, postedAt stored); postings
   inside the window, postings without a date count as old, and a URL another

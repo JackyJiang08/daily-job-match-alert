@@ -295,7 +295,7 @@ test('one failing board only warns; the others still deliver, and the seventh co
   assert.equal(broken.consecutiveFailures, 7);
   assert.equal(broken.dormant, true);
   assert.equal(broken.dormantSince, new Date(NOW.getTime() + 7 * 24 * 3600 * 1000).toISOString());
-  assert.match(warnings.at(-1).message, /marked dormant after 7 consecutive failures, resume it from the hub Status page/);
+  assert.match(warnings.at(-1).message, /marked dormant after 7 consecutive failures, probed again in 30 days, or resume it from the hub Status page/);
   const skipped = await collectAtsBoards({ registry, now: new Date(NOW.getTime() + 8 * 24 * 3600 * 1000), warnings, fetchImpl });
   assert.equal(skipped.results.find(result => result.key === 'lever:broken').skipped, 'dormant');
   assert.equal(broken.consecutiveFailures, 7, 'a dormant board is not even tried');

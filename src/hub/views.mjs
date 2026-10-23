@@ -429,7 +429,7 @@ function sourceRow(row, timeZone) {
   const fresh = row.newCount == null ? '<span class="muted">—</span>' : `${row.newCount}${row.jobCount != null ? ` <span class="muted">of ${row.jobCount} listed</span>` : ''}`;
   const notes = [];
   if (row.quiet && !row.dormant) notes.push('<span class="badge badge-muted" data-badge="quiet" title="No new posting for 30 days; polled weekly">Quiet</span>');
-  if (row.dormant) notes.push(`<span class="badge badge-bad" data-badge="dormant" title="${htmlEscape(row.error || '')}">Dormant</span> <form class="inline" method="post" action="/status/sources/resume"><input type="hidden" name="board" value="${htmlEscape(row.key)}"><button class="btn secondary small" type="submit">Resume Polling</button></form>`);
+  if (row.dormant) notes.push(`<span class="badge badge-bad" data-badge="dormant" title="${htmlEscape(row.error || '')}">Dormant</span> <form class="inline" method="post" action="/status/sources/resume"><input type="hidden" name="board" value="${htmlEscape(row.key)}"><button class="btn secondary small" type="submit">Resume Polling</button></form>${row.nextProbeAt ? ` <span class="muted" data-next-probe="${htmlEscape(row.nextProbeAt)}">Next probe ${htmlEscape(formatLocalDateTime(row.nextProbeAt, timeZone))}${row.lastProbeAt ? ` · last probe ${htmlEscape(formatLocalDay(row.lastProbeAt, timeZone))}: ${htmlEscape(row.lastProbeResult || 'failed')}` : ''}</span>` : ''}`);
   else if (row.outage) notes.push(`<span class="badge badge-muted" data-badge="outage" title="This Mac's network was down during the run; not counted as a failure">Network outage</span> <span class="muted">${htmlEscape(row.outage)}</span>`);
   else if (row.error) notes.push(`<span class="badge badge-warn" data-badge="failing">Failing${row.consecutiveFailures > 1 ? ` (${row.consecutiveFailures} in a row)` : ''}</span> <span class="muted">${htmlEscape(row.error)}</span>`);
   else if (row.skipped) notes.push(`<span class="muted">Not polled (${htmlEscape(row.skipped)})</span>`);
@@ -507,7 +507,7 @@ function sourcesCard(rows, timeZone) {
   const summary = boards.length
     ? `<p class="muted" id="sources-summary">${boards.length} ATS board${boards.length === 1 ? '' : 's'} · ${boards.filter(row => row.quiet && !row.dormant).length} quiet (polled weekly) · ${boards.filter(row => row.dormant).length} dormant · ${boards.filter(row => !row.enabled).length} disabled</p>`
     : '';
-  return `<article class="card" id="sources-card"><h2>Sources</h2><p class="muted">Built-in lists and every public ATS board discovered from posting URLs. A board with no new posting for 30 days is polled weekly; one that fails seven nights in a row goes dormant until you resume it.</p>${summary}${body}</article>`;
+  return `<article class="card" id="sources-card"><h2>Sources</h2><p class="muted">Built-in lists and every public ATS board discovered from posting URLs. A board with no new posting for 30 days is polled weekly; one that fails seven nights in a row goes dormant and is probed every 30 days, resuming on its own once it answers (or when you resume it).</p>${summary}${body}</article>`;
 }
 
 // The Runs card's Catch-up line: an incomplete run (cut short by the network) and what the hub's
