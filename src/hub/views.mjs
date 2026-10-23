@@ -529,6 +529,27 @@ function catchUpLine(view, at) {
   return parts.join('<br>');
 }
 
+// The Runs card's Backup line: the newest zip (src/backup.mjs) and where they go.
+function backupLine(view, at) {
+  if (!view) return '—';
+  const where = `<span class="muted" title="${htmlEscape(view.directory)}">${Number(view.count)} kept · nightly after the scheduled run · <code>npm run backup</code></span>`;
+  if (!view.latest) return `No backup yet <span class="muted" title="${htmlEscape(view.directory)}">· nightly after the scheduled run · <code>npm run backup</code></span>`;
+  return `${at(view.latest.modifiedAt)} · ${htmlEscape(formatBytes(view.latest.bytes))} <span class="muted">·</span> ${where}`;
+}
+
+// The integrity banner (src/state-integrity.mjs): seen state lost most of its entries, state.json read from
+// a backup, or a state file that does not parse.
+function integrityBanner(view, at) {
+  if (!view) return '';
+  const lines = [];
+  if (view.message) lines.push(htmlEscape(view.message));
+  if (view.stateRestored) lines.push(view.stateRestored.none
+    ? 'state/state.json does not parse and no backup could be read; the next run starts from an empty state.'
+    : `state/state.json does not parse; showing its backup ${htmlEscape(view.stateRestored.from ? view.stateRestored.from.split('/').at(-1) : '')}${view.stateRestored.at ? ` (${at(view.stateRestored.at)})` : ''}. The next run restores it.`);
+  for (const file of view.corrupt || []) lines.push(`state/${htmlEscape(file.name)} does not parse (${htmlEscape(file.error || 'invalid JSON')}).`);
+  return lines.length ? `<div class="flash error" data-banner="integrity">${lines.join('<br>')}</div>` : '';
+}
+
 export function statusPage({ status, timeZone }) {
   const { lastRun, nextRun, lock, runNow, run } = status;
   const at = value => htmlEscape(formatLocalDateTime(value, timeZone));
@@ -555,7 +576,7 @@ export function statusPage({ status, timeZone }) {
     ? `<div class="flash notice" data-banner="plan-change">${htmlEscape(status.planChange.message)} <a href="/settings">Review Settings</a>${status.claudeAuth?.expired ? ' <span class="muted">If the plan did not actually change, run <code>claude auth login --claudeai</code> to refresh the login.</span>' : ''}</div>`
     : '';
   return `<h1 class="hub-title">Status</h1>
-  ${planBanner}
+  ${integrityBanner(status.integrity, at)}${planBanner}
   ${authBanner}
   <article class="card"><h2>Runs</h2><dl class="kv">
     <dt>Last run</dt><dd>${lastRunLine}</dd>
@@ -566,6 +587,7 @@ export function statusPage({ status, timeZone }) {
     <dt>Next run</dt><dd>${nextRunLine}</dd>
     <dt>Catch-up</dt><dd id="catch-up-line">${catchUpLine(status.autoCatchUp, at)}</dd>
     <dt>Lock</dt><dd id="lock-line">${lockLine}</dd>
+    <dt>Backup</dt><dd id="backup-line">${backupLine(status.backup, at)}</dd>
   </dl></article>
   <article class="card" id="run-card" data-state="${runState}"><h2>Run Now</h2>
     <p class="muted">Runs the full pipeline now using your Claude subscription. Results merge into today's report.</p>

@@ -6,6 +6,7 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { caffeinated } from '../caffeinate.mjs';
 import { isPidAlive } from '../lock.mjs';
+import { writeJsonAtomic } from '../json-file.mjs';
 
 const TAIL_LINES = 50;
 const KEEP_RUNS = 20;
@@ -104,8 +105,7 @@ export function createRunManager(options) {
     try { runs = JSON.parse(await io.readFile(file, 'utf8')); } catch {}
     if (!Array.isArray(runs)) runs = [];
     runs.unshift(entry);
-    await io.mkdir(hubDirectory, { recursive: true });
-    await io.writeFile(file, `${JSON.stringify(runs.slice(0, KEEP_RUNS), null, 2)}\n`, { mode: 0o600 });
+    await writeJsonAtomic(file, runs.slice(0, KEEP_RUNS), { io, mode: 0o600 });
   }
 
   async function history() {

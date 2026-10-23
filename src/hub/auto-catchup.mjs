@@ -14,6 +14,7 @@
 import path from 'node:path';
 import { CLOCK_JUMP_MS, createRunClock } from '../collectors/ats-boards.mjs';
 import { errorSummary } from '../warnings.mjs';
+import { writeJsonAtomic } from '../json-file.mjs';
 
 export const CHECK_INTERVAL_MS = 10 * 60 * 1000;
 export const MAXIMUM_ATTEMPTS = 2;
@@ -61,8 +62,7 @@ async function readLog(io, file) {
 }
 
 async function writeLog(io, file, log) {
-  await io.mkdir(path.dirname(file), { recursive: true });
-  await io.writeFile(file, `${JSON.stringify(log, null, 2)}\n`, { mode: 0o600 });
+  await writeJsonAtomic(file, log, { io, mode: 0o600 });
 }
 
 // options: readState() → state, loadConfig() → config, schedule() → { hour, minute }, nextScheduledRun

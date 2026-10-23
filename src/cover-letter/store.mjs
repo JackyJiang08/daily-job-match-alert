@@ -7,6 +7,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { SAMPLE_TRACKS, deriveFileNamePrefix, letterFileName, sanitizeCompany } from './compose.mjs';
+import { writeJsonAtomic } from '../json-file.mjs';
 
 export const MAX_SAMPLES = 10;
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
@@ -27,8 +28,7 @@ export function createLetterStore({ root, io = fs, now = () => new Date(), extra
     try { return JSON.parse(await io.readFile(file, 'utf8')); } catch { return fallback; }
   }
   async function writeJson(file, value) {
-    await io.mkdir(path.dirname(file), { recursive: true });
-    await io.writeFile(file, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+    await writeJsonAtomic(file, value, { io, mode: 0o600 });
   }
 
   // fileNamePrefix defaults to the everyday name plus surname derived from the signature (or the name)

@@ -50,6 +50,11 @@
     "enabled": true,
     "note": "Settings > Pipeline \"Auto catch-up after network outage\": when a nightly run is cut short by this Mac's network, the hub checks every 10 minutes and reruns it once GitHub and Greenhouse answer (at most twice a day, until the next nightly run)."
   },
+  "backup": {
+    "directory": "~/Library/Application Support/daily-job-match-alert/backups",
+    "auto": true,
+    "note": "npm run backup zips private/, state/ (no day payloads or logs), and config.json here; the scheduled run makes one each night and the newest seven are kept. npm run restore -- <zip> writes one back."
+  },
   "hub": {
     "port": 4747,
     "chromeCommand": ""

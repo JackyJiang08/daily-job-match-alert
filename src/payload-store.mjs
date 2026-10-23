@@ -20,6 +20,7 @@ import zlib from 'node:zlib';
 import { promisify } from 'node:util';
 import { isSemanticCandidate } from './subscription-match.mjs';
 import { canonicalUrl, sha256 } from './utils.mjs';
+import { writeFileAtomic } from './json-file.mjs';
 
 const gunzip = promisify(zlib.gunzip);
 const gzip = promisify(zlib.gzip);
@@ -93,16 +94,13 @@ export async function encodePayload(payload, { gzip: compressed = false, pretty 
   return compressed ? gzip(Buffer.from(text, 'utf8')) : Buffer.from(text, 'utf8');
 }
 
-// Written to a temporary file and renamed; the other form of the same date is removed afterwards, so a
-// reader always finds exactly one complete file.
+// Written through writeFileAtomic (temporary file, fsync, rename); the other form of the same date is
+// removed afterwards, so a reader always finds exactly one complete file.
 export async function writePayloadFile(root, payload, { gzip: compressed = false, io = fs } = {}) {
   const date = payload.meta.date;
   const file = payloadFilePath(root, date, { gzip: compressed });
-  await io.mkdir(path.dirname(file), { recursive: true });
-  const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
   const bytes = await encodePayload(payload, { gzip: compressed });
-  await io.writeFile(temp, bytes);
-  await io.rename(temp, file);
+  await writeFileAtomic(file, bytes, { io });
   await io.rm(payloadFilePath(root, date, { gzip: !compressed }), { force: true });
   return { file, gzip: compressed, bytes: bytes.length };
 }

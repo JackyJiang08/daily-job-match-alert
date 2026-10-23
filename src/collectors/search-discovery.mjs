@@ -30,6 +30,7 @@ import { localDate } from '../time-format.mjs';
 import { canonicalUrl, cleanText } from '../utils.mjs';
 import { createWarning, errorSummary } from '../warnings.mjs';
 import { parsePostingDate } from '../posting-fields.mjs';
+import { writeJsonAtomic } from '../json-file.mjs';
 
 export const SEARCH_DISCOVERY_SOURCE = SEARCH_SOURCE_NAME;
 export const SEARCH_SOURCE_KIND = 'search_discovery';
@@ -133,8 +134,7 @@ export async function readSearchUsage(file, io = fs) {
 }
 
 async function writeSearchUsage(file, usage, io = fs) {
-  await io.mkdir(path.dirname(file), { recursive: true });
-  await io.writeFile(file, `${JSON.stringify(usage, null, 2)}\n`);
+  await writeJsonAtomic(file, usage, { io });
 }
 
 function scrub(text, apiKey) {

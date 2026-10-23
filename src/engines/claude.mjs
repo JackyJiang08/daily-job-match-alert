@@ -5,6 +5,7 @@ import { DEFAULT_CATALOG, canonicalModelId, cliModelArg, defaultModelId, familyP
 import { claudeUsageFromEnvelope } from './usage.mjs';
 import { compareVersions, extractResults, isMissingCommand, modelMatchesConfiguration, normalizeModelName, parseSemanticVersion, run, subscriptionEnvironment } from './shared.mjs';
 import { errorSummary } from '../warnings.mjs';
+import { writeJsonAtomic } from '../json-file.mjs';
 import { INSTALL_HINTS, resolveCliCommand } from './cli-path.mjs';
 import { AuthExpiredError, isAuthExpiredText, unwrapCliEnvelope } from './engine-errors.mjs';
 
@@ -106,9 +107,7 @@ function captureEnvelope(file, stdout, io) {
   try {
     const envelope = redactEnvelope(JSON.parse(String(stdout).trim()));
     const writer = io || fsPromises;
-    writer.mkdir(path.dirname(file), { recursive: true })
-      .then(() => writer.writeFile(file, `${JSON.stringify({ capturedAt: new Date().toISOString(), envelope }, null, 2)}\n`))
-      .catch(() => {});
+    writeJsonAtomic(file, { capturedAt: new Date().toISOString(), envelope }, { io: writer }).catch(() => {});
   } catch {}
 }
 

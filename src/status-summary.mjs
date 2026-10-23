@@ -20,7 +20,7 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 export const STATUS_META_FIELDS = [
   'date', 'generatedAt', 'lastUpdatedAt', 'completedAt', 'trigger', 'engine', 'scoringModel',
   'matchCount', 'candidateCount', 'reviewedThisRun', 'deferredCount', 'maxReviewedPerRun', 'expiredBacklogCount', 'runsToday',
-  'funnel', 'usage', 'prescreen', 'sourceCounts', 'quota', 'budgetAlert', 'budgetHistory', 'authExpired', 'planChange',
+  'funnel', 'usage', 'prescreen', 'sourceCounts', 'quota', 'budgetAlert', 'budgetHistory', 'authExpired', 'planChange', 'integrity',
 ];
 
 export function statusSummaryPath(root) {

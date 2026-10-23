@@ -15,6 +15,7 @@ import { describeQuota } from './engines/quota.mjs';
 import { LEGACY_LOCATION_GAP, LOCATION_NOT_STATED_LABEL, LOCATION_NOT_STATED_TITLE, LOCATION_UNVERIFIED_GAP, usEvidenceInDescription } from './eligibility.mjs';
 import { describePrescreen, funnelText } from './prescreen-text.mjs';
 import { roleFamilyCountsText } from './role-families.mjs';
+import { seenDropMessage } from './state-integrity.mjs';
 
 export const REPORT_TITLE = 'Daily Job Match Alert';
 export const WARNINGS_FILE_NAME = 'warnings.txt';
@@ -416,6 +417,7 @@ export function buildReportView(jobs, meta, options = {}) {
     toolbar: { roleTypes, tracks, quiet: jobs.length < 5, total: jobs.length },
     banner: meta.authExpired ? `${meta.authExpired.message}${meta.authExpired.deferred ? ` ${meta.authExpired.deferred} posting(s) were deferred to the next run and are not lost.` : ''}` : (meta.quota?.banner || null),
     networkBanner: meta.networkOutage ? meta.networkOutage.detail || meta.networkOutage.message : null,
+    integrityBanner: meta.integrity?.seenDrop ? seenDropMessage(meta.integrity.seenDrop, meta.timeZone) : null,
     cards,
     carried: carriedCards.length ? { title: CARRIED_OVER_TITLE, note: 'Deferred by the review budget on an earlier run and reviewed now; each card says when it was first found.', cards: carriedCards } : null,
     emptyMessage: 'No new postings cleared the configured threshold for this date.',

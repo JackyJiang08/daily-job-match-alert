@@ -7,6 +7,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { normalizeModelName } from './shared.mjs';
 import { localDate, zonedInstant } from '../time-format.mjs';
+import { writeJsonAtomic } from '../json-file.mjs';
 
 export const RETRY_AFTER_DAYS = 7;
 
@@ -113,8 +114,7 @@ export async function readAvailability(file, io = fs) {
 }
 
 export async function writeAvailability(file, record, io = fs) {
-  await io.mkdir(path.dirname(file), { recursive: true });
-  await io.writeFile(file, `${JSON.stringify(normalizeAvailability(record), null, 2)}\n`);
+  await writeJsonAtomic(file, normalizeAvailability(record), { io });
 }
 
 export function markModelUnavailable(record, model, { plan = null, at = new Date().toISOString(), notice = null, kind = 'not_on_plan' } = {}) {

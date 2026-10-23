@@ -38,6 +38,7 @@ import { workdayPostedOn } from '../enrich.mjs';
 import { canonicalUrl, cleanText, isoDate, mapLimit, normalizeLocation, sha256 } from '../utils.mjs';
 import { createWarning, errorCause, errorSummary, isNetworkError } from '../warnings.mjs';
 import { NEW_SINCE_LAST_POLL, freshnessInstant } from '../posting-fields.mjs';
+import { STATE_BACKUP_GENERATIONS, readJsonWithBackups, writeJsonAtomic } from '../json-file.mjs';
 
 export const ATS_KINDS = { greenhouse: 'Greenhouse', lever: 'Lever', ashby: 'Ashby', workday: 'Workday', smartrecruiters: 'SmartRecruiters' };
 export const ATS_SOURCE_KIND = 'public_ats_board';
@@ -110,8 +111,7 @@ export async function writeSnapshots(file, snapshots, registry = null, io = fs) 
   const normalized = normalizeSnapshots(snapshots);
   // Boards that left the registry leave the snapshot file too.
   if (registry) for (const key of Object.keys(normalized.boards)) if (!registry.boards[key]) delete normalized.boards[key];
-  await io.mkdir(path.dirname(file), { recursive: true });
-  await io.writeFile(file, `${JSON.stringify(normalized)}\n`);
+  await writeJsonAtomic(file, normalized, { io, indent: 0 });
 }
 
 // A posting is identified by its canonical URL and, when the board gives one, its own id; either match
@@ -275,18 +275,18 @@ export function undoOutageFailures(registry, now = new Date()) {
   return { applied: true, runs, boards: repaired };
 }
 
-export async function readRegistry(file, io = fs) {
-  try {
-    return normalizeRegistry(JSON.parse(await io.readFile(file, 'utf8')));
-  } catch (error) {
-    if (error.code === 'ENOENT') return normalizeRegistry(null);
-    throw error;
-  }
+// A registry that does not parse falls back to the newest backup that does (ats-boards.json.1 … .3, kept by
+// writeRegistry); onRestore(restored) lets the run warn and notify. restore: true (the pipeline) also puts
+// that backup back in place; the hub only reads it.
+export async function readRegistry(file, io = fs, { restore = false, onRestore = null, now = new Date() } = {}) {
+  const read = await readJsonWithBackups(file, { io, restore, now });
+  if (read.restored && onRestore) await onRestore(read.restored);
+  return normalizeRegistry(read.value);
 }
 
+// Atomic, keeping the three previous generations.
 export async function writeRegistry(file, registry, io = fs) {
-  await io.mkdir(path.dirname(file), { recursive: true });
-  await io.writeFile(file, `${JSON.stringify(normalizeRegistry(registry), null, 2)}\n`);
+  await writeJsonAtomic(file, normalizeRegistry(registry), { io, backups: STATE_BACKUP_GENERATIONS });
 }
 
 function newBoardRecord(board, now, origin) {

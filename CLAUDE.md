@@ -38,10 +38,33 @@ disabled; do not expand them unless a task says so.
   lock, warnings.txt per day, ERROR-*.html, Run Now = child
   `node src/index.mjs` with DAILY_JOB_MATCH_ALERT_TRIGGER=manual under the
   run lock), Settings (five keys, surgical config.json edit under the lock).
-- The hub only reads pipeline artifacts; it writes config.json, private/
+- The hub only reads pipeline artifacts (never state.json: a torn one is read from its backup); it writes config.json, private/
   (gitignored), state/ats-boards.json (the ATS board registry, when a
   dormant board is resumed from Status), state/reports-index.json, and
   state/status-summary.json.
+- State safety (2026-10-23): src/json-file.mjs writeFileAtomic/writeJsonAtomic (same-dir temp, fsync, rename,
+  dir fsync; a test double without open() uses writeFile+rename) for every JSON under state/ and private/
+  (state.json, ats-boards/ats-snapshots, payloads, resume-sources, search-usage, model-availability, the
+  envelope log, hub runs/auto-catchup/hub-state, letter store); files that already did temp+rename (reports
+  index, status summary, usage, quota notices, letters-auto/backlog, config.json) are unchanged. backups: 3
+  (state.json via writeState, writeRegistry) keeps <file>.1–.3 (hard link of the replaced file, copy as
+  fallback). readJsonWithBackups: unparsable → newest parsable .N; restore: true (pipeline loadState,
+  readRegistry in collectAtsBoardSources) moves the broken file to <file>.corrupt-<time> (one kept) and puts
+  the backup in place; warning + notifyMessage "state.json was corrupt, restored from backup (<local time>)"
+  (restoredFromBackupMessage); none readable → empty + warning. The hub (readStateView) reads the backup and
+  never rewrites. sweepTemporaryFiles at run start (> 10 min). src/state-integrity.mjs: writeState records
+  state/integrity.json { seenCount, recordedAt }; loadState runs checkIntegrity (top-level state/*.json except
+  payloads parse; seen < 50% of the record → meta.integrity.seenDrop, kept by same-day reruns → report
+  data-banner="integrity" + warning); hub startHub runs checkHubIntegrity (ctx.integrity) and Status shows
+  integrityView (live seen count of the cached state view, the newest run's seenDrop, state.json read from a
+  backup, still-corrupt files). src/backup.mjs + src/zip.mjs (own zip writer/reader, CRC-checked, no ZIP64):
+  createBackup → <config.backup.directory | ~/Library/Application Support/daily-job-match-alert/backups>/
+  daily-job-match-alert-backup-<local date>-<HHMMSS>.zip with backup-manifest.json, keep 7; isBackedUp skips
+  payloads, logs/, state/backups/, .N copies, .corrupt-, .tmp, .lock. main() autoBackupAfterRun after the
+  letters phase: triggers scheduled/catchup/auto_catchup only, once per local day, under the run lock (tests
+  pass backupDirectory). npm run backup / npm run restore -- <zip> (src/backup-cli.mjs; restore under the run
+  lock after a -pre-restore zip; state.json/ats-boards.json rotate). Status Runs card "Backup" row
+  (#backup-line, backupView; the Status snapshot helper strips it). Chaos scenario state-corrupt.
 - Payload size (2026-10-20): src/payload-store.mjs owns every payload read and write (.json or
   .json.gz; the plain file wins when both exist). writeReportPayload stores slimPayload(payload): only
   postings that went to the final review (semanticReviewed, unreviewed/local_fallback, or a local_only

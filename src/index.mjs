@@ -29,6 +29,9 @@ import { updateReportsIndex } from './reports-index.mjs';
 import { listPayloadFiles, payloadFilePath, payloadReviewedCount, readPayloadFile, reportJobKey, retentionDays, slimPayload, writePayloadFile } from './payload-store.mjs';
 import { maintainPayloads } from './payload-maintenance.mjs';
 import { updateStatusSummary } from './status-summary.mjs';
+import { STATE_BACKUP_GENERATIONS, readJsonWithBackups, sweepTemporaryFiles, writeJsonAtomic } from './json-file.mjs';
+import { SELF_HEALING_FILES, checkIntegrity, recordSeenCount, seenCountOf, seenDropMessage } from './state-integrity.mjs';
+import { autoBackupAfterRun } from './backup.mjs';
 import { isZapplyLink, resolveZapplyLink } from './collectors/zapply.mjs';
 import { appendUsage, summarizeUsage, usageEntries, usagePath } from './engines/usage.mjs';
 import { appendQuotaNotices, quotaNoticesPath } from './engines/quota-notices.mjs';
@@ -82,11 +85,50 @@ export function resolveRunDates(argv = process.argv, timeZone = 'America/Chicago
   };
 }
 
-async function readState(file) {
-  try { return normalizeState(JSON.parse(await fs.readFile(file, 'utf8'))); } catch (error) {
-    if (error.code === 'ENOENT') return { seen: {} };
-    throw error;
+// The notification and warning for a state file that did not parse and was replaced by its newest readable
+// backup (src/json-file.mjs readJsonWithBackups).
+export function restoredFromBackupMessage(name, restored, timeZone) {
+  if (restored.none) return `${name} was corrupt and no backup could be read; started from an empty file`;
+  return `${name} was corrupt, restored from backup (${restored.at ? formatLocalDateTime(restored.at, timeZone) : path.basename(restored.from)})`;
+}
+
+async function sendNotification(options, text) {
+  try {
+    await (options.notify || notifyMessage)(text, { runner: options.notificationRunner });
+  } catch (error) {
+    console.warn(`Could not send the notification "${text}": ${errorSummary(error)}`);
   }
+}
+
+// A file restored from a backup or left corrupt never stops the run: a warning, and a notification.
+async function reportRestored(name, restored, { config, warnings, options }) {
+  const message = restoredFromBackupMessage(name, restored, config.timeZone);
+  const detail = restored.none ? '' : ` (${path.basename(restored.from)}); the broken copy was kept as ${path.basename(restored.quarantined || `${name}.corrupt-*`)}`;
+  warnings.push(createWarning('state', name, `${message}${detail}. Parse error: ${restored.error}`));
+  await sendNotification(options, message);
+}
+
+// state/state.json with its backups (state.json.1 … .3), then the integrity check of state/ (every JSON
+// parses, the seen count against the one recorded at the last write; src/state-integrity.mjs).
+async function loadState(config, statePath, { now, warnings, options = {} }) {
+  // A run killed mid-write leaves its temporary file (up to the size of state.json) behind.
+  await sweepTemporaryFiles(path.dirname(statePath), { now: new Date() });
+  const read = await readJsonWithBackups(statePath, { restore: true, now, fallback: {} });
+  const state = normalizeState(read.value);
+  if (read.restored) await reportRestored('state.json', read.restored, { config, warnings, options });
+  let check = null;
+  try {
+    check = await checkIntegrity(config.root, { now, seenCount: seenCountOf(state) });
+  } catch (error) {
+    warnings.push(createWarning('state', 'integrity check', `could not check state/: ${errorSummary(error)}`, 'info'));
+  }
+  for (const file of check?.files || []) {
+    if (file.ok || SELF_HEALING_FILES.includes(file.name)) continue;
+    warnings.push(createWarning('state', file.name, `state/${file.name} does not parse (${file.error}); its reader starts from an empty file. Restore it from a backup (npm run restore -- <zip>) if it matters.`));
+  }
+  const seenDrop = check?.seenDrop || null;
+  if (seenDrop) warnings.push(createWarning('state', 'seen state', seenDropMessage(seenDrop, config.timeZone)));
+  return { state, seenDrop };
 }
 
 async function optionallyRunCareerOps(config, runner = execFileAsync) {
@@ -299,11 +341,11 @@ export function networkOutageNotice(outage) {
   return `${NETWORK_OUTAGE_MESSAGE} ${outage.missing} board(s) could not be reached (${why}; ${causeTallyText(outage.causes)}; retried after ${Math.round(outage.retryDelayMs / 1000)} s). They were not counted as failing and will be polled on the next run.`;
 }
 
-export async function collectAtsBoardSources(config, state, collectedJobs, { now, warnings, sourceStats, fetchImpl, searchBoards = [], clock = null, sleep = null, retryDelayMs = null } = {}) {
+export async function collectAtsBoardSources(config, state, collectedJobs, { now, warnings, sourceStats, fetchImpl, searchBoards = [], clock = null, sleep = null, retryDelayMs = null, onRegistryRestored = null } = {}) {
   const settings = config.sources.atsBoards || {};
   if (settings.enabled === false) return { jobs: [], results: [], registry: null, outage: null };
   const file = registryPath(config);
-  const registry = await readRegistry(file);
+  const registry = await readRegistry(file, fs, { restore: true, now, onRestore: onRegistryRestored });
   const repaired = undoOutageFailures(registry, now);
   if (repaired.boards) warnings.push(createWarning('collector', 'ATS boards', `took back ${repaired.boards} failure count(s) recorded during an earlier network outage (${repaired.runs.map(run => run.at).join(', ')}); those boards are polled normally again`, 'info'));
   registerBoards(registry, discoverBoards(collectedJobs), { now, origin: 'discovered' });
@@ -479,9 +521,11 @@ function statePathFor(config) {
   return path.join(config.root, 'state', 'state.json');
 }
 
+// Atomic, keeping the three previous generations (state.json.1 … .3); the seen count is recorded for the
+// next run's integrity check.
 async function writeState(statePath, state) {
-  await fs.mkdir(path.dirname(statePath), { recursive: true });
-  await fs.writeFile(statePath, JSON.stringify(state, null, 2) + '\n');
+  await writeJsonAtomic(statePath, state, { backups: STATE_BACKUP_GENERATIONS });
+  await recordSeenCount(path.dirname(path.dirname(statePath)), seenCountOf(state)).catch(error => console.warn(`Could not record the seen count in state/integrity.json: ${errorSummary(error)}`));
 }
 
 async function buildXlsx(payloadPath, xlsxPath, cwd) {
@@ -842,7 +886,7 @@ async function runPipeline(config, clock, options = {}) {
   console.error(`Resume tracks: ${resumeTracks.map(track => track.label).join(', ')}${disabledTracks.length ? ` (disabled: ${disabledTracks.join(', ')})` : ''}`);
   await fs.mkdir(config.outputDirectory, { recursive: true });
   const statePath = statePathFor(config);
-  const state = await readState(statePath);
+  const { state, seenDrop } = await loadState(config, statePath, { now, warnings, options });
   const cutoff = new Date(now.getTime() - config.lookbackHours * 60 * 60 * 1000);
   const debug = {};
   const prefs = config.preferences || {};
@@ -883,6 +927,7 @@ async function runPipeline(config, clock, options = {}) {
   });
   const atsSources = await collectAtsBoardSources(config, state, collectedRaw, {
     now, warnings, sourceStats, searchBoards, clock: runClock,
+    onRegistryRestored: restored => reportRestored('ats-boards.json', restored, { config, warnings, options }),
     ...(options.atsFetchImpl ? { fetchImpl: options.atsFetchImpl } : {}),
     ...(options.atsSleep ? { sleep: options.atsSleep } : {}),
     ...(options.atsRetryDelayMs != null ? { retryDelayMs: options.atsRetryDelayMs } : {}),
@@ -1184,6 +1229,9 @@ async function runPipeline(config, clock, options = {}) {
     quota,
     authExpired,
     networkOutage,
+    // A seen state that lost most of its entries since the last write (src/state-integrity.mjs): report header
+    // banner and Status banner. A rerun the same day keeps the first run's finding.
+    ...(seenDrop || previous?.meta?.integrity ? { integrity: { seenDrop: seenDrop || previous.meta.integrity.seenDrop } } : {}),
     planChange,
     plan: state.observedPlans?.claude?.type || null,
     unavailableModels: Object.values(availability.models),
@@ -1286,6 +1334,16 @@ export async function main(options = {}) {
       summary.autoLetters = await runLettersPhase(config, configPath, summary, options);
     } catch (error) {
       console.warn(`Automatic cover letters failed: ${errorSummary(error)}`);
+    }
+  }
+  // Then the night's backup of private/, state/, and config.json (src/backup.mjs: scheduled and catch-up runs
+  // only, once per local day). A failure is a log line; the report is already written.
+  if (summary && options.autoBackup !== false) {
+    try {
+      summary.backup = await autoBackupAfterRun(config, { trigger: summary.meta?.trigger, now: options.backupNow || new Date(), ...(options.backupDirectory ? { directory: options.backupDirectory } : {}) });
+      if (summary.backup?.file) console.error(`Backup: ${summary.backup.file} (${summary.backup.files} files, ${summary.backup.bytes} bytes)`);
+    } catch (error) {
+      console.warn(`Backup failed: ${errorSummary(error)}`);
     }
   }
   return summary;

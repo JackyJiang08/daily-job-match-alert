@@ -88,6 +88,8 @@ test('end to end: the outage run leaves state.incompleteRun; the catch-up run th
     process.env.DAILY_JOB_MATCH_ALERT_TRIGGER = 'auto_catchup';
     await main({
       argv: ['node', 'index.mjs', '--config', configPath, '--now', '2026-10-12T01:40:00.000Z'], autoLetters: false, notify: async () => {}, atsSleep: async () => assert.fail('no outage now'), runClock: { jumpMs: () => 0 },
+      // A catch-up run counts as the night's run, so the backup follows it (src/backup.mjs); kept in the test root.
+      backupDirectory: path.join(root, 'backups'), backupNow: new Date('2026-10-12T01:41:00.000Z'),
       atsFetchImpl: async () => new Response(JSON.stringify({ jobs: [] }), { status: 200, headers: { 'content-type': 'application/json' } }),
     });
     state = JSON.parse(await fs.readFile(path.join(root, 'state', 'state.json'), 'utf8'));
@@ -96,6 +98,7 @@ test('end to end: the outage run leaves state.incompleteRun; the catch-up run th
     const payload = JSON.parse(await fs.readFile(path.join(root, 'state', 'report-payload-2026-10-11.json'), 'utf8'));
     assert.equal(payload.meta.trigger, 'auto_catchup');
     assert.equal(payload.meta.sourceCounts.filter(stat => stat.kind === 'ats' && stat.ok).length, 4, 'the boards were polled again, not skipped as polled recently');
+    assert.deepEqual(await fs.readdir(path.join(root, 'backups')), ['daily-job-match-alert-backup-2026-10-11-204100.zip'], 'the catch-up run made the night\'s backup');
   } finally {
     [console.log, console.warn, console.error] = silence;
     if (trigger == null) delete process.env.DAILY_JOB_MATCH_ALERT_TRIGGER;

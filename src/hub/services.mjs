@@ -32,6 +32,9 @@ import { entryAsPayload, syncReportsIndex } from '../reports-index.mjs';
 import { MAXIMUM_RETENTION_DAYS, MINIMUM_RETENTION_DAYS, listPayloadFiles, readPayloadFile, retentionDays } from '../payload-store.mjs';
 import { loadStatusSummary, summaryAsPayload } from '../status-summary.mjs';
 import { acquireRunLock, releaseRunLock } from '../lock.mjs';
+import { readJsonWithBackups, writeJsonAtomic } from '../json-file.mjs';
+import { readIntegrityRecord, seenCountOf, seenDrop, seenDropMessage } from '../state-integrity.mjs';
+import { listBackups, resolveBackupDirectory } from '../backup.mjs';
 
 export const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 export const ERROR_FILE_PATTERN = /^ERROR-\d{4}-\d{2}-\d{2}\.html$/;
@@ -57,18 +60,61 @@ async function readJson(io, file, fallback = null) {
   try { return JSON.parse(await io.readFile(file, 'utf8')); } catch { return fallback; }
 }
 
-// state/state.json for the hub's read-only views (Status, the plan-change banner, Settings) without its
-// seen map, which is most of the file (tens of megabytes): parsed once per mtime and size, then shared.
-// Callers treat the object as read-only.
+// state/state.json for the hub's read-only views (Status, the plan-change banner, Settings, auto catch-up)
+// without its seen map, which is most of the file (tens of megabytes): parsed once per mtime and size, then
+// shared. Callers treat the object as read-only. A state.json that does not parse is read from its newest
+// readable backup (state.json.1 … .3; the hub never rewrites it, the next run restores it), and
+// ctx.stateView keeps the seen count for the integrity banner.
 export async function readStateView(ctx) {
   const file = path.join(ctx.root, 'state', 'state.json');
   const info = await ctx.io.stat(file).catch(() => null);
-  if (!info) return {};
+  if (!info) {
+    ctx.stateView = { key: 'missing', value: {}, seenCount: 0, restored: null, missing: true };
+    return {};
+  }
   const key = `${info.mtimeMs}|${info.size}`;
   if (ctx.stateView?.key === key) return ctx.stateView.value;
-  const { seen, ...value } = await readJson(ctx.io, file, {}) || {};
-  ctx.stateView = { key, value };
+  let read = { value: {}, restored: null };
+  try { read = await readJsonWithBackups(file, { io: ctx.io, fallback: {} }); } catch {}
+  const raw = read.value && typeof read.value === 'object' && !Array.isArray(read.value) ? read.value : {};
+  const { seen, ...value } = raw;
+  ctx.stateView = { key, value, seenCount: seenCountOf(raw), restored: read.restored, missing: false };
   return value;
+}
+
+// ---------------------------------------------------------------------------------------------- integrity
+
+// The Status banner: state.json's seen entries against the count the pipeline recorded at its last write
+// (live, from the cached state view), else the drop the newest run found; state.json read from a backup;
+// and the files the hub's startup check found unparsable that still do not parse.
+export async function integrityView(ctx, latest, timeZone) {
+  await readStateView(ctx);
+  const record = await readIntegrityRecord(ctx.root, ctx.io);
+  const drop = (ctx.stateView ? seenDrop(record, ctx.stateView.seenCount, ctx.now()) : null) || latest?.meta?.integrity?.seenDrop || null;
+  const corrupt = [];
+  for (const file of ctx.integrity?.files || []) {
+    if (file.ok || file.name === 'state.json') continue;
+    try { JSON.parse(await ctx.io.readFile(path.join(ctx.root, 'state', file.name), 'utf8')); } catch (error) {
+      if (error?.code !== 'ENOENT') corrupt.push({ name: file.name, error: file.error });
+    }
+  }
+  const restored = ctx.stateView?.restored || null;
+  if (!drop && !corrupt.length && !restored) return null;
+  return {
+    seenDrop: drop,
+    message: drop ? seenDropMessage(drop, timeZone) : null,
+    corrupt,
+    stateRestored: restored,
+  };
+}
+
+// ---------------------------------------------------------------------------------------------- backups
+
+// The Runs card's Backup line: the newest zip in the backup directory (src/backup.mjs).
+export async function backupView(ctx, config) {
+  const directory = resolveBackupDirectory(config, { home: ctx.homedir });
+  const backups = await listBackups(directory, ctx.io).catch(() => []);
+  return { directory, latest: backups[0] || null, count: backups.length };
 }
 
 // ---------------------------------------------------------------------------------------------- reports
@@ -124,8 +170,7 @@ export async function readHubState(ctx) {
 }
 
 export async function writeHubState(ctx, state) {
-  await ctx.io.mkdir(ctx.hubDirectory, { recursive: true });
-  await ctx.io.writeFile(hubStatePath(ctx), `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+  await writeJsonAtomic(hubStatePath(ctx), state, { io: ctx.io, mode: 0o600 });
 }
 
 // ---------------------------------------------------------------------------------------------- resumes
@@ -601,6 +646,8 @@ async function statusViewFrom(ctx, config, { now, entries, latest }) {
       ...(ctx.autoCatchUp ? await ctx.autoCatchUp.status(state) : { running: false, nextCheckAt: null, attempts: 0, maximumAttempts: MAXIMUM_ATTEMPTS, lastCheck: null }),
     },
     outputDirectory: config.outputDirectory,
+    backup: await backupView(ctx, config),
+    integrity: await integrityView(ctx, latest, config.timeZone || 'America/Chicago'),
     hub: { timings: ctx.reportTimings ? ctx.reportTimings.recent() : [], cache: ctx.reportCache ? ctx.reportCache.stats() : null },
   };
 }
@@ -1132,7 +1179,7 @@ export async function savePrescreen(ctx, form) {
   const enabled = on(form.enabled);
   const enforce = on(form.enforce);
   const { config: current } = await readConfigFile(ctx.configPath, ctx.io);
-  const overview = prescreenOverview(current, await readJson(ctx.io, path.join(ctx.root, 'state', 'state.json'), {}) || {});
+  const overview = prescreenOverview(current, await readStateView(ctx));
   if (enforce && !overview.canEnforce) throw new HubInputError(`The prescreen can be enforced after ${overview.shadowRuns} shadow nights; ${overview.shadowRunsDone} done so far`);
   await updateConfigFile(ctx.configPath, config => {
     config.prescreen = { ...(config.prescreen && typeof config.prescreen === 'object' ? config.prescreen : {}), enabled, threshold, enforce };

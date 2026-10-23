@@ -10,7 +10,8 @@ import { extractPdfText } from '../resume-sync.mjs';
 import { createHubHandler } from './routes.mjs';
 import { createRunManager } from './run.mjs';
 import { createAutoCatchUp } from './auto-catchup.mjs';
-import { installedSchedule, nextScheduledRun } from './services.mjs';
+import { installedSchedule, nextScheduledRun, readStateView } from './services.mjs';
+import { checkIntegrity } from '../state-integrity.mjs';
 import { createConnectionsProbe } from './connections.mjs';
 import { describeConnections } from '../engines/index.mjs';
 import { createLetterStore } from '../cover-letter/store.mjs';
@@ -101,9 +102,8 @@ export function createHubContext(options) {
   // Checks every 10 minutes for a run the network cut short; startHub starts the timer.
   ctx.autoCatchUp = options.autoCatchUp || createAutoCatchUp({
     io, hubDirectory, now, runManager: ctx.runManager,
-    readState: async () => {
-      try { return JSON.parse(await io.readFile(path.join(root, 'state', 'state.json'), 'utf8')); } catch { return {}; }
-    },
+    // The cached state view (src/hub/services.mjs): parsed once per state.json write, not every 10 minutes.
+    readState: () => readStateView(ctx).catch(() => ({})),
     loadConfig: () => ctx.loadConfig(),
     schedule: () => installedSchedule(ctx),
     nextScheduledRun,
@@ -126,6 +126,19 @@ export function createHubServer(ctx) {
   return server;
 }
 
+export async function checkHubIntegrity(ctx) {
+  try {
+    await readStateView(ctx);
+    ctx.integrity = await checkIntegrity(ctx.root, { io: ctx.io, now: ctx.now(), seenCount: ctx.stateView?.seenCount ?? null });
+    for (const file of ctx.integrity.files.filter(item => !item.ok)) console.warn(`[hub] state/${file.name} does not parse: ${file.error}`);
+    if (ctx.stateView?.restored) console.warn(`[hub] state/state.json does not parse; reading ${ctx.stateView.restored.from || 'nothing'} until the next run restores it`);
+    if (ctx.integrity.seenDrop) console.warn(`[hub] state.json holds ${ctx.integrity.seenDrop.current} seen postings against ${ctx.integrity.seenDrop.previous} at the last run`);
+  } catch (error) {
+    console.warn(`[hub] state integrity check failed: ${error?.message || error}`);
+  }
+  return ctx.integrity || null;
+}
+
 export async function startHub(options = {}) {
   const configPath = path.resolve(options.configPath || 'config.json');
   const config = await loadConfig(configPath, { notify: message => console.warn(message) });
@@ -137,6 +150,9 @@ export async function startHub(options = {}) {
     server.listen(port, HUB_HOST, () => { server.off('error', reject); resolve(); });
   });
   ctx.autoCatchUp.start();
+  // Startup integrity check of state/ (src/state-integrity.mjs), in the background: every JSON parses, and
+  // the seen count against the one the last run recorded. The Status banner shows what it finds.
+  ctx.integrityCheck = checkHubIntegrity(ctx);
   server.on('close', () => ctx.autoCatchUp.stop());
   return { server, ctx, url: `http://${HUB_HOST}:${port}/` };
 }

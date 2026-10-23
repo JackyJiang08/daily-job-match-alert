@@ -20,7 +20,10 @@ export async function addStatusFixture(root, { writePayload, fixturePayload, sel
   await fs.writeFile(path.join(warnings, 'warnings.txt'), 'deferred 10 postings to the next run\n');
 }
 
-// The Status page without the Hub card (its timings and cache counters differ per request).
+// The Status page without the Hub card (its timings and cache counters differ per request) and the Runs
+// card's Backup row (added 2026-10-23 after the snapshot was taken; it reads the machine's backup folder).
 export function withoutHubCard(html) {
-  return String(html).replace(/<article class="card" id="hub-card">[\s\S]*?<\/article>/, '<!-- hub card -->');
+  return String(html)
+    .replace(/<article class="card" id="hub-card">[\s\S]*?<\/article>/, '<!-- hub card -->')
+    .replace(/\n\s*<dt>Backup<\/dt><dd id="backup-line">[\s\S]*?<\/dd>/, '');
 }

@@ -1,7 +1,7 @@
 // One chaos scenario: build an isolated config under <workRoot>/<scenario>, run src/index.mjs
 // against it, and assert that the Desktop-equivalent output folder still holds a usable report.
 //
-//   node scripts/chaos-scenario.mjs <baseline|offline|llm-down|bad-input|xlsx-recovery|ats-500|network-drop|review-cap|fable-weekly-limit|account-limit|backlog-priority> <workRoot>
+//   node scripts/chaos-scenario.mjs <baseline|offline|llm-down|bad-input|xlsx-recovery|ats-500|network-drop|review-cap|fable-weekly-limit|account-limit|backlog-priority|state-corrupt> <workRoot>
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -677,6 +677,43 @@ scenarios['backlog-priority'] = async function backlogPriority() {
   assert.match(html, /posted within the last 24 hours/);
   assert.match(html, /expired \d+ backlog postings/);
   return `3 nights over a budget of 1: fresh postings reviewed first each night, night-one leftover expired unscored on night three, alert raised`;
+};
+
+// state.json is torn between two nights (a crash of some other tool, a bad sync): the run must restore the
+// newest backup that parses (state.json.1), say so in a warning and a notification, keep the earlier seen
+// marks, and still leave a full report. The torn copy is kept aside for a look.
+scenarios['state-corrupt'] = async function stateCorrupt() {
+  const directory = await prepareDirectory('state-corrupt');
+  await addFixtureEmail(directory, 'demo-new-grad-alert.eml');
+  const config = baseConfig(directory);
+  config.backup = { directory: path.join(directory, 'backups') };
+  const configPath = await writeConfig(directory, config);
+  const quiet = { DAILY_JOB_MATCH_ALERT_NOTIFY: 'off' };
+  const first = await runPipeline(configPath, NOW, quiet);
+  assert.equal(first.exitCode, 0, `first night exited ${first.exitCode}`);
+  const statePath = path.join(directory, 'state', 'state.json');
+  const before = JSON.parse(await fs.readFile(statePath, 'utf8'));
+  const seenBefore = Object.keys(before.seen || {});
+  assert.ok(seenBefore.length >= 1, 'the first night marked postings seen');
+  assert.ok(await exists(`${statePath}.1`), 'the first night kept a previous generation');
+  const text = await fs.readFile(statePath, 'utf8');
+  await fs.writeFile(statePath, text.slice(0, Math.floor(text.length / 2)));
+  await addFixtureEmail(directory, 'sample.eml');
+  const run = await runPipeline(configPath, '2026-08-27T15:00:00Z', quiet);
+  const artifacts = await assertDesktopArtifacts(config, run);
+  assert.equal(run.exitCode, 0, `the night after the corruption exited ${run.exitCode}`);
+  const warning = artifacts.warnings.find(item => item.source === 'state.json');
+  assert.ok(warning, `no state.json warning: ${warningLines(artifacts.warnings).join(' | ')}`);
+  assert.match(warning.message, /^state\.json was corrupt, restored from backup \(/);
+  assert.match(await readWarningsFile(config, run) || '', /state\.json was corrupt, restored from backup/);
+  const after = JSON.parse(await fs.readFile(statePath, 'utf8'));
+  assert.ok(seenBefore.every(key => after.seen[key]), 'the seen marks from before the corruption survived');
+  assert.equal(run.summary.meta.integrity, undefined, 'a restore from the newest backup is no seen-count drop');
+  const names = await fs.readdir(path.join(directory, 'state'));
+  assert.ok(names.some(name => name.startsWith('state.json.corrupt-')), 'the torn copy was kept aside');
+  assert.ok([1, 2, 3].some(generation => names.includes(`state.json.${generation}`)));
+  assert.equal(await exists(config.backup.directory), false, 'a manual run makes no nightly backup');
+  return `torn state.json restored from ${warning.message.match(/\(([^)]+)\)/)[1]}, ${seenBefore.length} seen mark(s) kept, ${run.summary.meta.matchCount} match(es), torn copy kept aside`;
 };
 
 const scenario = scenarios[scenarioName];

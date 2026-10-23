@@ -30,6 +30,8 @@
     "resume:sync": "node src/resume-sync-cli.mjs --config config.json",
     "boards:probe": "node src/boards-probe.mjs --config config.json",
     "payloads:compact": "node src/payloads-compact.mjs --config config.json",
+    "backup": "node src/backup-cli.mjs backup --config config.json",
+    "restore": "node src/backup-cli.mjs restore --config config.json",
     "hub": "node src/hub/index.mjs --config config.json",
     "hub:restart": "sh scripts/hub-restart.sh",
     "test": "node --test tests/*.test.mjs",

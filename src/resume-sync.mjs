@@ -5,6 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { enabledResumeTracks } from './config.mjs';
 import { createWarning, errorSummary } from './warnings.mjs';
+import { writeJsonAtomic } from './json-file.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -199,8 +200,7 @@ export async function syncResumes(config, options = {}) {
     refreshed.push(track.id);
   }
 
-  await fs.mkdir(path.dirname(statePath), { recursive: true });
-  await fs.writeFile(statePath, JSON.stringify(state, null, 2) + '\n', { mode: 0o600 });
+  await writeJsonAtomic(statePath, state, { mode: 0o600 });
   return { refreshed, unchanged, skipped, recovered, warnings, enabled: true };
 }
 
