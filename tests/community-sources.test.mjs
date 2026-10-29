@@ -245,8 +245,7 @@ test('the first collection of a new community source baselines only old postings
   assert.deepEqual(state.sourceBaselines[HACKER_NEWS_SOURCE], { baselinedAt: NOW.toISOString(), count: 0 });
   for (const url of ['https://example.com/list/old', 'https://example.com/list/undated', 'https://remoteok.com/remote-jobs/x']) assert.equal(isJobSeen(state, { url }), true, `${url} is baselined`);
   for (const url of ['https://example.com/list/shared', 'https://example.com/list/fresh', 'https://news.ycombinator.com/item?id=1']) assert.equal(isJobSeen(state, { url }), false, `${url} is not swallowed`);
-  const oldEntry = Object.values(state.seen).find(entry => entry.url === 'https://example.com/list/old');
-  assert.equal(oldEntry.lastEnrichment, 'source_baseline');
+  const oldEntry = state.seen[sha256('https://example.com/list/old')];
   assert.equal(oldEntry.baseline, true);
   assert.equal(oldEntry.postedAt, '2026-09-01T12:00:00Z', 'the posting date is kept so a later release can judge it');
   assert.equal(warnings.length, 3);

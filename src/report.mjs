@@ -315,6 +315,15 @@ export function runDetailsView(jobs, meta, tracks, notReviewedCount = 0) {
     const expired = `${meta.expiredBacklogCount != null ? ` · expired ${Number(meta.expiredBacklogCount)} backlog postings` : ''}${meta.undatedAbandonedCount ? ` · stopped carrying ${Number(meta.undatedAbandonedCount)} undated postings` : ''}`;
     rows.push({ term: 'Review budget', detail: `${Number(meta.candidateCount)} candidates${inWindow} · ${Number(meta.reviewedThisRun || 0)} reviewed · ${Number(meta.deferredCount || 0)} deferred${expired}${meta.earlyCareerCount ? ` · ${Number(meta.earlyCareerCount)} early-career full-time weighed like internships` : ''}${limit > 0 ? ` (limit ${limit} per run)` : ' (no limit)'}`, items: meta.budgetAlert ? [meta.budgetAlert.message] : [] });
   }
+  // New postings and the catch-up lane (postings held while the engine was unavailable), reviewed apart.
+  if (meta.catchUp) {
+    const catchUp = meta.catchUp;
+    const lane = catchUp.candidates
+      ? ` · catch-up: ${Number(catchUp.candidates)} held, ${Number(catchUp.selected)} taken after the new postings (catch-up budget ${Number(catchUp.limit) > 0 ? Number(catchUp.limit) : 'no limit'})${catchUp.waiting ? `, ${Number(catchUp.waiting)} waiting` : ''}${catchUp.expired ? `, ${Number(catchUp.expired)} past ${Number(catchUp.maxAgeHours)} hours expired` : ''}`
+      : '';
+    rows.push({ term: 'Reviewed', detail: `${Number(catchUp.reviewedNew)} new posting(s) · ${Number(catchUp.reviewedCatchUp)} catch-up posting(s)${lane}` });
+  }
+  if (meta.seen) rows.push({ term: 'Seen state', detail: `${Number(meta.seen.entries)} entries · ${Number(meta.seen.pruned)} past ${Number(meta.seen.retentionDays)} days removed this run` });
   if (Array.isArray(meta.sourceCounts) && meta.sourceCounts.length) {
     rows.push({ term: 'Sources', detail: sourcesSummary(meta.sourceCounts), items: meta.sourceCounts.map(sourceLine) });
   }

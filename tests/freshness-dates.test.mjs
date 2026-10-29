@@ -174,7 +174,6 @@ test('undated postings rank after every dated one and are dropped from the queue
   assert.deepEqual(third.deferred, []);
   assert.deepEqual([undatedHigh, undatedLow].map(job => deferredStatus(state, job).deferred), [false, false]);
   assert.deepEqual([undatedHigh, undatedLow].map(job => isJobSeen(state, job)), [true, true]);
-  assert.equal(Object.values(state.seen).find(entry => entry.url === undatedHigh.url).lastEnrichment, 'undated_abandoned');
   assert.deepEqual(third.ranking.filter(item => item.abandoned).length, 2);
 
   // An undated posting that gains a date after a deferral is a dated posting again and is never abandoned.

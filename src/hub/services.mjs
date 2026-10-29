@@ -35,6 +35,7 @@ import { acquireRunLock, releaseRunLock } from '../lock.mjs';
 import { readJsonWithBackups, writeJsonAtomic } from '../json-file.mjs';
 import { readIntegrityRecord, seenCountOf, seenDrop, seenDropMessage } from '../state-integrity.mjs';
 import { listBackups, resolveBackupDirectory } from '../backup.mjs';
+import { catchUpBudgetOf } from '../state.mjs';
 
 export const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 export const ERROR_FILE_PATTERN = /^ERROR-\d{4}-\d{2}-\d{2}\.html$/;
@@ -776,6 +777,7 @@ export async function readSettings(ctx) {
   return {
     minimumMatchScore: config.minimumMatchScore ?? 60,
     maxReviewedPerRun: semantic.maxReviewedPerRun == null ? 60 : Number(semantic.maxReviewedPerRun),
+    catchUpBudget: catchUpBudgetOf(semantic.catchUpBudget),
     includeCarriedOver: semantic.includeCarriedOver !== false,
     autoCatchUp: autoCatchUpEnabled(config),
     titleFamilies: Array.isArray(config.preferences?.titleFamilies) ? config.preferences.titleFamilies.map(String) : [...DEFAULT_TITLE_FAMILIES],
@@ -853,6 +855,10 @@ export function validateSettings(form, { catalog = DEFAULT_CATALOG } = {}) {
   const budgetGiven = form.maxReviewedPerRun != null && String(form.maxReviewedPerRun).trim() !== '';
   const maxReviewedPerRun = budgetGiven ? Number(form.maxReviewedPerRun) : null;
   if (budgetGiven && (!Number.isInteger(maxReviewedPerRun) || maxReviewedPerRun < 0 || maxReviewedPerRun > 5000)) errors.push('Max reviewed per run must be a whole number from 0 (no limit) to 5000');
+  // Optional: the catch-up lane after the run's new postings (applyReviewBudget); 0 means no limit.
+  const catchUpGiven = form.catchUpBudget != null && String(form.catchUpBudget).trim() !== '';
+  const catchUpBudget = catchUpGiven ? Number(form.catchUpBudget) : null;
+  if (catchUpGiven && (!Number.isInteger(catchUpBudget) || catchUpBudget < 0 || catchUpBudget > 5000)) errors.push('Catch-up budget must be a whole number from 0 (no limit) to 5000');
   // Optional as well: how long a payload keeps more than its matches and Run Summary (src/payload-store.mjs).
   const retentionGiven = form.payloadRetentionDays != null && String(form.payloadRetentionDays).trim() !== '';
   const payloadRetentionDays = retentionGiven ? Number(form.payloadRetentionDays) : null;
@@ -895,7 +901,7 @@ export function validateSettings(form, { catalog = DEFAULT_CATALOG } = {}) {
     if (lone) errors.push(`"${lone}" is not a title family on its own; it passes beside a family word (Associate Consultant, Associate Product Manager)`);
   }
   if (errors.length) throw new HubInputError(errors.join('; '));
-  return { minimumMatchScore, acceptedMatchLevels: MATCH_LEVELS.filter(level => levels.includes(level)), engine, model, xlsxRequired, editorReview, hubPort, maxReviewedPerRun, payloadRetentionDays, includeCarriedOver, autoCatchUp, titleFamilies, targetRoleFamilies: roleFamilies, modelLadder, fallbackEngine, reasoningEffort };
+  return { minimumMatchScore, acceptedMatchLevels: MATCH_LEVELS.filter(level => levels.includes(level)), engine, model, xlsxRequired, editorReview, hubPort, maxReviewedPerRun, catchUpBudget, payloadRetentionDays, includeCarriedOver, autoCatchUp, titleFamilies, targetRoleFamilies: roleFamilies, modelLadder, fallbackEngine, reasoningEffort };
 }
 
 // "Save this path to config": pins the resolved binary as semanticMatching.<engine>Command.
@@ -931,6 +937,7 @@ export async function saveSettings(ctx, form) {
     config.semanticMatching = config.semanticMatching && typeof config.semanticMatching === 'object' ? config.semanticMatching : {};
     config.semanticMatching.acceptedMatchLevels = settings.acceptedMatchLevels;
     if (settings.maxReviewedPerRun != null) config.semanticMatching.maxReviewedPerRun = settings.maxReviewedPerRun;
+    if (settings.catchUpBudget != null) config.semanticMatching.catchUpBudget = settings.catchUpBudget;
     if (settings.includeCarriedOver != null) config.semanticMatching.includeCarriedOver = settings.includeCarriedOver;
     if (settings.titleFamilies || settings.targetRoleFamilies) {
       config.preferences = config.preferences && typeof config.preferences === 'object' ? config.preferences : {};

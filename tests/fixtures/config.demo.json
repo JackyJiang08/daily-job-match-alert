@@ -4,6 +4,7 @@
   "semanticMatching": { "engine": "local_only" },
   "reports": { "xlsx": { "enabled": true, "required": false } },
   "outputDirectory": "./demo-output",
+  "backup": { "directory": "./demo-output/backups" },
   "resumes": {
     "autoRefresh": false,
     "tracks": [

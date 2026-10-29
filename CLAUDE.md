@@ -185,15 +185,30 @@ disabled; do not expand them unless a task says so.
   reason 'auth', sticky). meta.authExpired { at, notice, deferred, takenOverBy, message }; report data-banner="auth"
   (signedOutBanner, "Claude signed out"), footer, Run Details; quotaNote ignores auth events; notifyAuthExpired
   "Claude is signed out. Run claude auth login --claudeai" (main({ notifier })). applyReviewBudget ranks reason
-  'auth' first; releaseAuthDeferrals after a run whose login worked (priority = first run after login, Run Now
-  too). requeueSignedOutPostings (startup, state.authRequeue per date): payloads whose meta shows the sign-out
+  reasons 'auth'/'quota' as the catch-up lane (below). requeueSignedOutPostings (startup, state.authRequeue per date): payloads whose meta shows the sign-out
   (meta.authExpired, or the old "authentication check failed … loggedIn false" warning) → unreviewed postings
-  inside the deferral window are forgotten from seen and deferred 'auth' (10-26..10-29 nights). Hub:
+  inside CATCH_UP_MAX_AGE_HOURS (48) are forgotten from seen and deferred 'auth' (10-26..10-29 nights). Hub:
   src/hub/auth-watch.mjs (ctx.authWatch, startHub starts it, every 10 min, connections probe force; signedOut →
   authState.expire(notice, 'login check'), notification once per local day in private/hub/auth-watch.json;
   signed in clears only what the watch set). Sidebar "Login · Claude signed out", Connections "Signed out",
   Status banner data-banner="auth-expired"; POST /settings/connections/refresh clears; every user-visible engine
   error goes through humanizeEngineError; raw text only in the hub log.
+- Catch-up lane (2026-10-29, applyReviewBudget): deferral reasons CATCH_UP_REASONS ('auth', 'quota', src/state.mjs)
+  never compete in the main budget; after it, the lane keeps those at most CATCH_UP_MAX_AGE_HOURS (48) old by
+  postingAgeHours, same ranking, up to semanticMatching.catchUpBudget (catchUpBudgetOf: default 40, 0 = no limit,
+  Settings → Pipeline catchUpBudget); older ones expire unseen (budget step and expireDeferred catchUpMaxAgeHours
+  at startup), the rest re-deferred with their reason. budget.jobs = others, main kept, then catch-up (the engine
+  reviews them last). The prescreen runs before the budget, so catch-up postings pass it too. meta.catchUp
+  (reviewSplit: reviewedNew / reviewedCatchUp, candidates, selected, waiting, expired) → Run Details "Reviewed".
+  budgetHistory counts only the main lane.
+- Seen state (2026-10-29, src/state.mjs SEEN_FORMAT 2): entries keyed sha256(canonical original/final URL) hold
+  firstSeen, lastAttempt (only when different), attempts+completed (open retry or more than one attempt),
+  baseline+postedAt (baseline entries only); no URLs, enrichment, or error. migrateSeenFormat (loadState): legacy
+  state → createBackup(label '-pre-seen-slim', not matched by the prune pattern) first (failure → warning, stay
+  legacy), slimSeenState, prune, state.seenMigration { entriesBefore/After, pruned, bytesBefore, backup }.
+  writeState is compact (indent 0). pruneSeen(SEEN_RETENTION_DAYS 90) every run → meta.seen → Run Details "Seen
+  state". Tests/chaos/demo keep backups out of ~/Library (demo: demo-output/backups; chaos baseConfig backup).
+  Real file 2026-10-29 dry run: 96.8 MB → 16.4 MB, 138,078 entries kept.
 - Not reviewed (src/review-status.mjs): isNotReviewed (matchLevel 'unreviewed' or local_fallback); isEligible
   never matches one unless the engine is local_only; splitReportJobs({ matches, reviewed }) → matches without
   them + notReviewed (both lists, once per URL, eligibility exclusions dropped, best local score first);

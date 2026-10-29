@@ -80,7 +80,8 @@ test('unrecoverable HTTP failures are closed on the first attempt', async () => 
     const state = { seen: {} };
     assert.deepEqual(markJobSeen(state, blocked, '2026-08-27T20:00:00.000Z'), { attempts: 1, completed: true });
     assert.equal(isJobSeen(state, blocked), true);
-    assert.equal(state.seen[sha256(canonicalUrl(blocked.url))].lastError, `http_${status}`);
+    // The slim seen entry (src/state.mjs SEEN_FORMAT) keeps no error text: one attempt, done.
+    assert.deepEqual(state.seen[sha256(canonicalUrl(blocked.url))], { firstSeen: '2026-08-27T20:00:00.000Z' });
   }
 });
 

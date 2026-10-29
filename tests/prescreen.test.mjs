@@ -143,7 +143,6 @@ test('enforced: postings at or above the threshold go on ordered by prescreen sc
     assert.deepEqual(result.meta.dropped.map(item => [item.title, item.score]), [['Data Analyst e', 54], ['Data Analyst b', 40]], 'Run Details lists them best first');
     for (const dropped of result.dropped) {
       assert.equal(isJobSeen(state, dropped), true);
-      assert.equal(Object.values(state.seen).find(entry => entry.url === dropped.url).lastEnrichment, 'prescreened_out');
     }
 
     const budget = applyReviewBudget(result.jobs, state, 2, NOW, { rankByPrescreen: true });

@@ -18,6 +18,7 @@
     "maximumDescriptionCharacters": 7000,
     "acceptedMatchLevels": ["high"],
     "maxReviewedPerRun": 60,
+    "catchUpBudget": 40,
     "includeCarriedOver": true,
     "quotaPolicy": {
       "fiveHourLimit": { "retryIntervalMs": 600000, "maxWaitMs": 5400000 },

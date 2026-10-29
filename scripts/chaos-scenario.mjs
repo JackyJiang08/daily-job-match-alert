@@ -10,6 +10,7 @@ import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import ExcelJS from 'exceljs';
+import { canonicalUrl, sha256 } from '../src/utils.mjs';
 
 const execFileAsync = promisify(execFile);
 const projectDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -55,6 +56,8 @@ function baseConfig(directory) {
     prescreen: { enabled: false },
     reports: { xlsx: { enabled: true, required: false } },
     outputDirectory: path.join(directory, 'output'),
+    // Backups (the seen-state migration, src/index.mjs) stay inside the scenario's own directory.
+    backup: { directory: path.join(directory, 'backups') },
     resumes: {
       autoRefresh: false,
       tracks: TRACKS.map(track => ({ id: track.id, label: track.label, profile: path.join(directory, track.file), enabled: true })),
@@ -187,6 +190,12 @@ async function readMatches(xlsxPath) {
   const headers = [];
   sheet.getRow(1).eachCell(cell => headers.push(String(cell.value)));
   return { sheet, headers };
+}
+
+// Seen entries are keyed by sha256 of the canonical URL and no longer repeat the URL (src/state.mjs SEEN_FORMAT).
+function isSeen(state, url) {
+  const canonical = canonicalUrl(url);
+  return Boolean(canonical && state.seen?.[sha256(canonical)]);
 }
 
 function warningLines(warnings) {
@@ -490,7 +499,7 @@ scenarios['review-cap'] = async function reviewCap() {
   const state = JSON.parse(await fs.readFile(path.join(directory, 'state', 'state.json'), 'utf8'));
   const deferredUrls = Object.values(state.deferred || {}).map(entry => entry.url);
   assert.equal(deferredUrls.length, first.summary.meta.deferredCount, 'every deferred posting is recorded');
-  for (const url of deferredUrls) assert.ok(!Object.values(state.seen).some(entry => entry.url === url), `${url} was deferred but marked seen`);
+  for (const url of deferredUrls) assert.ok(!isSeen(state, url), `${url} was deferred but marked seen`);
 
   const second = await runPipeline(configPath, '2026-08-27T13:00:00Z');
   assert.equal(second.exitCode, 0, `second review-cap run exited ${second.exitCode}`);
@@ -586,7 +595,7 @@ scenarios['account-limit'] = async function accountLimit() {
   const state = JSON.parse(await fs.readFile(path.join(directory, 'state', 'state.json'), 'utf8'));
   const deferred = Object.values(state.deferred || {});
   assert.equal(deferred.length, run.summary.meta.candidateCount, 'the deferral queue holds every refused posting');
-  for (const entry of deferred) assert.ok(!Object.values(state.seen).some(seen => seen.url === entry.url), `${entry.url} was deferred but marked seen`);
+  for (const entry of deferred) assert.ok(!isSeen(state, entry.url), `${entry.url} was deferred but marked seen`);
   assert.match(await readWarningsFile(config, run) || '', /^\[llm \/ claude\] info: Claude subscription weekly account limit reached/m);
   return `all ${run.summary.meta.candidateCount} candidate(s) deferred, banner shown, report still written`;
 };
@@ -616,7 +625,7 @@ scenarios['signed-out'] = async function signedOut() {
   const deferred = Object.values(state.deferred || {});
   assert.equal(deferred.length, meta.candidateCount);
   assert.ok(deferred.every(entry => entry.reason === 'auth'), 'held with reason auth, reviewed first once signed in');
-  for (const entry of deferred) assert.ok(!Object.values(state.seen).some(seen => seen.url === entry.url), `${entry.url} was held but marked seen`);
+  for (const entry of deferred) assert.ok(!isSeen(state, entry.url), `${entry.url} was held but marked seen`);
   assert.match(await readWarningsFile(config, run) || '', /^\[llm \/ claude\] Claude is signed out\. Run `claude auth login --claudeai` in Terminal, then try again\. \d+ postings were deferred/m);
   return `all ${meta.candidateCount} candidate(s) held for the login, none unreviewed, "Claude signed out" banner`;
 };
@@ -641,7 +650,6 @@ scenarios['prescreen-unavailable'] = async function prescreenUnavailable() {
   assert.equal(meta.funnel.passed, meta.candidateCount, 'every candidate passes on to the review budget');
   assert.ok(artifacts.warnings.some(warning => warning.source === 'prescreen' && /used the local order/.test(warning.message)), `no prescreen fallback warning: ${warningLines(artifacts.warnings).join(' | ')}`);
   const state = JSON.parse(await fs.readFile(path.join(directory, 'state', 'state.json'), 'utf8'));
-  assert.ok(!Object.values(state.seen || {}).some(entry => entry.lastEnrichment === 'prescreened_out'), 'nothing was marked prescreened_out');
   assert.equal(state.prescreen?.shadowRunsDone || 0, 0, 'a failed night does not count toward the shadow period');
   assert.match(artifacts.html, /Prescreen<\/dt><dd>failed/);
   return `prescreen failed, local order kept, ${meta.matchCount} match(es) from the final review, warning recorded`;
@@ -707,7 +715,7 @@ scenarios['backlog-priority'] = async function backlogPriority() {
   const state = JSON.parse(await fs.readFile(path.join(directory, 'state', 'state.json'), 'utf8'));
   for (const url of backlogFromFirst) {
     assert.ok(!Object.values(state.deferred || {}).some(entry => entry.url === url), `${url} should have left the queue`);
-    assert.ok(!Object.values(state.seen).some(entry => entry.url === url), `${url} expired but was marked seen`);
+    assert.ok(!isSeen(state, url), `${url} expired but was marked seen`);
   }
   assert.equal(state.budgetHistory.length, 3);
   const html = await fs.readFile(path.join(config.outputDirectory, third.summary.meta.date, `Daily Job Match Alert - ${third.summary.meta.date}.html`), 'utf8');

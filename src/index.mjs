@@ -21,7 +21,7 @@ import { annotateEligibility, summarizeExclusions } from './eligibility.mjs';
 import { applySubscriptionMatching, isSemanticCandidate, localFallbackJob, summarizeScoringModel } from './subscription-match.mjs';
 import { normalizeEngineId, resolveModel } from './engines/index.mjs';
 import { buildHtml, writeReports, writeWarningsFile } from './report.mjs';
-import { clearBudgetDeferrals, clearDeferred, deferredStatus, expireDeferred, forgetSeen, isJobSeen, markDeferred, markJobSeen, normalizeState, pruneSeen, releaseAuthDeferrals, releaseRecentBaselines } from './state.mjs';
+import { SEEN_FORMAT, SEEN_RETENTION_DAYS, clearBudgetDeferrals, clearDeferred, deferredStatus, expireDeferred, forgetSeen, isJobSeen, isLegacySeenState, markDeferred, markJobSeen, normalizeState, pruneSeen, releaseRecentBaselines, slimSeenState, CATCH_UP_MAX_AGE_HOURS, CATCH_UP_REASONS, DEFAULT_CATCH_UP_BUDGET, catchUpBudgetOf } from './state.mjs';
 import { isNotReviewed, splitReportJobs } from './review-status.mjs';
 import { ageBasisInstant, correctFutureTimestamp, datePrecisionSummary, freshnessInstant, isNewSinceLastPoll, isUndated } from './posting-fields.mjs';
 import { detectEarlyCareer, isEarlyCareerPriority, prefilterJobs } from './prefilter.mjs';
@@ -32,7 +32,7 @@ import { maintainPayloads } from './payload-maintenance.mjs';
 import { updateStatusSummary } from './status-summary.mjs';
 import { STATE_BACKUP_GENERATIONS, readJsonWithBackups, sweepTemporaryFiles, writeJsonAtomic } from './json-file.mjs';
 import { SELF_HEALING_FILES, checkIntegrity, recordSeenCount, seenCountOf, seenDropMessage } from './state-integrity.mjs';
-import { autoBackupAfterRun } from './backup.mjs';
+import { autoBackupAfterRun, createBackup } from './backup.mjs';
 import { isZapplyLink, resolveZapplyLink } from './collectors/zapply.mjs';
 import { appendUsage, summarizeUsage, usageEntries, usagePath } from './engines/usage.mjs';
 import { appendQuotaNotices, quotaNoticesPath } from './engines/quota-notices.mjs';
@@ -50,6 +50,7 @@ import { HOLD_GRACE_MS, availabilityPath, markModelUnavailable, markModelUsed, m
 const execFileAsync = promisify(execFile);
 const REPORT_PAYLOAD_PREFIX = 'report-payload-';
 export const DEFAULT_MAX_REVIEWED_PER_RUN = 60;
+export { CATCH_UP_MAX_AGE_HOURS, DEFAULT_CATCH_UP_BUDGET, catchUpBudgetOf };
 // A deferred posting may wait this long beyond the lookback window before it leaves the backlog unscored.
 export const DEFAULT_DEFERRAL_GRACE_HOURS = 24;
 // Nights in a row the in-window candidates must exceed the budget before the report says so.
@@ -129,7 +130,30 @@ async function loadState(config, statePath, { now, warnings, options = {} }) {
   }
   const seenDrop = check?.seenDrop || null;
   if (seenDrop) warnings.push(createWarning('state', 'seen state', seenDropMessage(seenDrop, config.timeZone)));
+  await migrateSeenFormat(config, state, statePath, { now, warnings, options });
   return { state, seenDrop };
+}
+
+// One-time slimming of the seen entries (src/state.mjs SEEN_FORMAT): a full zip backup comes first
+// (src/backup.mjs, labelled -pre-seen-slim, never pruned), and without one the state stays as it is for this
+// run. A fresh state is just marked. state.seenMigration records the counts, sizes, and the backup.
+async function migrateSeenFormat(config, state, statePath, { now, warnings, options = {} }) {
+  if (!isLegacySeenState(state)) return null;
+  const entries = Object.keys(state.seen || {}).length;
+  if (!entries) { state.seenFormat = SEEN_FORMAT; return null; }
+  let backup;
+  try {
+    backup = await createBackup(config, { now, label: '-pre-seen-slim', ...(options.backupDirectory ? { directory: options.backupDirectory } : {}) });
+  } catch (error) {
+    warnings.push(createWarning('state', 'seen state', `kept the old seen format for now: the backup before slimming it failed (${errorSummary(error)})`));
+    return null;
+  }
+  const bytesBefore = (await fs.stat(statePath).catch(() => null))?.size ?? null;
+  slimSeenState(state, now);
+  const pruned = pruneSeen(state, now, SEEN_RETENTION_DAYS);
+  state.seenMigration = { at: now.toISOString(), format: SEEN_FORMAT, entriesBefore: entries, entriesAfter: Object.keys(state.seen).length, pruned, bytesBefore, backup: backup.file };
+  warnings.push(createWarning('state', 'seen state', `slimmed ${entries} seen entries to the URL key, first sighting, and retry/baseline fields (${pruned} past the ${SEEN_RETENTION_DAYS}-day retention removed); backup first: ${backup.file}`, 'info'));
+  return state.seenMigration;
 }
 
 async function optionallyRunCareerOps(config, runner = execFileAsync) {
@@ -506,6 +530,20 @@ export function quotaNote(quota, deferredByQuota = 0) {
   return `Quota: ${limit}. ${who ? `${who} took over` : 'The run continued'}; every posting was reviewed.`;
 }
 
+// How many postings a model reviewed this run, new ones and catch-up ones apart (a catch-up posting the
+// engine deferred again is not counted).
+export function reviewSplit(evaluated, budget) {
+  const catchUrls = new Set((budget?.catchUp?.jobs || []).map(job => job.url));
+  let reviewedNew = 0;
+  let reviewedCatchUp = 0;
+  for (const job of evaluated) {
+    if (!job.semanticReviewed) continue;
+    if (catchUrls.has(job.url)) reviewedCatchUp += 1;
+    else reviewedNew += 1;
+  }
+  return { reviewedNew, reviewedCatchUp, candidates: budget?.catchUp?.candidates || 0, selected: budget?.catchUp?.reviewed || 0 };
+}
+
 export const REVIEWED_WINDOW_DAYS = 90;
 export async function reviewedInLastDays(config, date, todayCount, now = new Date(), days = REVIEWED_WINDOW_DAYS) {
   const cutoff = new Date(now.getTime() - Number(days) * 24 * 60 * 60 * 1000).getTime();
@@ -528,7 +566,8 @@ function statePathFor(config) {
 // Atomic, keeping the three previous generations (state.json.1 … .3); the seen count is recorded for the
 // next run's integrity check.
 async function writeState(statePath, state) {
-  await writeJsonAtomic(statePath, state, { backups: STATE_BACKUP_GENERATIONS });
+  // Compact: indentation alone made up a large share of the file once it held a hundred thousand entries.
+  await writeJsonAtomic(statePath, state, { backups: STATE_BACKUP_GENERATIONS, indent: 0 });
   await recordSeenCount(path.dirname(path.dirname(statePath)), seenCountOf(state)).catch(error => console.warn(`Could not record the seen count in state/integrity.json: ${errorSummary(error)}`));
 }
 
@@ -788,38 +827,56 @@ export function applyBacklogExpiry(jobs, state, now = new Date(), maxAgeHours = 
 }
 
 // Keeps the best `limit` local candidates for the engine (0 or a non-number means no limit). Ranking:
-// postings deferred because Claude was signed out (reason 'auth') first, then the freshness bucket (tonight's postings, then last night's backlog, then postings with no date),
-// then local best score with a bonus per deferral, and a twice-deferred posting ahead of its bucket-mates.
-// An undated posting that misses the budget for the third night running is not deferred again: it is
-// marked seen and reported as abandoned. Non-candidates (no role relevance or a hard blocker) never reach
-// the engine and pass through as-is. With `rankByPrescreen` (an enforced prescreen), the prescreen score
-// takes the local score's place inside each freshness bucket.
-export function applyReviewBudget(jobs, state, configuredLimit, now = new Date(), { lookbackHours = 24, timeZone = null, undatedNights = UNDATED_DEFERRAL_NIGHTS, rankByPrescreen = false } = {}) {
+// the freshness bucket (tonight's postings, then last night's backlog, then postings with no date), then local
+// best score with a bonus per deferral, and a twice-deferred posting ahead of its bucket-mates. An undated
+// posting that misses the budget for the third night running is not deferred again: it is marked seen and
+// reported as abandoned. Non-candidates (no role relevance or a hard blocker) never reach the engine and pass
+// through as-is. With `rankByPrescreen` (an enforced prescreen), the prescreen score takes the local score's
+// place inside each freshness bucket.
+//
+// Catch-up (2026-10-29): postings an earlier run held because the engine was unavailable (deferral reason
+// 'auth' or 'quota', src/state.mjs CATCH_UP_REASONS) do not compete with this run's postings. They form a lane
+// of their own after the main budget: only those whose posting date is at most `catchUpMaxAgeHours` (48) old,
+// ranked the same way, at most `catchUpLimit` of them (semanticMatching.catchUpBudget, default 40, 0 = no
+// limit); older ones expire unscored and unseen, the rest wait (same reason) for the next run. The engine
+// reviews them after the run's own postings.
+export function applyReviewBudget(jobs, state, configuredLimit, now = new Date(), { lookbackHours = 24, timeZone = null, undatedNights = UNDATED_DEFERRAL_NIGHTS, rankByPrescreen = false, catchUpLimit = DEFAULT_CATCH_UP_BUDGET, catchUpMaxAgeHours = CATCH_UP_MAX_AGE_HOURS } = {}) {
   const limit = configuredLimit == null || configuredLimit === '' ? DEFAULT_MAX_REVIEWED_PER_RUN : Math.max(0, Math.floor(Number(configuredLimit)) || 0);
+  const catchLimit = catchUpBudgetOf(catchUpLimit);
   const candidates = jobs.filter(isSemanticCandidate);
   const others = jobs.filter(job => !isSemanticCandidate(job));
   const rankScore = job => (rankByPrescreen && Number.isFinite(job.prescreenScore) ? job.prescreenScore : Number(job.bestScore) || 0);
-  const ranked = candidates
-    .map(job => { const status = deferredStatus(state, job); return { job, deferredCount: status.deferredCount, authHeld: status.reason === 'auth', bucket: freshnessBucket(job, now, lookbackHours, timeZone) }; })
-    // Postings held back while Claude was signed out go first (the expiry has already dropped the ones past
-    // the freshness window), then the usual order.
-    .sort((a, b) => (Number(b.authHeld) - Number(a.authHeld))
-      || (a.bucket - b.bucket)
-      || (Number(b.deferredCount >= 2) - Number(a.deferredCount >= 2))
-      || (Number(isEarlyCareerPriority(b.job)) - Number(isEarlyCareerPriority(a.job)))
-      || (rankScore(b.job) + 10 * b.deferredCount) - (rankScore(a.job) + 10 * a.deferredCount));
+  const order = (a, b) => (a.bucket - b.bucket)
+    || (Number(b.deferredCount >= 2) - Number(a.deferredCount >= 2))
+    || (Number(isEarlyCareerPriority(b.job)) - Number(isEarlyCareerPriority(a.job)))
+    || (rankScore(b.job) + 10 * b.deferredCount) - (rankScore(a.job) + 10 * a.deferredCount);
+  const entries = candidates.map(job => {
+    const status = deferredStatus(state, job);
+    return { job, deferredCount: status.deferredCount, reason: status.reason, catchUp: CATCH_UP_REASONS.includes(status.reason), bucket: freshnessBucket(job, now, lookbackHours, timeZone) };
+  });
+  const ranked = entries.filter(entry => !entry.catchUp).sort(order);
   const kept = limit > 0 ? ranked.slice(0, limit) : ranked;
   const missed = limit > 0 ? ranked.slice(limit) : [];
   const abandoned = missed.filter(entry => entry.bucket === 2 && entry.deferredCount >= Number(undatedNights));
   const deferred = missed.filter(entry => !abandoned.includes(entry));
+  // The catch-up lane.
+  const lane = entries.filter(entry => entry.catchUp);
+  const tooOld = entry => { const age = postingAgeHours(entry.job, now, timeZone); return age == null || age > Number(catchUpMaxAgeHours); };
+  const catchExpired = lane.filter(tooOld);
+  const catchRanked = lane.filter(entry => !tooOld(entry)).sort(order);
+  const catchKept = catchLimit > 0 ? catchRanked.slice(0, catchLimit) : catchRanked;
+  const catchWaiting = catchLimit > 0 ? catchRanked.slice(catchLimit) : [];
   const at = now.toISOString();
-  for (const entry of kept) clearDeferred(state, entry.job);
+  for (const entry of [...kept, ...catchKept, ...catchExpired]) clearDeferred(state, entry.job);
   for (const entry of deferred) markDeferred(state, entry.job, at);
+  for (const entry of catchWaiting) markDeferred(state, entry.job, at, entry.reason);
   for (const entry of abandoned) { clearDeferred(state, entry.job); markJobSeen(state, { ...entry.job, enrichment: 'undated_abandoned' }, at); }
-  const ranking = ranked.map(entry => ({ url: entry.job.url, bucket: entry.bucket, bestScore: Number(entry.job.bestScore) || 0, deferredCount: entry.deferredCount, ...(entry.authHeld ? { authHeld: true } : {}), kept: kept.includes(entry), abandoned: abandoned.includes(entry) }));
+  const ranking = [...ranked, ...catchRanked, ...catchExpired].map(entry => ({ url: entry.job.url, bucket: entry.bucket, bestScore: Number(entry.job.bestScore) || 0, deferredCount: entry.deferredCount, ...(entry.catchUp ? { catchUp: entry.reason } : {}), kept: kept.includes(entry) || catchKept.includes(entry), abandoned: abandoned.includes(entry), ...(catchExpired.includes(entry) ? { expired: true } : {}) }));
   return {
-    jobs: [...others, ...kept.map(entry => entry.job)], deferred: deferred.map(entry => entry.job), abandoned: abandoned.map(entry => entry.job),
-    candidateCount: candidates.length, inWindowCount: ranked.filter(entry => entry.bucket === 0).length, undatedCount: ranked.filter(entry => entry.bucket === 2).length, reviewedCount: kept.length, limit, ranking,
+    jobs: [...others, ...kept.map(entry => entry.job), ...catchKept.map(entry => entry.job)], deferred: deferred.map(entry => entry.job), abandoned: abandoned.map(entry => entry.job),
+    candidateCount: candidates.length, inWindowCount: ranked.filter(entry => entry.bucket === 0).length, undatedCount: ranked.filter(entry => entry.bucket === 2).length,
+    reviewedCount: kept.length + catchKept.length, newReviewedCount: kept.length, limit, ranking,
+    catchUp: { candidates: lane.length, reviewed: catchKept.length, waiting: catchWaiting.length, expired: catchExpired.length, limit: catchLimit, maxAgeHours: Number(catchUpMaxAgeHours), jobs: catchKept.map(entry => entry.job), waitingJobs: catchWaiting.map(entry => entry.job), expiredJobs: catchExpired.map(entry => entry.job) },
   };
 }
 
@@ -948,9 +1005,9 @@ async function runPipeline(config, clock, options = {}) {
   // The backlog only holds postings still worth reviewing: anything older than the lookback window plus
   // the grace period leaves the queue now (this also migrates queues written under the old one-week rule).
   const deferralMaxAgeHours = Number(config.lookbackHours || 24) + Number(config.deferralGraceHours ?? DEFAULT_DEFERRAL_GRACE_HOURS);
-  const signedOutRequeue = await requeueSignedOutPostings(config, state, { now, maxAgeHours: deferralMaxAgeHours, timeZone: config.timeZone }).catch(error => { warnings.push(createWarning('llm', 'Claude login', `could not requeue the postings a signed-out run left unreviewed: ${errorSummary(error)}`, 'info')); return []; });
-  if (signedOutRequeue.length) warnings.push(createWarning('llm', 'Claude login', `requeued ${signedOutRequeue.length} posting(s) an earlier run left unreviewed while Claude was signed out; they are reviewed first once the login works`, 'info'));
-  const staleBacklog = expireDeferred(state, now, deferralMaxAgeHours, { timeZone: config.timeZone });
+  const signedOutRequeue = await requeueSignedOutPostings(config, state, { now, maxAgeHours: CATCH_UP_MAX_AGE_HOURS, timeZone: config.timeZone }).catch(error => { warnings.push(createWarning('llm', 'Claude login', `could not requeue the postings a signed-out run left unreviewed: ${errorSummary(error)}`, 'info')); return []; });
+  if (signedOutRequeue.length) warnings.push(createWarning('llm', 'Claude login', `requeued ${signedOutRequeue.length} posting(s) an earlier run left unreviewed while Claude was signed out; they are caught up after each run's new postings (catch-up budget) while at most ${CATCH_UP_MAX_AGE_HOURS} hours old`, 'info'));
+  const staleBacklog = expireDeferred(state, now, deferralMaxAgeHours, { timeZone: config.timeZone, catchUpMaxAgeHours: CATCH_UP_MAX_AGE_HOURS });
   if (staleBacklog.removed) warnings.push(createWarning('llm', 'review budget', `expired ${staleBacklog.removed} backlog postings older than ${deferralMaxAgeHours} hours (not scored, not marked seen)`, 'info'));
   // Settings > Pipeline "Include carried-over postings" (semanticMatching.includeCarriedOver, default on).
   // Off: postings the review budget left behind are not carried into this or any later run (quota
@@ -1111,9 +1168,12 @@ async function runPipeline(config, clock, options = {}) {
   // Review budget: tonight's postings first (freshness bucket), then local score (prescreen score when the
   // prescreen is enforced); the rest are deferred (not marked seen) and come back next run while they are
   // still inside the grace period.
-  const budget = applyReviewBudget(prescreen.jobs, state, config.semanticMatching?.maxReviewedPerRun, now, { lookbackHours: config.lookbackHours, timeZone: config.timeZone, rankByPrescreen: prescreen.meta.status === 'ok' && prescreen.meta.mode === 'enforced' });
+  // Catch-up postings (held while the engine was unavailable) went through the same prescreen above; the budget
+  // gives them their own lane after this run's postings.
+  const budget = applyReviewBudget(prescreen.jobs, state, config.semanticMatching?.maxReviewedPerRun, now, { lookbackHours: config.lookbackHours, timeZone: config.timeZone, rankByPrescreen: prescreen.meta.status === 'ok' && prescreen.meta.mode === 'enforced', catchUpLimit: config.semanticMatching?.catchUpBudget });
+  if (budget.catchUp.candidates) warnings.push(createWarning('llm', 'catch-up', `caught up ${budget.catchUp.reviewed} posting(s) held while the engine was unavailable, after this run's own postings (catch-up budget ${budget.catchUp.limit || 'no limit'})${budget.catchUp.waiting ? `; ${budget.catchUp.waiting} wait for the next run` : ''}${budget.catchUp.expired ? `; ${budget.catchUp.expired} past ${budget.catchUp.maxAgeHours} hours expired unreviewed` : ''}`, 'info'));
   if (budget.abandoned.length) warnings.push(createWarning('llm', 'review budget', `stopped carrying ${budget.abandoned.length} undated postings after ${UNDATED_DEFERRAL_NIGHTS} nights without a posting date (not scored)`, 'info'));
-  debug.reviewBudget = { kept: budget.ranking.filter(item => item.kept).map(item => ({ url: item.url, bucket: item.bucket, bestScore: item.bestScore, deferredCount: item.deferredCount, ...(item.authHeld ? { authHeld: true } : {}) })), deferred: budget.ranking.filter(item => !item.kept && !item.abandoned).map(item => ({ url: item.url, bucket: item.bucket, bestScore: item.bestScore, deferredCount: item.deferredCount })), abandoned: budget.abandoned.map(job => job.url), expired: [...staleBacklog.urls, ...backlog.expired.map(job => job.url)] };
+  debug.reviewBudget = { kept: budget.ranking.filter(item => item.kept).map(item => ({ url: item.url, bucket: item.bucket, bestScore: item.bestScore, deferredCount: item.deferredCount, ...(item.catchUp ? { catchUp: item.catchUp } : {}) })), deferred: budget.ranking.filter(item => !item.kept && !item.abandoned && !item.expired).map(item => ({ url: item.url, bucket: item.bucket, bestScore: item.bestScore, deferredCount: item.deferredCount, ...(item.catchUp ? { catchUp: item.catchUp } : {}) })), abandoned: budget.abandoned.map(job => job.url), expired: [...staleBacklog.urls, ...backlog.expired.map(job => job.url), ...budget.catchUp.expiredJobs.map(job => job.url)] };
   if (budget.deferred.length && !includeCarriedOver) {
     // Carry-over is off: nothing waits for the next run; the postings stay unseen and unscored.
     for (const job of budget.deferred) clearDeferred(state, job);
@@ -1121,7 +1181,7 @@ async function runPipeline(config, clock, options = {}) {
   } else if (budget.deferred.length) {
     warnings.push(createWarning('llm', 'review budget', `deferred ${budget.deferred.length} postings to the next run (review limit ${budget.limit} per run); they are not marked as seen`, 'info'));
   }
-  const budgetAlert = recordBudgetHistory(state, { date, at: now.toISOString(), candidates: budget.candidateCount, inWindow: budget.inWindowCount, limit: budget.limit, reviewed: budget.reviewedCount });
+  const budgetAlert = recordBudgetHistory(state, { date, at: now.toISOString(), candidates: budget.candidateCount - budget.catchUp.candidates, inWindow: budget.inWindowCount, limit: budget.limit, reviewed: budget.newReviewedCount });
   if (budgetAlert) warnings.push(createWarning('llm', 'review budget', budgetAlert.message));
   let evaluated;
   const quotaEvents = [];
@@ -1210,12 +1270,6 @@ async function runPipeline(config, clock, options = {}) {
   // An expired login is surfaced everywhere at once: the report, the hub, and a desktop notification.
   const authEvent = quotaEvents.find(event => event.kind === 'auth_expired') || null;
   const authTakeover = quotaEvents.find(event => event.kind === 'auth_expired' && event.action === 'fallback-engine') || null;
-  // The login worked this run: the held postings it reviewed are done, and any the budget left go back to the
-  // usual order (the priority belongs to the first run after the login works, Run Now included).
-  if (!authEvent && evaluated.some(job => job.semanticReviewed)) {
-    const released = releaseAuthDeferrals(state);
-    if (released) warnings.push(createWarning('llm', 'Claude login', `${released} posting(s) held while Claude was signed out did not fit this run's review limit; they wait in the usual order now`, 'info'));
-  }
   const authExpired = authEvent ? { at: authEvent.at, notice: authEvent.notice || null, deferred: authDeferredCount, takenOverBy: authTakeover ? String(authTakeover.detail || '').replace(/^switched to /, '') || null : null, message: AUTH_EXPIRED_MESSAGE } : null;
   if (authExpired) {
     try {
@@ -1272,6 +1326,8 @@ async function runPipeline(config, clock, options = {}) {
     datePrecision: datePrecisionSummary(reviewed),
     reviewedInRun: evaluated.length, reviewedLast90Days,
     runCounts: runCounts({ evaluated, budget, quotaDeferred, prefiltered, expiredBacklogCount, prescreenedOut: prescreen.dropped.length }),
+    // Run Details "Reviewed": this run's postings and the catch-up lane, apart.
+    catchUp: { ...reviewSplit(evaluated, budget), limit: budget.catchUp.limit, waiting: budget.catchUp.waiting, expired: budget.catchUp.expired, maxAgeHours: budget.catchUp.maxAgeHours },
     quotaNote: quotaNote(quota, quotaDeferred.length - authDeferredCount),
     prefilter: { titleExcluded: prefiltered.titleExcluded, locationExcludedCount: prefiltered.locationExcluded.length, titleExcludedCount: prefiltered.titleExcluded.length, bySource: prefiltered.bySource },
     earlyCareerCount: locallyEvaluated.filter(job => job.earlyCareer).length,
@@ -1314,7 +1370,9 @@ async function runPipeline(config, clock, options = {}) {
     if (job.enrichment !== 'failed') markJobSeen(state, job, now.toISOString());
     for (const alternate of job.alternates || []) markJobSeen(state, { url: alternate.url, enrichment: 'near_duplicate' }, now.toISOString());
   }
-  pruneSeen(state, now, 90);
+  // The 90-day retention, every run; the count goes to Run Details.
+  const seenPruned = pruneSeen(state, now, SEEN_RETENTION_DAYS);
+  meta.seen = { entries: Object.keys(state.seen).length, pruned: seenPruned, retentionDays: SEEN_RETENTION_DAYS };
   await compactAgedPayloads(config, now).catch(error => console.warn(`Could not compact the older report payloads: ${errorSummary(error)}`));
   // A run this Mac's network cut short is recorded as incomplete for the hub's auto catch-up (see
   // src/hub/auto-catchup.mjs); any run that did collect clears the record.

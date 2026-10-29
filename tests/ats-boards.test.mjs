@@ -6,6 +6,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { canonicalUrl, sha256 } from '../src/utils.mjs';
 import {
   ATS_SOURCE_KIND, DORMANT_AFTER_FAILURES, applyConfigBoards, boardFromKey, boardLabel, collectAtsBoards, discoverBoards, identifyBoard, isQuietBoard,
   normalizeRegistry, parseAshbyJobs, parseGreenhouseJobs, parseLeverPostings, parseWorkdayPostings, pollBoard, readRegistry, registerBoards, resumeBoard, writeRegistry,
@@ -354,7 +355,7 @@ test('the pipeline wrapper discovers boards from collected postings, marks the b
     assert.deepEqual(agents, ['TestAgent/1.0']);
     for (const job of payload.jobs) {
       assert.equal(isJobSeen(state, { url: job.absolute_url }), true, 'baseline postings are seen');
-      assert.equal(state.seen[Object.keys(state.seen).find(key => state.seen[key].url === job.absolute_url)].lastEnrichment, 'ats_baseline');
+      assert.equal(state.seen[sha256(canonicalUrl(job.absolute_url))].baseline, true, 'marked as a baseline entry');
     }
     assert.deepEqual(sourceStats.map(stat => [stat.name, stat.kind, stat.ok, stat.baseline, stat.skipped]), [['Greenhouse · Example Corp', 'ats', true, true, null], ['Lever · Manual Co', 'ats', true, false, 'disabled']]);
     const registry = JSON.parse(await fs.readFile(path.join(root, 'state', 'ats-boards.json'), 'utf8'));

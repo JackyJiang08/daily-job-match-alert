@@ -3,7 +3,7 @@
 // unreviewed, mixed into the matches, and queued for automatic letters. Now the run-start check and a session
 // that expires mid-run are both auth_expired: Codex reviews when the fallback is on and signed in, otherwise
 // the postings wait (never unreviewed); a posting no model reviewed is never a match; the hub watches the login;
-// the first run after the login works reviews the held postings first. Every engine here is a fake.
+// the held postings are caught up after each run's new postings (tests/catch-up.test.mjs). Every engine here is a fake.
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -13,8 +13,8 @@ import { fileURLToPath } from 'node:url';
 import { applySubscriptionMatching } from '../src/subscription-match.mjs';
 import { AUTH_EXPIRED_MESSAGE, AUTH_EXPIRED_NOTIFICATION, AuthExpiredError, classifyEngineError } from '../src/engines/engine-errors.mjs';
 import { describeClaudeConnection, readClaudeAuthStatus, verifyClaudeSubscription } from '../src/engines/claude.mjs';
-import { applyReviewBudget, main, requeueSignedOutPostings } from '../src/index.mjs';
-import { deferredStatus, isJobSeen, markDeferred, markJobSeen, releaseAuthDeferrals } from '../src/state.mjs';
+import { main, requeueSignedOutPostings } from '../src/index.mjs';
+import { deferredStatus, isJobSeen, markJobSeen } from '../src/state.mjs';
 import { buildReportView } from '../src/report.mjs';
 import { renderReportBody } from '../src/report-components.mjs';
 import { splitReportJobs } from '../src/review-status.mjs';
@@ -143,7 +143,7 @@ async function signedOutProject() {
   return { root, configPath, config };
 }
 
-test('end to end: a run that starts signed out holds every posting (no match, no unreviewed card), says "Claude signed out", notifies; the next run after login reviews them first', async () => {
+test('end to end: a run that starts signed out holds every posting (no match, no unreviewed card), says "Claude signed out", notifies; the next run after login catches them up', async () => {
   const { root, configPath, config } = await signedOutProject();
   const silence = [console.log, console.warn, console.error];
   const trigger = process.env.DAILY_JOB_MATCH_ALERT_TRIGGER;
@@ -171,14 +171,15 @@ test('end to end: a run that starts signed out holds every posting (no match, no
     assert.doesNotMatch(html, /<article class="job"/);
     assert.equal(await fs.stat(path.join(root, 'unexpected.log')).catch(() => null), null, 'no scoring call reached the signed-out CLI');
 
-    // Signed in again the same evening: the held postings come back and are reviewed first.
+    // Signed in again the same evening: the held postings come back through the catch-up lane.
     config.semanticMatching.claudeCommand = standIn;
     await fs.writeFile(configPath, JSON.stringify(config, null, 2));
     process.env.DAILY_JOB_MATCH_ALERT_TRIGGER = 'manual';
     const second = await main({ argv: ['node', 'index.mjs', '--config', configPath, '--now', '2026-08-28T01:00:00Z'], autoLetters: false, autoBackup: false, notify: async () => {}, notifier: async () => assert.fail('signed in: no notification') });
     assert.equal(second.meta.authExpired, null);
     assert.ok(second.meta.matchCount >= 1, 'the held posting was reviewed and matched');
-    assert.ok(second.debug.reviewBudget.kept.length >= 1 && second.debug.reviewBudget.kept.every(item => item.authHeld === true), 'reviewed as the held postings, first');
+    assert.ok(second.debug.reviewBudget.kept.length >= 1 && second.debug.reviewBudget.kept.every(item => item.catchUp === 'auth'), 'reviewed in the catch-up lane');
+    assert.deepEqual([second.meta.catchUp.reviewedNew, second.meta.catchUp.reviewedCatchUp], [0, second.debug.reviewBudget.kept.length]);
     state = JSON.parse(await fs.readFile(path.join(root, 'state', 'state.json'), 'utf8'));
     assert.deepEqual(state.deferred, {});
   } finally {
@@ -187,27 +188,6 @@ test('end to end: a run that starts signed out holds every posting (no match, no
     else process.env.DAILY_JOB_MATCH_ALERT_TRIGGER = trigger;
     await fs.rm(root, { recursive: true, force: true });
   }
-});
-
-test('after the login works again, postings held for it go to the front of the review budget', () => {
-  const now = new Date('2026-10-30T01:00:00Z');
-  const state = { seen: {}, deferred: {} };
-  const fresh = candidate(30, { postedAt: '2026-10-29T20:00:00Z', bestScore: 95 });
-  const heldOld = candidate(1, { postedAt: '2026-10-28T15:00:00Z', bestScore: 40 });
-  const budgetHeld = candidate(2, { postedAt: '2026-10-28T15:00:00Z', bestScore: 90 });
-  markDeferred(state, heldOld, '2026-10-29T01:00:00Z', 'auth');
-  markDeferred(state, budgetHeld, '2026-10-29T01:00:00Z', 'budget');
-  const budget = applyReviewBudget([fresh, heldOld, budgetHeld], state, 1, now, { lookbackHours: 24, timeZone: 'America/Chicago' });
-  assert.deepEqual(budget.jobs.map(job => job.url), [heldOld.url], 'the held posting beats tonight\'s higher-scored one');
-  assert.equal(deferredStatus(state, heldOld).deferred, false, 'reviewed now, so it leaves the queue');
-  assert.equal(deferredStatus(state, fresh).reason, 'budget');
-  // A held posting the budget pushes back again keeps its reason while Claude is still signed out ...
-  markDeferred(state, heldOld, '2026-10-30T01:00:00Z', 'auth');
-  markDeferred(state, heldOld, '2026-10-30T02:00:00Z', 'budget');
-  assert.equal(deferredStatus(state, heldOld).reason, 'auth');
-  // ... and once a run with a working login is over, what it could not take returns to the usual order.
-  assert.equal(releaseAuthDeferrals(state), 1);
-  assert.equal(deferredStatus(state, heldOld).reason, 'budget');
 });
 
 test('the postings the 10-28 / 10-29 runs left unreviewed go back into the queue once, while still inside the window', async () => {
@@ -227,13 +207,13 @@ test('the postings the 10-28 / 10-29 runs left unreviewed go back into the queue
     const state = { seen: {} };
     for (const job of [recent, stale, reviewed, crashed]) markJobSeen(state, job, '2026-10-29T01:00:00Z');
     const now = new Date('2026-10-30T00:30:00Z');
-    const requeued = await requeueSignedOutPostings(config, state, { now, maxAgeHours: 72, timeZone: 'America/Chicago' });
+    const requeued = await requeueSignedOutPostings(config, state, { now, maxAgeHours: 48, timeZone: 'America/Chicago' });
     assert.deepEqual(requeued, [recent.url]);
     assert.equal(isJobSeen(state, recent), false);
     assert.equal(deferredStatus(state, recent).reason, 'auth');
     assert.ok(isJobSeen(state, stale) && isJobSeen(state, reviewed) && isJobSeen(state, crashed));
     assert.deepEqual(state.authRequeue['2026-10-29'], { at: now.toISOString(), count: 1 });
-    assert.deepEqual(await requeueSignedOutPostings(config, state, { now, maxAgeHours: 72 }), [], 'each day once');
+    assert.deepEqual(await requeueSignedOutPostings(config, state, { now, maxAgeHours: 48 }), [], 'each day once');
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
