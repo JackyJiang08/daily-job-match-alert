@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import { applySubscriptionMatching, assessClaudeAuthStatus, buildResultSchema, buildSemanticPrompt, expandModelAlias, extractScoringModel, MINIMUM_CLAUDE_CODE_VERSION, mergeSemanticResults, modelMatchesConfiguration, parseStructuredOutput, runSubscriptionCommand, subscriptionEnvironment, summarizeScoringModel, verifyClaudeSubscription } from '../src/subscription-match.mjs';
 import { sha256 } from '../src/utils.mjs';
@@ -306,18 +309,25 @@ test('a CLI that exits before reading its prompt is reported as a failed exit, n
 });
 
 test('a claudeCommand whose auth status command fails is treated as signed out: the posting waits, never unreviewed', async () => {
-  const warnings = [];
-  const [job] = await applySubscriptionMatching(
-    [localCandidate('https://example.com/jobs/dead-cli')],
-    { data: 'DATA', ai: 'AI' },
-    {},
-    // /bin/sh answers --version (bash 3.2 or dash) but `auth status --json` fails: the login check errored.
-    { engine: 'claude_subscription', claudeCommand: '/bin/sh', warnings, quotaPolicy: { fallbackEngine: null } },
-  );
-  assert.equal(job.quotaDeferred, true);
-  assert.equal(job.authDeferred, true);
-  assert.notEqual(job.matchLevel, 'unreviewed');
-  assert.ok(warnings.some(warning => warning.message.startsWith('Claude is signed out.')), warnings.map(warning => warning.message).join(' | '));
+  // Answers --version, then `auth status --json` crashes without printing a status: the login check errored.
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'auth-status-fails-'));
+  const command = path.join(directory, 'claude');
+  await fs.writeFile(command, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "2.1.300 (Claude Code)"; exit 0; fi\necho "segmentation fault" >&2\nexit 139\n', { mode: 0o755 });
+  try {
+    const warnings = [];
+    const [job] = await applySubscriptionMatching(
+      [localCandidate('https://example.com/jobs/dead-cli')],
+      { data: 'DATA', ai: 'AI' },
+      {},
+      { engine: 'claude_subscription', claudeCommand: command, warnings, quotaPolicy: { fallbackEngine: null } },
+    );
+    assert.equal(job.quotaDeferred, true);
+    assert.equal(job.authDeferred, true);
+    assert.notEqual(job.matchLevel, 'unreviewed');
+    assert.ok(warnings.some(warning => warning.message.startsWith('Claude is signed out.')), warnings.map(warning => warning.message).join(' | '));
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
 });
 
 test('a CLI that cannot even report its version keeps the local fallback (not a login problem)', async () => {
