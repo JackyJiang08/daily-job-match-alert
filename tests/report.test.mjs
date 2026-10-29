@@ -71,11 +71,11 @@ test('run metadata lives only in the collapsed Run details block, including the 
   assert.match(details, /<dt>Scoring model<\/dt><dd>claude-fable-5<\/dd>/);
   assert.match(details, /<dt>Resume tracks<\/dt><dd>Data, AI<\/dd>/);
   assert.match(details, /<dt>Minimum score<\/dt><dd>70<\/dd>/);
-  assert.match(details, /<dt>Postings<\/dt><dd>12 collected · 7 reviewed · 2 matched<\/dd>/);
+  assert.match(details, /<dt>Postings<\/dt><dd>12 collected · 7 reviewed · 1 matched<\/dd>/, 'the posting no model reviewed is not a match');
   assert.match(details, /<dt>Hard filter<\/dt><dd>3 excluded: 2 outside the United States, 1 outside the graduation window<ul><li>Globex — Data Analyst \(Toronto\): location outside the United States<\/li><li>Initech — BI Intern: Class of 2026 only<\/li><\/ul><\/dd>/);
   assert.match(details, /<dt>Updates today<\/dt><dd>Daily update #2 · last updated Aug 27, 2026, 8:30 AM<\/dd>/);
   assert.doesNotMatch(html, /\bUTC\b/);
-  assert.match(details, /<dt>Status<\/dt><dd>1 of 2 matches kept local scores because semantic review was unavailable \(unreviewed\)<ul><li>Resume PDF\(s\) recovered from iCloud before this run: data<\/li><li>2 pipeline warning\(s\), see warnings\.txt beside this file<\/li><\/ul><\/dd>/);
+  assert.match(details, /<dt>Status<\/dt><dd>1 posting was not reviewed by a model \(engine unavailable\); they are listed under Not reviewed \(engine unavailable\), not among the matches<ul><li>Resume PDF\(s\) recovered from iCloud before this run: data<\/li><li>2 pipeline warning\(s\), see warnings\.txt beside this file<\/li><\/ul><\/dd>/);
   // The warning lines themselves never reach the page.
   assert.doesNotMatch(html, /network unavailable|batch fallback|Pipeline warnings/);
   // Outside the block, none of the run metadata appears.

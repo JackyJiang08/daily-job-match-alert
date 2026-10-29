@@ -42,7 +42,9 @@ export function run(command, args, { input = '', cwd = process.cwd(), timeoutMs 
       clearTimeout(timer);
       const result = { code, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') };
       if (code === 0) resolve(result);
-      else reject(new Error(`${command} exited ${code ?? signal}: ${result.stderr.slice(-2000) || result.stdout.slice(-2000)}`));
+      // The output rides along (stdout, stderr, exitCode): `claude auth status --json` exits 1 when signed
+      // out and still prints its status object.
+      else reject(Object.assign(new Error(`${command} exited ${code ?? signal}: ${result.stderr.slice(-2000) || result.stdout.slice(-2000)}`), { stdout: result.stdout.slice(-20_000), stderr: result.stderr.slice(-20_000), exitCode: code }));
     });
     // A CLI that exits before reading its prompt (crash, bad flag, missing binary) closes the pipe while
     // the prompt is still being written. That EPIPE must not become an unhandled 'error' event that kills

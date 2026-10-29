@@ -16,6 +16,8 @@ import { LEGACY_LOCATION_GAP, LOCATION_NOT_STATED_LABEL, LOCATION_NOT_STATED_TIT
 import { describePrescreen, funnelText } from './prescreen-text.mjs';
 import { roleFamilyCountsText } from './role-families.mjs';
 import { seenDropMessage } from './state-integrity.mjs';
+import { NOT_REVIEWED_TITLE, isNotReviewed, notReviewedHeadline, splitReportJobs } from './review-status.mjs';
+import { CLAUDE_SIGNED_OUT } from './engines/engine-errors.mjs';
 
 export const REPORT_TITLE = 'Daily Job Match Alert';
 export const WARNINGS_FILE_NAME = 'warnings.txt';
@@ -207,7 +209,7 @@ function sourcesSummary(stats) {
 }
 
 // Everything that used to sit in the page header or the warnings panel, folded into one list.
-export function runDetailsView(jobs, meta, tracks) {
+export function runDetailsView(jobs, meta, tracks, notReviewedCount = 0) {
   const rows = [];
   const exclusions = meta.eligibilityExclusions || null;
   const warnings = meta.warnings || [];
@@ -232,7 +234,7 @@ export function runDetailsView(jobs, meta, tracks) {
     });
   }
   if (meta.networkOutage) rows.push({ term: 'Network', detail: meta.networkOutage.detail || meta.networkOutage.message });
-  if (meta.authExpired) rows.push({ term: 'Claude login', detail: `${meta.authExpired.message}${meta.authExpired.deferred ? ` (${meta.authExpired.deferred} deferred)` : ''}` });
+  if (meta.authExpired) rows.push({ term: 'Claude login', detail: `${meta.authExpired.message}${meta.authExpired.takenOverBy ? ` (${meta.authExpired.takenOverBy} reviewed the postings)` : meta.authExpired.deferred ? ` (${meta.authExpired.deferred} deferred)` : ''}` });
   if (meta.quota?.events?.length) {
     const events = meta.quota.events.map(event => `${describeQuota(event, { timeZone: meta.timeZone })}: ${event.action}${event.detail ? ` (${event.detail})` : ''}`);
     rows.push({ term: 'Subscription quota', detail: `${events.length} event(s)${meta.quota.effectiveModel || meta.quota.effectiveEngine ? ` · scored by ${meta.quota.effectiveEngine || 'claude'}${meta.quota.effectiveModel ? ` · ${meta.quota.effectiveModel}` : ''}` : ''}${meta.quota.deferredByQuota ? ` · ${meta.quota.deferredByQuota} deferred` : ''}`, items: events });
@@ -335,8 +337,8 @@ export function runDetailsView(jobs, meta, tracks) {
   }
 
   const status = [];
-  const unreviewed = jobs.filter(job => job.matchLevel === 'unreviewed' || job.scoringEngine === 'local_fallback').length;
-  if (unreviewed) status.push(`${unreviewed} of ${jobs.length} matches kept local scores because semantic review was unavailable (unreviewed)`);
+  const unreviewed = Number(notReviewedCount) || 0;
+  if (unreviewed) status.push(`${notReviewedHeadline(unreviewed)} (engine unavailable); they are listed under ${NOT_REVIEWED_TITLE}, not among the matches`);
   if (!unreviewed && (meta.scoringModel === 'local_only' || meta.scoringModel === 'none') && jobs.length) status.push('No semantic review ran; scores are local triage only');
   const unverified = jobs.filter(locationNotStated).length;
   if (unverified) status.push(`${unverified} match(es) do not state a US location; confirm you can work from the United States before applying`);
@@ -394,13 +396,29 @@ export function mastheadSubtitle(jobs, meta, { withDate = true } = {}) {
   return parts.join(' · ');
 }
 
+// The report header line for a run that met a signed-out Claude: who reviewed instead, or how many postings wait.
+export function signedOutBanner(auth) {
+  if (!auth) return null;
+  const outcome = auth.takenOverBy
+    ? `${String(auth.takenOverBy).charAt(0).toUpperCase()}${String(auth.takenOverBy).slice(1)} reviewed this run's postings instead.`
+    : auth.deferred ? `${auth.deferred} posting(s) were deferred to the next run and are not lost.` : '';
+  return `${CLAUDE_SIGNED_OUT}. ${outcome ? `${outcome} ` : ''}Run \`claude auth login --claudeai\` in Terminal.`;
+}
+
 // The view object consumed by report-components; the hub renders the same view inside its shell with
 // `embedded: true`, which titles the masthead with the date instead of repeating the product name.
-export function buildReportView(jobs, meta, options = {}) {
-  const tracks = reportTracks(meta, jobs);
-  const review = Array.isArray(options.review) && options.review.length === jobs.length ? options.review : null;
-  const allCards = jobs.map((job, index) => cardView(job, tracks, meta.timeZone, options.decorate, review ? review[index] : null));
-  if (options.lazyDescription) for (const card of allCards) lazyDescription(card, options.lazyDescription);
+// `jobs` are the day's matches; a posting no model reviewed (an older payload kept them there) moves to the
+// folded Not reviewed group, together with options.notReviewed (the hub's list) or the ones found in
+// options.reviewed (the pipeline passes the day's reviewed list).
+export function buildReportView(matchJobs, meta, options = {}) {
+  const inputReview = Array.isArray(options.review) && options.review.length === matchJobs.length ? options.review : null;
+  const kept = matchJobs.map((job, index) => ({ job, review: inputReview ? inputReview[index] : null })).filter(item => !isNotReviewed(item.job));
+  const jobs = kept.map(item => item.job);
+  const notReviewed = Array.isArray(options.notReviewed) ? options.notReviewed : splitReportJobs({ matches: matchJobs, reviewed: options.reviewed || [] }).notReviewed;
+  const tracks = reportTracks(meta, notReviewed.length ? [...jobs, ...notReviewed] : jobs);
+  const allCards = kept.map(item => cardView(item.job, tracks, meta.timeZone, options.decorate, item.review));
+  const notReviewedCards = notReviewed.map(job => cardView(job, tracks, meta.timeZone, options.decorate, null));
+  if (options.lazyDescription) for (const card of [...allCards, ...notReviewedCards]) lazyDescription(card, options.lazyDescription);
   // The main list holds this run's window; postings the review budget carried from an earlier run are
   // a separate group under it.
   const cards = allCards.filter(card => !card.carriedOver);
@@ -415,19 +433,22 @@ export function buildReportView(jobs, meta, options = {}) {
       ? { title: readableDate(meta.date), subtitle: mastheadSubtitle(jobs, meta, { withDate: false }), note: meta.quotaNote || null }
       : { title: REPORT_TITLE, subtitle: mastheadSubtitle(jobs, meta), note: meta.quotaNote || null },
     toolbar: { roleTypes, tracks, quiet: jobs.length < 5, total: jobs.length },
-    banner: meta.authExpired ? `${meta.authExpired.message}${meta.authExpired.deferred ? ` ${meta.authExpired.deferred} posting(s) were deferred to the next run and are not lost.` : ''}` : (meta.quota?.banner || null),
+    authBanner: signedOutBanner(meta.authExpired),
+    banner: meta.authExpired ? null : (meta.quota?.banner || null),
+    notReviewedBanner: notReviewed.length ? `${notReviewedHeadline(notReviewed.length)}: the scoring engine was unavailable, so they kept only the local triage score. They are not matches; see "${NOT_REVIEWED_TITLE}" at the bottom.` : null,
     networkBanner: meta.networkOutage ? meta.networkOutage.detail || meta.networkOutage.message : null,
     integrityBanner: meta.integrity?.seenDrop ? seenDropMessage(meta.integrity.seenDrop, meta.timeZone) : null,
     cards,
     carried: carriedCards.length ? { title: CARRIED_OVER_TITLE, note: 'Deferred by the review budget on an earlier run and reviewed now; each card says when it was first found.', cards: carriedCards } : null,
+    notReviewed: notReviewedCards.length ? { title: NOT_REVIEWED_TITLE, note: 'Local triage scores only: no model reviewed these postings, so none of them counts as a match and no cover letter is written for them automatically. Verify the fit yourself.', cards: notReviewedCards } : null,
     emptyMessage: 'No new postings cleared the configured threshold for this date.',
-    runDetails: runDetailsView(jobs, meta, tracks),
+    runDetails: runDetailsView(jobs, meta, tracks, notReviewed.length),
     footer: `Generated locally. Scores are triage aids, not facts. Verify eligibility, posting date, and JD before applying. No applications were submitted.${meta.authExpired ? ` ${meta.authExpired.message}` : ''}`,
   };
 }
 
-export function buildHtml(jobs, meta) {
-  return renderReportPage(buildReportView(jobs, meta));
+export function buildHtml(jobs, meta, options = {}) {
+  return renderReportPage(buildReportView(jobs, meta, options));
 }
 
 export function warningsFileText(meta) {
@@ -467,7 +488,7 @@ export async function writeReports(jobs, allJobs, meta, outputDirectory) {
   const payloadPath = path.join(temporaryDirectory, 'report-payload.json');
   const [, , warningsPath] = await Promise.all([
     fs.writeFile(payloadPath, JSON.stringify({ meta, matches: jobs, reviewed: allJobs }, null, 2) + '\n'),
-    fs.writeFile(htmlPath, buildHtml(jobs, meta)),
+    fs.writeFile(htmlPath, buildHtml(jobs, meta, { reviewed: allJobs })),
     writeWarningsFile(runDirectory, meta),
   ]);
   return { runDirectory, payloadPath, temporaryDirectory, reportBaseName, htmlPath, warningsPath };

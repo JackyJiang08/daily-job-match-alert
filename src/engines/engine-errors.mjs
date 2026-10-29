@@ -5,8 +5,11 @@
 // becomes a short "Generation failed" line while the full text stays in the hub log.
 import { classifyQuotaError, describeQuota, modelNamed, normalizeQuotaPolicy, planLabel } from './quota.mjs';
 
-export const AUTH_EXPIRED_MESSAGE = 'Claude session expired. Run `claude auth login --claudeai` in Terminal, then try again.';
-export const AUTH_EXPIRED_NOTIFICATION = 'Claude login expired, run claude auth login';
+// One wording for every login failure: the run-start check (claude auth status says loggedIn false, authMethod
+// none, or fails) and a session that expires mid-run are the same auth_expired case.
+export const CLAUDE_SIGNED_OUT = 'Claude signed out';
+export const AUTH_EXPIRED_MESSAGE = 'Claude is signed out. Run `claude auth login --claudeai` in Terminal, then try again.';
+export const AUTH_EXPIRED_NOTIFICATION = 'Claude is signed out. Run claude auth login --claudeai';
 
 // The CLI writes its JSON envelope to stdout even on a failed exit, and run() folds that into the error
 // message ("claude exited 1: {…}"). Returns { notice, envelope } when a result envelope is present.

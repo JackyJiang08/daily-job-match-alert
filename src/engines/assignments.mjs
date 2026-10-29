@@ -2,7 +2,7 @@
 //
 //   scoring       semanticMatching.engine / models / reasoningEffort; its fallback chain is the model
 //                 ladder (quotaPolicy.modelLadder after the scoring model) plus, at the end, the Codex
-//                 model when quotaPolicy.fallbackEngine is "codex" (a weekly account limit hands over).
+//                 model when quotaPolicy.fallbackEngine is "codex" (a weekly account limit or a signed-out Claude hands over).
 //   supplemental  linked to scoring (the same call path re-asks for omitted ids).
 //   letterDraft   config.models.assignments.letterDraft { engine, model, effort, fallback: [ids] }
 //   letterEditor  config.models.assignments.letterEditor (same shape)

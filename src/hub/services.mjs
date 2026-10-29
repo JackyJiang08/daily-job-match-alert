@@ -402,13 +402,13 @@ export function claudeAuthView(ctx, latest) {
   const fromRun = latest?.meta?.authExpired || null;
   const runAt = fromRun ? String(fromRun.at || latest?.meta?.completedAt || '') : '';
   const runStillCurrent = Boolean(fromRun) && (!own.clearedAt || String(own.clearedAt) < runAt);
-  if (own.expired) return { expired: true, at: own.at, notice: own.notice, source: 'hub' };
+  if (own.expired) return { expired: true, at: own.at, notice: own.notice, source: own.source || 'hub' };
   if (runStillCurrent) return { expired: true, at: runAt || null, notice: fromRun.notice || null, source: 'nightly run' };
   return { expired: false, at: null, notice: null, source: null };
 }
 
-// Applies the hub's expired flag on top of the CLI probe: "Session expired" is a distinct state from
-// "Not connected" (the CLI still says it is logged in, but calls fail).
+// Applies the hub's expired flag on top of the CLI probe: "Signed out" is a distinct state from "Not
+// connected" (the CLI may still say it is logged in while calls fail).
 export function annotateConnections(connections, auth) {
   if (!connections || !auth?.expired) return connections;
   return { ...connections, claude: { ...(connections.claude || {}), connected: false, sessionExpired: true, hint: 'claude auth login --claudeai', reason: auth.notice || 'The last call to Claude failed to authenticate' } };
@@ -1073,7 +1073,7 @@ export async function testModel(ctx, config, form) {
 // ---- Settings → Task assignments
 
 // Scoring: engine, model, effort, and a fallback chain that is the model ladder (Claude models after the
-// scoring model) with an optional ChatGPT model at the end for a weekly account limit. Cover letter draft
+// scoring model) with an optional ChatGPT model at the end for a weekly account limit or a signed-out Claude. Cover letter draft
 // and editor: their own engine, model, effort, and chain. The editor pass switch rides along.
 export function validateAssignments(form, { catalog = DEFAULT_CATALOG } = {}) {
   const errors = [];

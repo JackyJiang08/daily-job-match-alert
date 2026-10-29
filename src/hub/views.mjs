@@ -180,7 +180,7 @@ function renderMiniStatus(sidebar, timeZone, now) {
   const claudeLine = sidebar.claudeAuth?.expired ? null : lines.claude && lines.claude.plan ? `<span data-plan="claude">${htmlEscape(lines.claude.sidebar)}</span>` : null;
   const chatgptLine = lines.chatgpt && lines.chatgpt.plan ? `<span data-plan="chatgpt">${htmlEscape(lines.chatgpt.sidebar)}</span>` : null;
   const planBlock = claudeLine || chatgptLine ? `<b>Plan</b>${[claudeLine, chatgptLine].filter(Boolean).join('<br>')}` : '';
-  const auth = `${sidebar.claudeAuth?.expired ? '<b>Claude</b><span class="bad" data-auth="expired">Session expired</span>' : ''}${planBlock}`;
+  const auth = `${sidebar.claudeAuth?.expired ? '<b>Login</b><span class="bad" data-auth="expired">Claude signed out</span>' : ''}${planBlock}`;
   return `<div class="mini"><b>Last run</b>${last}<b>Next run</b>${next}${auth}</div>`;
 }
 
@@ -570,7 +570,7 @@ export function statusPage({ status, timeZone }) {
       ? `${at(nextRun.at)}${status.overdue ? ` <span class="badge badge-bad" data-badge="overdue">overdue${status.waitingOnQuota ? ' (waiting on quota)' : ''}</span>` : status.dueNow ? ' <span class="badge badge-warn" data-badge="due-now">due now</span>' : ''}${nextRun.installed ? '' : ' <span class="badge badge-warn" data-badge="not-installed">LaunchAgent not installed; showing the 20:00 default</span>'}`
       : '—';
   const authBanner = status.claudeAuth?.expired
-    ? `<div class="flash error" data-banner="auth-expired">Claude session expired. Run <code>claude auth login --claudeai</code> in Terminal, then try again.${status.claudeAuth.at ? ` <span class="muted">Seen ${at(status.claudeAuth.at)}${status.claudeAuth.source ? ` (${htmlEscape(status.claudeAuth.source)})` : ''}.</span>` : ''} <form class="inline" method="post" action="/settings/connections/refresh"><input type="hidden" name="back" value="status"><button class="btn secondary small" type="submit">Refresh</button></form></div>`
+    ? `<div class="flash error" data-banner="auth-expired">Claude signed out. Run <code>claude auth login --claudeai</code> in Terminal, then Refresh. Until then the nightly review goes to Codex when a ChatGPT model ends Scoring's fallback chain and Codex is signed in; otherwise the postings wait for the next run.${status.claudeAuth.at ? ` <span class="muted">Seen ${at(status.claudeAuth.at)}${status.claudeAuth.source ? ` (${htmlEscape(status.claudeAuth.source)})` : ''}.</span>` : ''} <form class="inline" method="post" action="/settings/connections/refresh"><input type="hidden" name="back" value="status"><button class="btn secondary small" type="submit">Refresh</button></form></div>`
     : '';
   const planBanner = status.planChange
     ? `<div class="flash notice" data-banner="plan-change">${htmlEscape(status.planChange.message)} <a href="/settings">Review Settings</a>${status.claudeAuth?.expired ? ' <span class="muted">If the plan did not actually change, run <code>claude auth login --claudeai</code> to refresh the login.</span>' : ''}</div>`
@@ -683,14 +683,14 @@ export function connectionRow(name, engine, item) {
   if (!item.installed) {
     return `<dt>${htmlEscape(name)}</dt><dd><span class="badge badge-muted" data-conn="missing">Not found on this Mac</span> <span class="muted">Install with <code>${htmlEscape(item.hint)}</code>${item.configured ? `; config points at <code>${htmlEscape(item.configured)}</code>` : ''}</span><br><span class="muted" title="${htmlEscape((item.searched || []).join('\n'))}">Searched PATH, ~/.local/bin, /opt/homebrew/bin, /usr/local/bin, ~/.npm-global/bin, and nvm.</span></dd>`;
   }
-  if (item.sessionExpired) return `<dt>${htmlEscape(name)}</dt><dd><span class="badge badge-bad" data-conn="expired">Session expired</span> <span class="muted">Run <code>claude auth login --claudeai</code> in Terminal, then Refresh.</span>${item.reason ? `<br><span class="muted">${htmlEscape(item.reason)}</span>` : ''}${where}</dd>`;
+  if (item.sessionExpired || item.signedOut) return `<dt>${htmlEscape(name)}</dt><dd><span class="badge badge-bad" data-conn="expired">Signed out</span> <span class="muted">Run <code>claude auth login --claudeai</code> in Terminal, then Refresh.</span>${item.reason ? `<br><span class="muted">${htmlEscape(item.reason)}</span>` : ''}${where}</dd>`;
   if (item.connected) return `<dt>${htmlEscape(name)}</dt><dd><span class="badge badge-good" data-conn="connected">Connected</span> ${htmlEscape(item.detail)}${where}${savePath ? ` ${savePath}` : ''}</dd>`;
   return `<dt>${htmlEscape(name)}</dt><dd><span class="badge badge-warn" data-conn="disconnected">Not connected</span> <span class="muted">Sign in from a terminal: <code>${htmlEscape(item.hint)}</code></span>${item.reason ? `<br><span class="muted">${htmlEscape(item.reason)}</span>` : ''}${where}${savePath ? ` ${savePath}` : ''}</dd>`;
 }
 
 function engineBadge(item) {
   if (!item) return '';
-  if (item.sessionExpired) return '<span class="badge badge-bad" data-engine-state="expired">Session expired</span>';
+  if (item.sessionExpired || item.signedOut) return '<span class="badge badge-bad" data-engine-state="expired">Signed out</span>';
   if (item.connected) return '<span class="badge badge-good" data-engine-state="connected">Connected</span>';
   if (!item.installed) return '<span class="badge badge-muted" data-engine-state="missing">Not found</span>';
   return '<span class="badge badge-warn" data-engine-state="disconnected">Not connected</span>';

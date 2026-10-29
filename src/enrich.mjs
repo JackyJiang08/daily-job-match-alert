@@ -65,7 +65,8 @@ function salaryFromPosting(posting) {
 function greenhouseApiUrl(url) {
   try {
     const parsed = new URL(url);
-    if (!/(^|\.)job-boards\.greenhouse\.io$/i.test(parsed.hostname)) return null;
+    // EU-region postings (job-boards.eu.greenhouse.io) are served by the same global API host.
+    if (!/(^|\.)job-boards(\.eu)?\.greenhouse\.io$/i.test(parsed.hostname)) return null;
     const match = parsed.pathname.match(/^\/([^/]+)\/jobs\/(\d+)/);
     return match ? `https://boards-api.greenhouse.io/v1/boards/${match[1]}/jobs/${match[2]}` : null;
   } catch {

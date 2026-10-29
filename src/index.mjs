@@ -13,7 +13,7 @@ import { collectGithubList } from './collectors/github-lists.mjs';
 import { collectHackerNewsHiring } from './collectors/hn-hiring.mjs';
 import { collectRemoteOk } from './collectors/remoteok.mjs';
 import { HACKER_NEWS_SOURCE, REMOTEOK_SOURCE, githubLists } from './collectors/catalog.mjs';
-import { applyConfigBoards, applySeedBoards, causeTallyText, collectAtsBoards, createRunClock, discoverBoards, readRegistry, readSnapshots, registerBoards, registryPath, snapshotPath, undoOutageFailures, withinWindow, writeRegistry, writeSnapshots } from './collectors/ats-boards.mjs';
+import { GREENHOUSE_API_HOST, applyConfigBoards, applySeedBoards, causeTallyText, collectAtsBoards, createRunClock, discoverBoards, readRegistry, repointGreenhouseEuBoards, readSnapshots, registerBoards, registryPath, snapshotPath, undoOutageFailures, withinWindow, writeRegistry, writeSnapshots } from './collectors/ats-boards.mjs';
 import { SEARCH_DISCOVERY_SOURCE, SEARCH_PROVIDERS, SEARCH_SOURCE_KIND, collectSearchDiscovery, readSearchKey, searchSettings, searchUsagePath } from './collectors/search-discovery.mjs';
 import { enrichJob, enrichmentWarningMessage } from './enrich.mjs';
 import { evaluateJob, isEligible } from './match.mjs';
@@ -21,7 +21,8 @@ import { annotateEligibility, summarizeExclusions } from './eligibility.mjs';
 import { applySubscriptionMatching, isSemanticCandidate, localFallbackJob, summarizeScoringModel } from './subscription-match.mjs';
 import { normalizeEngineId, resolveModel } from './engines/index.mjs';
 import { buildHtml, writeReports, writeWarningsFile } from './report.mjs';
-import { clearBudgetDeferrals, clearDeferred, deferredStatus, expireDeferred, isJobSeen, markDeferred, markJobSeen, normalizeState, pruneSeen, releaseRecentBaselines } from './state.mjs';
+import { clearBudgetDeferrals, clearDeferred, deferredStatus, expireDeferred, forgetSeen, isJobSeen, markDeferred, markJobSeen, normalizeState, pruneSeen, releaseAuthDeferrals, releaseRecentBaselines } from './state.mjs';
+import { isNotReviewed, splitReportJobs } from './review-status.mjs';
 import { ageBasisInstant, correctFutureTimestamp, datePrecisionSummary, freshnessInstant, isNewSinceLastPoll, isUndated } from './posting-fields.mjs';
 import { detectEarlyCareer, isEarlyCareerPriority, prefilterJobs } from './prefilter.mjs';
 import { countByRoleFamily } from './role-families.mjs';
@@ -43,7 +44,7 @@ import { formatLocalDateTime } from './time-format.mjs';
 import { holdsToExactWindow, resolveCompanyName } from './posting-fields.mjs';
 import { describeConnections } from './engines/index.mjs';
 import { describeQuota, normalizeQuotaPolicy } from './engines/quota.mjs';
-import { AUTH_EXPIRED_MESSAGE, AUTH_EXPIRED_NOTIFICATION, classifyEngineError } from './engines/engine-errors.mjs';
+import { AUTH_EXPIRED_MESSAGE, AUTH_EXPIRED_NOTIFICATION, classifyEngineError, isAuthExpiredText } from './engines/engine-errors.mjs';
 import { HOLD_GRACE_MS, availabilityPath, markModelUnavailable, markModelUsed, markWeeklyLimit, pruneAvailability, pruneLimits, readAvailability, unavailableModelNames, weeklyResetOf, writeAvailability } from './engines/model-availability.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -348,6 +349,8 @@ export async function collectAtsBoardSources(config, state, collectedJobs, { now
   const registry = await readRegistry(file, fs, { restore: true, now, onRestore: onRegistryRestored });
   const repaired = undoOutageFailures(registry, now);
   if (repaired.boards) warnings.push(createWarning('collector', 'ATS boards', `took back ${repaired.boards} failure count(s) recorded during an earlier network outage (${repaired.runs.map(run => run.at).join(', ')}); those boards are polled normally again`, 'info'));
+  const euBoards = repointGreenhouseEuBoards(registry);
+  if (euBoards.repointed.length) warnings.push(createWarning('collector', 'ATS boards', `pointed ${euBoards.repointed.length} EU Greenhouse board(s) at ${GREENHOUSE_API_HOST} (boards-api.eu.greenhouse.io does not resolve)${euBoards.woken.length ? `; ${euBoards.woken.length} left dormancy` : ''}: ${euBoards.repointed.join(', ')}`, 'info'));
   registerBoards(registry, discoverBoards(collectedJobs), { now, origin: 'discovered' });
   applySeedBoards(registry, settings.seeds, { now, warnings });
   const searchAdded = registerBoards(registry, searchBoards, { now, origin: 'search_discovery' });
@@ -491,7 +494,8 @@ export function runCounts({ evaluated = [], budget = {}, quotaDeferred = [], pre
 // (deferred, or left with local scores), or another engine (Codex) took over. A step down inside the
 // Claude family (Fable to Opus) that still reviewed every posting is only a Run Details line. Null otherwise.
 export function quotaNote(quota, deferredByQuota = 0) {
-  const events = (quota?.events || []).filter(event => event.action !== 'skipped' || event.kind === 'modelWeeklyLimit');
+  // A signed-out Claude has its own banner and header line (meta.authExpired), not a quota line.
+  const events = (quota?.events || []).filter(event => event.kind !== 'auth_expired' && (event.action !== 'skipped' || event.kind === 'modelWeeklyLimit'));
   if (!events.length) return null;
   const costly = events.some(event => ['deferred', 'fallback-engine', 'local-fallback'].includes(event.action));
   if (!deferredByQuota && !costly) return null;
@@ -784,7 +788,7 @@ export function applyBacklogExpiry(jobs, state, now = new Date(), maxAgeHours = 
 }
 
 // Keeps the best `limit` local candidates for the engine (0 or a non-number means no limit). Ranking:
-// the freshness bucket first (tonight's postings, then last night's backlog, then postings with no date),
+// postings deferred because Claude was signed out (reason 'auth') first, then the freshness bucket (tonight's postings, then last night's backlog, then postings with no date),
 // then local best score with a bonus per deferral, and a twice-deferred posting ahead of its bucket-mates.
 // An undated posting that misses the budget for the third night running is not deferred again: it is
 // marked seen and reported as abandoned. Non-candidates (no role relevance or a hard blocker) never reach
@@ -796,8 +800,11 @@ export function applyReviewBudget(jobs, state, configuredLimit, now = new Date()
   const others = jobs.filter(job => !isSemanticCandidate(job));
   const rankScore = job => (rankByPrescreen && Number.isFinite(job.prescreenScore) ? job.prescreenScore : Number(job.bestScore) || 0);
   const ranked = candidates
-    .map(job => ({ job, deferredCount: deferredStatus(state, job).deferredCount, bucket: freshnessBucket(job, now, lookbackHours, timeZone) }))
-    .sort((a, b) => (a.bucket - b.bucket)
+    .map(job => { const status = deferredStatus(state, job); return { job, deferredCount: status.deferredCount, authHeld: status.reason === 'auth', bucket: freshnessBucket(job, now, lookbackHours, timeZone) }; })
+    // Postings held back while Claude was signed out go first (the expiry has already dropped the ones past
+    // the freshness window), then the usual order.
+    .sort((a, b) => (Number(b.authHeld) - Number(a.authHeld))
+      || (a.bucket - b.bucket)
       || (Number(b.deferredCount >= 2) - Number(a.deferredCount >= 2))
       || (Number(isEarlyCareerPriority(b.job)) - Number(isEarlyCareerPriority(a.job)))
       || (rankScore(b.job) + 10 * b.deferredCount) - (rankScore(a.job) + 10 * a.deferredCount));
@@ -809,7 +816,7 @@ export function applyReviewBudget(jobs, state, configuredLimit, now = new Date()
   for (const entry of kept) clearDeferred(state, entry.job);
   for (const entry of deferred) markDeferred(state, entry.job, at);
   for (const entry of abandoned) { clearDeferred(state, entry.job); markJobSeen(state, { ...entry.job, enrichment: 'undated_abandoned' }, at); }
-  const ranking = ranked.map(entry => ({ url: entry.job.url, bucket: entry.bucket, bestScore: Number(entry.job.bestScore) || 0, deferredCount: entry.deferredCount, kept: kept.includes(entry), abandoned: abandoned.includes(entry) }));
+  const ranking = ranked.map(entry => ({ url: entry.job.url, bucket: entry.bucket, bestScore: Number(entry.job.bestScore) || 0, deferredCount: entry.deferredCount, ...(entry.authHeld ? { authHeld: true } : {}), kept: kept.includes(entry), abandoned: abandoned.includes(entry) }));
   return {
     jobs: [...others, ...kept.map(entry => entry.job)], deferred: deferred.map(entry => entry.job), abandoned: abandoned.map(entry => entry.job),
     candidateCount: candidates.length, inWindowCount: ranked.filter(entry => entry.bucket === 0).length, undatedCount: ranked.filter(entry => entry.bucket === 2).length, reviewedCount: kept.length, limit, ranking,
@@ -873,6 +880,47 @@ export function mergeNearDuplicates(jobs) {
 
 // Keeps the best `limit` local candidates for the engine
 
+// Postings an earlier run scored only locally because Claude was signed out (before the run-start check
+// deferred them: the 2026-10-28 and 10-29 nights marked them unreviewed and seen) go back into the queue
+// once: their seen entries are forgotten and they are deferred with reason 'auth', so the next run collects
+// them again and reviews them first. Only days whose payload shows the signed-out check, and only postings
+// still inside the deferral window. Each day is handled once (state.authRequeue).
+export async function requeueSignedOutPostings(config, state, { now = new Date(), maxAgeHours = 72, timeZone = null } = {}) {
+  state.authRequeue = state.authRequeue && typeof state.authRequeue === 'object' && !Array.isArray(state.authRequeue) ? state.authRequeue : {};
+  const oldest = new Date(now.getTime() - (Number(maxAgeHours) + 48) * 3_600_000).toISOString().slice(0, 10);
+  const requeued = [];
+  for (const date of await listReportPayloadDates(config)) {
+    if (date < oldest || state.authRequeue[date]) continue;
+    let payload;
+    try { payload = await readReportPayload(config, date); } catch { continue; }
+    if (!payload || !wasSignedOut(payload.meta)) continue;
+    const at = now.toISOString();
+    let count = 0;
+    const seenKeys = new Set();
+    for (const job of [...(payload.matches || []), ...(payload.reviewed || [])]) {
+      if (!isNotReviewed(job) || job.semanticReviewed) continue;
+      const key = canonicalUrl(job.url) || job.url;
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      const age = postingAgeHours(job, now, timeZone);
+      if (age == null || age > Number(maxAgeHours)) continue;
+      forgetSeen(state, job);
+      markDeferred(state, job, at, 'auth');
+      count += 1;
+      requeued.push(job.url);
+    }
+    state.authRequeue[date] = { at, count };
+  }
+  return requeued;
+}
+
+// A day whose run met a signed-out Claude: meta.authExpired, or (runs before the run-start check counted it as
+// auth_expired) the "authentication check failed … local fallback" warning carrying the signed-out status.
+function wasSignedOut(meta) {
+  if (meta?.authExpired) return true;
+  return (meta?.warnings || []).some(warning => warning?.stage === 'llm' && /authentication check failed/i.test(String(warning.message || '')) && isAuthExpiredText(warning.message));
+}
+
 async function runPipeline(config, clock, options = {}) {
   const { now, runDate, applicationDate: date } = clock;
   // Watches for a sleep mid-run (the wall clock jumping ahead of the monotonic one); see collectAtsBoards.
@@ -900,6 +948,8 @@ async function runPipeline(config, clock, options = {}) {
   // The backlog only holds postings still worth reviewing: anything older than the lookback window plus
   // the grace period leaves the queue now (this also migrates queues written under the old one-week rule).
   const deferralMaxAgeHours = Number(config.lookbackHours || 24) + Number(config.deferralGraceHours ?? DEFAULT_DEFERRAL_GRACE_HOURS);
+  const signedOutRequeue = await requeueSignedOutPostings(config, state, { now, maxAgeHours: deferralMaxAgeHours, timeZone: config.timeZone }).catch(error => { warnings.push(createWarning('llm', 'Claude login', `could not requeue the postings a signed-out run left unreviewed: ${errorSummary(error)}`, 'info')); return []; });
+  if (signedOutRequeue.length) warnings.push(createWarning('llm', 'Claude login', `requeued ${signedOutRequeue.length} posting(s) an earlier run left unreviewed while Claude was signed out; they are reviewed first once the login works`, 'info'));
   const staleBacklog = expireDeferred(state, now, deferralMaxAgeHours, { timeZone: config.timeZone });
   if (staleBacklog.removed) warnings.push(createWarning('llm', 'review budget', `expired ${staleBacklog.removed} backlog postings older than ${deferralMaxAgeHours} hours (not scored, not marked seen)`, 'info'));
   // Settings > Pipeline "Include carried-over postings" (semanticMatching.includeCarriedOver, default on).
@@ -1063,7 +1113,7 @@ async function runPipeline(config, clock, options = {}) {
   // still inside the grace period.
   const budget = applyReviewBudget(prescreen.jobs, state, config.semanticMatching?.maxReviewedPerRun, now, { lookbackHours: config.lookbackHours, timeZone: config.timeZone, rankByPrescreen: prescreen.meta.status === 'ok' && prescreen.meta.mode === 'enforced' });
   if (budget.abandoned.length) warnings.push(createWarning('llm', 'review budget', `stopped carrying ${budget.abandoned.length} undated postings after ${UNDATED_DEFERRAL_NIGHTS} nights without a posting date (not scored)`, 'info'));
-  debug.reviewBudget = { kept: budget.ranking.filter(item => item.kept).map(item => ({ url: item.url, bucket: item.bucket, bestScore: item.bestScore, deferredCount: item.deferredCount })), deferred: budget.ranking.filter(item => !item.kept && !item.abandoned).map(item => ({ url: item.url, bucket: item.bucket, bestScore: item.bestScore, deferredCount: item.deferredCount })), abandoned: budget.abandoned.map(job => job.url), expired: [...staleBacklog.urls, ...backlog.expired.map(job => job.url)] };
+  debug.reviewBudget = { kept: budget.ranking.filter(item => item.kept).map(item => ({ url: item.url, bucket: item.bucket, bestScore: item.bestScore, deferredCount: item.deferredCount, ...(item.authHeld ? { authHeld: true } : {}) })), deferred: budget.ranking.filter(item => !item.kept && !item.abandoned).map(item => ({ url: item.url, bucket: item.bucket, bestScore: item.bestScore, deferredCount: item.deferredCount })), abandoned: budget.abandoned.map(job => job.url), expired: [...staleBacklog.urls, ...backlog.expired.map(job => job.url)] };
   if (budget.deferred.length && !includeCarriedOver) {
     // Carry-over is off: nothing waits for the next run; the postings stay unseen and unscored.
     for (const job of budget.deferred) clearDeferred(state, job);
@@ -1125,7 +1175,10 @@ async function runPipeline(config, clock, options = {}) {
   }
   // Postings a quota refusal left unscored wait for the next run like budget deferrals: never seen, never unreviewed.
   const quotaDeferred = evaluated.filter(job => job.quotaDeferred);
-  for (const job of quotaDeferred) markDeferred(state, job, now.toISOString(), 'quota');
+  // A posting held back because Claude was signed out keeps reason 'auth': the first run after the login
+  // works again reviews those first (applyReviewBudget).
+  for (const job of quotaDeferred) markDeferred(state, job, now.toISOString(), job.authDeferred ? 'auth' : 'quota');
+  const authDeferredCount = quotaDeferred.filter(job => job.authDeferred).length;
   evaluated = evaluated.filter(job => !job.quotaDeferred);
   // Weekly limits the run hit are shown on Settings until their reset time.
   // Only limits this run actually met are recorded (a skip of an already recorded limit is not new).
@@ -1156,7 +1209,14 @@ async function runPipeline(config, clock, options = {}) {
   }
   // An expired login is surfaced everywhere at once: the report, the hub, and a desktop notification.
   const authEvent = quotaEvents.find(event => event.kind === 'auth_expired') || null;
-  const authExpired = authEvent ? { at: authEvent.at, notice: authEvent.detail || null, deferred: quotaDeferred.length, message: AUTH_EXPIRED_MESSAGE } : null;
+  const authTakeover = quotaEvents.find(event => event.kind === 'auth_expired' && event.action === 'fallback-engine') || null;
+  // The login worked this run: the held postings it reviewed are done, and any the budget left go back to the
+  // usual order (the priority belongs to the first run after the login works, Run Now included).
+  if (!authEvent && evaluated.some(job => job.semanticReviewed)) {
+    const released = releaseAuthDeferrals(state);
+    if (released) warnings.push(createWarning('llm', 'Claude login', `${released} posting(s) held while Claude was signed out did not fit this run's review limit; they wait in the usual order now`, 'info'));
+  }
+  const authExpired = authEvent ? { at: authEvent.at, notice: authEvent.notice || null, deferred: authDeferredCount, takenOverBy: authTakeover ? String(authTakeover.detail || '').replace(/^switched to /, '') || null : null, message: AUTH_EXPIRED_MESSAGE } : null;
   if (authExpired) {
     try {
       await (options.notifier || notifyAuthExpired)({ runner: options.notificationRunner });
@@ -1206,11 +1266,13 @@ async function runPipeline(config, clock, options = {}) {
     minimumMatchScore: config.minimumMatchScore, resumeSync, resumeTracks, collectedCount: collected.length,
     sourceCounts: sourceStats,
     newCount: reviewed.length, newThisRun: enriched.length, reviewedCount: reviewed.length, matchCount: matches.length,
+    // Postings no model reviewed (the engine was unavailable): never matches; the report's Not reviewed group.
+    notReviewedCount: splitReportJobs({ matches, reviewed }).notReviewed.length,
     candidateCount: budget.candidateCount, candidateInWindowCount: budget.inWindowCount, candidateUndatedCount: budget.undatedCount, reviewedThisRun: budget.reviewedCount, deferredCount: budget.deferred.length, expiredBacklogCount, undatedAbandonedCount: budget.abandoned.length, maxReviewedPerRun: budget.limit,
     datePrecision: datePrecisionSummary(reviewed),
     reviewedInRun: evaluated.length, reviewedLast90Days,
     runCounts: runCounts({ evaluated, budget, quotaDeferred, prefiltered, expiredBacklogCount, prescreenedOut: prescreen.dropped.length }),
-    quotaNote: quotaNote(quota, quotaDeferred.length),
+    quotaNote: quotaNote(quota, quotaDeferred.length - authDeferredCount),
     prefilter: { titleExcluded: prefiltered.titleExcluded, locationExcludedCount: prefiltered.locationExcluded.length, titleExcludedCount: prefiltered.titleExcluded.length, bySource: prefiltered.bySource },
     earlyCareerCount: locallyEvaluated.filter(job => job.earlyCareer).length,
     // Run Details "Candidates by role family": what reached the prescreen, the review, and the matches.
@@ -1283,7 +1345,7 @@ async function runPipeline(config, clock, options = {}) {
       finalWarnings.push(createWarning('report', 'XLSX failure marker', paths.xlsxMarkerWarning));
     }
     try {
-      await fs.writeFile(paths.htmlPath, buildHtml(matches, meta));
+      await fs.writeFile(paths.htmlPath, buildHtml(matches, meta, { reviewed }));
       await writeWarningsFile(rendered.runDirectory, meta);
     } catch (htmlUpdateError) {
       console.warn(`Could not add the XLSX warning to the report files: ${errorSummary(htmlUpdateError)}`);
@@ -1364,7 +1426,7 @@ export async function runLettersPhase(config, configPath, summary, options = {})
       payload.meta.autoLetters = autoLetters;
       for (const warning of warnings) if (!payload.meta.warnings.some(item => warningTextEquals(item, warning))) payload.meta.warnings.push(warning);
       await writeReportPayload(config, payload);
-      if (summary.htmlPath) await fs.writeFile(summary.htmlPath, buildHtml(payload.matches, payload.meta));
+      if (summary.htmlPath) await fs.writeFile(summary.htmlPath, buildHtml(payload.matches, payload.meta, { reviewed: payload.reviewed }));
       if (summary.runDirectory) await writeWarningsFile(summary.runDirectory, payload.meta);
     },
   });

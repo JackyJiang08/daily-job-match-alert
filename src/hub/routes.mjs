@@ -29,6 +29,7 @@ import { modelSettingsView } from './model-settings.mjs';
 import { MODEL_SETTINGS_SCRIPT } from './model-settings-views.mjs';
 import { availabilityPath, normalizeAvailability, pruneAvailability, pruneLimits, readAvailability, weeklyResetOf } from '../engines/model-availability.mjs';
 import { readUsage, usagePath } from '../engines/usage.mjs';
+import { isLetterCandidate, splitReportJobs } from '../review-status.mjs';
 
 const MAXIMUM_BODY_BYTES = 6 * 1024 * 1024;
 const GZIP_MINIMUM_BYTES = 1024;
@@ -151,9 +152,9 @@ export function createHubHandler(ctx) {
     timer?.finish({ status: sent.notModified ? 304 : status, ...sent });
   };
 
-  // High matches of a report that have no letter and a trusted company name.
+  // Model-reviewed high matches of a report that have no letter and a trusted company name.
   function missingLetterJobs(matches, lettersByJob) {
-    return (matches || []).filter(job => !lettersByJob.has(jobIdOf(job)) && job.companyUncertain !== true && !letterCompanyFor(job).uncertain);
+    return (matches || []).filter(job => isLetterCandidate(job) && !lettersByJob.has(jobIdOf(job)) && job.companyUncertain !== true && !letterCompanyFor(job).uncertain);
   }
 
   // The parts of the day page that depend only on the payload file: the matches and meta, the
@@ -168,17 +169,18 @@ export function createHubHandler(ctx) {
     const phase = (name, fn) => (timer ? timer.phase(name, fn) : fn());
     const payload = await phase('payload', () => readReportPayload(ctx, date));
     if (!payload) return null;
-    const matches = payload.matches;
+    // Postings no model reviewed (an older payload kept some among its matches) render in their own folded group.
+    const { matches, notReviewed } = splitReportJobs(payload);
     const review = await phase('review', () => reviewReportJobs(matches));
     // A JD loads on demand by card id; an id two cards share keeps its text in the page.
     const descriptions = new Map();
     const shared = new Set();
-    for (const job of matches) {
+    for (const job of [...matches, ...notReviewed]) {
       const id = jobIdOf(job);
       if (descriptions.has(id)) shared.add(id);
       else descriptions.set(id, String(job.description || '').trim());
     }
-    return ctx.reportCache.setDay(key, { key, date, meta: payload.meta, matches, review, descriptions, shared });
+    return ctx.reportCache.setDay(key, { key, date, meta: payload.meta, matches, notReviewed, review, descriptions, shared });
   }
 
   // Changes the hub cannot see through its own writes: the automatic letters pass (another process) and
@@ -246,7 +248,7 @@ export function createHubHandler(ctx) {
           };
         };
         const lazy = { src: card => (day.shared.has(card.id) ? null : `/reports/${selected}/jd/${card.id}`) };
-        const body = await timer.phase('render', () => renderReportBody(buildReportView(day.matches, { timeZone, ...day.meta }, { embedded: true, decorate, review: day.review, lazyDescription: lazy })));
+        const body = await timer.phase('render', () => renderReportBody(buildReportView(day.matches, { timeZone, ...day.meta }, { embedded: true, decorate, review: day.review, notReviewed: day.notReviewed || [], lazyDescription: lazy })));
         rendered = ctx.reportCache.setRender(renderKey, { reportBody: body, missingCount: missingLetterJobs(day.matches, lettersByJob).length });
       }
       reportBody = rendered.reportBody;

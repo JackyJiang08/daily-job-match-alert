@@ -3,6 +3,7 @@ import { assessEligibility } from './eligibility.mjs';
 import { exclusionLifted } from './prefilter.mjs';
 import { pickBestTrack, resumeTrackList } from './resume-tracks.mjs';
 import { unique } from './utils.mjs';
+import { isNotReviewed } from './review-status.mjs';
 
 const STOP = new Set('a an and are as at be by for from has have in into is it its of on or that the their this to using with you your we our will work role team experience skills preferred required responsibilities qualifications'.split(' '));
 
@@ -160,11 +161,10 @@ export function isEligible(job, config) {
   if (maxRoleRelevance(job) < 14) return false;
   const semantic = config.semanticMatching || {};
   if ((semantic.engine || 'claude_subscription') !== 'local_only') {
-    const locallyFallbacked = job.matchLevel === 'unreviewed' || job.scoringEngine === 'local_fallback';
-    if (!locallyFallbacked) {
-      if (!job.semanticReviewed) return false;
-      if (!(semantic.acceptedMatchLevels || ['high']).includes(job.matchLevel)) return false;
-    }
+    // Only a posting a model reviewed can be a match; one left with the local score because the engine was
+    // unavailable goes to the report's "Not reviewed" group instead (src/review-status.mjs).
+    if (!job.semanticReviewed || isNotReviewed(job)) return false;
+    if (!(semantic.acceptedMatchLevels || ['high']).includes(job.matchLevel)) return false;
   }
   return job.bestScore >= Number(config.minimumMatchScore || 60);
 }

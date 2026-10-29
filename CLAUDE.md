@@ -174,19 +174,38 @@ disabled; do not expand them unless a task says so.
   step down the same ladder (editor note + footer) and offer "Generate with
   Codex"; Status has a Quota card; Settings exposes the ladder and fallback.
   Fixture: tests/fixtures/quota-errors.json (recorded from the CLI binary).
-- Expired login (src/engines/engine-errors.mjs): the CLI's print-mode result
-  envelope ({ is_error: true, result: "<notice>" }, recorded in
-  tests/fixtures/engine-errors.json) is unwrapped before any text reaches a
-  person; quotaPolicy.patterns.authExpired classifies "Failed to authenticate",
-  "OAuth session expired", "could not be refreshed", "not logged in",
-  "loggedIn=false" as auth_expired. Nightly: defer like a quota (never
-  unreviewed), meta.authExpired, banner + footer + Run Details, macOS
-  notification via notifyAuthExpired (injectable through main({ notifier })).
-  Hub: ctx.authState (expire/clear), "Session expired" badge on Connections
-  and the sidebar, Status banner, POST /settings/connections/refresh clears
-  it; every user-visible engine error goes through humanizeEngineError
-  (auth sentence, quota sentence, or "Generation failed (<reason>); details
-  in the hub log"); raw text only in the hub log.
+- Signed out / expired login (2026-10-29; src/engines/engine-errors.mjs, claude.mjs readClaudeAuthStatus): the
+  run-start check (`claude auth status --json` exits 1 and still prints { loggedIn: false, authMethod: "none" }:
+  run() errors carry stdout; loggedIn false, authMethod none/missing, or a status command that fails without a
+  status → AuthExpiredError, notice "claude auth status: loggedIn=false, authMethod=\"none\"") and a mid-run
+  failure (print-mode envelope unwrapped; quotaPolicy.patterns.authExpired incl. '"loggedin"\s*:\s*false') are
+  one auth_expired. Console/API-key logins and a CLI that cannot report its version keep the local fallback.
+  applySubscriptionMatching handOverForAuth: quotaPolicy.fallbackEngine codex + fallbackConnected → Codex reviews
+  the rest (event action 'fallback-engine'); else deferForAuth (quotaDeferred + authDeferred; markDeferred
+  reason 'auth', sticky). meta.authExpired { at, notice, deferred, takenOverBy, message }; report data-banner="auth"
+  (signedOutBanner, "Claude signed out"), footer, Run Details; quotaNote ignores auth events; notifyAuthExpired
+  "Claude is signed out. Run claude auth login --claudeai" (main({ notifier })). applyReviewBudget ranks reason
+  'auth' first; releaseAuthDeferrals after a run whose login worked (priority = first run after login, Run Now
+  too). requeueSignedOutPostings (startup, state.authRequeue per date): payloads whose meta shows the sign-out
+  (meta.authExpired, or the old "authentication check failed … loggedIn false" warning) → unreviewed postings
+  inside the deferral window are forgotten from seen and deferred 'auth' (10-26..10-29 nights). Hub:
+  src/hub/auth-watch.mjs (ctx.authWatch, startHub starts it, every 10 min, connections probe force; signedOut →
+  authState.expire(notice, 'login check'), notification once per local day in private/hub/auth-watch.json;
+  signed in clears only what the watch set). Sidebar "Login · Claude signed out", Connections "Signed out",
+  Status banner data-banner="auth-expired"; POST /settings/connections/refresh clears; every user-visible engine
+  error goes through humanizeEngineError; raw text only in the hub log.
+- Not reviewed (src/review-status.mjs): isNotReviewed (matchLevel 'unreviewed' or local_fallback); isEligible
+  never matches one unless the engine is local_only; splitReportJobs({ matches, reviewed }) → matches without
+  them + notReviewed (both lists, once per URL, eligibility exclusions dropped, best local score first);
+  buildReportView splits (options.reviewed in the pipeline, options.notReviewed in the hub day layer) →
+  data-banner="not-reviewed" (inline bad style: the shared CSS/script stay byte-identical) and a folded
+  <details class="run" id="not-reviewed"> with a div.jobs (not section.jobs, so the page script ignores it);
+  meta.notReviewedCount; xlsx Matches without them + "Not Reviewed" sheet (only when any); reports index v3
+  matchCount = reviewedMatchCount; Generate Missing Letters and auto letters take isLetterCandidate only
+  (model-reviewed high); pruneLettersBacklog drops queue entries for unreviewed postings (run inside the pass).
+- Greenhouse EU: no boards-api.eu.greenhouse.io (NXDOMAIN, checked 2026-10-29); identifyBoard uses the global
+  API host for EU boards, repointGreenhouseEuBoards (every run) repoints old registry entries and lifts the
+  failures/dormancy that host caused; enrich greenhouseApiUrl accepts job-boards.eu.
 - Automatic letters (src/auto-letters.mjs): main() runs runLettersPhase after
   runPipeline returns and the run lock is released (Run Now too), under
   state/.letters.lock, with a headless hub context (createHubContext; tests pass

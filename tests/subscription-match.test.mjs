@@ -305,13 +305,28 @@ test('a CLI that exits before reading its prompt is reported as a failed exit, n
   );
 });
 
-test('a claudeCommand that exits immediately degrades to local fallback with a warning', async () => {
+test('a claudeCommand whose auth status command fails is treated as signed out: the posting waits, never unreviewed', async () => {
   const warnings = [];
   const [job] = await applySubscriptionMatching(
     [localCandidate('https://example.com/jobs/dead-cli')],
     { data: 'DATA', ai: 'AI' },
     {},
-    { engine: 'claude_subscription', claudeCommand: '/bin/sh', warnings },
+    // /bin/sh answers --version (bash 3.2 or dash) but `auth status --json` fails: the login check errored.
+    { engine: 'claude_subscription', claudeCommand: '/bin/sh', warnings, quotaPolicy: { fallbackEngine: null } },
+  );
+  assert.equal(job.quotaDeferred, true);
+  assert.equal(job.authDeferred, true);
+  assert.notEqual(job.matchLevel, 'unreviewed');
+  assert.ok(warnings.some(warning => warning.message.startsWith('Claude is signed out.')), warnings.map(warning => warning.message).join(' | '));
+});
+
+test('a CLI that cannot even report its version keeps the local fallback (not a login problem)', async () => {
+  const warnings = [];
+  const [job] = await applySubscriptionMatching(
+    [localCandidate('https://example.com/jobs/false-cli')],
+    { data: 'DATA', ai: 'AI' },
+    {},
+    { engine: 'claude_subscription', claudeCommand: '/usr/bin/false', warnings, quotaPolicy: { fallbackEngine: null } },
   );
   assert.equal(job.matchLevel, 'unreviewed');
   assert.equal(job.scoringEngine, 'local_fallback');

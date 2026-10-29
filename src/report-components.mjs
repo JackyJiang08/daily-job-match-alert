@@ -128,11 +128,19 @@ export function renderReportBody(view) {
   const list = view.cards.length || carried
     ? `${main}${carriedGroup}<div class="empty" id="no-results" hidden>No matches for the current filters.</div>`
     : renderEmptyState(view.emptyMessage);
+  // Postings no model reviewed: folded at the bottom, outside the match list (a div, not section.jobs, so the
+  // page script's sort, filter, and count leave them out).
+  const notReviewed = view.notReviewed?.cards?.length ? view.notReviewed : null;
+  const notReviewedGroup = notReviewed
+    ? `<details class="run" id="not-reviewed"><summary>${htmlEscape(notReviewed.title)} <span class="group-count">(${notReviewed.cards.length})</span></summary><p class="group-note">${htmlEscape(notReviewed.note)}</p><div class="jobs" id="jobs-not-reviewed">${notReviewed.cards.map(renderJobCard).join('\n')}</div></details>`
+    : '';
+  // The signed-out and not-reviewed lines stand out (the stylesheet is shared with older pages, so inline).
+  const alert = 'style="background:var(--bad-bg);color:var(--bad-ink);font-weight:650"';
   return `${renderMasthead(view)}
-${view.integrityBanner ? `<div class="banner" data-banner="integrity">${htmlEscape(view.integrityBanner)}</div>` : ''}${view.networkBanner ? `<div class="banner" data-banner="network">${htmlEscape(view.networkBanner)}</div>` : ''}
-${view.banner ? `<div class="banner" data-banner="quota">${htmlEscape(view.banner)}</div>` : ''}
+${view.integrityBanner ? `<div class="banner" data-banner="integrity">${htmlEscape(view.integrityBanner)}</div>` : ''}${view.networkBanner ? `<div class="banner" data-banner="network">${htmlEscape(view.networkBanner)}</div>` : ''}${view.notReviewedBanner ? `<div class="banner" data-banner="not-reviewed" ${alert}>${htmlEscape(view.notReviewedBanner)}</div>` : ''}
+${view.authBanner ? `<div class="banner" data-banner="auth" ${alert}>${htmlEscape(view.authBanner)}</div>` : ''}${view.banner ? `<div class="banner" data-banner="quota">${htmlEscape(view.banner)}</div>` : ''}
 ${renderToolbar(view.toolbar)}
-${list}
+${list}${notReviewedGroup}
 ${renderRunDetails(view.runDetails)}
 <footer class="foot">${htmlEscape(view.footer)}</footer>`;
 }

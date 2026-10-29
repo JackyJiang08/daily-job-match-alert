@@ -61,6 +61,50 @@ export function assessClaudeAuthStatus(status) {
   return { accepted: true, reason: null };
 }
 
+// Signed out: no login at all (loggedIn false, or authMethod none or missing). A Console or API-key login is a
+// different problem (a billing path this tool refuses) and keeps its own message from assessClaudeAuthStatus.
+export function isSignedOutStatus(status) {
+  if (!status || typeof status !== 'object') return true;
+  if (status.loggedIn !== true) return true;
+  return ['', 'none'].includes(normalizeAuthValue(status.authMethod));
+}
+
+export function signedOutNotice(status) {
+  return `claude auth status: loggedIn=${JSON.stringify(status?.loggedIn ?? null)}, authMethod="${status?.authMethod ?? ''}"`;
+}
+
+// What `claude auth status --json` printed even though it exited non-zero: a signed-out CLI exits 1 and
+// still prints { "loggedIn": false, "authMethod": "none", … } (2026-10-28 and 10-29 nightly runs). Null when
+// nothing parseable was printed.
+export function authStatusFromError(error) {
+  const candidates = [error?.stdout, String(error?.message || '').replace(/^[^{]*/, '')];
+  for (const text of candidates) {
+    if (!text || !String(text).trim()) continue;
+    try {
+      const value = JSON.parse(String(text).trim());
+      if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+    } catch {}
+  }
+  return null;
+}
+
+// Runs `claude auth status --json`. Signed out (see isSignedOutStatus), or a status command that fails without
+// printing a status (crash, timeout, unreadable output), throws AuthExpiredError: the run treats it exactly like
+// a session that expired mid-run. A missing binary is rethrown as is.
+export async function readClaudeAuthStatus(command, runner = run) {
+  let status;
+  try {
+    const result = await runner(command, ['auth', 'status', '--json'], { timeoutMs: 30_000, env: subscriptionEnvironment() });
+    status = JSON.parse(result.stdout);
+  } catch (error) {
+    if (isMissingCommand(error)) throw error;
+    status = authStatusFromError(error);
+    if (!status) throw new AuthExpiredError(`claude auth status failed: ${errorSummary(error)}`, error);
+  }
+  if (isSignedOutStatus(status)) throw new AuthExpiredError(signedOutNotice(status));
+  return status;
+}
+
 // `claude --print --output-format json` reports usage per model id under modelUsage; the scoring model is the
 // entry that produced the most output tokens (helper calls such as Haiku title generation are much smaller).
 export function extractScoringModel(parsed) {
@@ -152,8 +196,7 @@ export async function verifyClaudeSubscription(options = {}) {
     throw new Error(`Claude Code ${installedVersion.join('.')} is older than the verified minimum ${MINIMUM_CLAUDE_CODE_VERSION}. Upgrade with \`npm i -g @anthropic-ai/claude-code@latest\`.`);
   }
 
-  const result = await runner(command, ['auth', 'status', '--json'], { timeoutMs: 30_000, env: subscriptionEnvironment() });
-  const status = JSON.parse(result.stdout);
+  const status = await readClaudeAuthStatus(command, runner);
   const verdict = assessClaudeAuthStatus(status);
   if (!verdict.accepted) throw new Error(verdict.reason);
   return status;
@@ -175,8 +218,7 @@ export async function describeClaudeConnection(options = {}) {
   const location = { path: resolution.found ? resolution.command : null, source: resolution.source, configured: resolution.configured || null, configuredMissing: resolution.configuredMissing === true, searched: resolution.searched };
   if (!resolution.found) return { installed: false, connected: false, detail: null, hint: INSTALL_HINTS.claude, reason: 'Claude Code CLI was not found on this Mac', ...location };
   try {
-    const result = await runner(resolution.command, ['auth', 'status', '--json'], { timeoutMs: 30_000, env: subscriptionEnvironment() });
-    const status = JSON.parse(result.stdout);
+    const status = await readClaudeAuthStatus(resolution.command, runner);
     const verdict = assessClaudeAuthStatus(status);
     if (!verdict.accepted) return { installed: true, connected: false, detail: null, hint: 'claude auth login --claudeai', reason: verdict.reason, ...location };
     const plan = status.subscriptionType ? String(status.subscriptionType).charAt(0).toUpperCase() + String(status.subscriptionType).slice(1) : 'Subscription';
@@ -188,6 +230,8 @@ export async function describeClaudeConnection(options = {}) {
     return { installed: true, connected: true, detail: `Claude · ${plan} · ${status.authMethod}`, plan: status.subscriptionType ? String(status.subscriptionType).toLowerCase() : null, planSource: status.subscriptionType ? 'auth status' : null, version, hint: null, reason: null, ...location };
   } catch (error) {
     if (isMissingCommand(error)) return { installed: false, connected: false, detail: null, hint: INSTALL_HINTS.claude, reason: 'Claude Code CLI was not found on this Mac', ...location, path: null, source: 'missing' };
+    // Signed out (or a status command that failed): the hub's login watch notifies on this flag.
+    if (error?.code === 'SUBSCRIPTION_AUTH') return { installed: true, connected: false, signedOut: true, detail: null, hint: 'claude auth login --claudeai', reason: `Claude is signed out (${error.notice})`, ...location };
     return { installed: true, connected: false, detail: null, hint: 'claude auth login --claudeai', reason: errorSummary(error), ...location };
   }
 }

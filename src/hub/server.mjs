@@ -10,7 +10,7 @@ import { extractPdfText } from '../resume-sync.mjs';
 import { createHubHandler } from './routes.mjs';
 import { createRunManager } from './run.mjs';
 import { createAutoCatchUp } from './auto-catchup.mjs';
-import { installedSchedule, nextScheduledRun, readStateView } from './services.mjs';
+import { configuredCliCommands, installedSchedule, nextScheduledRun, readStateView } from './services.mjs';
 import { checkIntegrity } from '../state-integrity.mjs';
 import { createConnectionsProbe } from './connections.mjs';
 import { describeConnections } from '../engines/index.mjs';
@@ -22,6 +22,7 @@ import { refreshIndexLetters } from '../reports-index.mjs';
 import { refreshStatusLetters } from '../status-summary.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { createAuthWatch } from './auth-watch.mjs';
 
 export const DEFAULT_HUB_PORT = 4747;
 export const HUB_HOST = '127.0.0.1';
@@ -85,9 +86,9 @@ export function createHubContext(options) {
   ctx.quotaLog = options.quotaLog || { last: null, record(event) { this.last = event; return event; } };
   // Whether the hub has seen Claude's login fail since the last successful call or manual refresh.
   ctx.authState = options.authState || {
-    claude: { expired: false, at: null, notice: null, clearedAt: null },
-    expire(notice) { this.claude = { expired: true, at: now().toISOString(), notice: notice || null, clearedAt: null }; },
-    clear() { this.claude = { expired: false, at: null, notice: null, clearedAt: now().toISOString() }; },
+    claude: { expired: false, at: null, notice: null, clearedAt: null, source: null },
+    expire(notice, source = 'hub') { this.claude = { expired: true, at: now().toISOString(), notice: notice || null, clearedAt: null, source }; },
+    clear() { this.claude = { expired: false, at: null, notice: null, clearedAt: now().toISOString(), source: null }; },
   };
   ctx.renderPdf = options.renderPdf || null;
   ctx.chromeCommand = options.chromeCommand;
@@ -109,6 +110,16 @@ export function createHubContext(options) {
     nextScheduledRun,
     notify: text => ctx.notify(text),
     ...(options.networkProbe ? { probe: options.networkProbe } : {}),
+  });
+  // Checks Claude's login every 10 minutes; startHub starts the timer (src/hub/auth-watch.mjs).
+  ctx.authWatch = options.authWatch || createAuthWatch({
+    io, hubDirectory, now, authState: ctx.authState,
+    probe: async () => {
+      const config = await ctx.loadConfig().catch(() => ({}));
+      return (await ctx.connections.status({ force: true, commands: configuredCliCommands(config) }))?.claude || null;
+    },
+    notify: text => ctx.notify(text),
+    timeZone: async () => (await ctx.loadConfig().catch(() => ({}))).timeZone || 'America/Chicago',
   });
   return ctx;
 }
@@ -153,6 +164,9 @@ export async function startHub(options = {}) {
   // Startup integrity check of state/ (src/state-integrity.mjs), in the background: every JSON parses, and
   // the seen count against the one the last run recorded. The Status banner shows what it finds.
   ctx.integrityCheck = checkHubIntegrity(ctx);
-  server.on('close', () => ctx.autoCatchUp.stop());
+  // Claude's login: checked now and every 10 minutes; signed out → banner, sidebar, one notification a day.
+  ctx.authWatch.start();
+  ctx.loginCheck = ctx.authWatch.check();
+  server.on('close', () => { ctx.autoCatchUp.stop(); ctx.authWatch.stop(); });
   return { server, ctx, url: `http://${HUB_HOST}:${port}/` };
 }

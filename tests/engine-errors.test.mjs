@@ -1,5 +1,5 @@
 // Expired Claude logins: classification from the recorded CLI envelope, humanized wording, the nightly
-// deferral with a desktop notification (fake runner), and the hub's Session expired state.
+// deferral with a desktop notification (fake runner), and the hub's signed-out state.
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import test from 'node:test';
@@ -82,7 +82,8 @@ test('the nightly run defers every candidate on an expired login, warns plainly,
   const evaluated = await applySubscriptionMatching(jobs, resumes, {}, { engine: 'claude', model: 'fable', batchSize: 2, warnings, quotaEvents, makeEngine, now: () => NOW, sleep: async () => {}, retryDelayMs: 0 });
   assert.deepEqual(evaluated.map(job => job.quotaDeferred), [true, true, true], 'every candidate waits for the next run');
   assert.equal(evaluated.some(job => job.matchLevel === 'unreviewed' || job.scoringEngine === 'local_fallback'), false, 'nothing is marked unreviewed');
-  assert.deepEqual([quotaEvents[0].kind, quotaEvents[0].action, quotaEvents[0].detail], ['auth_expired', 'deferred', 'Failed to authenticate: OAuth session expired and could not be refreshed']);
+  assert.deepEqual([quotaEvents[0].kind, quotaEvents[0].action, quotaEvents[0].detail, quotaEvents[0].notice], ['auth_expired', 'deferred', 'codex fallback is not connected', 'Failed to authenticate: OAuth session expired and could not be refreshed']);
+  assert.deepEqual(evaluated.map(job => job.authDeferred), [true, true, true], 'held for the login, not for a quota');
   assert.equal(warnings.length, 1);
   assert.equal(warnings[0].message, `${AUTH_EXPIRED_MESSAGE} 3 postings were deferred to the next run (not marked unreviewed).`);
   assert.doesNotMatch(warnings[0].message, /[{}]/);
@@ -94,14 +95,15 @@ test('the nightly run defers every candidate on an expired login, warns plainly,
   const calls = [];
   assert.equal(await notifyAuthExpired({ platform: 'darwin', runner: async (command, args) => { calls.push([command, args]); return {}; } }), true);
   assert.equal(calls[0][0], 'osascript');
-  assert.match(calls[0][1][1], /display notification "Claude login expired, run claude auth login" with title "Daily Job Match Alert"/);
+  assert.match(calls[0][1][1], /display notification "Claude is signed out\. Run claude auth login --claudeai" with title "Daily Job Match Alert"/);
   assert.equal(await notifyAuthExpired({ platform: 'linux', runner: async () => { throw new Error('must not run'); } }), false);
 
   const meta = { date: '2026-09-19', timeZone: 'America/Chicago', resumeTracks: [{ id: 'data', label: 'Data' }], warnings: [], authExpired: { at: NOW.toISOString(), notice: 'x', deferred: 3, message: AUTH_EXPIRED_MESSAGE } };
   const html = renderReportBody(buildReportView([], meta));
-  assert.match(html, /<div class="banner" data-banner="quota">Claude session expired\. Run `claude auth login --claudeai` in Terminal, then try again\. 3 posting\(s\) were deferred to the next run and are not lost\.<\/div>/);
-  assert.match(html, /<footer class="foot">Generated locally\.[^<]*Claude session expired\. Run `claude auth login --claudeai` in Terminal, then try again\.<\/footer>/);
-  assert.match(html, /<dt>Claude login<\/dt><dd>Claude session expired\.[^<]*\(3 deferred\)<\/dd>/);
+  assert.match(html, /<div class="banner" data-banner="auth" style="[^"]+">Claude signed out\. 3 posting\(s\) were deferred to the next run and are not lost\. Run `claude auth login --claudeai` in Terminal\.<\/div>/);
+  assert.doesNotMatch(html, /data-banner="quota"/);
+  assert.match(html, /<footer class="foot">Generated locally\.[^<]*Claude is signed out\. Run `claude auth login --claudeai` in Terminal, then try again\.<\/footer>/);
+  assert.match(html, /<dt>Claude login<\/dt><dd>Claude is signed out\.[^<]*\(3 deferred\)<\/dd>/);
 });
 
 test('Session expired is a distinct connection state from Not connected and clears with a refresh', () => {

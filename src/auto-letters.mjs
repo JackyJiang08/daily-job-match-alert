@@ -7,6 +7,9 @@
 //   Picks: first the carry-over queue (postings an earlier pass did not reach because it stopped on a
 //   limit or a failure), then this run's new high matches, best score first, skipping postings that
 //   already have a letter and postings whose company name is uncertain; at most maxPerRun when set.
+//   Only postings a model reviewed as a high match qualify (src/review-status.mjs isLetterCandidate): a
+//   posting left with the local score because the engine was unavailable never gets an automatic letter,
+//   and queue entries pointing at one are removed (pruneLettersBacklog).
 //   Engines: the Cover letter draft and Cover letter editor stage assignments and their fallback chains.
 //   A posting whose whole chain fails stops the phase with a warning; it and every posting the pass did not
 //   reach go to the carry-over queue (state/letters-backlog.json), which the next run or Run Now takes
@@ -24,6 +27,7 @@ import { createWarning, errorSummary } from './warnings.mjs';
 import { stageAssignments } from './engines/assignments.mjs';
 import { readUsage, summarizeUsage, usagePath } from './engines/usage.mjs';
 import { canonicalUrl } from './utils.mjs';
+import { isLetterCandidate } from './review-status.mjs';
 
 export const DEFAULT_AUTO_LETTERS = { enabled: true, maxPerRun: 0 };
 export const MAX_LETTERS_PER_RUN = 500;
@@ -80,11 +84,30 @@ async function writeStatus(root, status, io = fs) {
   await io.rename(temp, file);
 }
 
-// This run's new matches, best score first; postings with a letter, or with an uncertain company, are
-// skipped and counted; the rest are capped at max.
+// Queue entries whose posting no model reviewed (or reviewed as less than a high match) leave the carry-over
+// queue; entries whose posting cannot be found are kept for the usual checks. `readPayload(date)` returns a
+// day payload or null. Returns { kept, removed }.
+export async function pruneLettersBacklog(root, { readPayload, jobIdOf, io = fs } = {}) {
+  const items = await readLettersBacklog(root, io);
+  const payloads = new Map();
+  const kept = [];
+  const removed = [];
+  for (const item of items) {
+    if (!payloads.has(item.date)) payloads.set(item.date, await Promise.resolve(readPayload(item.date)).catch(() => null));
+    const payload = payloads.get(item.date);
+    const job = payload ? [...(payload.matches || []), ...(payload.reviewed || [])].find(entry => jobIdOf(entry) === item.jobId) : null;
+    if (job && !isLetterCandidate(job)) removed.push(item);
+    else kept.push(item);
+  }
+  if (removed.length) await writeLettersBacklog(root, kept, io);
+  return { kept, removed };
+}
+
+// This run's new model-reviewed high matches, best score first; postings with a letter, or with an uncertain
+// company, are skipped and counted; the rest are capped at max.
 export function selectAutoLetters({ matches = [], newMatchUrls = null, lettersByJob = new Map(), max = DEFAULT_AUTO_LETTERS.maxPerRun, jobIdOf, companyFor, date = null }) {
   const fresh = new Set((newMatchUrls || []).map(url => canonicalUrl(url) || url));
-  const candidates = matches.filter(job => !newMatchUrls || fresh.has(canonicalUrl(job.url) || job.url))
+  const candidates = matches.filter(job => isLetterCandidate(job) && (!newMatchUrls || fresh.has(canonicalUrl(job.url) || job.url)))
     .sort((a, b) => (Number(b.bestScore) || 0) - (Number(a.bestScore) || 0));
   const picked = [];
   const skipped = { existing: 0, uncertain: 0, overLimit: 0 };
@@ -123,6 +146,8 @@ export async function runAutoLetters({ config, date, newMatchUrls = null, ctx, l
     const { readReportPayload } = await import('./hub/services.mjs');
     const { generateLetter, saveLetter, jobIdOf, letterCompanyFor } = await import('./hub/letters.mjs');
     const payload = await readReportPayload(ctx, date);
+    const pruned = await pruneLettersBacklog(root, { readPayload: day => (day === date ? payload : readReportPayload(ctx, day)), jobIdOf, io });
+    if (pruned.removed.length) warnings.push(createWarning('cover letter', 'automatic letters', `removed ${pruned.removed.length} queued letter(s) for postings no model reviewed`, 'info'));
     const lettersByJob = await ctx.letterStore.lettersByJob().catch(() => new Map());
     // The carry-over queue: still in its report, still without a letter, not older than 14 days.
     const today = ctx.now().getTime();
@@ -131,7 +156,7 @@ export async function runAutoLetters({ config, date, newMatchUrls = null, ctx, l
       if (lettersByJob.has(item.jobId)) continue;
       if (today - new Date(`${item.date}T12:00:00Z`).getTime() > BACKLOG_DAYS * 86_400_000) continue;
       const source = item.date === date ? payload : await readReportPayload(ctx, item.date).catch(() => null);
-      if (!(source?.matches || []).some(job => jobIdOf(job) === item.jobId)) continue;
+      if (!(source?.matches || []).some(job => jobIdOf(job) === item.jobId && isLetterCandidate(job))) continue;
       backlog.push(item);
     }
     const selection = selectAutoLetters({ matches: payload?.matches || [], newMatchUrls: missing ? null : newMatchUrls, lettersByJob, max: missing ? 0 : settings.maxPerRun, jobIdOf, companyFor: letterCompanyFor, date });

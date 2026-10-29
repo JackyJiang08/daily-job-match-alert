@@ -14,8 +14,10 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { listPayloadFiles, payloadReviewedCount, readPayloadFile, resolvePayloadFile } from './payload-store.mjs';
+import { isNotReviewed, reviewedMatchCount, splitReportJobs } from './review-status.mjs';
 
-export const REPORTS_INDEX_VERSION = 2;
+// 3 (2026-10-29): match counts leave out postings no model reviewed (src/review-status.mjs); older entries rebuild.
+export const REPORTS_INDEX_VERSION = 3;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const COMPANY_PATTERN = /^[A-Za-z0-9]{1,80}$/;
 
@@ -73,12 +75,13 @@ export function indexEntry(date, payload, { mtimeMs = null, size = null, gzip = 
     generatedAt: meta.generatedAt || null,
     lastUpdatedAt: meta.lastUpdatedAt || null,
     completedAt: meta.completedAt || null,
-    matchCount: valid ? (meta.matchCount ?? payload.matches.length) : null,
+    matchCount: valid ? reviewedMatchCount(payload) : null,
+    notReviewedCount: valid ? splitReportJobs(payload).notReviewed.length : null,
     deferredCount: valid ? Number(meta.deferredCount || 0) : null,
     carriedCount: valid ? payload.matches.filter(job => job?.carriedOver).length : null,
     letterCount: letters.count,
     // meta.matchCount as written (the Status page's last 7 days show it, or nothing when absent).
-    metaMatchCount: valid ? (meta.matchCount ?? null) : null,
+    metaMatchCount: valid ? (payload.matches.some(isNotReviewed) ? reviewedMatchCount(payload) : (meta.matchCount ?? null)) : null,
     reviewedCount: valid ? payloadReviewedCount(payload) : null,
     warningsCount: valid && Array.isArray(meta.warnings) ? meta.warnings.length : 0,
     complete: valid && payload.complete === true,

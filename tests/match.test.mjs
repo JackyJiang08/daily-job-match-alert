@@ -81,7 +81,7 @@ test('requires a substantive JD before a role enters the high-match report', () 
   assert.equal(isEligible(job, { preferences, minimumMatchScore: 1, semanticMatching: { engine: 'local_only' } }), false);
 });
 
-test('keeps an unreviewed local fallback when its local score clears the threshold', () => {
+test('an unreviewed local fallback is never a match, whatever its local score (2026-10-29)', () => {
   const evaluated = evaluateJob({
     title: 'Data Analyst - New Grad', company: 'Acme', location: 'Remote',
     description: 'Use SQL, Python, Tableau, statistics, experimentation, and data visualization to support product decisions. '.repeat(4),
@@ -92,7 +92,12 @@ test('keeps an unreviewed local fallback when its local score clears the thresho
     preferences,
     minimumMatchScore: job.bestScore,
     semanticMatching: { engine: 'claude_subscription', acceptedMatchLevels: ['high'] },
-  }), true);
+  }), false, 'the local score clears the threshold, but no model reviewed it');
+  assert.equal(isEligible({ ...job, matchLevel: 'high', semanticReviewed: true, scoringEngine: 'claude' }, {
+    preferences,
+    minimumMatchScore: job.bestScore,
+    semanticMatching: { engine: 'claude_subscription', acceptedMatchLevels: ['high'] },
+  }), true, 'the same posting reviewed as a high match is one');
   assert.equal(isEligible(job, {
     preferences,
     minimumMatchScore: job.bestScore + 1,

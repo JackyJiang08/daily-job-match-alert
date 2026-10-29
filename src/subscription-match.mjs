@@ -247,24 +247,47 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
   if (!candidates.length) return jobs;
   const schema = buildResultSchema(tracks);
 
-  // An expired login is not a scoring failure: every candidate waits for the next run, the reason is
-  // written plainly, and the caller raises the desktop notification.
+  // A login that does not work (signed out at the run-start check, or a session that expires mid-run) is not a
+  // scoring failure. With the Codex fallback on (quotaPolicy.fallbackEngine: a ChatGPT model ends Scoring's chain) and
+  // Codex signed in, Codex reviews the rest of the run; otherwise every remaining candidate waits for the next
+  // run (authDeferred, never unreviewed). Either way the caller raises the "Claude signed out" notification.
+  const deferredForAuth = new Set();
+  const authEvent = (action, detail, notice) => ({ kind: 'auth_expired', model: engine.model, resetsAt: null, at: clock().toISOString(), action, detail, notice: notice || null, engine: engineName, message: AUTH_EXPIRED_MESSAGE });
+  const handOverForAuth = async notice => {
+    const fallback = policy.fallbackEngine;
+    if (!fallback || engineName === fallback) return false;
+    const connected = options.fallbackConnected ? await options.fallbackConnected(fallback).catch(() => false) : false;
+    if (!connected) return false;
+    quotaEvents.push(authEvent('fallback-engine', `switched to ${fallback}`, notice));
+    addWarning(options, `${AUTH_EXPIRED_MESSAGE} The ${fallback} engine reviewed the postings instead.`);
+    engine = makeEngine(fallback, resolveModel(options, fallback));
+    engineName = fallback;
+    strategicModels.add(engine.model);
+    downgradeNote = 'Claude signed out';
+    return true;
+  };
   const deferForAuth = (remaining, notice) => {
-    quotaEvents.push({ kind: 'auth_expired', model: engine.model, resetsAt: null, at: clock().toISOString(), action: 'deferred', detail: notice || null, engine: engineName, message: AUTH_EXPIRED_MESSAGE });
-    for (const job of remaining) deferredIds.add(job.semanticId);
+    const fallback = policy.fallbackEngine;
+    quotaEvents.push(authEvent('deferred', fallback ? `${fallback} fallback is not connected` : 'no fallback engine configured', notice));
+    for (const job of remaining) { deferredIds.add(job.semanticId); deferredForAuth.add(job.semanticId); }
     addWarning(options, `${AUTH_EXPIRED_MESSAGE} ${remaining.length} postings were deferred to the next run (not marked unreviewed).`);
-    const held = new Set(remaining.map(job => job.semanticId));
-    return jobs.map(job => (job.semanticId && held.has(job.semanticId)) || candidates.some(candidate => candidate.url === job.url && held.has(candidate.semanticId)) ? { ...job, quotaDeferred: true } : job);
   };
   try {
     const auth = await engine.verifyAuth();
     if (auth && typeof auth === 'object' && auth.subscriptionType) plan = String(auth.subscriptionType).toLowerCase();
     if (typeof options.onAuth === 'function') await options.onAuth({ engine: engineName, plan, status: auth });
   } catch (error) {
-    if (classifyEngineError(error, { now: clock(), policy })?.kind === 'auth_expired') return deferForAuth(candidates, engineNotice(error));
-    addWarning(options, `Subscription authentication check failed; ${candidates.length} jobs used local fallback: ${errorSummary(error)}`);
-    const fallbackByUrl = new Map(candidates.map(job => [job.url, localFallbackJob(job)]));
-    return jobs.map(job => fallbackByUrl.get(job.url) || job);
+    if (classifyEngineError(error, { now: clock(), policy })?.kind === 'auth_expired') {
+      const notice = engineNotice(error);
+      if (!(await handOverForAuth(notice))) {
+        deferForAuth(candidates, notice);
+        return jobs.map(job => { const candidate = candidates.find(item => item.url === job.url); return candidate ? { ...job, quotaDeferred: true, authDeferred: true } : job; });
+      }
+    } else {
+      addWarning(options, `Subscription authentication check failed; ${candidates.length} jobs used local fallback: ${errorSummary(error)}`);
+      const fallbackByUrl = new Map(candidates.map(job => [job.url, localFallbackJob(job)]));
+      return jobs.map(job => fallbackByUrl.get(job.url) || job);
+    }
   }
 
   let tempDirectory;
@@ -357,10 +380,13 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
       batchNumber += 1;
       let { response, error } = await invokeWithRetry(batch);
       if (error && classifyEngineError(error, { now: clock(), policy })?.kind === 'auth_expired') {
-        const held = batches.slice(index).flat();
-        quotaEvents.push({ kind: 'auth_expired', model: engine.model, resetsAt: null, at: clock().toISOString(), action: 'deferred', detail: engineNotice(error) || null, engine: engineName, message: AUTH_EXPIRED_MESSAGE });
-        for (const job of held) deferredIds.add(job.semanticId);
-        addWarning(options, `${AUTH_EXPIRED_MESSAGE} ${held.length} postings were deferred to the next run (not marked unreviewed).`);
+        // Codex takes this very batch and the rest when the fallback is on and signed in.
+        if (await handOverForAuth(engineNotice(error))) {
+          index -= 1;
+          batchNumber -= 1;
+          continue;
+        }
+        deferForAuth(batches.slice(index).flat(), engineNotice(error));
         break;
       }
       // An unavailable model steps down the ladder at once and is remembered for later calls.
@@ -511,7 +537,7 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
   const candidateResults = mergeSemanticResults(candidates, allResults, engineName, tracks);
   const mergedByUrl = new Map(candidateResults.map(job => [
     job.url,
-    deferredIds.has(job.semanticId) ? { ...job, quotaDeferred: true } : fallbackIds.has(job.semanticId) || !resultIds.has(job.semanticId) ? localFallbackJob(job) : job,
+    deferredIds.has(job.semanticId) ? { ...job, quotaDeferred: true, ...(deferredForAuth.has(job.semanticId) ? { authDeferred: true } : {}) } : fallbackIds.has(job.semanticId) || !resultIds.has(job.semanticId) ? localFallbackJob(job) : job,
   ]));
   return jobs.map(job => mergedByUrl.get(job.url) || job);
 }

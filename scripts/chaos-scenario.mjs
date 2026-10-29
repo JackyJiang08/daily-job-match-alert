@@ -1,7 +1,7 @@
 // One chaos scenario: build an isolated config under <workRoot>/<scenario>, run src/index.mjs
 // against it, and assert that the Desktop-equivalent output folder still holds a usable report.
 //
-//   node scripts/chaos-scenario.mjs <baseline|offline|llm-down|bad-input|xlsx-recovery|ats-500|network-drop|review-cap|fable-weekly-limit|account-limit|backlog-priority|state-corrupt> <workRoot>
+//   node scripts/chaos-scenario.mjs <baseline|offline|llm-down|bad-input|xlsx-recovery|ats-500|network-drop|review-cap|fable-weekly-limit|account-limit|signed-out|backlog-priority|state-corrupt> <workRoot>
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -262,24 +262,32 @@ const scenarios = {
     const run = await runPipeline(await writeConfig(directory, config));
     const artifacts = await assertDesktopArtifacts(config, run);
     assert.equal(run.exitCode, 0, `llm-down run exited ${run.exitCode}`);
-    assert.ok(run.summary.meta.matchCount >= 1, 'no jobs reached the report through the local fallback');
+    // The CLI cannot even report its version (not a login problem): the postings keep their local scores, and
+    // since no model reviewed them, none is a match; they sit in the folded Not reviewed group.
+    assert.equal(run.summary.meta.matchCount, 0, 'a posting no model reviewed is never a match');
+    const notReviewed = run.summary.meta.notReviewedCount;
+    assert.ok(notReviewed >= 1, 'no posting reached the Not reviewed group through the local fallback');
     assert.ok(
       artifacts.warnings.some(warning => warning.stage === 'llm' && /local fallback/.test(warning.message)),
       `no llm fallback warning: ${warningLines(artifacts.warnings).join(' | ')}`,
     );
-    const cards = (artifacts.html.match(/<article class="job"/g) || []).length;
-    const unreviewed = (artifacts.html.match(/data-badge="unreviewed"/g) || []).length;
-    assert.equal(cards, run.summary.meta.matchCount);
-    assert.equal(unreviewed, cards, `${cards} job card(s) but only ${unreviewed} carry the unreviewed badge`);
-    assert.match(artifacts.html, /kept local scores because semantic review was unavailable/);
+    assert.doesNotMatch(artifacts.html, /<section class="jobs" id="jobs">/, 'the match list is empty');
+    assert.match(artifacts.html, new RegExp(`<div class="banner" data-banner="not-reviewed"[^>]*>${notReviewed} postings? (?:was|were) not reviewed by a model`));
+    const group = artifacts.html.match(/<details class="run" id="not-reviewed">([\s\S]*?)<\/details>\n<details class="run" id="run-details">/);
+    assert.ok(group, 'the folded Not reviewed group is missing');
+    const cards = (group[1].match(/<article class="job"/g) || []).length;
+    const unreviewed = (group[1].match(/data-badge="unreviewed"/g) || []).length;
+    assert.equal(cards, notReviewed);
+    assert.equal(unreviewed, cards, `${cards} card(s) in the group but only ${unreviewed} carry the unreviewed badge`);
     assert.equal(run.summary.meta.scoringModel, 'none');
     if (artifacts.xlsxPath) {
       const { sheet } = await readMatches(artifacts.xlsxPath);
-      for (let row = 2; row <= sheet.actualRowCount; row++) {
-        assert.match(String(sheet.getCell(row, WHY_COLUMN).value), /^\[unreviewed\]/, `xlsx row ${row} lacks the [unreviewed] prefix`);
-      }
+      assert.equal(sheet.actualRowCount, 1, 'the Matches sheet holds only its header');
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.readFile(artifacts.xlsxPath);
+      assert.equal(workbook.getWorksheet('Not Reviewed')?.actualRowCount, notReviewed + 1, 'the Not Reviewed sheet lists them');
     }
-    return `${cards} job(s) all unreviewed, llm warning disclosed, scoring model "none"`;
+    return `${notReviewed} posting(s) in the folded Not reviewed group and sheet, none a match, llm warning disclosed`;
   },
 
   async 'bad-input'() {
@@ -581,6 +589,36 @@ scenarios['account-limit'] = async function accountLimit() {
   for (const entry of deferred) assert.ok(!Object.values(state.seen).some(seen => seen.url === entry.url), `${entry.url} was deferred but marked seen`);
   assert.match(await readWarningsFile(config, run) || '', /^\[llm \/ claude\] info: Claude subscription weekly account limit reached/m);
   return `all ${run.summary.meta.candidateCount} candidate(s) deferred, banner shown, report still written`;
+};
+
+// Signed out before the run (2026-10-28 and 10-29): `claude auth status` prints loggedIn false and exits 1.
+// Every candidate waits for the next run (Codex fallback off here; tests cover the takeover), nothing is
+// unreviewed or a match, no scoring call is made, and the report says "Claude signed out".
+scenarios['signed-out'] = async function signedOut() {
+  const directory = await prepareDirectory('signed-out');
+  await addFixtureEmail(directory, 'demo-new-grad-alert.eml');
+  const config = baseConfig(directory);
+  config.semanticMatching = { engine: 'claude', claudeCommand: path.join(projectDirectory, 'scripts', 'chaos', 'fake-claude.sh'), models: { claude: 'fable' }, required: true, quotaPolicy: { fallbackEngine: null }, batchSize: 6, acceptedMatchLevels: ['high'], timeoutMs: 30_000 };
+  const calls = path.join(directory, 'claude-calls.txt');
+  const run = await runPipeline(await writeConfig(directory, config), NOW, { FAKE_CLAUDE_MODE: 'signed-out', FAKE_CLAUDE_CALLS: calls, DAILY_JOB_MATCH_ALERT_NOTIFY: 'off' });
+  const artifacts = await assertDesktopArtifacts(config, run);
+  assert.equal(run.exitCode, 0, `signed-out run exited ${run.exitCode}`);
+  const meta = run.summary.meta;
+  assert.ok(meta.candidateCount >= 1, 'the fixture must yield at least one candidate');
+  assert.equal(meta.matchCount, 0);
+  assert.equal(meta.notReviewedCount, 0, 'held for the login, not left unreviewed');
+  assert.equal(meta.authExpired?.deferred, meta.candidateCount, 'every candidate waits for the next run');
+  assert.equal(meta.authExpired.notice, 'claude auth status: loggedIn=false, authMethod="none"');
+  assert.equal(await exists(calls), false, 'no scoring call reached the signed-out CLI');
+  assert.match(artifacts.html, /<div class="banner" data-banner="auth"[^>]*>Claude signed out\. \d+ posting\(s\) were deferred to the next run and are not lost\. Run `claude auth login --claudeai` in Terminal\.<\/div>/);
+  assert.doesNotMatch(artifacts.html, /data-badge="unreviewed"|<article class="job"/);
+  const state = JSON.parse(await fs.readFile(path.join(directory, 'state', 'state.json'), 'utf8'));
+  const deferred = Object.values(state.deferred || {});
+  assert.equal(deferred.length, meta.candidateCount);
+  assert.ok(deferred.every(entry => entry.reason === 'auth'), 'held with reason auth, reviewed first once signed in');
+  for (const entry of deferred) assert.ok(!Object.values(state.seen).some(seen => seen.url === entry.url), `${entry.url} was held but marked seen`);
+  assert.match(await readWarningsFile(config, run) || '', /^\[llm \/ claude\] Claude is signed out\. Run `claude auth login --claudeai` in Terminal, then try again\. \d+ postings were deferred/m);
+  return `all ${meta.candidateCount} candidate(s) held for the login, none unreviewed, "Claude signed out" banner`;
 };
 
 // The prescreen engine cannot run (the Codex command exits at once): the run warns, keeps the local order

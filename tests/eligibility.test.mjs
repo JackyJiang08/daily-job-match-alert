@@ -61,11 +61,12 @@ test('graduation window: unambiguous early cohorts exclude, ambiguous or compati
   assert.deepEqual(assessGraduationWindow('class of 2026', undefined), { excluded: false, skipped: true, reason: null });
 });
 
-test('isEligible enforces the hard filters for locally fallbacked jobs, regardless of the scoring engine', () => {
-  assert.equal(isEligible(fallbackJob(), fallbackConfig), true, 'baseline fallback job clears the threshold');
-  assert.equal(isEligible(fallbackJob({ location: 'Remote – Canada' }), fallbackConfig), false);
-  assert.equal(isEligible(fallbackJob({ description: `${description} Class of 2026 only.` }), fallbackConfig), false);
-  assert.equal(isEligible(fallbackJob({ location: 'Remote – Canada' }), { ...fallbackConfig, semanticMatching: { engine: 'local_only' } }), false);
+test('isEligible enforces the hard filters for every engine, and a posting no model reviewed is never a match', () => {
+  assert.equal(isEligible(fallbackJob(), fallbackConfig), false, 'a local fallback is never a match (it goes to the Not reviewed group)');
+  const localOnly = { ...fallbackConfig, semanticMatching: { engine: 'local_only' } };
+  assert.equal(isEligible(fallbackJob(), localOnly), true, 'local_only scoring (no engine on purpose) still matches by local score');
+  assert.equal(isEligible(fallbackJob({ location: 'Remote – Canada' }), localOnly), false);
+  assert.equal(isEligible(fallbackJob({ description: `${description} Class of 2026 only.` }), localOnly), false);
   const reviewedHigh = { ...fallbackJob({ location: 'Toronto, ON' }), matchLevel: 'high', semanticReviewed: true, scoringEngine: 'claude_subscription' };
   assert.equal(isEligible(reviewedHigh, fallbackConfig), false, 'even a high semantic match cannot override a non-US location');
 });

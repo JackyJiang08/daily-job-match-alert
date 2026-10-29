@@ -116,7 +116,7 @@ function engineSelect(row) {
 }
 
 // The Task assignments form: one row per stage with inline engine, model, and effort, and the fallback
-// chain as editable tags. Scoring's chain is the model ladder (plus Codex on a weekly account limit);
+// chain as editable tags. Scoring's chain is the model ladder (plus Codex on a weekly account limit or a signed-out Claude);
 // Supplemental follows Scoring; Prescreen has no chain (a failed prescreen keeps the local order).
 export function assignmentsForm(view, settings) {
   const { catalog } = view;
@@ -137,7 +137,7 @@ export function assignmentsForm(view, settings) {
     <h2>Task assignments</h2>
     <input type="hidden" name="assignmentsPresent" value="1"><input type="hidden" name="editorReviewPresent" value="1">
     <div class="table-scroll"><table class="plain assignments"><tr><th>Stage</th><th>Engine</th><th>Model</th><th>Effort</th><th>Fallback chain</th></tr>${rows}</table></div>
-    <p class="form-foot">Scoring's chain is the model ladder; a ChatGPT model at its end takes over on a weekly account limit when Codex is signed in. A Codex step that is not connected is skipped and noted in the letter's Editor notes.</p>
+    <p class="form-foot">Scoring's chain is the model ladder; a ChatGPT model at its end takes over the review on a weekly account limit or when Claude is signed out (at the run-start login check or mid-run), as long as Codex is signed in. A Codex step that is not connected is skipped and noted in the letter's Editor notes.</p>
     <button class="btn" type="submit">Save Assignments</button>
   </form>`;
 }

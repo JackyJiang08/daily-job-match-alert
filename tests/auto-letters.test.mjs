@@ -8,7 +8,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { autoLetterSettings, lettersLockPath, readLettersStatus, runAutoLetters, selectAutoLetters } from '../src/auto-letters.mjs';
+import { autoLetterSettings, lettersBacklogPath, lettersLockPath, pruneLettersBacklog, readLettersBacklog, readLettersStatus, runAutoLetters, selectAutoLetters } from '../src/auto-letters.mjs';
 import { createHubContext } from '../src/hub/server.mjs';
 import { jobIdOf, letterCompanyFor } from '../src/hub/letters.mjs';
 import { main } from '../src/index.mjs';
@@ -228,3 +228,40 @@ function require_dir(directory) {
   }
   return out;
 }
+
+test('automatic letters only follow model-reviewed high matches: a posting left with the local score is skipped, and queued letters for one are removed', async () => {
+  const unreviewed = extra => job(8, { matchLevel: 'unreviewed', semanticReviewed: false, scoringEngine: 'local_fallback', ...extra });
+  const medium = job(6, { matchLevel: 'medium' });
+  const selection = selectAutoLetters({ matches: [job(1), unreviewed(), medium], newMatchUrls: null, jobIdOf, companyFor: letterCompanyFor });
+  assert.deepEqual(selection.picked.map(item => item.company), ['Example Co 1'], 'neither the unreviewed nor the medium match');
+
+  // An older payload kept the unreviewed posting among its matches (the 2026-10-28 run did), and the stopped pass
+  // queued it; a reviewed posting is queued too.
+  const matches = [job(1), job(2), unreviewed()];
+  const root = await prepareProject({ matches });
+  try {
+    await fs.writeFile(lettersBacklogPath(root), JSON.stringify({ items: [
+      { date: '2026-09-15', jobId: jobIdOf(unreviewed()), company: 'Example Co 8', title: 'Data Analyst 8', bestScore: 78 },
+      { date: '2026-09-15', jobId: jobIdOf(job(2)), company: 'Example Co 2', title: 'Data Analyst 2', bestScore: 72 },
+      { date: '2026-09-14', jobId: 'feedfacefeedface', company: 'Gone Co', title: 'Analyst', bestScore: 70 },
+    ] }));
+    const dry = await pruneLettersBacklog(root, { readPayload: async date => (date === '2026-09-15' ? { matches } : null), jobIdOf });
+    assert.deepEqual(dry.removed.map(item => item.company), ['Example Co 8']);
+    assert.deepEqual(dry.kept.map(item => item.company), ['Example Co 2', 'Gone Co'], 'an entry whose posting cannot be found is left to the usual checks');
+    assert.deepEqual((await readLettersBacklog(root)).map(item => item.company), ['Example Co 2', 'Gone Co']);
+
+    // The pass itself prunes too: the entry is queued again before it runs.
+    await fs.writeFile(lettersBacklogPath(root), JSON.stringify({ items: [{ date: '2026-09-15', jobId: jobIdOf(unreviewed()), company: 'Example Co 8', title: 'Data Analyst 8', bestScore: 78 }, ...dry.kept] }));
+    const { ctx } = await contextFor(root);
+    const warnings = [];
+    const outcome = await runAutoLetters({ config: await ctx.loadConfig(), date: '2026-09-15', newMatchUrls: matches.map(item => item.url), ctx, warnings });
+    assert.ok(warnings.some(warning => warning.message === 'removed 1 queued letter(s) for postings no model reviewed'), warnings.map(warning => warning.message).join(' | '));
+    const status = await readLettersStatus(root);
+    assert.deepEqual(status.generated.map(item => item.company).sort(), ['Example Co 1', 'Example Co 2']);
+    assert.equal(outcome.generated, 2);
+    assert.ok(!status.planned.some(item => item.company === 'Example Co 8'), 'no letter is planned for the unreviewed posting');
+    assert.deepEqual(await readLettersBacklog(root), [], 'the queue is empty: written, removed, or gone from its report');
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

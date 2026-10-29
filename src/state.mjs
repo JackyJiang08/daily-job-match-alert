@@ -100,11 +100,12 @@ function deferredKey(job) {
 
 export function deferredStatus(state, job) {
   const entry = state?.deferred?.[deferredKey(job)];
-  return { deferred: Boolean(entry), deferredCount: Number(entry?.deferredCount || 0), entry: entry || null };
+  return { deferred: Boolean(entry), deferredCount: Number(entry?.deferredCount || 0), reason: entry ? entry.reason || 'budget' : null, entry: entry || null };
 }
 
-// `reason` is 'budget' (the review limit) or 'quota' (a refusal); a budget deferral is what the report
-// calls carried over, and Settings can switch it off. A posting new since the last board poll keeps that
+// `reason` is 'budget' (the review limit), 'quota' (a refusal), or 'auth' (Claude was signed out); a budget
+// deferral is what the report calls carried over, and Settings can switch it off. 'auth' sticks until the
+// posting is reviewed: the first run after the login works again takes those first (applyReviewBudget). A posting new since the last board poll keeps that
 // basis and its first-seen time, so it is still aged from the night it appeared.
 export function markDeferred(state, job, deferredAt, reason = 'budget') {
   state.deferred = state.deferred && typeof state.deferred === 'object' ? state.deferred : {};
@@ -114,22 +115,35 @@ export function markDeferred(state, job, deferredAt, reason = 'budget') {
   state.deferred[key] = {
     url: canonicalUrl(job.finalUrl || job.url) || job.url, deferredCount: Number(previous?.deferredCount || 0) + 1, firstDeferredAt: previous?.firstDeferredAt || deferredAt, lastDeferredAt: deferredAt,
     postedAt: job.postedAt || previous?.postedAt || null, postedAtPrecision: job.postedAt ? postedAtPrecision(job) : previous?.postedAtPrecision || null, discoveredAt: job.discoveredAt || previous?.discoveredAt || null,
-    reason: previous?.reason === 'quota' && reason === 'quota' ? 'quota' : reason,
+    reason: previous?.reason === 'auth' ? 'auth' : previous?.reason === 'quota' && reason === 'quota' ? 'quota' : reason,
     ...(fresh || previous?.freshnessBasis === NEW_SINCE_LAST_POLL ? { freshnessBasis: NEW_SINCE_LAST_POLL, firstSeenAt: (fresh ? job.firstSeenAt : null) || previous?.firstSeenAt || null } : {}),
   };
   return state.deferred[key];
 }
 
-// Drops every budget deferral (entries without a reason are budget deferrals from older versions); quota
-// deferrals stay, since the report promised them to the next run. Returns the URLs removed.
+// Drops every budget deferral (entries without a reason are budget deferrals from older versions); quota and
+// auth deferrals stay, since the report promised them to the next run. Returns the URLs removed.
 export function clearBudgetDeferrals(state) {
   const urls = [];
   for (const [key, entry] of Object.entries(state?.deferred || {})) {
-    if (entry?.reason === 'quota') continue;
+    if (entry?.reason === 'quota' || entry?.reason === 'auth') continue;
     urls.push(entry?.url || key);
     delete state.deferred[key];
   }
   return urls;
+}
+
+// After a run in which the login worked: postings still held for it (the review budget could not take them all)
+// return to the usual order (reason 'budget'), so only the first run after the login works takes them first.
+// Returns how many were released.
+export function releaseAuthDeferrals(state) {
+  let released = 0;
+  for (const entry of Object.values(state?.deferred || {})) {
+    if (entry?.reason !== 'auth') continue;
+    entry.reason = 'budget';
+    released += 1;
+  }
+  return released;
 }
 
 // When a posting was published, as far as the queue knows: the night it appeared for a posting new since
@@ -139,6 +153,18 @@ export function deferralAgeBasis(entry, timeZone) {
   if (entry?.freshnessBasis === NEW_SINCE_LAST_POLL && entry.firstSeenAt) return entry.firstSeenAt;
   if (entry?.postedAt) return entry.postedAtPrecision === 'date' ? freshnessInstant({ postedAt: entry.postedAt, postedAtPrecision: 'date' }, timeZone) || entry.postedAt : entry.postedAt;
   return entry?.discoveredAt || entry?.firstDeferredAt || null;
+}
+
+// Forgets every seen entry of a posting (original, final, and listed URL), so the next collection treats it as
+// new. Returns the number of entries removed.
+export function forgetSeen(state, job) {
+  const seen = normalizeState(state).seen;
+  let removed = 0;
+  for (const url of seenUrls(job)) {
+    const key = sha256(url);
+    if (seen[key]) { delete seen[key]; removed += 1; }
+  }
+  return removed;
 }
 
 export function clearDeferred(state, job) {

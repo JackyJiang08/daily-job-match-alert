@@ -38,6 +38,8 @@ export const DEFAULT_QUOTA_PATTERNS = {
     // The engine's own auth check when the CLI reports no login at all (a Console or API-key login is a
     // configuration problem, not an expiry, and keeps the local fallback).
     'loggedin=false',
+    // The same status as the CLI prints it (`claude auth status --json` exits 1 with it when signed out).
+    '"loggedin"\\s*:\\s*false',
   ],
   // A model the plan does not include or the CLI does not know. Conservative: the text must name a
   // model or a plan; recorded in tests/fixtures/engine-errors.json.
@@ -115,7 +117,7 @@ export function normalizeQuotaPolicy(raw = {}) {
       maxWaitMs: Math.max(0, Number(fiveHour.maxWaitMs ?? DEFAULT_QUOTA_POLICY.fiveHourLimit.maxWaitMs) || 0),
     },
     modelLadder: ladder.length ? ladder : [...DEFAULT_QUOTA_POLICY.modelLadder],
-    // Unset means on: a weekly account limit hands the run to Codex when Codex is signed in (the matcher
+    // Unset means on: a weekly account limit or a signed-out Claude hands the run to Codex when Codex is signed in (the matcher
     // checks the connection). An explicit null or false in config.json turns it off.
     fallbackEngine: policy.fallbackEngine === undefined ? 'codex' : String(policy.fallbackEngine || '').toLowerCase() === 'codex' ? 'codex' : null,
     patterns,
@@ -240,7 +242,7 @@ export const QUOTA_LABELS = { fiveHourLimit: 'five-hour usage limit', modelWeekl
 export function describeQuota(quota, { timeZone = 'America/Chicago' } = {}) {
   if (!quota) return '';
   if (quota.kind === 'model_unavailable') return `Claude model ${quota.model || 'unknown'} is not available on ${planLabel(quota.plan)}`;
-  if (quota.kind === 'auth_expired') return 'Claude session expired';
+  if (quota.kind === 'auth_expired') return 'Claude signed out';
   // Older payloads stored the family word ("fable"); it is shown as the registry id like everything else.
   const label = quota.kind === 'modelWeeklyLimit' && quota.model ? `${canonicalModelId(quota.model, null, DEFAULT_CATALOG)} weekly limit` : QUOTA_LABELS[quota.kind] || 'usage limit';
   const reset = quota.resetsAt ? `; expected to reset ${new Date(quota.resetsAt).toLocaleString('en-US', { timeZone, dateStyle: 'medium', timeStyle: 'short' })}` : '';

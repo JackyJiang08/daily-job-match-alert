@@ -6,11 +6,18 @@
 #   fable-unnamed-limit refuse the Fable model with the notice the 2026-10-06 nightly run really got, which
 #                       names no model ("You're out of usage credits. Switch to another model, ...")
 #   account-limit       refuse every scoring call with the recorded weekly account notice
+#   signed-out          signed out the way the CLI really is (2026-10-28): `auth status --json` prints
+#                       loggedIn false, authMethod none, and exits 1
 # FAKE_CLAUDE_CALLS, when set, is a file that receives one line per --print call naming the --model given.
 # Scoring answers are built from the job ids found in the prompt, so every posting gets a result.
 case "$1" in
   --version) echo "2.1.269 (Claude Code)"; exit 0 ;;
-  auth) echo '{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max"}'; exit 0 ;;
+  auth)
+    if [ "${FAKE_CLAUDE_MODE:-}" = "signed-out" ]; then
+      printf '{\n  "loggedIn": false,\n  "authMethod": "none",\n  "apiProvider": "firstParty"\n}\n'
+      exit 1
+    fi
+    echo '{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max"}'; exit 0 ;;
 esac
 model=""
 prev=""

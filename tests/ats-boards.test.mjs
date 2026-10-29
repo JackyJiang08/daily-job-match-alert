@@ -36,7 +36,7 @@ test('identifies Greenhouse, Lever, Ashby, and Workday boards from posting URLs,
   });
   assert.equal(identifyBoard('https://boards.greenhouse.io/examplecorp').key, 'greenhouse:examplecorp');
   assert.equal(identifyBoard('https://boards.greenhouse.io/embed/job_app?for=examplecorp&token=123').key, 'greenhouse:examplecorp');
-  assert.equal(identifyBoard('https://job-boards.eu.greenhouse.io/eucorp/jobs/1').apiUrl, 'https://boards-api.eu.greenhouse.io/v1/boards/eucorp/jobs?content=true');
+  assert.equal(identifyBoard('https://job-boards.eu.greenhouse.io/eucorp/jobs/1').apiUrl, 'https://boards-api.greenhouse.io/v1/boards/eucorp/jobs?content=true', 'an EU board is served by the global API host');
   assert.equal(identifyBoard('https://boards.greenhouse.io/embed/job_app?token=123'), null, 'an embed link without the board token is not a board');
 
   assert.deepEqual(identifyBoard('https://jobs.lever.co/examplecorp/f4746da4-8eb8-43e2-b7ce-bf3c7cf9640d'), {

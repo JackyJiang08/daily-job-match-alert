@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { compactAgedPayloads, dedupeByFinalUrl, main, mergeReviewedJobs, preferReportJob, readReportPayload, recoverIncompleteReports, reportPayloadPath } from '../src/index.mjs';
 
@@ -19,10 +20,13 @@ async function prepareProject() {
   await fs.copyFile(new URL('demo-new-grad-alert.eml', fixtures), path.join(root, 'intake', 'demo-new-grad-alert.eml'));
   const claudeLog = path.join(root, 'claude-calls.log');
   const fakeClaude = path.join(root, 'fake-claude.sh');
-  await fs.writeFile(fakeClaude, `#!/bin/sh\necho "$@" >> "${claudeLog}"\nexit 1\n`, { mode: 0o755 });
+  // Logs every call, then answers like the chaos stand-in: signed in, every posting a high match. (A posting no
+  // model reviewed is never a match, so these recovery tests need a scoring engine to have matches to protect.)
+  const standIn = fileURLToPath(new URL('../scripts/chaos/fake-claude.sh', import.meta.url));
+  await fs.writeFile(fakeClaude, `#!/bin/sh\necho "$@" >> "${claudeLog}"\nexec "${standIn}" "$@"\n`, { mode: 0o755 });
   const config = {
     lookbackHours: 24, timeZone: 'America/Chicago', minimumMatchScore: 20, requireFullDescription: true, minimumDescriptionCharacters: 200,
-    semanticMatching: { engine: 'claude_subscription', claudeCommand: fakeClaude, required: true, batchSize: 6, acceptedMatchLevels: ['high'], timeoutMs: 30_000 },
+    semanticMatching: { engine: 'claude_subscription', claudeCommand: fakeClaude, required: true, batchSize: 6, acceptedMatchLevels: ['high'], timeoutMs: 30_000, quotaPolicy: { fallbackEngine: null } },
     // The prescreen would default to the signed-in Codex CLI; tests never call a real engine.
     prescreen: { enabled: false },
     reports: { xlsx: { enabled: true, required: false } },

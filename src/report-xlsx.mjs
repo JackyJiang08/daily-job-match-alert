@@ -4,6 +4,7 @@ import path from 'node:path';
 import ExcelJS from 'exceljs';
 import { reportTracks, scoreHeader, trackScore } from './resume-tracks.mjs';
 import { displayCompanyName, freshnessLabel, postedAtPrecision, postedText } from './posting-fields.mjs';
+import { splitReportJobs } from './review-status.mjs';
 
 const [jsonPath, outputPath, verifyFlag] = process.argv.slice(2);
 if (!jsonPath || !outputPath) {
@@ -154,8 +155,9 @@ async function verifyWorkbook(filePath, expectedMatchCount, headers, linkColumn)
 }
 
 const payload = JSON.parse(await fs.readFile(jsonPath, 'utf8'));
-const jobs = payload.matches || [];
-const tracks = reportTracks(payload.meta, jobs);
+// Matches holds only model-reviewed postings; the ones no model reviewed get their own sheet (src/review-status.mjs).
+const { matches: jobs, notReviewed: notReviewedJobs } = splitReportJobs({ matches: payload.matches || [], reviewed: payload.reviewed || [] });
+const tracks = reportTracks(payload.meta, notReviewedJobs.length ? [...jobs, ...notReviewedJobs] : jobs);
 const MATCH_COLUMNS = matchColumnsFor(tracks);
 const MATCH_HEADERS = MATCH_COLUMNS.map(column => column.header);
 const COLUMN = Object.fromEntries(MATCH_HEADERS.map((header, index) => [header, index + 1]));
@@ -179,6 +181,7 @@ function scoredByModelText(counts) {
 
 const summary = workbook.addWorksheet('Run Summary', { views: [{ showGridLines: false }] });
 const matches = workbook.addWorksheet('Matches', { views: [{ state: 'frozen', ySplit: 1, showGridLines: false }] });
+const notReviewedSheet = notReviewedJobs.length ? workbook.addWorksheet('Not Reviewed', { views: [{ state: 'frozen', ySplit: 1, showGridLines: false }] }) : null;
 const notes = workbook.addWorksheet('Notes', { views: [{ showGridLines: false }] });
 
 styleMergedTitle(summary, 'A1:F1', 'Daily Job Match Alert', COLORS.teal, 18, 34);
@@ -195,6 +198,7 @@ const summaryValues = [
   ['Expired', payload.meta.runCounts ? payload.meta.runCounts.expired : 'not recorded'],
   ['Reviewed (last 90 days)', payload.meta.reviewedLast90Days ?? 'not recorded'],
   ['High matches', jobs.length],
+  ...(notReviewedJobs.length ? [['Not reviewed by a model', `${notReviewedJobs.length} (engine unavailable; see the Not Reviewed sheet)`]] : []),
   ['Excluded: location outside US', Number(payload.meta.eligibilityExclusions?.location || 0)],
   ['Excluded: graduation window', Number(payload.meta.eligibilityExclusions?.graduation || 0)],
   ['Minimum score', payload.meta.minimumMatchScore],
@@ -323,6 +327,33 @@ MATCH_COLUMNS.forEach((column, index) => {
   matches.getColumn(index + 1).width = column.width;
 });
 
+// Postings no model reviewed: local triage scores only, never matches.
+if (notReviewedSheet) {
+  const headers = ['Company', 'Title', 'Location', 'Role Type', 'Posted At', ...tracks.map(track => `Local ${scoreHeader(track)}`), 'Gaps / Verify', 'Posting Link'];
+  const widths = [22, 38, 22, 13, 22, ...tracks.map(() => 14), 45, 30];
+  notReviewedSheet.addRow(headers);
+  for (const job of notReviewedJobs) {
+    notReviewedSheet.addRow([
+      displayCompanyName(job) || job.company, job.title, job.location, job.roleType, postedAtCell(job, payload.meta?.timeZone),
+      ...tracks.map(track => trackScore(job, track.id)), (job.gaps || []).join('; '), linkCell(job.url),
+    ]);
+  }
+  notReviewedSheet.getRow(1).eachCell(cell => {
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.orange } };
+    cell.font = { bold: true, color: { argb: COLORS.white } };
+    cell.alignment = { vertical: 'middle', wrapText: true };
+  });
+  notReviewedSheet.getRow(1).height = 30;
+  widths.forEach((width, index) => { notReviewedSheet.getColumn(index + 1).width = width; });
+  const linkColumn = headers.length;
+  for (let row = 2; row <= notReviewedJobs.length + 1; row++) {
+    const cell = notReviewedSheet.getCell(row, linkColumn);
+    if (cell.value && typeof cell.value === 'object') cell.font = { color: { argb: COLORS.link }, underline: true };
+    if (notReviewedSheet.getCell(row, 5).value instanceof Date) notReviewedSheet.getCell(row, 5).numFmt = 'yyyy-mm-dd hh:mm';
+    notReviewedSheet.getCell(row, linkColumn - 1).alignment = { vertical: 'top', wrapText: true };
+  }
+}
+
 styleMergedTitle(notes, 'A1:F1', 'How to read this report', COLORS.darkTeal, 16, 32);
 const scoreColumnNames = tracks.map(track => scoreHeader(track)).join(' / ');
 const noteRows = [
@@ -338,6 +369,7 @@ const noteRows = [
   ['Excluded rows', 'Postings removed by the deterministic eligibility rules before scoring mattered: a location outside the United States, or cohort wording (class of, graduate by, full-time start) that is incompatible with the configured graduation date. They never appear in Matches.'],
   ['Posted At', 'When the source says the posting was published. A value with a time of day comes from a board API or structured posting data; "Oct 8 (date only)" means the source (a curated list, a Workday "Posted N Days Ago") reports no time of day; "first seen Oct 9, 8:04 PM" is when this pipeline first found a board posting that was not on the board at its previous poll; "Unknown (found Sep 26)" means the source gives no posting date at all and the day is when this pipeline first found the posting.'],
   ['Freshness', 'Why the posting counts as fresh: "new since last poll" (not on its board at the previous poll, at most 30 hours earlier), "posted today" (a precise posting time inside the window), "carried over" (deferred by the review budget on an earlier run and reviewed now; also listed under Carried over from yesterday in the report), "date only" (a posting date without a time of day), or "undated" (no posting date).'],
+  ...(notReviewedJobs.length ? [['Not Reviewed', 'Postings no model reviewed because the scoring engine was unavailable. They carry only the local triage score, are not matches, and get no automatic cover letter; verify the fit yourself.']] : []),
   ['Posting Link', 'Clickable link to the original or final resolved posting; the cell shows the domain and the hyperlink carries the full URL.'],
   ['HTML report', 'The full captured JD, salary, employment type, source, discovery time, and freshness basis stay in the companion HTML file.'],
   ['Safety', 'This workbook never submits an application.'],

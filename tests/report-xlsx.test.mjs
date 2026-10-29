@@ -59,7 +59,7 @@ test('writes and re-reads the ExcelJS workbook with one score column per enabled
       source: 'fixture', roleType: 'new_grad', postedAt: '2026-08-27T15:00:00.000Z', discoveredAt: '2026-08-27T20:00:00.000Z',
       company: 'Acme', title: 'Data Analyst', location: 'Remote - US', employmentType: 'FULL_TIME', salary: '',
       scores: { data: 88, llm: 74, agent: 88 }, bestScore: 88, recommendedTrack: 'data', recommendedResume: 'Data',
-      matchLevel: 'unreviewed', scoringEngine: 'local_fallback', reasons: ['SQL'], gaps: [], blockers: [],
+      matchLevel: 'high', semanticReviewed: true, scoringEngine: 'claude_subscription', scoringModel: 'claude-fable-5', reasons: ['SQL'], gaps: [], blockers: [],
       description: 'x'.repeat(40_000), url: 'https://www.example.com/jobs/42?utm=1', freshnessBasis: 'jobposting_date_posted',
     }, {
       source: 'fixture', roleType: 'internship', postedAt: '2026-08-27T16:00:00.000Z', discoveredAt: '2026-08-27T20:00:00.000Z',
@@ -85,7 +85,7 @@ test('writes and re-reads the ExcelJS workbook with one score column per enabled
     assert.equal(matches.getCell('J2').value.formula, 'CHOOSE(MATCH(MAX(G2:I2),G2:I2,0),"Data","LLM","AI Agent")');
     assert.equal(matches.getCell('J2').value.result, 'Data', 'a tie resolves to the earlier configured track');
     assert.equal(matches.getCell('J3').value.result, 'AI Agent');
-    assert.equal(matches.getCell('K2').value, '[unreviewed] SQL');
+    assert.equal(matches.getCell('K2').value, 'SQL');
     assert.equal(matches.getCell('K3').value, 'Tool use; Evaluation loops');
     assert.equal(matches.getCell('L3').value, 'Verify sponsorship');
     assert.deepEqual(
@@ -127,6 +127,30 @@ test('writes and re-reads the ExcelJS workbook with one score column per enabled
     assert.ok(noteFields.includes('Data Score / LLM Score / AI Agent Score'));
     assert.ok(!noteFields.includes('Full JD'));
     assert.ok(!noteFields.includes('Match Level'));
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('postings no model reviewed leave the Matches sheet for a Not Reviewed sheet, also from an older payload that kept them among its matches', async () => {
+  const meta = { date: '2026-10-28', applicationDate: '2026-10-28', generatedAt: '2026-10-28T01:00:00.000Z', timeZone: 'America/Chicago', resumeTracks: [{ id: 'data', label: 'Data' }], warnings: [], scoringModel: 'claude-fable-5' };
+  const base = { title: 'Analyst', location: 'Remote - US', roleType: 'new_grad', recommendedTrack: 'data', reasons: ['x'], gaps: ['Verify SQL depth'], postedAt: '2026-10-27T18:00:00.000Z' };
+  const reviewedJob = { ...base, company: 'Example Corp', url: 'https://example.com/reviewed', scores: { data: 84 }, bestScore: 84, matchLevel: 'high', semanticReviewed: true, scoringEngine: 'claude', scoringModel: 'claude-fable-5' };
+  const legacy = { ...base, company: 'Legacy Co', url: 'https://example.com/legacy', scores: { data: 71 }, bestScore: 71, matchLevel: 'unreviewed', semanticReviewed: false, scoringEngine: 'local_fallback' };
+  const notMatched = { ...base, company: 'Other Co', url: 'https://example.com/other', scores: { data: 40 }, bestScore: 40, matchLevel: 'unreviewed', semanticReviewed: false, scoringEngine: 'local_fallback' };
+  const { workbook, directory } = await buildWorkbook({ meta, matches: [reviewedJob, legacy], reviewed: [reviewedJob, legacy, notMatched] }, 'not-reviewed');
+  try {
+    assert.deepEqual(workbook.worksheets.map(sheet => sheet.name), ['Run Summary', 'Matches', 'Not Reviewed', 'Notes']);
+    const matches = workbook.getWorksheet('Matches');
+    assert.equal(matches.actualRowCount, 2, 'only the reviewed posting is a match');
+    assert.equal(matches.getCell('A2').value, 'Example Corp');
+    const sheet = workbook.getWorksheet('Not Reviewed');
+    assert.deepEqual(headersOf(sheet), ['Company', 'Title', 'Location', 'Role Type', 'Posted At', 'Local Data Score', 'Gaps / Verify', 'Posting Link']);
+    assert.deepEqual([sheet.getCell('A2').value, sheet.getCell('F2').value, sheet.getCell('A3').value, sheet.getCell('F3').value], ['Legacy Co', 71, 'Other Co', 40], 'best local score first');
+    assert.equal(sheet.getCell('H2').value.hyperlink, 'https://example.com/legacy');
+    const summaryRows = summaryRowsOf(workbook);
+    assert.equal(summaryRows['High matches'], 1);
+    assert.equal(summaryRows['Not reviewed by a model'], '2 (engine unavailable; see the Not Reviewed sheet)');
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }

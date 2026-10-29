@@ -152,6 +152,13 @@ export function snapshotHas(snapshot, job) {
 
 // ---------------------------------------------------------------------------------------------- identification
 
+export const GREENHOUSE_API_HOST = 'boards-api.greenhouse.io';
+const GREENHOUSE_EU_API_HOST = 'boards-api.eu.greenhouse.io';
+
+export function greenhouseBoardApiUrl(token) {
+  return `https://${GREENHOUSE_API_HOST}/v1/boards/${token}/jobs?content=true`;
+}
+
 // Recognizes a posting URL or a board's front page and returns the board it belongs to, with the
 // public API endpoint that lists its postings. Anything else returns null.
 export function identifyBoard(raw) {
@@ -167,10 +174,13 @@ export function identifyBoard(raw) {
     const token = slug(segments[0] === 'embed' ? url.searchParams.get('for') : segments[0]);
     if (!token || token === 'embed') return null;
     const region = greenhouse[1] ? '.eu' : '';
+    // An EU-region board (job-boards.eu.greenhouse.io) has no regional API host: boards-api.eu.greenhouse.io
+    // does not resolve, and the global boards-api.greenhouse.io serves EU boards too (checked 2026-10-29
+    // against mangroup, glencoreuk, imc, veeamsoftware, stubhubinc; their absolute_url keeps the EU host).
     return {
       key: `greenhouse:${token.toLowerCase()}`, kind: 'greenhouse', token,
       boardUrl: `https://job-boards${region}.greenhouse.io/${token}`,
-      apiUrl: `https://boards-api${region}.greenhouse.io/v1/boards/${token}/jobs?content=true`,
+      apiUrl: greenhouseBoardApiUrl(token),
     };
   }
 
@@ -280,6 +290,36 @@ export function undoOutageFailures(registry, now = new Date()) {
   }
   registry.migrations[OUTAGE_REPAIR_MIGRATION] = { at: now.toISOString(), runs };
   return { applied: true, runs, boards: repaired };
+}
+
+// Greenhouse boards registered with the EU API host (boards-api.eu.greenhouse.io, which does not resolve)
+// are pointed at the global API host. Failures that host caused (ENOTFOUND) are taken back, and a dormancy
+// they caused is lifted, so the board is polled normally on this run. Idempotent: a board already on the
+// global host is left alone. Returns the keys repointed and the keys woken from dormancy.
+export function repointGreenhouseEuBoards(registry) {
+  const repointed = [];
+  const woken = [];
+  for (const board of Object.values(registry?.boards || {})) {
+    if (board?.kind !== 'greenhouse') continue;
+    let url;
+    try { url = new URL(String(board.apiUrl || '')); } catch { continue; }
+    if (url.hostname.toLowerCase() !== GREENHOUSE_EU_API_HOST) continue;
+    url.hostname = GREENHOUSE_API_HOST;
+    board.apiUrl = url.toString();
+    repointed.push(board.key);
+    if (String(board.lastError || '').includes(GREENHOUSE_EU_API_HOST)) {
+      if (board.dormant) woken.push(board.key);
+      board.consecutiveFailures = 0;
+      board.lastError = null;
+      board.lastErrorCode = null;
+      board.lastFailureAt = null;
+      board.dormant = false;
+      board.dormantSince = null;
+      board.etag = null;
+      board.lastModified = null;
+    }
+  }
+  return { repointed, woken };
 }
 
 // A registry that does not parse falls back to the newest backup that does (ats-boards.json.1 … .3, kept by
