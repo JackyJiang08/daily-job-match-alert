@@ -18,6 +18,7 @@ import { roleFamilyCountsText } from './role-families.mjs';
 import { seenDropMessage } from './state-integrity.mjs';
 import { NOT_REVIEWED_TITLE, isNotReviewed, notReviewedHeadline, splitReportJobs } from './review-status.mjs';
 import { CLAUDE_SIGNED_OUT } from './engines/engine-errors.mjs';
+import { DATE_ONLY_GROUP_TITLE, splitStrictWindow, strictWindowHeadline } from './strict-window.mjs';
 
 export const REPORT_TITLE = 'Daily Job Match Alert';
 export const WARNINGS_FILE_NAME = 'warnings.txt';
@@ -394,11 +395,13 @@ export function postingWindowLabel(jobs, meta) {
   return `posted within the last ${days} days`;
 }
 
-export function mastheadSubtitle(jobs, meta, { withDate = true } = {}) {
+// `windowJobs` (the main list under the strict 24-hour window) sets the posting-window phrase; the match
+// count is the day's whole.
+export function mastheadSubtitle(jobs, meta, { withDate = true, windowJobs = jobs } = {}) {
   const parts = [];
   if (withDate) parts.push(readableDate(meta.date));
   parts.push(matchLabel(jobs.length));
-  const window = postingWindowLabel(jobs, meta);
+  const window = postingWindowLabel(windowJobs, meta);
   if (window) parts.push(window);
   const ranAt = meta.completedAt || meta.lastUpdatedAt || null;
   if (ranAt) parts.push(`Ran ${formatLocalShort(ranAt, meta.timeZone)}`);
@@ -429,9 +432,15 @@ export function buildReportView(matchJobs, meta, options = {}) {
   const notReviewedCards = notReviewed.map(job => cardView(job, tracks, meta.timeZone, options.decorate, null));
   if (options.lazyDescription) for (const card of [...allCards, ...notReviewedCards]) lazyDescription(card, options.lazyDescription);
   // The main list holds this run's window; postings the review budget carried from an earlier run are
-  // a separate group under it.
-  const cards = allCards.filter(card => !card.carriedOver);
+  // a separate group under it. With the strict 24-hour window on, postings that may be older than 24 hours
+  // (a date-only posting from before the run's day, no date) leave the main list for a folded group.
+  const strict = splitStrictWindow(kept.filter(item => !item.job.carriedOver).map(item => item.job), meta);
+  const dateOnlyJobs = new Set(strict.dateOnly);
+  const cards = allCards.filter((card, index) => !card.carriedOver && !dateOnlyJobs.has(kept[index].job));
+  const dateOnlyCards = allCards.filter((card, index) => dateOnlyJobs.has(kept[index].job));
   const carriedCards = allCards.filter(card => card.carriedOver);
+  // Payloads from before the setting record no mode and keep their header as it was.
+  const windowNote = meta.strictWindow && strictWindowHeadline({ enabled: strict.enabled, main: cards.length, dateOnly: dateOnlyCards.length, carried: carriedCards.length, notReviewed: notReviewedCards.length, carriedTitle: CARRIED_OVER_TITLE, notReviewedTitle: NOT_REVIEWED_TITLE }) || null;
   const roleTypes = [...new Set(jobs.map(job => job.roleType || 'unknown'))].map(value => ({ value, label: roleLabel(value) }));
   const embedded = options.embedded === true;
   return {
@@ -439,8 +448,8 @@ export function buildReportView(matchJobs, meta, options = {}) {
     dateLabel: readableDate(meta.date),
     matchLabel: matchLabel(jobs.length),
     masthead: embedded
-      ? { title: readableDate(meta.date), subtitle: mastheadSubtitle(jobs, meta, { withDate: false }), note: meta.quotaNote || null }
-      : { title: REPORT_TITLE, subtitle: mastheadSubtitle(jobs, meta), note: meta.quotaNote || null },
+      ? { title: readableDate(meta.date), subtitle: mastheadSubtitle(jobs, meta, { withDate: false, windowJobs: strict.main }), windowNote, note: meta.quotaNote || null }
+      : { title: REPORT_TITLE, subtitle: mastheadSubtitle(jobs, meta, { windowJobs: strict.main }), windowNote, note: meta.quotaNote || null },
     toolbar: { roleTypes, tracks, quiet: jobs.length < 5, total: jobs.length },
     authBanner: signedOutBanner(meta.authExpired),
     banner: meta.authExpired ? null : (meta.quota?.banner || null),
@@ -448,9 +457,10 @@ export function buildReportView(matchJobs, meta, options = {}) {
     networkBanner: meta.networkOutage ? meta.networkOutage.detail || meta.networkOutage.message : null,
     integrityBanner: meta.integrity?.seenDrop ? seenDropMessage(meta.integrity.seenDrop, meta.timeZone) : null,
     cards,
+    dateOnly: strict.enabled && dateOnlyCards.length ? { title: DATE_ONLY_GROUP_TITLE, note: 'Strict 24-hour window: the source gives only a date before the run\'s day (such as "Posted Yesterday"), or no date at all, so these postings may be older than 24 hours. They were reviewed like the rest.', cards: dateOnlyCards } : null,
     carried: carriedCards.length ? { title: CARRIED_OVER_TITLE, note: 'Deferred by the review budget on an earlier run and reviewed now; each card says when it was first found.', cards: carriedCards } : null,
     notReviewed: notReviewedCards.length ? { title: NOT_REVIEWED_TITLE, note: 'Local triage scores only: no model reviewed these postings, so none of them counts as a match and no cover letter is written for them automatically. Verify the fit yourself.', cards: notReviewedCards } : null,
-    emptyMessage: 'No new postings cleared the configured threshold for this date.',
+    emptyMessage: strict.enabled && dateOnlyCards.length && !cards.length ? `No match is known to be posted within 24 hours; see "${DATE_ONLY_GROUP_TITLE}" below.` : 'No new postings cleared the configured threshold for this date.',
     runDetails: runDetailsView(jobs, meta, tracks, notReviewed.length),
     footer: `Generated locally. Scores are triage aids, not facts. Verify eligibility, posting date, and JD before applying. No applications were submitted.${meta.authExpired ? ` ${meta.authExpired.message}` : ''}`,
   };

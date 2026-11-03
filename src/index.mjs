@@ -23,6 +23,7 @@ import { normalizeEngineId, resolveModel } from './engines/index.mjs';
 import { buildHtml, writeReports, writeWarningsFile } from './report.mjs';
 import { SEEN_FORMAT, SEEN_RETENTION_DAYS, clearBudgetDeferrals, clearDeferred, deferredStatus, expireDeferred, forgetSeen, isJobSeen, isLegacySeenState, markDeferred, markJobSeen, normalizeState, pruneSeen, releaseRecentBaselines, slimSeenState, CATCH_UP_MAX_AGE_HOURS, CATCH_UP_REASONS, DEFAULT_CATCH_UP_BUDGET, catchUpBudgetOf } from './state.mjs';
 import { isNotReviewed, splitReportJobs } from './review-status.mjs';
+import { STRICT_WINDOW_HOURS, strictWindowEnabled } from './strict-window.mjs';
 import { ageBasisInstant, correctFutureTimestamp, datePrecisionSummary, freshnessInstant, isNewSinceLastPoll, isUndated } from './posting-fields.mjs';
 import { detectEarlyCareer, isEarlyCareerPriority, prefilterJobs } from './prefilter.mjs';
 import { countByRoleFamily } from './role-families.mjs';
@@ -1326,6 +1327,8 @@ async function runPipeline(config, clock, options = {}) {
     datePrecision: datePrecisionSummary(reviewed),
     reviewedInRun: evaluated.length, reviewedLast90Days,
     runCounts: runCounts({ evaluated, budget, quotaDeferred, prefiltered, expiredBacklogCount, prescreenedOut: prescreen.dropped.length }),
+    // Settings > Pipeline "Strict 24-hour window": the report splits its main list with it (strict-window.mjs).
+    strictWindow: { enabled: strictWindowEnabled(config), hours: STRICT_WINDOW_HOURS },
     // Run Details "Reviewed": this run's postings and the catch-up lane, apart.
     catchUp: { ...reviewSplit(evaluated, budget), limit: budget.catchUp.limit, waiting: budget.catchUp.waiting, expired: budget.catchUp.expired, maxAgeHours: budget.catchUp.maxAgeHours },
     quotaNote: quotaNote(quota, quotaDeferred.length - authDeferredCount),

@@ -779,6 +779,7 @@ export async function readSettings(ctx) {
     maxReviewedPerRun: semantic.maxReviewedPerRun == null ? 60 : Number(semantic.maxReviewedPerRun),
     catchUpBudget: catchUpBudgetOf(semantic.catchUpBudget),
     includeCarriedOver: semantic.includeCarriedOver !== false,
+    strict24HourWindow: semantic.strict24HourWindow === true,
     autoCatchUp: autoCatchUpEnabled(config),
     titleFamilies: Array.isArray(config.preferences?.titleFamilies) ? config.preferences.titleFamilies.map(String) : [...DEFAULT_TITLE_FAMILIES],
     targetRoleFamilies: targetRoleFamilies(config.preferences),
@@ -889,6 +890,7 @@ export function validateSettings(form, { catalog = DEFAULT_CATALOG } = {}) {
   const editorReview = form.editorReviewPresent != null ? (form.editorReview === 'on' || form.editorReview === 'true' || form.editorReview === true) : null;
   // Only the Pipeline tab carries "Include carried-over postings"; other forms leave it alone.
   const includeCarriedOver = form.pipelinePresent != null ? (form.includeCarriedOver === 'on' || form.includeCarriedOver === 'true' || form.includeCarriedOver === true) : null;
+  const strict24HourWindow = form.pipelinePresent != null ? (form.strict24HourWindow === 'on' || form.strict24HourWindow === 'true' || form.strict24HourWindow === true) : null;
   const autoCatchUp = form.pipelinePresent != null ? (form.autoCatchUp === 'on' || form.autoCatchUp === 'true' || form.autoCatchUp === true) : null;
   // Role scope: only a form with the roleScopePresent marker (Settings > Pipeline) changes the two lists.
   let titleFamilies = null;
@@ -901,7 +903,7 @@ export function validateSettings(form, { catalog = DEFAULT_CATALOG } = {}) {
     if (lone) errors.push(`"${lone}" is not a title family on its own; it passes beside a family word (Associate Consultant, Associate Product Manager)`);
   }
   if (errors.length) throw new HubInputError(errors.join('; '));
-  return { minimumMatchScore, acceptedMatchLevels: MATCH_LEVELS.filter(level => levels.includes(level)), engine, model, xlsxRequired, editorReview, hubPort, maxReviewedPerRun, catchUpBudget, payloadRetentionDays, includeCarriedOver, autoCatchUp, titleFamilies, targetRoleFamilies: roleFamilies, modelLadder, fallbackEngine, reasoningEffort };
+  return { minimumMatchScore, acceptedMatchLevels: MATCH_LEVELS.filter(level => levels.includes(level)), engine, model, xlsxRequired, editorReview, hubPort, maxReviewedPerRun, catchUpBudget, payloadRetentionDays, includeCarriedOver, strict24HourWindow, autoCatchUp, titleFamilies, targetRoleFamilies: roleFamilies, modelLadder, fallbackEngine, reasoningEffort };
 }
 
 // "Save this path to config": pins the resolved binary as semanticMatching.<engine>Command.
@@ -939,6 +941,7 @@ export async function saveSettings(ctx, form) {
     if (settings.maxReviewedPerRun != null) config.semanticMatching.maxReviewedPerRun = settings.maxReviewedPerRun;
     if (settings.catchUpBudget != null) config.semanticMatching.catchUpBudget = settings.catchUpBudget;
     if (settings.includeCarriedOver != null) config.semanticMatching.includeCarriedOver = settings.includeCarriedOver;
+    if (settings.strict24HourWindow != null) config.semanticMatching.strict24HourWindow = settings.strict24HourWindow;
     if (settings.titleFamilies || settings.targetRoleFamilies) {
       config.preferences = config.preferences && typeof config.preferences === 'object' ? config.preferences : {};
       if (settings.titleFamilies) config.preferences.titleFamilies = settings.titleFamilies;

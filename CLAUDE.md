@@ -277,6 +277,16 @@ disabled; do not expand them unless a task says so.
   "Carried over from yesterday" group (view.carried, section#jobs-carried; the script sorts each
   section.jobs). semanticMatching.includeCarriedOver (Settings > Pipeline, pipelinePresent marker) false →
   clearBudgetDeferrals at startup and no budget deferral kept (quota ones stay).
+- Strict 24-hour window (src/strict-window.mjs, 2026-11-03): semanticMatching.strict24HourWindow (Settings >
+  Pipeline checkbox, pipelinePresent marker, default off) → meta.strictWindow {enabled, hours: 24}. Render-time
+  only (buildReportView): of the non-carried reviewed matches, main keeps NEW-since-poll, precise postedAt ≤ 24 h
+  before meta.generatedAt, and date-only whose postingDay ≥ meta.runDate (run's local day); the rest (earlier
+  date-only, undated, precise older e.g. email) → view.dateOnly, folded details#date-only holding
+  section.jobs#jobs-date-only (sorted/filtered by the page script). Carried over / Not reviewed untouched; match
+  count, xlsx, letters unchanged. Header line p[data-window-note] "Strict 24-hour window: on|off · Main list (N) ·
+  [Date only, may be older than 24 hours (N) ·] Carried over from yesterday (N) · Not reviewed (engine
+  unavailable) (N)"; absent for payloads without meta.strictWindow (keeps hub snapshots). Don't edit
+  REPORT_SCRIPT text casually: it is embedded in every page and the hub snapshot tests compare whole pages.
 - Dates: parsePostingDate (JSON-LD datePosted, Workday startDate, search page_age): bare date → noon UTC
   calendar date; midnight → date; zoneless clock time → ZONELESS_TIME_ZONES (jobright.ai = UTC, verified
   2026-10-11 against its "2 hours ago") else date only. postingDay reads stored noon/midnight-UTC values as

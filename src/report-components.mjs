@@ -14,7 +14,9 @@ export function renderMasthead(view) {
   // A quota limit that touched the run gets one line under the subtitle: how many postings it held back and
   // which engine or model took over.
   const note = view.masthead?.note ? `<p class="sub quota-note" data-quota-note>${htmlEscape(view.masthead.note)}</p>` : '';
-  return `<header class="masthead"><h1>${htmlEscape(title)}</h1><p class="sub">${htmlEscape(subtitle)}</p>${note}</header>`;
+  // Whether the strict 24-hour window is on, and how many postings each group holds.
+  const windowNote = view.masthead?.windowNote ? `<p class="sub" data-window-note>${htmlEscape(view.masthead.windowNote)}</p>` : '';
+  return `<header class="masthead"><h1>${htmlEscape(title)}</h1><p class="sub">${htmlEscape(subtitle)}</p>${windowNote}${note}</header>`;
 }
 
 function option(value, label, selected = false) {
@@ -118,15 +120,21 @@ export function renderEmptyState(message) {
 // Everything between <main> and </main>: the hub embeds this inside its own shell.
 export function renderReportBody(view) {
   const carried = view.carried?.cards?.length ? view.carried : null;
+  const dateOnly = view.dateOnly?.cards?.length ? view.dateOnly : null;
   const main = view.cards.length
     ? `<section class="jobs" id="jobs">${view.cards.map(renderJobCard).join('\n')}</section>`
-    : (carried ? renderEmptyState(view.emptyMessage) : '');
+    : (carried || dateOnly ? renderEmptyState(view.emptyMessage) : '');
+  // Strict 24-hour window: postings that may be older than 24 hours, folded under the main list. They are
+  // reviewed matches, so the section stays a section.jobs the page script sorts, filters, and counts.
+  const dateOnlyGroup = dateOnly
+    ? `<details class="run" id="date-only"><summary>${htmlEscape(dateOnly.title)} <span class="group-count">(${dateOnly.cards.length})</span></summary><p class="group-note">${htmlEscape(dateOnly.note)}</p><section class="jobs date-only" id="jobs-date-only">${dateOnly.cards.map(renderJobCard).join('\n')}</section></details>`
+    : '';
   // Postings the review budget carried from an earlier run: their own group under the main list.
   const carriedGroup = carried
     ? `<h2 class="group-title" id="carried-over">${htmlEscape(carried.title)} <span class="group-count">(${carried.cards.length})</span></h2>${carried.note ? `<p class="group-note">${htmlEscape(carried.note)}</p>` : ''}<section class="jobs carried" id="jobs-carried">${carried.cards.map(renderJobCard).join('\n')}</section>`
     : '';
-  const list = view.cards.length || carried
-    ? `${main}${carriedGroup}<div class="empty" id="no-results" hidden>No matches for the current filters.</div>`
+  const list = view.cards.length || carried || dateOnly
+    ? `${main}${dateOnlyGroup}${carriedGroup}<div class="empty" id="no-results" hidden>No matches for the current filters.</div>`
     : renderEmptyState(view.emptyMessage);
   // Postings no model reviewed: folded at the bottom, outside the match list (a div, not section.jobs, so the
   // page script's sort, filter, and count leave them out).

@@ -376,3 +376,27 @@ test('with carried-over postings switched off, nothing is carried: the budget le
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test('the run records the strict 24-hour window setting, and its report header says so', async () => {
+  const { root, configPath } = await prepareProject();
+  const silence = [console.log, console.warn, console.error];
+  console.log = console.warn = console.error = () => {};
+  try {
+    const jobs = [greenhouseJob(1, 'Data Analyst, New Grad', '2026-10-08T15:00:00Z')];
+    await main({ argv: ['node', 'index.mjs', '--config', configPath, '--now', LAST_NIGHT.toISOString()], atsFetchImpl: async () => jsonResponse({ jobs }), autoLetters: false });
+    const payloadFile = path.join(root, 'state', 'report-payload-2026-10-08.json');
+    const htmlFile = path.join(root, 'output', '2026-10-08', 'Daily Job Match Alert - 2026-10-08.html');
+    assert.deepEqual(JSON.parse(await fs.readFile(payloadFile, 'utf8')).meta.strictWindow, { enabled: false, hours: 24 }, 'off by default');
+    assert.match(await fs.readFile(htmlFile, 'utf8'), /data-window-note>Strict 24-hour window: off · Main list \(1\)/);
+    const config = JSON.parse(await fs.readFile(configPath, 'utf8'));
+    config.semanticMatching.strict24HourWindow = true;
+    await fs.writeFile(configPath, JSON.stringify(config));
+    await fs.rm(path.join(root, 'state', 'state.json'), { force: true });
+    await main({ argv: ['node', 'index.mjs', '--config', configPath, '--now', LAST_NIGHT.toISOString()], atsFetchImpl: async () => jsonResponse({ jobs }), autoLetters: false });
+    assert.deepEqual(JSON.parse(await fs.readFile(payloadFile, 'utf8')).meta.strictWindow, { enabled: true, hours: 24 });
+    assert.match(await fs.readFile(htmlFile, 'utf8'), /data-window-note>Strict 24-hour window: on · Main list \(1\) · Date only, may be older than 24 hours \(0\)/);
+  } finally {
+    [console.log, console.warn, console.error] = silence;
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

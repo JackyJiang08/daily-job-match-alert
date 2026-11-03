@@ -1198,6 +1198,13 @@ test('Settings > Pipeline has "Include carried-over postings" (default on); only
     await hub.form('/settings', { pipelinePresent: '1', includeCarriedOver: 'on', minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' });
     assert.equal((await readConfig(root)).semanticMatching.includeCarriedOver, true);
     assert.equal(validateSettings({ minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' }).includeCarriedOver, null);
+    // "Strict 24-hour window" sits beside it, off by default.
+    assert.match(page.text, /<input type="checkbox" name="strict24HourWindow"> Strict 24-hour window<\/label>/);
+    await hub.form('/settings', { pipelinePresent: '1', includeCarriedOver: 'on', strict24HourWindow: 'on', minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' });
+    assert.equal((await readConfig(root)).semanticMatching.strict24HourWindow, true);
+    assert.match((await hub.request('GET', '/settings?tab=pipeline')).text, /<input type="checkbox" name="strict24HourWindow" checked> Strict 24-hour window<\/label>/);
+    await hub.form('/settings', { minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' });
+    assert.equal((await readConfig(root)).semanticMatching.strict24HourWindow, true, 'a form without the Pipeline marker leaves it alone');
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });
