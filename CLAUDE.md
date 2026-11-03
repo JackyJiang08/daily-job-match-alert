@@ -27,6 +27,12 @@ disabled; do not expand them unless a task says so.
   `npm run run` (owner's quota + real Desktop); the owner does acceptance.
 - No new dependencies unless the task allows; no framework/TypeScript
   migration; do not rename user-facing files or folders.
+- package.json overrides (2026-11-03, npm audit 0): exceljs 4.4.0 pins archiver 5, whose glob 7 /
+  minimatch 3–5 chain carries GHSA-g3hv-75wg-m249 (fixed only in minimatch 11.0.1). Overriding minimatch
+  alone breaks glob 7 (glob.sync throws), so the chain is lifted together: archiver ^7 (CJS, same API),
+  glob ^14, minimatch ^11, unzipper ^0.12 (drops fstream/rimraf/glob 7). xlsx parts were byte-identical to
+  the old build apart from docProps timestamps. exceljs's stream.xlsx.WorkbookReader fails on our files
+  under the old deps too (unused here; verify uses xlsx.readFile).
 - Report UI lives in src/report-components.mjs + src/report-theme.mjs and
   is meant to be reused by a future local hub.
 ## Local hub (src/hub/)
