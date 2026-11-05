@@ -563,16 +563,21 @@ disabled; do not expand them unless a task says so.
   for an uncertain company) → alias table (profile.companyAliases, Settings → Cover Letters "Company Short
   Names", "Full = Short" lines; matched against every chain candidate as written or cleaned) → model
   shortName if validateShortName passes (case-sensitive whole-name hit in job.description after &amp;/’
-  normalization, or equal to the cleaned name) → cleanCompanyName(chain name): drops parentheses, ", a …"
-  appositives, Inc./LLC/L.P./Corp./Corporation/Company/Co./Holdings, Group only when the JD uses the bare
-  name (not followed by Group), "The" only kept when the JD writes "The <name>" mid-sentence without a
-  suffix after it (or never without "The"). A refused shortName still in the body → issue kind
+  normalization, or equal to the cleaned name) → cleanCompanyName(chain name). Cleaning (second pass,
+  2026-11-04): baseCompanyName always drops parentheses, ", a …" appositives, Inc./Incorporated/LLC/L.P./LP;
+  Corporation/Corp./Company/Co./Group/Holdings and a leading "The" go only when the shorter form is attested
+  in the JD (attestedCount: an occurrence not followed by a dropped suffix word and, if "The" was dropped,
+  not preceded by "The"); otherwise the base (full) name stays. No JD → base. A refused shortName still in the body → issue kind
   'short-name'. The editor prompt now allows the full name at the first mention. Records keep fullName and
   shortNameSource. POST /letters/update-salutations (Reports "Update Salutations (N)", shown when the date
   has letters): salutationUpdateFor = alias → owner rename (shortNameSource 'owner' or legacy renamedAt) →
-  stored model name that still validates → cleaned name; reuses renameLetter (PDF re-render, no condense,
-  no engine); skips a target slug held by another posting's letter. Real-data preview 2026-11-04: 62 of
-  571 saved letters would change (all fallback; no aliases yet).
+  with a JD in the payload, inferShortNameFromPosting (most JD occurrences among cleaned, full/base, a stored
+  model name that validates, and brands: an acronym whose capitals spell the name's initials incl. CamelCase
+  humps (HPE, P&G, PwC, RGA), a contraction of word starts (FedEx, AmEx), or KNOWN_BRANDS (Disney, IBM,
+  BofA, 3M); ties keep that order; source 'posting') → without a JD the stored model name, then the cleaned
+  name; reuses renameLetter (PDF re-render, no condense,
+  no engine); skips a target slug held by another posting's letter. Real-data preview 2026-11-04 (second
+  pass): 51 of 571 saved letters would change; 36 differ from the first pass.
 - Personal details (name, phone, email, signature, playbook, sample letters)
   live ONLY under private/cover-letter/; generated letters under
   private/cover-letters/<date>/<Company>/. Never put a real person's data in

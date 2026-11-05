@@ -23,7 +23,7 @@ import { AuthExpiredError, EngineError, classifyEngineError, engineNotice, human
 import { isAcceptableCompanyName, isTrustedSourceName, resolveCompanyName } from '../posting-fields.mjs';
 import { renderLetterPdf as renderPdfDefault } from '../cover-letter/pdf.mjs';
 import { sanitizeCompany } from '../cover-letter/compose.mjs';
-import { shortNameWithoutModel } from '../cover-letter/short-name.mjs';
+import { inferShortNameFromPosting, shortNameWithoutModel } from '../cover-letter/short-name.mjs';
 
 export function jobIdOf(job) {
   return job.semanticId || sha256(job.url || '').slice(0, 16);
@@ -381,13 +381,19 @@ export async function renameLetter(ctx, { date, slug, company, shortNameSource =
 }
 
 // The short name an existing letter should carry, without a model call: the alias table first, then a name the
-// owner typed (Rename, or a typed panel value), then a stored model short name that still validates, then the
-// cleaned company name.
+// owner typed (Rename, or a typed panel value). Then, when the payload still holds the posting's JD, the name
+// the JD uses most often among the cleaned name, the full name, a stored model short name, and the company's
+// abbreviations or brands in the JD (inferShortNameFromPosting). Without a JD: a stored model short name that
+// still validates, then the cleaned company name.
 export function salutationUpdateFor(record, job, aliases = []) {
   const chainName = (job ? letterCompanyFor(job).name : '') || record.fullName || record.company || '';
   const posting = job || { company: chainName };
-  const resolved = shortNameWithoutModel({ job: posting, chainName, aliases, storedShortName: record.shortNameSource === 'model' ? record.company : null });
-  if (resolved.source !== 'alias' && (record.shortNameSource === 'owner' || (!record.shortNameSource && record.renamedAt))) return { name: String(record.company || '').trim(), source: 'owner' };
+  const storedShortName = record.shortNameSource === 'model' ? record.company : null;
+  const resolved = shortNameWithoutModel({ job: posting, chainName, aliases, storedShortName });
+  if (resolved.source === 'alias') return { name: resolved.name, source: 'alias' };
+  if (record.shortNameSource === 'owner' || (!record.shortNameSource && record.renamedAt)) return { name: String(record.company || '').trim(), source: 'owner' };
+  const inferred = inferShortNameFromPosting({ job: posting, chainName, storedShortName });
+  if (inferred) return { name: inferred.name, source: inferred.kind === 'stored' ? 'model' : 'posting' };
   return { name: resolved.name, source: resolved.source };
 }
 

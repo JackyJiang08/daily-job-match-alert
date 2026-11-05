@@ -2,7 +2,8 @@
 // shortName validated against the posting, the alias table first, the fallback, and the file name.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { aliasFor, aliasText, appearsInPosting, cleanCompanyName, parseAliasText, resolveShortName, validateShortName } from '../src/cover-letter/short-name.mjs';
+import { aliasFor, aliasText, appearsInPosting, cleanCompanyName, inferShortNameFromPosting, parseAliasText, resolveShortName, validateShortName } from '../src/cover-letter/short-name.mjs';
+import { salutationUpdateFor } from '../src/hub/letters.mjs';
 import { LETTER_SCHEMA, BODY_SCHEMA, assembleLetter, buildCoverLetterPrompt, buildReviewPrompt, letterFileName } from '../src/cover-letter/compose.mjs';
 import { generateCoverLetter, condenseCoverLetter, shortNameFrom } from '../src/cover-letter/generate.mjs';
 
@@ -12,23 +13,34 @@ function posting(company, description, extra = {}) {
 
 const fileName = short => letterFileName(null, { name: 'Jane Doe', company: short, prefix: 'JaneDoe' });
 
-test('cleaning drops legal suffixes, parentheses, and "The" the way the posting writes the name', () => {
-  assert.equal(cleanCompanyName('Pacers Sports & Entertainment'), 'Pacers Sports & Entertainment');
+test('cleaning: Inc., LLC, L.P., and parentheses always go; Corporation, Company, Co., Group, Holdings, and "The" only with the posting as evidence', () => {
+  // Unconditional.
   assert.equal(cleanCompanyName('PricewaterhouseCoopers (PwC)'), 'PricewaterhouseCoopers');
-  assert.equal(cleanCompanyName('Hewlett Packard Enterprise'), 'Hewlett Packard Enterprise');
-  assert.equal(cleanCompanyName('The Procter & Gamble Company'), 'Procter & Gamble');
-  assert.equal(cleanCompanyName('Dow Jones & Company, Inc.'), 'Dow Jones');
-  assert.equal(cleanCompanyName('Johnson & Johnson'), 'Johnson & Johnson');
-  for (const [raw, clean] of [['Example Corp.', 'Example'], ['Example Corporation', 'Example'], ['Example, LLC', 'Example'], ['Example L.P.', 'Example'], ['Example Co.', 'Example'], ['Example Holdings, Inc.', 'Example'], ['Example Inc', 'Example']]) {
-    assert.equal(cleanCompanyName(raw), clean, raw);
-  }
-  // "Group" goes only when the posting calls the company by the name without it.
+  for (const [raw, clean] of [['Example, Inc.', 'Example'], ['Example Inc', 'Example'], ['Example, LLC', 'Example'], ['Example L.P.', 'Example'], ['Example Incorporated', 'Example']]) assert.equal(cleanCompanyName(raw), clean, raw);
+  assert.equal(cleanCompanyName('Revantage, A Blackstone Portfolio Company'), 'Revantage');
+  // No posting, or a posting that writes only the full name: the full name stays.
+  assert.equal(cleanCompanyName('The Aerospace Corporation'), 'The Aerospace Corporation');
+  assert.equal(cleanCompanyName('The Aerospace Corporation', { text: 'The Aerospace Corporation operates a federally funded research center. Join The Aerospace Corporation.' }), 'The Aerospace Corporation');
+  assert.equal(cleanCompanyName('Brain Co.', { text: 'Brain Co. builds AI for retailers. At Brain Co., analysts own the metrics.' }), 'Brain Co.');
+  assert.equal(cleanCompanyName('The Walt Disney Company', { text: 'At The Walt Disney Company, analysts shape parks.' }), 'The Walt Disney Company');
+  assert.equal(cleanCompanyName('Dow Jones & Company, Inc.'), 'Dow Jones & Company', 'only Inc. goes without evidence');
+  // The posting writes the shorter name.
+  assert.equal(cleanCompanyName('KLA Corporation', { text: 'KLA is a global leader in process control. At KLA Corporation, analysts… KLA hires.' }), 'KLA');
+  assert.equal(cleanCompanyName('Brain Co.', { text: 'Brain builds AI for retailers.' }), 'Brain');
+  assert.equal(cleanCompanyName('Dow Jones & Company, Inc.', { text: 'Dow Jones is a global provider of news.' }), 'Dow Jones');
+  assert.equal(cleanCompanyName('The Procter & Gamble Company', { text: 'Procter & Gamble brands serve consumers.' }), 'Procter & Gamble');
+  assert.equal(cleanCompanyName('The Procter & Gamble Company', { text: 'The Procter & Gamble Company serves consumers.' }), 'The Procter & Gamble Company');
+  assert.equal(cleanCompanyName('Example Holdings, Inc.', { text: 'Example is hiring.' }), 'Example');
   assert.equal(cleanCompanyName('Example Group', { text: 'At Example, analysts partner with product.' }), 'Example');
-  assert.equal(cleanCompanyName('Example Group', { text: 'Example Group is a global insurer.' }), 'Example Group');
-  assert.equal(cleanCompanyName('Example Group'), 'Example Group');
-  // "The" stays when the posting writes it as part of the name in mid-sentence, or never drops it.
-  assert.equal(cleanCompanyName('The Home Depot', { text: 'Join the team at The Home Depot. The Home Depot hires analysts.' }), 'The Home Depot');
-  assert.equal(cleanCompanyName('The Procter & Gamble Company', { text: 'The Procter & Gamble Company is hiring. Procter & Gamble brands reach billions.' }), 'Procter & Gamble');
+  assert.equal(cleanCompanyName('Example Group', { text: 'Example Group is a global insurer.' }), 'Example Group', '"Example" only inside "Example Group" is not evidence');
+  assert.equal(cleanCompanyName('The Home Depot', { text: 'Associates at The Home Depot serve customers.' }), 'The Home Depot');
+  assert.equal(cleanCompanyName('The Home Depot', { text: 'Home Depot associates serve customers.' }), 'Home Depot');
+  assert.equal(cleanCompanyName('The Toro Company', { text: 'Toro is hiring an analyst. The Toro Company is an equal opportunity employer.' }), 'Toro');
+  // Unchanged names from the first pass.
+  assert.equal(cleanCompanyName('Pacers Sports & Entertainment'), 'Pacers Sports & Entertainment');
+  assert.equal(cleanCompanyName('Hewlett Packard Enterprise'), 'Hewlett Packard Enterprise');
+  assert.equal(cleanCompanyName('Johnson & Johnson'), 'Johnson & Johnson');
+  assert.equal(cleanCompanyName('Cincinnati Children’s Hospital and Medical Center'), 'Cincinnati Children’s Hospital and Medical Center', 'typography stays');
   assert.equal(cleanCompanyName('Inc.'), 'Inc.', 'nothing usable left: the name as given');
 });
 
@@ -179,12 +191,32 @@ test('generateCoverLetter: an alias is given to the model up front and wins over
   assert.equal(condense.calls[0].context.schema, BODY_SCHEMA);
 });
 
-test('cleaning real-world names: a posting that only writes the legal name drops "The"; a trailing ", a … Company" goes; typography stays', () => {
-  assert.equal(cleanCompanyName('The Walt Disney Company', { text: 'At The Walt Disney Company, analysts shape parks. The Walt Disney Company is hiring.' }), 'Walt Disney');
-  assert.equal(cleanCompanyName('The Toro Company', { text: 'Join The Toro Company in Bloomington.' }), 'Toro');
-  assert.equal(cleanCompanyName('The Home Depot', { text: 'Associates at The Home Depot serve customers.' }), 'The Home Depot', 'no suffix follows: the posting writes "The Home Depot"');
-  assert.equal(cleanCompanyName('Revantage, A Blackstone Portfolio Company'), 'Revantage');
-  assert.equal(cleanCompanyName('Motorola Mobility (a Lenovo Company)'), 'Motorola Mobility');
-  assert.equal(cleanCompanyName('Cincinnati Children’s Hospital and Medical Center'), 'Cincinnati Children’s Hospital and Medical Center');
-  assert.equal(validateShortName('Children’s', { job: { description: "Cincinnati Children's is hiring." }, chainName: 'x' }).ok, true, 'curly and straight apostrophes match each other');
+test('inference for old letters: the name the JD uses most among the cleaned name, the full name, and the company\'s abbreviations or brands', () => {
+  const infer = (company, description) => inferShortNameFromPosting({ job: { company, description }, chainName: company })?.name ?? null;
+  assert.equal(infer('Federal Express Corporation', 'FedEx is hiring. At FedEx Ground, analysts plan routes. Federal Express Corporation is an equal opportunity employer.'), 'FedEx');
+  assert.equal(infer('Hewlett Packard Enterprise', 'HPE is the edge-to-cloud company. At HPE, analysts use SQL and AWS. Hewlett Packard Enterprise is an EEO employer.'), 'HPE');
+  assert.equal(infer('PricewaterhouseCoopers (PwC)', 'At PwC, our purpose is to build trust. PwC US is hiring.'), 'PwC');
+  assert.equal(infer('The Procter & Gamble Company', 'P&G serves consumers. P&G analysts forecast. The Procter & Gamble Company is an EEO employer.'), 'P&G');
+  assert.equal(infer('Reinsurance Group of America, Incorporated', 'RGA is a global reinsurer. RGA analysts model risk. Reinsurance Group of America is an EEO employer.'), 'RGA');
+  assert.equal(infer('The Walt Disney Company', 'Disney Parks is hiring. At Disney, analysts shape guest experiences. The Walt Disney Company is an EEO employer.'), 'Disney', 'a known brand');
+  assert.equal(infer('KLA Corporation', 'KLA is a leader. At KLA, analysts… KLA Corporation is an EEO employer.'), 'KLA');
+  assert.equal(infer('The Aerospace Corporation', 'The Aerospace Corporation is hiring. SQL and AWS required.'), 'The Aerospace Corporation', 'unrelated acronyms are not the company');
+  assert.equal(infer('Brain Co.', 'Brain Co. builds AI. Brain Co. is hiring.'), 'Brain Co.');
+  assert.equal(infer('Johnson & Johnson', 'At Johnson & Johnson, health is everything. Johnson & Johnson Innovative Medicine.'), 'Johnson & Johnson', 'no J&J without the JD writing it');
+  // The full name wins when the JD uses it more than any shorter form.
+  assert.equal(infer('Example Group', 'Example Group is hiring. Example Group analysts. At Example, data matters.'), 'Example Group');
+  assert.equal(infer('Example Group', ''), null, 'no JD: no inference');
+});
+
+test('Update Salutations without a model: alias first, then the owner\'s rename, then the JD; without a JD the earlier order', () => {
+  const fedex = { company: 'Federal Express Corporation', companyFromSource: 'Federal Express Corporation', companySource: 'source', description: 'FedEx is hiring. At FedEx, analysts plan routes. Federal Express Corporation is an EEO employer.' };
+  const legacy = { company: 'Federal Express Corporation', paragraphs: ['x'] };
+  assert.deepEqual(salutationUpdateFor(legacy, fedex), { name: 'FedEx', source: 'posting' });
+  assert.deepEqual(salutationUpdateFor(legacy, fedex, [{ full: 'Federal Express Corporation', short: 'FedEx Freight' }]), { name: 'FedEx Freight', source: 'alias' });
+  assert.deepEqual(salutationUpdateFor({ ...legacy, company: 'Federal Express', renamedAt: '2026-10-30T00:00:00Z' }, fedex), { name: 'Federal Express', source: 'owner' });
+  // The payload no longer holds the posting: the stored names and the earlier order.
+  assert.deepEqual(salutationUpdateFor({ ...legacy, fullName: 'Federal Express Corporation' }, null), { name: 'Federal Express Corporation', source: 'fallback' });
+  assert.deepEqual(salutationUpdateFor({ company: 'KLA Corporation', fullName: 'KLA Corporation' }, null), { name: 'KLA Corporation', source: 'fallback' });
+  assert.deepEqual(salutationUpdateFor({ company: 'HPE', fullName: 'Hewlett Packard Enterprise', shortNameSource: 'model' }, null), { name: 'Hewlett Packard Enterprise', source: 'fallback' }, 'a stored model name must still validate, and there is no posting to check it against');
+  assert.deepEqual(salutationUpdateFor({ company: 'Federal Express Corporation', fullName: 'Federal Express Corporation' }, null, [{ full: 'Federal Express Corporation', short: 'FedEx' }]), { name: 'FedEx', source: 'alias' });
 });
