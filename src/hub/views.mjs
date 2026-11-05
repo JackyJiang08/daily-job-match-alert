@@ -253,10 +253,17 @@ export function todayTarget(dates, today) {
 
 // "Generate Missing Letters": every high match of the date without a letter and with a trusted company,
 // written in the background under the letters lock; hidden when there is nothing to write.
+// "Update Salutations" sits beside it whenever the date has saved letters: the salutation line and the file
+// name move to the company's short name and the PDF is rendered again, with no engine call.
+function updateSalutationsControl(selected, missing) {
+  if (!missing?.letters || missing.running) return '';
+  return `<form class="inline" method="post" action="/letters/update-salutations" id="update-salutations-form"><input type="hidden" name="date" value="${htmlEscape(selected)}"><button class="btn secondary small" type="submit" id="update-salutations" title="Use the company's short name in the salutation and the file name of every letter on this date and render the PDFs again. The letter bodies are not rewritten and no subscription quota is used.">Update Salutations (${Number(missing.letters)})</button></form>`;
+}
+
 function missingLettersControl(selected, missing) {
-  if (!missing || (!missing.count && !missing.running)) return '';
+  if (!missing || (!missing.count && !missing.running)) return updateSalutationsControl(selected, missing);
   if (missing.running) return `<button class="btn small" type="button" id="missing-letters" disabled title="Cover letters are being written; the cards update as they finish">Writing letters… ${Number(missing.done || 0)} of ${Number(missing.planned || 0)}</button>`;
-  return `<form class="inline" method="post" action="/letters/missing" id="missing-letters-form"><input type="hidden" name="date" value="${htmlEscape(selected)}"><button class="btn small" type="submit" id="missing-letters" title="Write a letter for every high match on this date that has none and a trusted company name">Generate Missing Letters (${Number(missing.count)})</button></form>`;
+  return `<form class="inline" method="post" action="/letters/missing" id="missing-letters-form"><input type="hidden" name="date" value="${htmlEscape(selected)}"><button class="btn small" type="submit" id="missing-letters" title="Write a letter for every high match on this date that has none and a trusted company name">Generate Missing Letters (${Number(missing.count)})</button></form>${updateSalutationsControl(selected, missing)}`;
 }
 
 export function reportsPage({ dates, selected, reportBody, desktopPath, today, missingLetters = null }) {

@@ -181,7 +181,7 @@ export async function runAutoLetters({ config, date, newMatchUrls = null, ctx, l
         const saved = await saveLetter(ctx, {
           date: item.date, jobId: item.jobId, trackId: draft.track.id, company: draft.company, paragraphs: draft.paragraphs,
           engine: draft.engine, model: draft.model, effort: draft.effort, reviewEngine: draft.reviewEngine, reviewModel: draft.reviewModel, reviewEffort: draft.reviewEffort,
-          source: 'auto', issues: draft.issues || [], editorNotes: draft.editorNotes || [], samplesUsed: draft.samplesUsed || [],
+          source: 'auto', issues: draft.issues || [], editorNotes: draft.editorNotes || [], samplesUsed: draft.samplesUsed || [], shortNameSource: draft.shortNameSource || null,
         });
         status.generated.push({ date: item.date, jobId: item.jobId, company: draft.company, slug: saved.slug, engine: draft.engine, model: draft.model, effort: draft.effort || null, reviewEngine: draft.reviewEngine || null, reviewModel: draft.reviewModel || null, reviewEffort: draft.reviewEffort || null, editorNotes: (draft.editorNotes || []).length });
       } catch (error) {

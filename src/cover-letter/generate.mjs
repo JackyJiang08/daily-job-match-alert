@@ -4,7 +4,8 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { LETTER_SCHEMA, REVIEW_SCHEMA, buildCondensePrompt, buildCoverLetterPrompt, buildReviewPrompt, selectSamples, validateParagraphs } from './compose.mjs';
+import { BODY_SCHEMA, LETTER_SCHEMA, REVIEW_SCHEMA, buildCondensePrompt, buildCoverLetterPrompt, buildReviewPrompt, selectSamples, validateParagraphs } from './compose.mjs';
+import { resolveShortName } from './short-name.mjs';
 
 export function paragraphsFrom(output, key = 'paragraphs') {
   if (Array.isArray(output?.[key])) return output[key];
@@ -17,6 +18,19 @@ export function paragraphsFrom(output, key = 'paragraphs') {
     return output.split(/\n\s*\n/).map(part => part.trim()).filter(Boolean);
   }
   return [];
+}
+
+// The draft's "shortName", from a parsed object or a JSON string.
+export function shortNameFrom(output) {
+  if (typeof output?.shortName === 'string') return output.shortName;
+  if (typeof output === 'string') {
+    const start = output.indexOf('{');
+    const end = output.lastIndexOf('}');
+    if (start >= 0 && end > start) {
+      try { return shortNameFrom(JSON.parse(output.slice(start, end + 1))); } catch {}
+    }
+  }
+  return null;
 }
 
 function issuesFrom(output) {
@@ -64,14 +78,27 @@ async function reviewWithChain({ engines, paragraphs, inputs, tempDirectory }) {
   throw lastError;
 }
 
+// inputs.naming = { chainName, aliases, fixed }: the candidate chain's company name, the owner's alias
+// table, and a short name the owner typed. An alias or a typed name is given to the model up front; otherwise
+// the model's shortName is checked (short-name.mjs) and the cleaned chain name stands in when it fails.
 export async function generateCoverLetter({ engine, reviewEngines = null, inputs, review = true, io = fs, tempRoot = os.tmpdir() }) {
   const samples = selectSamples(inputs.samples || [], inputs.track?.id || null);
+  const naming = { chainName: inputs.naming?.chainName ?? inputs.company ?? '', aliases: inputs.naming?.aliases || [], fixed: inputs.naming ? inputs.naming.fixed || null : inputs.company || null };
+  const preset = resolveShortName({ job: inputs.job, ...naming });
+  const presetName = preset.source === 'owner' || preset.source === 'alias' ? preset.name : null;
   return withTempDirectory(io, tempRoot, async tempDirectory => {
-    const prompt = buildCoverLetterPrompt({ ...inputs, samples });
+    const prompt = buildCoverLetterPrompt({ ...inputs, samples, shortName: presetName });
     const response = await engine.generateText(prompt, { schema: LETTER_SCHEMA, tempDirectory });
     const draft = validateParagraphs(paragraphsFrom(response.output));
+    const modelShortName = shortNameFrom(response.output);
+    const shortName = presetName ? { ...preset, modelValue: modelShortName } : { ...resolveShortName({ job: inputs.job, ...naming, modelShortName }), modelValue: modelShortName };
     let paragraphs = draft.paragraphs;
     let issues = draft.issues;
+    // A refused short name may still stand in the body; the owner checks the mentions.
+    if (shortName.rejected && paragraphs.some(paragraph => paragraph.includes(shortName.rejected.value))) {
+      issues = [...issues, { kind: 'short-name', message: `The body calls the company "${shortName.rejected.value}" (${shortName.rejected.reason}); the salutation and file name use "${shortName.name}"` }];
+    }
+    const company = shortName.name;
     let editorNotes = [];
     let reviewed = false;
     let revisionAdopted = false;
@@ -80,7 +107,7 @@ export async function generateCoverLetter({ engine, reviewEngines = null, inputs
     let reviewEffort = null;
     let handoffNotes = [];
     if (review && draft.ok) {
-      const edited = await reviewWithChain({ engines: reviewEngines?.length ? reviewEngines : [engine], paragraphs, inputs, tempDirectory });
+      const edited = await reviewWithChain({ engines: reviewEngines?.length ? reviewEngines : [engine], paragraphs, inputs: { ...inputs, company }, tempDirectory });
       reviewed = true;
       editorNotes = edited.notes;
       handoffNotes = edited.handoffNotes;
@@ -91,12 +118,13 @@ export async function generateCoverLetter({ engine, reviewEngines = null, inputs
         revisionAdopted = true;
         paragraphs = edited.paragraphs;
         const recheck = validateParagraphs(paragraphs);
-        issues = [...edited.revisionIssues, ...recheck.issues.filter(issue => !['bullet', 'dash'].includes(issue.kind))];
+        issues = [...edited.revisionIssues, ...recheck.issues.filter(issue => !['bullet', 'dash'].includes(issue.kind)), ...issues.filter(issue => issue.kind === 'short-name')];
       }
     }
     const words = validateParagraphs(paragraphs).wordCount;
     return {
       paragraphs, issues, wordCount: words, ok: draft.ok,
+      company, shortName: { name: shortName.name, source: shortName.source, fallback: shortName.fallback, modelValue: shortName.modelValue || null, rejected: shortName.rejected || null },
       engine: engine.id, engineLabel: engine.label, model: response.scoringModel || engine.model || 'unknown', effort: engine.effort || null,
       reviewed, editorNotes: [...handoffNotes, ...editorNotes], revisionAdopted,
       reviewEngine: reviewEngineId, reviewModel, reviewEffort,
@@ -108,7 +136,7 @@ export async function generateCoverLetter({ engine, reviewEngines = null, inputs
 // Condensing pass used by the PDF renderer when the first render runs past one page.
 export async function condenseCoverLetter({ engine, paragraphs, pages, io = fs, tempRoot = os.tmpdir() }) {
   return withTempDirectory(io, tempRoot, async tempDirectory => {
-    const response = await engine.generateText(buildCondensePrompt({ paragraphs, pages }), { schema: LETTER_SCHEMA, tempDirectory });
+    const response = await engine.generateText(buildCondensePrompt({ paragraphs, pages }), { schema: BODY_SCHEMA, tempDirectory });
     const condensed = validateParagraphs(paragraphsFrom(response.output));
     if (!condensed.ok || condensed.paragraphs.length === 0) return null;
     return condensed.paragraphs;

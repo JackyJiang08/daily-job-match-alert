@@ -1,5 +1,5 @@
 // Private cover-letter material and generated letters, all under private/ (gitignored):
-//   private/cover-letter/profile.json        name, phone, email, signature, playbook + sample metadata
+//   private/cover-letter/profile.json        name, phone, email, signature, company aliases, playbook + sample metadata
 //   private/cover-letter/playbook.<ext>      the owner's writing rules and evidence library
 //   private/cover-letter/samples/<file>.txt  extracted text of up to ten style samples (+ original PDF)
 //   private/cover-letters/<date>/<Company>/  letter.json, letter.md, <fileName>.pdf per generated letter
@@ -8,6 +8,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { SAMPLE_TRACKS, deriveFileNamePrefix, letterFileName, sanitizeCompany } from './compose.mjs';
 import { writeJsonAtomic } from '../json-file.mjs';
+import { parseAliasText } from './short-name.mjs';
 
 export const MAX_SAMPLES = 10;
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
@@ -35,7 +36,8 @@ export function createLetterStore({ root, io = fs, now = () => new Date(), extra
   // until the owner sets one under Settings.
   async function readProfile() {
     const stored = await readJson(profilePath, {});
-    const profile = { name: '', phone: '', email: '', signatureName: '', fileNamePrefix: '', playbook: null, samples: [], ...stored };
+    const profile = { name: '', phone: '', email: '', signatureName: '', fileNamePrefix: '', companyAliases: [], playbook: null, samples: [], ...stored };
+    if (!Array.isArray(profile.companyAliases)) profile.companyAliases = [];
     if (!String(profile.fileNamePrefix || '').trim()) profile.fileNamePrefix = deriveFileNamePrefix(profile.signatureName, profile.name);
     return profile;
   }
@@ -54,6 +56,12 @@ export function createLetterStore({ root, io = fs, now = () => new Date(), extra
     const profile = await readProfile();
     for (const key of ['name', 'phone', 'email', 'signatureName', 'fileNamePrefix']) {
       if (fields[key] != null) profile[key] = String(fields[key]).trim().slice(0, 200);
+    }
+    // Settings → Cover Letters "Company Short Names": one "Full Name = Short Name" per line.
+    if (fields.companyAliases != null) {
+      const { aliases, errors } = parseAliasText(fields.companyAliases);
+      if (errors.length) throw new LetterInputError(`Company short names: ${errors.slice(0, 3).join('; ')}`);
+      profile.companyAliases = aliases;
     }
     await writeJson(profilePath, profile);
     return profile;
@@ -200,6 +208,9 @@ export function createLetterStore({ root, io = fs, now = () => new Date(), extra
     const existing = await readJson(path.join(from.directory, 'letter.json'), null);
     if (!existing) throw new LetterInputError('Letter not found');
     if (to.slug !== from.slug) {
+      // Never over another posting's letter saved under the new name on the same date.
+      const occupant = await readJson(path.join(to.directory, 'letter.json'), null);
+      if (occupant && occupant.jobId && occupant.jobId !== existing.jobId) throw new LetterInputError(`Another letter of ${date} is already saved as ${company}; rename that one first`);
       await io.mkdir(path.dirname(to.directory), { recursive: true });
       await io.rm(to.directory, { recursive: true, force: true });
       await io.rename(from.directory, to.directory);

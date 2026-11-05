@@ -6,6 +6,7 @@ import { formatLocalDateTime } from '../time-format.mjs';
 import { roleLabel } from '../report.mjs';
 import { htmlEscape } from '../utils.mjs';
 import { looksLikeEntityCode } from '../posting-fields.mjs';
+import { aliasText } from '../cover-letter/short-name.mjs';
 
 export const TRACK_LABELS = { data: 'Data', llm: 'LLM', agent: 'AI Agent' };
 export const MAX_SAMPLE_COUNT = 10;
@@ -128,6 +129,10 @@ export function coverLetterSettingsSection({ profile, readiness, timeZone }) {
         <label class="field"><span>File Name Prefix (letters are saved as Prefix_Cover_Letter_Company.pdf)</span><input type="text" name="fileNamePrefix" class="control-input" value="${htmlEscape(profile.fileNamePrefix || '')}" placeholder="JaneDoe" pattern="[A-Za-z0-9]{1,60}" title="Letters and digits only"></label>
       </div>
     </fieldset>
+    <fieldset class="group" id="company-short-names"><legend>Company Short Names</legend>
+      <p class="muted" style="margin:0 0 var(--space-2)">One per line, full name = short name (for example: PricewaterhouseCoopers = PwC). A name listed here is used in the salutation, the file name, and the body after the first mention, ahead of the short name the model picks.</p>
+      <textarea name="companyAliases" class="control-input" rows="5" spellcheck="false" placeholder="Hewlett Packard Enterprise = HPE&#10;The Procter &amp; Gamble Company = P&amp;G">${htmlEscape(aliasText(profile.companyAliases))}</textarea>
+    </fieldset>
     <fieldset class="group"><legend>Playbook</legend>
       <p class="muted" style="margin:0 0 var(--space-2)">Your writing rules and evidence library; Replace swaps the whole file.</p>
       ${playbookRow(profile, timeZone)}
@@ -243,7 +248,7 @@ export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, 
     </dl>
     <div class="letter-controls">
       <label class="field"><span>Resume Track</span><select id="letter-track" class="control-input">${trackOptions}</select></label>
-      <label class="field"><span>Company Name</span><input type="text" id="letter-company" class="control-input" value="${htmlEscape(company)}" required></label>
+      <label class="field"><span>Company Short Name</span><input type="text" id="letter-company" class="control-input" value="${htmlEscape(company)}" required title="Used in &quot;Dear … Recruiting Team,&quot;, the file name, and the body after the first mention. A name typed here is kept on Regenerate; Rename Company &amp; Re-render applies it to the saved letter."></label>
       ${companyHint}
       <div class="row">
         <button class="btn" id="generate-button" type="button"${readiness.ready ? '' : ' disabled'}>Regenerate</button>
@@ -285,7 +290,13 @@ export const LETTER_SCRIPT = `
   var notesBox = document.getElementById('editor-notes');
   var emptyHint = document.getElementById('letter-empty');
   var notesList = document.getElementById('editor-notes-list');
-  var state = { engine: null, model: null, issues: [], editorNotes: [], samplesUsed: [], pages: null };
+  var state = { engine: null, model: null, issues: [], editorNotes: [], samplesUsed: [], pages: null, shortNameSource: null };
+  // A short name the owner typed (or confirmed for an uncertain company) is sent as fixed; otherwise the
+  // alias table and the model choose it, and the field shows what they chose.
+  var companyInput = document.getElementById('letter-company');
+  var companyBase = companyInput.value;
+  var companyTyped = panel.dataset.companyUncertain === 'yes';
+  companyInput.addEventListener('input', function () { companyTyped = companyInput.value.trim() !== companyBase.trim(); });
   function say(text, error) { status.textContent = text || ''; status.className = 'letter-status' + (error ? ' error' : ''); }
   function form(fields) { var params = new URLSearchParams(); Object.keys(fields).forEach(function (key) { [].concat(fields[key]).forEach(function (value) { params.append(key, value); }); }); return params.toString(); }
   function post(url, fields) {
@@ -315,6 +326,8 @@ export const LETTER_SCRIPT = `
     if (notesBox) notesBox.hidden = !(result.notesNeedReview && result.notesNeedReview.length);
     var infoList = document.getElementById('letter-info-notes');
     if (infoList) { infoList.innerHTML = ''; (result.notesInfo || []).forEach(function (note) { var item = document.createElement('li'); item.textContent = note; infoList.appendChild(item); }); infoList.hidden = !(result.notesInfo && result.notesInfo.length); }
+    if (result.company) { companyInput.value = result.company; companyBase = result.company; companyTyped = result.shortNameSource === 'owner'; }
+    state.shortNameSource = result.shortNameSource || null;
     state.engine = result.engine; state.model = result.model; state.issues = result.issues || []; state.editorNotes = result.editorNotes || []; state.samplesUsed = result.samplesUsed || []; state.pages = null;
     showCounts(result.paragraphs, null);
     showFoot(result);
@@ -323,7 +336,7 @@ export const LETTER_SCRIPT = `
   box.addEventListener('input', function () { showCounts(paragraphs(), state.pages); });
   var codexButton = document.getElementById('codex-button');
   function postGenerate(engine) {
-    var fields = { date: panel.dataset.date, job: panel.dataset.job, track: document.getElementById('letter-track').value, company: document.getElementById('letter-company').value };
+    var fields = { date: panel.dataset.date, job: panel.dataset.job, track: document.getElementById('letter-track').value, company: companyInput.value, companyEdited: companyTyped ? '1' : '' };
     if (engine) fields.engine = engine;
     return fetch('/letters/generate', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form(fields) }).then(function (r) { return r.json().then(function (data) { data.httpStatus = r.status; return data; }); });
   }
@@ -362,7 +375,7 @@ export const LETTER_SCRIPT = `
   if (codexButton) codexButton.addEventListener('click', function () { runGenerate('codex'); });
   save.addEventListener('click', function () {
     save.disabled = true; say('Rendering PDF…');
-    post('/letters/save', { date: panel.dataset.date, job: panel.dataset.job, track: document.getElementById('letter-track').value, company: document.getElementById('letter-company').value, paragraph: paragraphs(), engine: state.engine || '', model: state.model || '', issues: JSON.stringify(state.issues), editorNotes: JSON.stringify(state.editorNotes), samplesUsed: JSON.stringify(state.samplesUsed) })
+    post('/letters/save', { date: panel.dataset.date, job: panel.dataset.job, track: document.getElementById('letter-track').value, company: document.getElementById('letter-company').value, paragraph: paragraphs(), engine: state.engine || '', model: state.model || '', issues: JSON.stringify(state.issues), editorNotes: JSON.stringify(state.editorNotes), samplesUsed: JSON.stringify(state.samplesUsed), shortNameSource: companyTyped ? 'owner' : (state.shortNameSource || '') })
       .then(function (result) {
         download.href = result.downloadUrl; download.hidden = false;
         panel.dataset.slug = result.slug; var renameButton = document.getElementById('rename-button'); if (renameButton) renameButton.hidden = false;

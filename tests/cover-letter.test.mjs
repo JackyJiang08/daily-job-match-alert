@@ -57,7 +57,8 @@ test('the prompt carries the playbook, the chosen track resume, the samples with
     resumeText: 'RESUME TEXT FOR LLM TRACK',
     job: { title: 'LLM Engineer', company: 'Globex', location: 'Boston, MA Johnston, RI', roleType: 'new_grad', description: 'Build RAG systems.', reasons: ['RAG match'], gaps: ['No Kubernetes'] },
   });
-  assert.match(prompt, /^RULES:\n1\. You write cover letters\. Output ONLY the body paragraphs as JSON/);
+  assert.match(prompt, /^RULES:\n1\. You write cover letters\. Output ONLY JSON: \{ "paragraphs": string\[\], "shortName": string \}/);
+  assert.match(prompt, /\n2\. Company naming: return "shortName", the name the company most often uses for itself in the JOB POSTING description/);
   assert.match(prompt, /Body length: 460 to 600 words/);
   assert.match(prompt, /Never use an em dash or an en dash/);
   assert.match(prompt, /no bullet points/);
@@ -76,8 +77,8 @@ test('the prompt carries the playbook, the chosen track resume, the samples with
   assert.match(prompt, /"gaps": \[\s*"No Kubernetes"\s*\]/);
   assert.doesNotMatch(prompt, /Condense it/);
   assert.match(buildCoverLetterPrompt({ playbook: 'P', track: { id: 'data', label: 'Data' }, resumeText: 'R', job: {}, condense: true }), /Condense it by about 15 percent/);
-  assert.equal(letterRules().split('\n').length, 11);
-  assert.equal(letterRules({ condense: true }).split('\n').length, 12);
+  assert.equal(letterRules().split('\n').length, 12, 'the naming rule is one more line');
+  assert.equal(letterRules({ condense: true }).split('\n').length, 13);
   assert.match(prompt, /Prefer opening with "I am writing to apply for the <role> position at <company>" unless the samples open differently/);
   assert.match(prompt, /State the GPA as "with a 3\.91 GPA" \(the number exactly as the RESUME or PLAYBOOK gives it\), never as "3\.91\/4\.00"/);
   assert.match(prompt, /Vary the phrasing between letters: do not reuse one fixed set of opening, transition, and closing phrases/);
@@ -550,7 +551,7 @@ test('generate → edit → save renders a PDF, records the letter, marks the ca
     assert.equal(draft.engine, 'claude');
     assert.equal(draft.model, 'claude-fable-5');
     assert.equal(draft.track.id, 'llm');
-    assert.equal(draft.company, 'Acme, Inc.');
+    assert.equal(draft.company, 'Acme');
     assert.match(calls[0].prompt, /RESUME \(track "LLM"/);
     assert.match(calls[0].prompt, /LLM Resume/, 'the switched track profile text is what the engine sees');
     assert.match(calls[0].prompt, /"title": "Data Analyst"/);
@@ -558,13 +559,13 @@ test('generate → edit → save renders a PDF, records the letter, marks the ca
 
     const edited = [...draft.paragraphs];
     edited[1] = 'I edited this paragraph by hand before rendering.';
-    const saved = await hub.form('/letters/save', { date: '2026-09-15', job: jobId, track: 'llm', company: 'Acme, Inc.', paragraph: edited, engine: draft.engine, model: draft.model, issues: JSON.stringify(draft.issues), editorNotes: JSON.stringify(draft.editorNotes), samplesUsed: JSON.stringify(draft.samplesUsed) });
+    const saved = await hub.form('/letters/save', { date: '2026-09-15', job: jobId, track: 'llm', company: draft.company, paragraph: edited, engine: draft.engine, model: draft.model, issues: JSON.stringify(draft.issues), editorNotes: JSON.stringify(draft.editorNotes), samplesUsed: JSON.stringify(draft.samplesUsed) });
     assert.equal(saved.status, 200);
     const result = JSON.parse(saved.text);
-    assert.equal(result.slug, 'AcmeInc');
-    assert.equal(result.downloadUrl, '/letters/2026-09-15/AcmeInc/JaneDoe_Cover_Letter_AcmeInc.pdf');
+    assert.equal(result.slug, 'Acme');
+    assert.equal(result.downloadUrl, '/letters/2026-09-15/Acme/JaneDoe_Cover_Letter_Acme.pdf');
     assert.deepEqual([result.pdf.renderer, result.pdf.pages, result.pdf.layout], ['pdfkit', 1, 'letter-1in']);
-    const record = JSON.parse(await fs.readFile(path.join(root, 'private', 'cover-letters', '2026-09-15', 'AcmeInc', 'letter.json'), 'utf8'));
+    const record = JSON.parse(await fs.readFile(path.join(root, 'private', 'cover-letters', '2026-09-15', 'Acme', 'letter.json'), 'utf8'));
     assert.equal(record.paragraphs[1], 'I edited this paragraph by hand before rendering.');
     assert.deepEqual(record.editorNotes, ['Paragraph 1 lacks the GPA']);
     assert.deepEqual(record.samplesUsed, [{ name: 'sample.txt', track: null }]);
@@ -572,29 +573,29 @@ test('generate → edit → save renders a PDF, records the letter, marks the ca
     assert.equal(typeof record.wordCount, 'number');
     assert.equal(record.track, 'llm');
     assert.equal(record.jobId, jobId);
-    const markdown = await fs.readFile(path.join(root, 'private', 'cover-letters', '2026-09-15', 'AcmeInc', 'letter.md'), 'utf8');
-    assert.match(markdown, /^# Jane Doe\n555-0100 · jane\.doe@example\.com\n\nSeptember 15, 2026\n\nDear Acme, Inc\. Recruiting Team,\n/);
+    const markdown = await fs.readFile(path.join(root, 'private', 'cover-letters', '2026-09-15', 'Acme', 'letter.md'), 'utf8');
+    assert.match(markdown, /^# Jane Doe\n555-0100 · jane\.doe@example\.com\n\nSeptember 15, 2026\n\nDear Acme Recruiting Team,\n/);
     assert.match(markdown, /\nSincerely,\nJane Doe\n$/, 'sign-off and name on consecutive lines, as in the samples');
 
     const pdf = await hub.request('GET', result.downloadUrl);
     assert.equal(pdf.status, 200);
     assert.match(pdf.headers['content-type'], /application\/pdf/);
-    assert.equal(pdf.headers['content-disposition'], 'attachment; filename="JaneDoe_Cover_Letter_AcmeInc.pdf"');
+    assert.equal(pdf.headers['content-disposition'], 'attachment; filename="JaneDoe_Cover_Letter_Acme.pdf"');
     assert.equal(pdf.buffer.slice(0, 5).toString('latin1'), '%PDF-');
     assert.equal(countPdfPages(pdf.buffer), 1);
-    assert.equal((await hub.request('GET', '/letters/2026-09-15/AcmeInc/letter.md')).status, 200);
-    assert.equal((await hub.request('GET', '/letters/2026-09-15/AcmeInc/letter.json')).status, 404, 'metadata is not served');
-    assert.equal((await hub.request('GET', '/letters/2026-09-15/AcmeInc/..%2Fprofile.json')).status, 400, 'a traversal-looking file name is refused outright');
+    assert.equal((await hub.request('GET', '/letters/2026-09-15/Acme/letter.md')).status, 200);
+    assert.equal((await hub.request('GET', '/letters/2026-09-15/Acme/letter.json')).status, 404, 'metadata is not served');
+    assert.equal((await hub.request('GET', '/letters/2026-09-15/Acme/..%2Fprofile.json')).status, 400, 'a traversal-looking file name is refused outright');
     assert.equal((await hub.request('GET', '/letters/2026-09-15/Nope/letter.md')).status, 404);
-    assert.equal((await hub.request('GET', '/letters/2026-09-15/AcmeInc')).status, 200);
-    const reopened = (await hub.request('GET', '/letters/2026-09-15/AcmeInc')).text;
+    assert.equal((await hub.request('GET', '/letters/2026-09-15/Acme')).status, 200);
+    const reopened = (await hub.request('GET', '/letters/2026-09-15/Acme')).text;
     assert.match(reopened, /I edited this paragraph by hand before rendering\./);
     assert.match(reopened, /<details class="notes" id="editor-notes" open hidden><summary>Check before sending<\/summary><ul class="issues" id="editor-notes-list"><\/ul><\/details>/, 'a rule fix the editor applied needs no check');
     assert.match(reopened, /<ul class="letter-foot foot-notes" id="letter-info-notes"><li>Paragraph 1 lacks the GPA<\/li><\/ul>/, 'it is an info note in the footer');
     assert.match(reopened, /<p class="letter-foot" id="letter-foot">Samples used: sample\.txt · Engine: claude · claude-fable-5 · PDF via pdfkit<\/p>/);
     assert.match(reopened, /<p class="letter-counts" id="letter-counts">\d+ words · 5 paragraphs · 1 page<\/p>\s*<p class="muted" id="letter-empty" hidden>[^<]*<\/p>\s*<div id="paragraphs"><div class="para-row"><span class="num">1<\/span><textarea class="para" name="paragraph" data-index="0">/);
     assert.match(reopened, /<span>Resume Track<\/span><select id="letter-track" class="control-input">/);
-    assert.match(reopened, /<span>Company Name<\/span>/);
+    assert.match(reopened, /<span>Company Short Name<\/span>/);
     assert.match(reopened, /id="generate-button" type="button">Regenerate<\/button>/);
     assert.match(reopened, /<article class="card" id="letter-editor" data-state="editing">/, 'an existing letter opens straight into the editor');
     assert.match(reopened, /<p class="muted" id="letter-empty" hidden>/);
@@ -610,16 +611,16 @@ test('generate → edit → save renders a PDF, records the letter, marks the ca
 
     const list = await hub.request('GET', '/letters');
     assert.match(list.text, /<tr><th>Date<\/th><th>Company<\/th><th>Role<\/th><th>Track<\/th><th>Engine<\/th><th>Pages<\/th><th>Generated<\/th><th>Notes<\/th><th>File<\/th><th>Actions<\/th><\/tr>/);
-    assert.match(list.text, /<td><span class="mono">JaneDoe_Cover_Letter_AcmeInc\.pdf<\/span><\/td>/, 'the current file name is shown');
-    assert.match(list.text, /<td>2026-09-15<\/td>\s*<td><a href="\/letters\/2026-09-15\/AcmeInc">Acme, Inc\.<\/a><\/td>\s*<td>Data Analyst<\/td>\s*<td><span class="badge" data-track-badge="llm">LLM<\/span><\/td>\s*<td>claude · claude-fable-5<\/td>\s*<td>1<\/td>\s*<td>Sep 15, 2026, 10:00 AM<\/td>\s*<td>1<\/td>/, 'generation time and editor-note count columns');
+    assert.match(list.text, /<td><span class="mono">JaneDoe_Cover_Letter_Acme\.pdf<\/span><\/td>/, 'the current file name is shown');
+    assert.match(list.text, /<td>2026-09-15<\/td>\s*<td><a href="\/letters\/2026-09-15\/Acme">Acme<\/a><\/td>\s*<td>Data Analyst<\/td>\s*<td><span class="badge" data-track-badge="llm">LLM<\/span><\/td>\s*<td>claude · claude-fable-5<\/td>\s*<td>1<\/td>\s*<td>Sep 15, 2026, 10:00 AM<\/td>\s*<td>1<\/td>/, 'generation time and editor-note count columns');
     assert.match(list.text, /Letters you generate are kept on this Mac\. Reopen one to edit or download it again\./);
     assert.doesNotMatch(list.text, /private\/cover-letters/);
-    assert.match(list.text, /href="\/letters\/2026-09-15\/AcmeInc\/JaneDoe_Cover_Letter_AcmeInc\.pdf">Download PDF<\/a>/);
+    assert.match(list.text, /href="\/letters\/2026-09-15\/Acme\/JaneDoe_Cover_Letter_Acme\.pdf">Download PDF<\/a>/);
     const report = await hub.request('GET', '/reports/2026-09-15');
     assert.doesNotMatch(report.text.split('<script>')[0], /data-badge="letter-/, 'no status badge: the only letter badge is "Check N details"');
-    assert.match(report.text, /<div class="actions"><a class="apply"[^>]*>Open Posting<\/a><a class="btn secondary small" href="\/letters\/2026-09-15\/AcmeInc\/JaneDoe_Cover_Letter_AcmeInc\.pdf">Download PDF<\/a><a class="btn secondary small" href="\/letters\/2026-09-15\/AcmeInc">Open Letter<\/a><span class="meta"/, 'a saved letter gives the card exactly two buttons');
+    assert.match(report.text, /<div class="actions"><a class="apply"[^>]*>Open Posting<\/a><a class="btn secondary small" href="\/letters\/2026-09-15\/Acme\/JaneDoe_Cover_Letter_Acme\.pdf">Download PDF<\/a><a class="btn secondary small" href="\/letters\/2026-09-15\/Acme">Open Letter<\/a><span class="meta"/, 'a saved letter gives the card exactly two buttons');
     assert.doesNotMatch(report.text.split('<script>')[0], /Generate Cover Letter/, 'no one-click button once a letter exists (the page script mentions the label)');
-    assert.match(list.text, /<a class="btn secondary small" href="\/letters\/2026-09-15\/AcmeInc">Open<\/a> <a class="btn secondary small" href="\/letters\/2026-09-15\/AcmeInc\/JaneDoe_Cover_Letter_AcmeInc\.pdf">Download PDF<\/a>/, 'the Letters row has the same two actions');
+    assert.match(list.text, /<a class="btn secondary small" href="\/letters\/2026-09-15\/Acme">Open<\/a> <a class="btn secondary small" href="\/letters\/2026-09-15\/Acme\/JaneDoe_Cover_Letter_Acme\.pdf">Download PDF<\/a>/, 'the Letters row has the same two actions');
 
     const evil = await hub.form('/letters/generate', { date: '2026-09-15', job: jobId }, { origin: 'http://evil.example' });
     assert.equal(evil.status, 403);
@@ -678,21 +679,21 @@ test('one click on a card generates in the background: generating → ready with
     assert.equal(ready.state, 'ready');
     assert.equal(ready.busy, false);
     assert.equal(calls, 2, 'draft plus editor pass');
-    assert.equal(ready.result.downloadUrl, '/letters/2026-09-15/AcmeInc/JaneDoe_Cover_Letter_AcmeInc.pdf');
-    assert.equal(ready.result.openUrl, '/letters/2026-09-15/AcmeInc');
+    assert.equal(ready.result.downloadUrl, '/letters/2026-09-15/Acme/JaneDoe_Cover_Letter_Acme.pdf');
+    assert.equal(ready.result.openUrl, '/letters/2026-09-15/Acme');
     assert.equal(ready.result.track.id, 'data', 'the recommended track');
-    assert.equal(ready.result.company, 'Acme, Inc.');
+    assert.equal(ready.result.company, 'Acme');
     assert.equal(ready.result.pdf.pages, 1);
     assert.deepEqual(JSON.parse((await hub.request('GET', '/letters/oneclick.json')).text).state, 'ready');
     const pdf = await hub.request('GET', ready.result.downloadUrl);
     assert.equal(pdf.status, 200);
     assert.equal(pdf.headers['content-type'], 'application/pdf');
-    assert.equal(pdf.headers['content-disposition'], 'attachment; filename="JaneDoe_Cover_Letter_AcmeInc.pdf"', 'the browser downloads it under the templated name');
+    assert.equal(pdf.headers['content-disposition'], 'attachment; filename="JaneDoe_Cover_Letter_Acme.pdf"', 'the browser downloads it under the templated name');
     assert.equal(pdf.buffer.slice(0, 5).toString('latin1'), '%PDF-');
     const report = await hub.request('GET', '/reports/2026-09-15');
-    assert.match(report.text, /<a class="btn secondary small" href="\/letters\/2026-09-15\/AcmeInc\/JaneDoe_Cover_Letter_AcmeInc\.pdf">Download PDF<\/a><a class="btn secondary small" href="\/letters\/2026-09-15\/AcmeInc">Open Letter<\/a>/);
+    assert.match(report.text, /<a class="btn secondary small" href="\/letters\/2026-09-15\/Acme\/JaneDoe_Cover_Letter_Acme\.pdf">Download PDF<\/a><a class="btn secondary small" href="\/letters\/2026-09-15\/Acme">Open Letter<\/a>/);
     assert.doesNotMatch(report.text.split('<script>')[0], /data-oneclick/);
-    const opened = await hub.request('GET', '/letters/2026-09-15/AcmeInc');
+    const opened = await hub.request('GET', '/letters/2026-09-15/Acme');
     assert.match(opened.text, /<article class="card" id="letter-editor" data-state="editing">/);
     assert.match(opened.text, /<textarea class="para" name="paragraph" data-index="0">Paragraph 1 /);
     assert.match(opened.text, /id="generate-button" type="button">Regenerate<\/button>/);
@@ -784,7 +785,7 @@ test('a quota refusal reaches the panel and the card as a plain sentence with a 
     const ready = await hub.ctx.letterJobs.settle();
     assert.equal(ready.state, 'ready');
     assert.equal(ready.result.engine, 'codex');
-    const panel = await hub.request('GET', '/letters/2026-09-15/AcmeInc');
+    const panel = await hub.request('GET', '/letters/2026-09-15/Acme');
     assert.equal(panel.status, 200, 'the one-click letter was saved under the fixture company slug');
     assert.match(panel.text, /<button class="btn secondary" id="codex-button" type="button" hidden>Generate with Codex<\/button>/);
     assert.match(panel.text, /Generate with Codex/);
@@ -1148,6 +1149,142 @@ test('letter stages run on their own assignments; without a Codex connection bot
     assert.deepEqual(calls.map(call => [call.engine, call.model, call.kind]), [['codex', 'gpt-5.6-sol', 'draft'], ['codex', 'gpt-5.6-sol', 'editor'], ['claude', 'claude-opus-5-5', 'editor']]);
     assert.equal(handed.editorNotes[0], 'Editor: gpt-5.6-sol failed (codex exited 1: stream disconnected); reviewed with claude-opus-5-5');
     assert.equal(handed.reviewModel, 'claude-opus-5-5');
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('short names: Settings keeps the alias table, the panel shows the short name, a typed name is kept, and the alias beats the model', async () => {
+  const root = await prepareProject();
+  const payloadPath = path.join(root, 'state', 'report-payload-2026-09-15.json');
+  const payload = JSON.parse(await fs.readFile(payloadPath, 'utf8'));
+  const pwc = job({ url: 'https://example.com/jobs/pwc', company: 'PricewaterhouseCoopers (PwC)', description: 'At PwC, our people build trust. PwC analysts automate audits with SQL and Python.' });
+  payload.matches.push(pwc);
+  payload.reviewed.push(pwc);
+  await fs.writeFile(payloadPath, JSON.stringify(payload));
+  const replies = [];
+  const engine = { id: 'claude', label: 'Claude subscription', model: 'fable', async generateText(prompt) { replies.push(prompt); if (prompt.startsWith('EDITOR REVIEW')) return { output: { issues: [], revised_paragraphs: [] }, scoringModel: 'claude-fable-5' }; return { output: { paragraphs: fiveParagraphs(100), shortName: 'PwC' }, scoringModel: 'claude-fable-5' }; } };
+  const hub = await startHub(root, { letterEngine: engine });
+  const pwcId = sha256(pwc.url).slice(0, 16);
+  const acmeId = sha256('https://example.com/jobs/1').slice(0, 16);
+  try {
+    await hub.upload('/settings/cover-letter', PROFILE, [{ field: 'playbook', name: 'playbook.md', data: Buffer.from(`# Playbook\n${'Real evidence line. '.repeat(10)}`) }], { companyAliases: '' });
+    // Before any draft the panel offers the cleaned company name.
+    assert.match((await hub.request('GET', `/letters/new?date=2026-09-15&job=${acmeId}`)).text, /<span>Company Short Name<\/span><input type="text" id="letter-company" class="control-input" value="Acme"/);
+    assert.match((await hub.request('GET', `/letters/new?date=2026-09-15&job=${pwcId}`)).text, /id="letter-company" class="control-input" value="PricewaterhouseCoopers"/);
+    // The model's PwC is in the posting, so the draft uses it.
+    const drafted = JSON.parse((await hub.form('/letters/generate', { date: '2026-09-15', job: pwcId, track: 'data', company: 'PricewaterhouseCoopers' })).text);
+    assert.equal(drafted.company, 'PwC');
+    assert.equal(drafted.shortNameSource, 'model');
+    // A name the owner typed in the panel is kept on Regenerate.
+    const typed = JSON.parse((await hub.form('/letters/generate', { date: '2026-09-15', job: pwcId, track: 'data', company: 'PwC US', companyEdited: '1' })).text);
+    assert.equal(typed.company, 'PwC US');
+    assert.equal(typed.shortNameSource, 'owner');
+    assert.match(replies.at(-2), /the company's short name is "PwC US"/, 'the typed name went to the model');
+
+    // The alias table (Settings → Cover Letters) wins over the model.
+    const bad = await hub.upload('/settings/cover-letter', PROFILE, [], { companyAliases: 'Acme without separator' });
+    assert.equal(bad.status, 303);
+    assert.match(decodeURIComponent(bad.headers.location), /error=Company short names: Line 1: write "Full Name = Short Name"/);
+    await hub.upload('/settings/cover-letter', PROFILE, [], { companyAliases: 'PricewaterhouseCoopers = PwC Advisory\nAcme, Inc. = ACME' });
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(root, 'private', 'cover-letter', 'profile.json'), 'utf8')).companyAliases, [{ full: 'PricewaterhouseCoopers', short: 'PwC Advisory' }, { full: 'Acme, Inc.', short: 'ACME' }]);
+    assert.match((await hub.request('GET', '/settings?tab=letters')).text, /<legend>Company Short Names<\/legend>[\s\S]*?<textarea name="companyAliases"[^>]*>PricewaterhouseCoopers = PwC Advisory\nAcme, Inc. = ACME<\/textarea>/);
+    const aliased = JSON.parse((await hub.form('/letters/generate', { date: '2026-09-15', job: pwcId, track: 'data', company: 'PwC' })).text);
+    assert.equal(aliased.company, 'PwC Advisory');
+    assert.equal(aliased.shortNameSource, 'alias');
+    assert.match((await hub.request('GET', `/letters/new?date=2026-09-15&job=${acmeId}`)).text, /id="letter-company" class="control-input" value="ACME"/, 'the panel starts from the alias');
+    const saved = JSON.parse((await hub.form('/letters/save', { date: '2026-09-15', job: pwcId, track: 'data', company: aliased.company, paragraph: aliased.paragraphs, engine: 'claude', model: 'x', shortNameSource: aliased.shortNameSource })).text);
+    assert.equal(saved.downloadUrl, '/letters/2026-09-15/PwCAdvisory/JaneDoe_Cover_Letter_PwCAdvisory.pdf');
+    const record = JSON.parse(await fs.readFile(path.join(root, 'private', 'cover-letters', '2026-09-15', 'PwCAdvisory', 'letter.json'), 'utf8'));
+    assert.equal(record.fullName, 'PricewaterhouseCoopers (PwC)');
+    assert.equal(record.shortNameSource, 'alias');
+    assert.match(await fs.readFile(path.join(root, 'private', 'cover-letters', '2026-09-15', 'PwCAdvisory', 'letter.md'), 'utf8'), /\nDear PwC Advisory Recruiting Team,\n/);
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('Update Salutations rewrites the salutation and the file name of the date\'s letters and renders the PDF again, without an engine call or a body change', async () => {
+  const root = await prepareProject();
+  const payloadPath = path.join(root, 'state', 'report-payload-2026-09-15.json');
+  const payload = JSON.parse(await fs.readFile(payloadPath, 'utf8'));
+  const extra = [
+    job({ url: 'https://example.com/jobs/dj', company: 'Dow Jones & Company, Inc.', description: 'Dow Jones is a global provider of news.' }),
+    job({ url: 'https://example.com/jobs/pg', company: 'The Procter & Gamble Company', description: 'Procter & Gamble brands serve consumers.' }),
+    job({ url: 'https://example.com/jobs/renamed', company: 'Initech Holdings', description: 'Initech is hiring.' }),
+  ];
+  payload.matches.push(...extra);
+  payload.reviewed.push(...extra);
+  await fs.writeFile(payloadPath, JSON.stringify(payload));
+  let engineCalls = 0;
+  const engine = { id: 'claude', label: 'Claude subscription', model: 'fable', async generateText() { engineCalls += 1; throw new Error('no engine call expected'); } };
+  const hub = await startHub(root, { letterEngine: engine });
+  const idOf = url => sha256(url).slice(0, 16);
+  const dir = (...parts) => path.join(root, 'private', 'cover-letters', '2026-09-15', ...parts);
+  try {
+    await hub.upload('/settings/cover-letter', PROFILE, [{ field: 'playbook', name: 'playbook.md', data: Buffer.from(`# Playbook\n${'Real evidence line. '.repeat(10)}`) }], { companyAliases: 'The Procter & Gamble Company = P&G' });
+    // Letters written before short names: the salutation and the file name carry the full name.
+    const body = company => [`I am writing to apply for the Data Analyst position at ${company}.`, ...fiveParagraphs(100).slice(1)];
+    for (const [url, company] of [['https://example.com/jobs/1', 'Acme, Inc.'], ['https://example.com/jobs/dj', 'Dow Jones & Company, Inc.'], ['https://example.com/jobs/pg', 'The Procter & Gamble Company'], ['https://example.com/jobs/renamed', 'Initech Holdings']]) {
+      const saved = await hub.form('/letters/save', { date: '2026-09-15', job: idOf(url), track: 'data', company, paragraph: body(company), engine: 'claude', model: 'x' });
+      assert.equal(saved.status, 200, company);
+    }
+    // One the owner renamed by hand stays as the owner named it.
+    assert.equal((await hub.form('/letters/rename', { date: '2026-09-15', slug: 'InitechHoldings', company: 'Initech Holdings Group' })).status, 200);
+    for (const file of ['AcmeInc', 'DowJonesCompanyInc', 'TheProcterGambleCompany']) {
+      const legacy = JSON.parse(await fs.readFile(dir(file, 'letter.json'), 'utf8'));
+      delete legacy.shortNameSource;
+      delete legacy.fullName;
+      await fs.writeFile(dir(file, 'letter.json'), JSON.stringify(legacy));
+    }
+    const report = await hub.request('GET', '/reports/2026-09-15');
+    assert.match(report.text, /<form class="inline" method="post" action="\/letters\/update-salutations" id="update-salutations-form"><input type="hidden" name="date" value="2026-09-15"><button class="btn secondary small" type="submit" id="update-salutations" title="[^"]*no subscription quota is used\.">Update Salutations \(4\)<\/button><\/form>/);
+
+    const updated = await hub.form('/letters/update-salutations', { date: '2026-09-15' });
+    assert.equal(updated.status, 303);
+    const notice = decodeURIComponent(updated.headers.location);
+    assert.match(notice, /notice=Updated 3 salutation\(s\); Acme, Inc\. → Acme, Dow Jones & Company, Inc\. → Dow Jones, The Procter & Gamble Company → P&G; 1 already used the short name\. No engine was called; the letter bodies are unchanged\./);
+    assert.equal(engineCalls, 0, 'no engine call, no quota');
+    for (const [slug, short, file, full] of [['Acme', 'Acme', 'JaneDoe_Cover_Letter_Acme.pdf', 'Acme, Inc.'], ['DowJones', 'Dow Jones', 'JaneDoe_Cover_Letter_DowJones.pdf', 'Dow Jones & Company, Inc.'], ['PG', 'P&G', 'JaneDoe_Cover_Letter_PG.pdf', 'The Procter & Gamble Company']]) {
+      assert.deepEqual((await fs.readdir(dir(slug))).sort(), [file, 'letter.json', 'letter.md'], `${short}: only the new PDF`);
+      const markdown = await fs.readFile(dir(slug, 'letter.md'), 'utf8');
+      assert.match(markdown, new RegExp(`\\nDear ${short.replace('&', '\\&')} Recruiting Team,\\n\\nI am writing to apply for the Data Analyst position at ${full.replace(/[.&]/g, '\\$&')}\\.\\n`), `${short}: the salutation changed, the full name in the body did not`);
+      const record = JSON.parse(await fs.readFile(dir(slug, 'letter.json'), 'utf8'));
+      assert.deepEqual(record.paragraphs, body(full));
+      assert.equal(record.pdfFileName, file);
+      assert.equal(record.pdf.pages, 1, 'the PDF was rendered again');
+      assert.ok((await fs.stat(dir(slug, file))).size > 500);
+    }
+    for (const gone of ['AcmeInc', 'DowJonesCompanyInc', 'TheProcterGambleCompany']) await assert.rejects(fs.access(dir(gone)), `${gone} moved`);
+    assert.equal(JSON.parse(await fs.readFile(dir('InitechHoldingsGroup', 'letter.json'), 'utf8')).company, 'Initech Holdings Group', 'the owner\'s rename stays');
+    // Running it again changes nothing.
+    assert.match(decodeURIComponent((await hub.form('/letters/update-salutations', { date: '2026-09-15' })).headers.location), /notice=Updated 0 salutation\(s\); 4 already used the short name/);
+    assert.equal(engineCalls, 0);
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('Update Salutations never moves a letter over another posting\'s letter with the same short name', async () => {
+  const root = await prepareProject();
+  const payloadPath = path.join(root, 'state', 'report-payload-2026-09-15.json');
+  const payload = JSON.parse(await fs.readFile(payloadPath, 'utf8'));
+  const second = job({ url: 'https://example.com/jobs/acme-2', company: 'Acme' });
+  payload.matches.push(second);
+  payload.reviewed.push(second);
+  await fs.writeFile(payloadPath, JSON.stringify(payload));
+  const hub = await startHub(root);
+  try {
+    await hub.upload('/settings/cover-letter', PROFILE, [{ field: 'playbook', name: 'playbook.md', data: Buffer.from(`# Playbook\n${'Real evidence line. '.repeat(10)}`) }]);
+    await hub.form('/letters/save', { date: '2026-09-15', job: sha256('https://example.com/jobs/1').slice(0, 16), track: 'data', company: 'Acme, Inc.', paragraph: fiveParagraphs(100), engine: 'claude', model: 'x' });
+    await hub.form('/letters/save', { date: '2026-09-15', job: sha256(second.url).slice(0, 16), track: 'data', company: 'Acme', paragraph: fiveParagraphs(100), engine: 'claude', model: 'x' });
+    const outcome = decodeURIComponent((await hub.form('/letters/update-salutations', { date: '2026-09-15' })).headers.location);
+    assert.match(outcome, /Updated 0 salutation\(s\); 1 already used the short name; skipped Acme, Inc\. \(another letter of this date is already saved as Acme\)/);
+    const letters = await fs.readdir(path.join(root, 'private', 'cover-letters', '2026-09-15'));
+    assert.deepEqual(letters.sort(), ['Acme', 'AcmeInc'], 'both letters are still there');
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });

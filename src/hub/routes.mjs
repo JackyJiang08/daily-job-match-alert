@@ -18,7 +18,7 @@ import {
 import { localDate } from '../time-format.mjs';
 import { LETTER_SCRIPT, ONECLICK_SCRIPT, SAMPLE_TRACK_SCRIPT, letterPanel, lettersPage, trackLabelOf } from './letter-views.mjs';
 import { todayTarget } from './views.mjs';
-import { findLetterJob, generateLetter, jobIdOf, letterCompanyFor, letterEngineFor, oneClickLetter, renameLetter, saveLetter } from './letters.mjs';
+import { findLetterJob, generateLetter, initialShortName, jobIdOf, letterCompanyFor, letterEngineFor, oneClickLetter, renameLetter, saveLetter, updateSalutations } from './letters.mjs';
 import { LetterBusyError } from './letter-jobs.mjs';
 import { QuotaError, describeQuota } from '../engines/quota.mjs';
 import { AuthExpiredError, EngineError, humanizeEngineError } from '../engines/engine-errors.mjs';
@@ -249,11 +249,11 @@ export function createHubHandler(ctx) {
         };
         const lazy = { src: card => (day.shared.has(card.id) ? null : `/reports/${selected}/jd/${card.id}`) };
         const body = await timer.phase('render', () => renderReportBody(buildReportView(day.matches, { timeZone, ...day.meta }, { embedded: true, decorate, review: day.review, notReviewed: day.notReviewed || [], lazyDescription: lazy })));
-        rendered = ctx.reportCache.setRender(renderKey, { reportBody: body, missingCount: missingLetterJobs(day.matches, lettersByJob).length });
+        rendered = ctx.reportCache.setRender(renderKey, { reportBody: body, missingCount: missingLetterJobs(day.matches, lettersByJob).length, letterCount: [...lettersByJob.values()].filter(letter => letter.date === selected).length });
       }
       reportBody = rendered.reportBody;
       desktopPath = desktopCopyPath(config, selected);
-      missingLetters = { count: rendered.missingCount, running: Boolean(autoStatus?.running), done: autoStatus?.done || 0, planned: autoStatus?.planned || 0 };
+      missingLetters = { count: rendered.missingCount, letters: rendered.letterCount || 0, running: Boolean(autoStatus?.running), done: autoStatus?.done || 0, planned: autoStatus?.planned || 0 };
     }
     await page(response, 200, { active: 'reports', title: selected ? `Report ${selected}` : 'Reports', content: reportsPage({ dates, selected, reportBody, desktopPath, today, missingLetters }), script: REPORTS_SCRIPT + ONECLICK_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' }, timer);
   }
@@ -344,7 +344,9 @@ export function createHubHandler(ctx) {
     const companyGuess = letterCompanyFor(job);
     const shownJob = { ...job, company: companyGuess.name };
     const confirm = url.searchParams.get('confirm') === '1' || (!existing && companyGuess.uncertain);
-    const content = letterPanel({ date, jobId: id, job: shownJob, tracks, selectedTrack, company: existing?.record?.company || companyGuess.name || '', readiness, existing, engineLabel: `${engine.label} · ${engine.model}`, confirmCompany: confirm, companyUncertain: companyGuess.uncertain });
+    // The Company Short Name field: the saved letter's name, else the alias or the cleaned company name.
+    const shortGuess = initialShortName(job, readiness.profile?.companyAliases || []).name;
+    const content = letterPanel({ date, jobId: id, job: shownJob, tracks, selectedTrack, company: existing?.record?.company || shortGuess || companyGuess.name || '', readiness, existing, engineLabel: `${engine.label} · ${engine.model}`, confirmCompany: confirm, companyUncertain: companyGuess.uncertain });
     await page(response, 200, { active: 'letters', title: `Cover letter · ${companyGuess.name || job.title}`, content, script: LETTER_SCRIPT, error: url.searchParams.get('error') || '', notice: confirm ? `Confirm the company name${companyGuess.name ? ` (best guess: ${companyGuess.name})` : ''}, then Regenerate` : (url.searchParams.get('notice') || '') });
   }
 
@@ -448,7 +450,7 @@ export function createHubHandler(ctx) {
         return;
       }
       case '/letters/generate': {
-        json(response, 200, await generateLetter(ctx, { date: assertDate(fields.date), jobId: fields.job, trackId: fields.track || null, company: fields.company, engine: fields.engine || null }));
+        json(response, 200, await generateLetter(ctx, { date: assertDate(fields.date), jobId: fields.job, trackId: fields.track || null, company: fields.company, companyEdited: fields.companyEdited === '1', engine: fields.engine || null }));
         return;
       }
       case '/letters/oneclick': {
@@ -497,6 +499,19 @@ export function createHubHandler(ctx) {
         redirect(response, `/reports/${date}`, `Writing ${count} missing cover letter(s) in the background; the cards update as they finish`);
         return;
       }
+      case '/letters/update-salutations': {
+        const date = assertDate(fields.date);
+        const autoRunning = await autoLettersView(ctx);
+        if (autoRunning?.running) { redirect(response, `/reports/${date}`, `Cover letters are being written (${autoRunning.done} of ${autoRunning.planned}); try again when they finish`, 'error'); return; }
+        if (ctx.letterJobs.busy()) { redirect(response, `/reports/${date}`, 'A cover letter is generating; try again when it finishes', 'error'); return; }
+        const outcome = await updateSalutations(ctx, { date });
+        const parts = [`Updated ${outcome.updated.length} salutation(s)`];
+        if (outcome.updated.length) parts.push(outcome.updated.slice(0, 6).map(item => `${item.from} → ${item.to}`).join(', ') + (outcome.updated.length > 6 ? ', …' : ''));
+        if (outcome.unchanged) parts.push(`${outcome.unchanged} already used the short name`);
+        if (outcome.skipped.length) parts.push(`skipped ${outcome.skipped.map(item => `${item.company} (${item.reason})`).join(', ')}`);
+        redirect(response, `/reports/${date}`, `${parts.join('; ')}. No engine was called; the letter bodies are unchanged.`);
+        return;
+      }
       case '/letters/rename': {
         const letterSlug = String(fields.slug || '');
         if (!/^[A-Za-z0-9]{1,80}$/.test(letterSlug)) throw new HubInputError('Invalid letter');
@@ -510,7 +525,7 @@ export function createHubHandler(ctx) {
         try { editorNotes = JSON.parse(fields.editorNotes || '[]'); } catch { editorNotes = []; }
         let samplesUsed = [];
         try { samplesUsed = JSON.parse(fields.samplesUsed || '[]'); } catch { samplesUsed = []; }
-        json(response, 200, await saveLetter(ctx, { date: assertDate(fields.date), jobId: fields.job, trackId: fields.track || null, company: fields.company, paragraphs: [].concat(fields.paragraph || []), engine: fields.engine, model: fields.model, issues: Array.isArray(issues) ? issues : [], editorNotes: Array.isArray(editorNotes) ? editorNotes.map(String) : [], samplesUsed: Array.isArray(samplesUsed) ? samplesUsed : [] }));
+        json(response, 200, await saveLetter(ctx, { date: assertDate(fields.date), jobId: fields.job, trackId: fields.track || null, company: fields.company, paragraphs: [].concat(fields.paragraph || []), engine: fields.engine, model: fields.model, issues: Array.isArray(issues) ? issues : [], editorNotes: Array.isArray(editorNotes) ? editorNotes.map(String) : [], samplesUsed: Array.isArray(samplesUsed) ? samplesUsed : [], shortNameSource: fields.shortNameSource || null }));
         return;
       }
       case '/settings/cover-letter': {

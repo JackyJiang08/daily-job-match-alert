@@ -22,6 +22,8 @@ import { QuotaError, classifyQuotaError, describeQuota, nextLadderModel, normali
 import { AuthExpiredError, EngineError, classifyEngineError, engineNotice, humanizeEngineError } from '../engines/engine-errors.mjs';
 import { isAcceptableCompanyName, isTrustedSourceName, resolveCompanyName } from '../posting-fields.mjs';
 import { renderLetterPdf as renderPdfDefault } from '../cover-letter/pdf.mjs';
+import { sanitizeCompany } from '../cover-letter/compose.mjs';
+import { shortNameWithoutModel } from '../cover-letter/short-name.mjs';
 
 export function jobIdOf(job) {
   return job.semanticId || sha256(job.url || '').slice(0, 16);
@@ -33,6 +35,12 @@ export function letterCompanyFor(job) {
   const resolved = resolveCompanyName(job);
   if (job?.companySource && !job.companyUncertain && isAcceptableCompanyName(job.company, job.companySource)) return { name: job.company, uncertain: false, source: job.companySource };
   return { name: resolved.name, uncertain: resolved.uncertain || !isAcceptableCompanyName(resolved.name, resolved.source), source: resolved.source };
+}
+
+// The short name a letter for this job starts from before any model call: the owner's alias, else the
+// cleaned company name (the panel's first value).
+export function initialShortName(job, aliases = []) {
+  return shortNameWithoutModel({ job, chainName: letterCompanyFor(job).name, aliases });
 }
 
 export async function findLetterJob(ctx, date, jobId) {
@@ -237,7 +245,10 @@ async function withQuotaPolicy(ctx, config, engineChoice, attempt) {
 
 // strict (automatic letters): a draft that does not parse into a valid letter counts as a failure of that
 // chain step, so the next step is tried; the manual panel keeps such a draft for editing.
-export async function generateLetter(ctx, { date, jobId, trackId, company, engine: engineChoice = null, strict = false }) {
+// `company` is the panel's Company Short Name; it fixes the short name only when the owner typed it
+// (`companyEdited`). Otherwise the alias table, then the model's validated shortName, then the cleaned
+// company name decide (src/cover-letter/short-name.mjs).
+export async function generateLetter(ctx, { date, jobId, trackId, company, companyEdited = false, engine: engineChoice = null, strict = false }) {
   const config = await ctx.loadConfig();
   const readiness = await ctx.letterStore.readiness();
   if (!readiness.ready) throw new HubInputError(`Cover-letter material is incomplete (${readiness.missing.join(', ')}); upload it under Settings first`);
@@ -249,7 +260,11 @@ export async function generateLetter(ctx, { date, jobId, trackId, company, engin
   const review = config.coverLetter?.editorReview !== false;
   const engineId = engineChoice ? (normalizeEngineId(engineChoice) || null) : null;
   if (engineChoice && !engineId) throw new HubInputError('Engine must be claude or codex');
-  const salutationCompany = String(company || '').trim() || letterCompanyFor(job).name;
+  const chain = letterCompanyFor(job);
+  const chainName = chain.name;
+  // A name typed in the panel, or one confirmed for a company no source named usably, is the owner's.
+  const fixed = companyEdited || chain.uncertain ? String(company || '').trim() || null : null;
+  const aliases = readiness.profile?.companyAliases || [];
   // Draft and editor run on their own stage assignments (Settings → Task assignments).
   const draftPlan = await letterStagePlan(ctx, config, 'letterDraft', engineId);
   const editorPlan = review ? await letterStagePlan(ctx, config, 'letterEditor') : null;
@@ -257,7 +272,7 @@ export async function generateLetter(ctx, { date, jobId, trackId, company, engin
   // wrote the draft, including a ladder step it moved to.
   const reviewEngines = editorPlan && editorPlan.entries.some(entry => entry.engine) ? editorPlan.entries.map(entry => letterEngineFor(ctx, config, entry)) : null;
   const generated = await withStageChain(ctx, config, draftPlan, async engine => {
-    const result = await generateCoverLetter({ engine, reviewEngines, inputs: { playbook, samples, track, resumeText: text, job, graduation, company: salutationCompany }, review, io: ctx.io });
+    const result = await generateCoverLetter({ engine, reviewEngines, inputs: { playbook, samples, track, resumeText: text, job, graduation, naming: { chainName, aliases, fixed } }, review, io: ctx.io });
     if (strict && (!result.ok || !result.paragraphs?.length)) throw new Error(`the draft from ${engine.model || engine.id} did not parse into a letter (${(result.issues || []).map(issue => issue.message || issue.kind || issue).slice(0, 2).join('; ') || 'no paragraphs'})`);
     return result;
   });
@@ -270,7 +285,8 @@ export async function generateLetter(ctx, { date, jobId, trackId, company, engin
     notesInfo: levels.info,
     jobId: id,
     date,
-    company: salutationCompany || 'Company',
+    company: result.company || chainName || 'Company',
+    shortNameSource: result.shortName?.source || null,
     track,
     tracks,
     job: { title: job.title, company: letterCompanyFor(job).name, location: job.location, roleType: job.roleType },
@@ -287,13 +303,13 @@ export async function oneClickLetter(ctx, { date, jobId, engine = null }) {
   const saved = await saveLetter(ctx, {
     date, jobId, trackId: draft.track.id, company: draft.company, paragraphs: draft.paragraphs,
     engine: draft.engine, model: draft.model, effort: draft.effort, reviewEngine: draft.reviewEngine, reviewModel: draft.reviewModel, reviewEffort: draft.reviewEffort,
-    issues: draft.issues || [], editorNotes: draft.editorNotes || [], samplesUsed: draft.samplesUsed || [],
+    issues: draft.issues || [], editorNotes: draft.editorNotes || [], samplesUsed: draft.samplesUsed || [], shortNameSource: draft.shortNameSource || null,
   });
   return { downloadUrl: saved.downloadUrl, openUrl: `/letters/${date}/${saved.slug}`, pdf: saved.pdf, company: draft.company, track: draft.track, wordCount: saved.wordCount, engine: draft.engine, model: draft.model, downgradeNote: draft.downgradeNote || null, checkBadge: reviewBadge(draft.editorNotes || []) };
 }
 
 // Persists edited paragraphs, renders the PDF, and records everything needed to reopen or re-download.
-export async function saveLetter(ctx, { date, jobId, trackId, company, paragraphs, engine, model, effort = null, reviewEngine = null, reviewModel = null, reviewEffort = null, source = 'manual', issues = [], editorNotes = [], samplesUsed = [] }) {
+export async function saveLetter(ctx, { date, jobId, trackId, company, paragraphs, engine, model, effort = null, reviewEngine = null, reviewModel = null, reviewEffort = null, source = 'manual', issues = [], editorNotes = [], samplesUsed = [], shortNameSource = null }) {
   const config = await ctx.loadConfig();
   const { profile } = await ctx.letterStore.readiness();
   if (!String(profile.name || '').trim()) throw new HubInputError('Add your name under Settings before downloading a letter');
@@ -311,7 +327,7 @@ export async function saveLetter(ctx, { date, jobId, trackId, company, paragraph
   let saved;
   try {
     saved = await ctx.letterStore.saveLetter({ date, company: companyName, markdown: letter.markdown, meta: {
-      jobId: id, jobTitle: job.title, jobUrl: job.url, company: companyName, track: track.id, trackLabel: track.label,
+      jobId: id, jobTitle: job.title, jobUrl: job.url, company: companyName, fullName: letterCompanyFor(job).name || null, shortNameSource: ['owner', 'alias', 'model', 'fallback'].includes(shortNameSource) ? shortNameSource : null, track: track.id, trackLabel: track.label,
       engine: engine || 'unknown', model: model || 'unknown', effort: effort || null, reviewEngine: reviewEngine || null, reviewModel: reviewModel || null, reviewEffort: reviewEffort || null, source,
       paragraphs: body, issues, editorNotes, samplesUsed, wordCount: body.join(' ').split(/\s+/).filter(Boolean).length,
       pdfFileName, createdAt: now.toISOString(), timeZone,
@@ -345,7 +361,7 @@ export async function saveLetter(ctx, { date, jobId, trackId, company, paragraph
 
 // Rename Company & Re-render: a new salutation and file name for a saved letter, rendered again from the
 // stored paragraphs. No engine call; the model's text is untouched.
-export async function renameLetter(ctx, { date, slug, company }) {
+export async function renameLetter(ctx, { date, slug, company, shortNameSource = 'owner', meta = {} }) {
   const config = await ctx.loadConfig();
   const companyName = String(company || '').trim();
   if (!isTrustedSourceName(companyName)) throw new HubInputError(`"${companyName || ''}" is not a usable company name`);
@@ -356,10 +372,48 @@ export async function renameLetter(ctx, { date, slug, company }) {
   const createdAt = existing.record.createdAt ? new Date(existing.record.createdAt) : ctx.now();
   const letter = assembleLetter({ profile, company: companyName, paragraphs: existing.record.paragraphs || [], now: createdAt, timeZone });
   const pdfFileName = ctx.letterStore.fileNameFor(profile, companyName);
-  const renamed = await ctx.letterStore.renameLetter(date, slug, { company: companyName, markdown: letter.markdown, pdfFileName, meta: { renamedFrom: existing.record.company !== companyName ? existing.record.company : existing.record.renamedFrom || null, renamedAt: ctx.now().toISOString() } });
+  const renamed = await ctx.letterStore.renameLetter(date, slug, { company: companyName, markdown: letter.markdown, pdfFileName, meta: { renamedFrom: existing.record.company !== companyName ? existing.record.company : existing.record.renamedFrom || null, renamedAt: ctx.now().toISOString(), shortNameSource, ...meta } });
   const pdfPath = path.join(renamed.directory, pdfFileName);
   const pdf = await (ctx.renderPdf || renderPdfDefault)(letter, pdfPath, { chromeCommand: ctx.chromeCommand ?? (config.hub?.chromeCommand || null), io: ctx.io });
   renamed.record.pdf = { pages: pdf.pages, layout: pdf.layout, renderer: pdf.renderer, note: pdf.note, condensed: existing.record.pdf?.condensed === true };
   await ctx.letterStore.saveLetter({ date, company: companyName, markdown: letter.markdown, meta: renamed.record });
   return { record: renamed.record, slug: renamed.slug, openUrl: `/letters/${date}/${renamed.slug}`, downloadUrl: `/letters/${date}/${renamed.slug}/${encodeURIComponent(pdfFileName)}`, pdf: renamed.record.pdf, pdfFileName };
+}
+
+// The short name an existing letter should carry, without a model call: the alias table first, then a name the
+// owner typed (Rename, or a typed panel value), then a stored model short name that still validates, then the
+// cleaned company name.
+export function salutationUpdateFor(record, job, aliases = []) {
+  const chainName = (job ? letterCompanyFor(job).name : '') || record.fullName || record.company || '';
+  const posting = job || { company: chainName };
+  const resolved = shortNameWithoutModel({ job: posting, chainName, aliases, storedShortName: record.shortNameSource === 'model' ? record.company : null });
+  if (resolved.source !== 'alias' && (record.shortNameSource === 'owner' || (!record.shortNameSource && record.renamedAt))) return { name: String(record.company || '').trim(), source: 'owner' };
+  return { name: resolved.name, source: resolved.source };
+}
+
+// Update Salutations (report page): for every saved letter of the date, the salutation line and the file name
+// move to the short name and the PDF is rendered again from the stored body. No engine is called; the body,
+// including any full company name in it, is not touched.
+export async function updateSalutations(ctx, { date }) {
+  const { profile } = await ctx.letterStore.readiness();
+  const aliases = profile.companyAliases || [];
+  const letters = (await ctx.letterStore.listLetters()).filter(letter => letter.date === date);
+  const taken = new Map(letters.map(letter => [letter.slug, letter.jobId || letter.slug]));
+  const outcome = { updated: [], unchanged: 0, skipped: [] };
+  for (const letter of letters) {
+    if (!Array.isArray(letter.paragraphs) || !letter.paragraphs.length) { outcome.skipped.push({ company: letter.company, reason: 'no stored body' }); continue; }
+    let job = null;
+    if (letter.jobId) job = await findLetterJob(ctx, date, letter.jobId).then(found => found.job).catch(() => null);
+    const next = salutationUpdateFor(letter, job, aliases);
+    const fileName = ctx.letterStore.fileNameFor(profile, next.name);
+    if (!next.name || (next.name === letter.company && fileName === letter.pdfFileName)) { outcome.unchanged += 1; continue; }
+    const slug = sanitizeCompany(next.name);
+    const holder = taken.get(slug);
+    if (slug !== letter.slug && holder && holder !== (letter.jobId || letter.slug)) { outcome.skipped.push({ company: letter.company, reason: `another letter of this date is already saved as ${next.name}` }); continue; }
+    const renamed = await renameLetter(ctx, { date, slug: letter.slug, company: next.name, shortNameSource: next.source, meta: { salutationUpdatedAt: ctx.now().toISOString() } });
+    taken.delete(letter.slug);
+    taken.set(renamed.slug, letter.jobId || renamed.slug);
+    outcome.updated.push({ from: letter.company, to: next.name, pdfFileName: renamed.pdfFileName });
+  }
+  return outcome;
 }
