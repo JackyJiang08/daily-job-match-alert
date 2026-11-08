@@ -16,6 +16,7 @@ import { refreshIndexLetters, readReportsIndex, reportsIndexPath, syncReportsInd
 import { htmlEscape } from '../src/utils.mjs';
 import { waitFor } from './helpers/wait-for.mjs';
 import { DATES, LAZY, asBefore, countingIo, fixtureJob, fixturePayload, inlineAssets, prepareReportProject, selectedMatches, startReportHub, writePayload } from './helpers/report-hub.mjs';
+import { jobDescriptionHtml } from '../src/jd-html.mjs';
 
 const snapshots = new URL('./fixtures/snapshots/', import.meta.url);
 async function withHub(fn, options = {}) {
@@ -46,7 +47,7 @@ test('snapshot: the day page, the list page, and a short-JD day are the same HTM
   });
 });
 
-test('the JD section embeds the first 300 characters (code points) and the route returns exactly the text the page used to embed', async () => {
+test('the JD section embeds the first 300 characters (code points) as text and the route returns the whole JD as the markup the Desktop report embeds', async () => {
   await withHub(async ({ hub }) => {
     const page = await hub.request('/reports/2026-10-17');
     const lazy = [...page.text.matchAll(LAZY)];
@@ -55,16 +56,17 @@ test('the JD section embeds the first 300 characters (code points) and the route
     assert.equal(byId.size, 1, 'fixtures carry no semanticId; cards use the URL hash');
     for (const [, src, preview] of lazy) {
       const full = (await hub.request(src)).text;
-      const original = matches.find(job => job.description.trim() === full);
+      const original = matches.find(job => jobDescriptionHtml(job) === full);
       assert.ok(original, `${src} returns one posting's full description`);
-      assert.equal(preview, htmlEscape(Array.from(full).slice(0, 300).join('')));
+      assert.equal(full, `<p>${htmlEscape(original.description.trim())}</p>`, 'plain text without line breaks is one paragraph');
+      assert.equal(preview, htmlEscape(Array.from(original.description.trim()).slice(0, 300).join('')));
     }
     // The emoji at index 299 is kept whole, not cut into half a surrogate pair.
     const emoji = lazy.find(([, , preview]) => preview.startsWith('ééé'))[2];
     assert.ok(emoji.endsWith('😀'));
     assert.equal(Array.from(emoji).length, 300);
     // The short JD is embedded as before.
-    assert.match(page.text, /<details class="jd"><summary>Job Description<\/summary><p>Short JD: under three hundred characters, kept whole\. &lt;i&gt;tags&lt;\/i&gt; &amp; &quot;quotes&quot;\.<\/p><\/details>/);
+    assert.match(page.text, /<details class="jd"><summary>Job Description<\/summary><div class="jd-body"><p>Short JD: under three hundred characters, kept whole\. &lt;i&gt;tags&lt;\/i&gt; &amp; &quot;quotes&quot;\.<\/p><\/div><\/details>/);
     // Unknown posting, unknown date, bad id.
     assert.equal((await hub.request('/reports/2026-10-17/jd/0000000000000000')).status, 404);
     assert.equal((await hub.request('/reports/2026-10-01/jd/0000000000000000')).status, 404);
@@ -72,7 +74,7 @@ test('the JD section embeds the first 300 characters (code points) and the route
     // The script that opens a section loads the route once and drops the marker.
     const script = inlineAssets(page.text);
     assert.match(script, /details\.jd\[data-jd-src\]/);
-    assert.match(script, /details\.querySelector\('p'\)\.textContent = text;\s*details\.removeAttribute\('data-jd-src'\);/);
+    assert.match(script, /details\.querySelector\('\.jd-body'\)\.innerHTML = html;\s*details\.removeAttribute\('data-jd-src'\);/);
   });
 });
 
@@ -281,7 +283,7 @@ test('HTML, the JD route, and the assets carry an ETag; a matching If-None-Match
 
     const src = [...plain.text.matchAll(LAZY)][0][1];
     const jd = await hub.request(src);
-    assert.equal(jd.headers['content-type'], 'text/plain; charset=utf-8');
+    assert.equal(jd.headers['content-type'], 'text/html; charset=utf-8');
     assert.equal((await hub.request(src, { 'if-none-match': jd.headers.etag })).status, 304);
 
     const css = /href="(\/assets\/hub-[a-f0-9]{16}\.css)"/.exec(plain.text)[1];

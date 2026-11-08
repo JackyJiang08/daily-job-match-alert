@@ -32,10 +32,9 @@ const TRACKS = [
 const EXPECTED_HEADERS = [
   'Company', 'Title', 'Location', 'Role Type', 'Posted At', 'Freshness',
   ...TRACKS.map(track => `${track.label} Score`),
-  'Recommended Resume', 'Why It Matches', 'Gaps / Verify', 'Posting Link',
+  'Recommended Resume', 'Gaps / Verify', 'Posting Link',
 ];
 const LINK_COLUMN = EXPECTED_HEADERS.indexOf('Posting Link') + 1;
-const WHY_COLUMN = EXPECTED_HEADERS.indexOf('Why It Matches') + 1;
 
 if (!scenarioName || !workRootArgument) {
   console.error('Usage: node scripts/chaos-scenario.mjs <scenario> <workRoot>');

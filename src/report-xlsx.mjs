@@ -42,7 +42,6 @@ export function matchColumnsFor(tracks) {
     { header: 'Freshness', width: 18 },
     ...tracks.map(track => ({ header: scoreHeader(track), width: Math.max(10, Math.min(18, track.label.length + 7)), score: track.id })),
     { header: 'Recommended Resume', width: 18 },
-    { header: 'Why It Matches', width: 45, wrap: true },
     { header: 'Gaps / Verify', width: 45, wrap: true },
     { header: 'Posting Link', width: 30 },
   ];
@@ -79,10 +78,12 @@ function linkCell(url) {
   return { text, hyperlink: href, tooltip: href };
 }
 
-function whyItMatches(job) {
-  const reasons = (job.reasons || []).join('; ');
-  if (job.matchLevel !== 'unreviewed') return reasons;
-  return reasons ? `${UNREVIEWED_PREFIX} ${reasons}` : UNREVIEWED_PREFIX;
+// The review's "why it matches" evidence is kept in the payload for cover letters, not shown; a row no model
+// reviewed says so at the start of Gaps / Verify.
+function gapsAndVerify(job) {
+  const gaps = (job.gaps || []).join('; ');
+  if (job.matchLevel !== 'unreviewed') return gaps;
+  return gaps ? `${UNREVIEWED_PREFIX} ${gaps}` : UNREVIEWED_PREFIX;
 }
 
 function excelString(value) {
@@ -255,8 +256,7 @@ const rows = jobs.map(job => [
   freshnessLabel(job),
   ...tracks.map(track => trackScore(job, track.id)),
   null,
-  whyItMatches(job),
-  (job.gaps || []).join('; '),
+  gapsAndVerify(job),
   linkCell(job.url),
 ]);
 
@@ -363,8 +363,7 @@ const noteRows = [
   ['Scoring model', 'Model reported by the subscription CLI for semantic review. "unknown" means the CLI output did not identify a model; "local_only" or "none" means no subscription review happened.'],
   [scoreColumnNames, 'Fit score against the corresponding resume track from subscription review, or the local triage score for unreviewed rows; not a probability of getting an interview.'],
   ['Recommended Resume', 'Whichever track scored higher for this posting; ties go to the earlier configured track.'],
-  ['Why It Matches', 'Matched evidence from the review. A leading [unreviewed] tag means semantic review was unavailable and the local score was retained; verify the fit manually.'],
-  ['Gaps / Verify', 'Skills or eligibility details that were not found in the selected resume or need manual confirmation. "US location not stated" means neither the location nor the description names a US place or US work authorization; confirm you can work from the United States.'],
+  ['Gaps / Verify', 'Skills or eligibility details that were not found in the selected resume or need manual confirmation. A leading [unreviewed] tag means semantic review was unavailable and the local score was retained; verify the fit manually. "US location not stated" means neither the location nor the description names a US place or US work authorization; confirm you can work from the United States.'],
   ['Update today', 'How many runs have contributed to this application date. Every run merges its findings into the day\'s stored payload and re-renders the whole report, so a later run never shrinks it.'],
   ['Excluded rows', 'Postings removed by the deterministic eligibility rules before scoring mattered: a location outside the United States, or cohort wording (class of, graduate by, full-time start) that is incompatible with the configured graduation date. They never appear in Matches.'],
   ['Posted At', 'When the source says the posting was published. A value with a time of day comes from a board API or structured posting data; "Oct 8 (date only)" means the source (a curated list, a Workday "Posted N Days Ago") reports no time of day; "first seen Oct 9, 8:04 PM" is when this pipeline first found a board posting that was not on the board at its previous poll; "Unknown (found Sep 26)" means the source gives no posting date at all and the day is when this pipeline first found the posting.'],

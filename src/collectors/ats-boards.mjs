@@ -35,7 +35,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { workdayPostedOn } from '../enrich.mjs';
-import { canonicalUrl, cleanText, isoDate, mapLimit, normalizeLocation, sha256 } from '../utils.mjs';
+import { canonicalUrl, cleanText, htmlEscape, isoDate, mapLimit, normalizeLocation, sha256 } from '../utils.mjs';
+import { cleanDescriptionHtml } from '../jd-html.mjs';
 import { localDate } from '../time-format.mjs';
 import { createWarning, errorCause, errorSummary, isNetworkError } from '../warnings.mjs';
 import { NEW_SINCE_LAST_POLL, freshnessInstant } from '../posting-fields.mjs';
@@ -543,6 +544,8 @@ function atsJob(board, fields) {
     salary: fields.salary || '',
     externalId: fields.externalId || null,
     description: description.slice(0, 50000),
+    // The posting's own markup for the report (src/jd-html.mjs); the scorer reads `description`.
+    descriptionHtml: description ? cleanDescriptionHtml(fields.descriptionHtml ?? fields.description) : undefined,
     // A description straight from the API needs no page fetch; Workday rows get theirs from the CXS detail call.
     ...(description ? { enrichment: 'ats_api', finalUrl: fields.url } : {}),
   };
@@ -585,7 +588,10 @@ export function parseLeverPostings(payload, board) {
     if (!url || !title) return null;
     const categories = job.categories && typeof job.categories === 'object' ? job.categories : {};
     const locations = Array.isArray(categories.allLocations) && categories.allLocations.length ? categories.allLocations : [categories.location];
-    const sections = (Array.isArray(job.lists) ? job.lists : []).map(list => `${cleanText(list?.text || '')} ${cleanText(list?.content || '')}`);
+    const lists = Array.isArray(job.lists) ? job.lists : [];
+    const sections = lists.map(list => `${cleanText(list?.text || '')} ${cleanText(list?.content || '')}`);
+    // Lever list content is a run of <li> items under the list's heading.
+    const html = [job.description || '', ...lists.map(list => `<h3>${htmlEscape(cleanText(list?.text || ''))}</h3><ul>${list?.content || ''}</ul>`), job.additional || ''].join('');
     const createdAt = Number(job.createdAt);
     return atsJob(board, {
       title,
@@ -596,6 +602,7 @@ export function parseLeverPostings(payload, board) {
       employmentType: cleanText(categories.commitment || ''),
       salary: leverSalary(job.salaryRange),
       description: [job.descriptionPlain || cleanText(job.description || ''), ...sections, job.additionalPlain || ''].filter(Boolean).join('\n'),
+      descriptionHtml: html,
       externalId: job.id ? String(job.id) : null,
     });
   }).filter(Boolean);
@@ -621,6 +628,7 @@ export function parseAshbyJobs(payload, board) {
       employmentType: cleanText(job.employmentType || ''),
       salary: cleanText(compensation.compensationTierSummary || compensation.scrapeableCompensationSalarySummary || ''),
       description: job.descriptionPlain || job.descriptionHtml || '',
+      descriptionHtml: job.descriptionHtml || '',
       externalId: job.id ? String(job.id) : null,
     });
   }).filter(Boolean);

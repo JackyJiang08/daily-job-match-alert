@@ -7,6 +7,7 @@ import { roleLabel } from '../report.mjs';
 import { htmlEscape } from '../utils.mjs';
 import { looksLikeEntityCode } from '../posting-fields.mjs';
 import { aliasText } from '../cover-letter/short-name.mjs';
+import { LETTER_CLOSING, letterPlainText, salutationFor } from '../cover-letter/plain-text.mjs';
 
 export const TRACK_LABELS = { data: 'Data', llm: 'LLM', agent: 'AI Agent' };
 export const MAX_SAMPLE_COUNT = 10;
@@ -220,7 +221,9 @@ export function passLine(record) {
   return record.reviewEngine || record.reviewModel ? `${draft} · Editor: ${pass(record.reviewEngine || record.engine, record.reviewModel, record.reviewEffort)}` : draft;
 }
 
-export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, readiness, existing, engineLabel, confirmCompany = false, companyUncertain = false }) {
+// copy { name, contact, date, signature }: the parts around the body for the two copy buttons (the body and the
+// salutation's company come from the page as it is edited).
+export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, readiness, existing, engineLabel, confirmCompany = false, companyUncertain = false, copy = null }) {
   const trackOptions = tracks.map(track => `<option value="${htmlEscape(track.id)}"${track.id === selectedTrack ? ' selected' : ''}>${htmlEscape(track.label)}${track.id === job.recommendedTrack ? ' (recommended)' : ''}</option>`).join('');
   const notReady = readiness.ready ? '' : `<div class="flash error">Add your contact block and a playbook under <a href="/settings?tab=letters#cover-letters">Settings → Cover Letters</a> first (missing: ${htmlEscape(readiness.missing.join(', '))}).</div>`;
   const record = existing?.record || null;
@@ -237,7 +240,10 @@ export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, 
   const companyHint = companyUncertain || confirmCompany
     ? `<p class="letter-status" id="company-hint" data-company-uncertain="${companyUncertain ? 'yes' : 'no'}">${companyUncertain ? 'No source gave a usable employer name; type the company as it should appear in the salutation, then Regenerate.' : 'Confirm the company name before generating.'}</p>`
     : '';
+  // The letter as plain text for an application form: the whole letter, or from "Dear …" to the signature.
+  const copyRow = `<div class="row letter-copy" id="letter-copy"${paragraphs.length ? '' : ' hidden'} data-letter="${htmlEscape(JSON.stringify(copy || {}))}"><button class="btn" id="copy-full" type="button">Copy Full Letter</button><button class="btn secondary" id="copy-salutation" type="button">Copy From Salutation</button><span class="letter-status" id="copy-status" role="status"></span></div>`;
   return `<h1 class="hub-title">Cover Letter</h1>
+  ${copyRow}
   ${notReady}
   <article class="card letter-head" id="letter-panel" data-date="${htmlEscape(date)}" data-job="${htmlEscape(jobId)}" data-ready="${readiness.ready ? 'yes' : 'no'}" data-slug="${htmlEscape(existing?.slug || '')}" data-company-uncertain="${companyUncertain ? 'yes' : 'no'}">
     <dl class="kv">
@@ -274,6 +280,9 @@ export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, 
 }
 
 export const LETTER_SCRIPT = `
+var LETTER_CLOSING = ${JSON.stringify(LETTER_CLOSING)};
+${salutationFor.toString()}
+${letterPlainText.toString()}
 (function () {
   var panel = document.getElementById('letter-panel');
   if (!panel) return;
@@ -332,7 +341,34 @@ export const LETTER_SCRIPT = `
     showCounts(result.paragraphs, null);
     showFoot(result);
     editor.dataset.state = 'editing'; if (emptyHint) emptyHint.hidden = true; save.hidden = false; download.hidden = true; generate.textContent = 'Regenerate';
+    copyRow.hidden = false;
   }
+  // Copy Full Letter / Copy From Salutation: the letter as it stands on the page (edited paragraphs, the
+  // Company Short Name field) as plain text, built by src/cover-letter/plain-text.mjs.
+  var copyRow = document.getElementById('letter-copy');
+  var copyStatus = document.getElementById('copy-status');
+  var copyParts = {};
+  try { copyParts = JSON.parse(copyRow.getAttribute('data-letter') || '{}'); } catch (e) { copyParts = {}; }
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text);
+    return new Promise(function (resolve, reject) {
+      var area = document.createElement('textarea'); area.value = text; area.setAttribute('readonly', '');
+      area.style.position = 'fixed'; area.style.opacity = '0'; document.body.appendChild(area); area.select();
+      var ok = false; try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      document.body.removeChild(area);
+      if (ok) resolve(); else reject(new Error('copy refused'));
+    });
+  }
+  function copyLetter(from, label) {
+    var parts = { name: copyParts.name, contact: copyParts.contact, date: copyParts.date, signature: copyParts.signature, company: companyInput.value, paragraphs: paragraphs() };
+    copyText(letterPlainText(parts, from)).then(function () {
+      copyStatus.className = 'letter-status'; copyStatus.textContent = label + ' copied to the clipboard.';
+    }).catch(function () {
+      copyStatus.className = 'letter-status error'; copyStatus.textContent = 'Could not copy; select the text and copy it by hand.';
+    });
+  }
+  document.getElementById('copy-full').addEventListener('click', function () { copyLetter('top', 'Full letter'); });
+  document.getElementById('copy-salutation').addEventListener('click', function () { copyLetter('salutation', 'Letter from the salutation'); });
   box.addEventListener('input', function () { showCounts(paragraphs(), state.pages); });
   var codexButton = document.getElementById('codex-button');
   function postGenerate(engine) {
@@ -429,7 +465,7 @@ export const ONECLICK_SCRIPT = `
   }
   function markReady(button, result) {
     button.dataset.state = 'ready';
-    var open = document.createElement('a'); open.className = 'btn secondary small'; open.href = result.openUrl; open.textContent = 'Open Letter';
+    var open = document.createElement('a'); open.className = 'btn secondary small'; open.href = result.openUrl; open.target = '_blank'; open.rel = 'noopener noreferrer'; open.textContent = 'Open Letter';
     var download = document.createElement('a'); download.className = 'btn secondary small'; download.href = result.downloadUrl; download.textContent = 'Download PDF';
     button.replaceWith(download, open);
     buttons = buttons.filter(function (item) { return item !== button; });

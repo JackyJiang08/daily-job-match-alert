@@ -3,6 +3,8 @@
 // filesystem, and request bodies are capped just above the 5 MB upload limit.
 import { reviewBadge } from '../cover-letter/notes.mjs';
 import { buildReportView, reviewReportJobs } from '../report.mjs';
+import { jobDescriptionHtml } from '../jd-html.mjs';
+import { assembleLetter } from '../cover-letter/compose.mjs';
 import path from 'node:path';
 import { resolvePayloadFile } from '../payload-store.mjs';
 import { createHash } from 'node:crypto';
@@ -178,7 +180,7 @@ export function createHubHandler(ctx) {
     for (const job of [...matches, ...notReviewed]) {
       const id = jobIdOf(job);
       if (descriptions.has(id)) shared.add(id);
-      else descriptions.set(id, String(job.description || '').trim());
+      else descriptions.set(id, job);
     }
     return ctx.reportCache.setDay(key, { key, date, meta: payload.meta, matches, notReviewed, review, descriptions, shared });
   }
@@ -242,7 +244,8 @@ export function createHubHandler(ctx) {
           const check = letter ? reviewBadge(letter.editorNotes) : null;
           return {
             actions: letter
-              ? [...download, { href: `/letters/${letter.date}/${letter.slug}`, label: 'Open Letter' }]
+              // Open Letter opens a new tab, so the report stays where it was for checking the JD.
+              ? [...download, { href: `/letters/${letter.date}/${letter.slug}`, label: 'Open Letter', newTab: true }]
               : [{ button: true, label: 'Generate Cover Letter', data: { oneclick: '1', date: selected, job: id } }],
             badges: check ? [check] : [],
           };
@@ -258,12 +261,13 @@ export function createHubHandler(ctx) {
     await page(response, 200, { active: 'reports', title: selected ? `Report ${selected}` : 'Reports', content: reportsPage({ dates, selected, reportBody, desktopPath, today, missingLetters }), script: REPORTS_SCRIPT + ONECLICK_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' }, timer);
   }
 
-  // GET /reports/<date>/jd/<card id>: the full Job Description of one card, exactly the text the page
-  // used to embed. 404 when the posting is not (or no longer) in that day's report.
+  // GET /reports/<date>/jd/<card id>: the full Job Description of one card as the markup the Desktop report
+  // embeds (cleaned posting HTML, or the text by its line breaks; src/jd-html.mjs). 404 when the posting is
+  // not (or no longer) in that day's report.
   async function getJobDescription(date, id, response) {
     const day = await reportDay(assertDate(date));
     if (!day || !day.descriptions.has(id)) return send(response, 404, 'Not found', 'text/plain; charset=utf-8');
-    return sendCacheable(response, 200, day.descriptions.get(id), 'text/plain; charset=utf-8', 'private, no-cache');
+    return sendCacheable(response, 200, jobDescriptionHtml(day.descriptions.get(id)), 'text/html; charset=utf-8', 'private, no-cache');
   }
 
   async function getResumes(url, response) {
@@ -346,7 +350,11 @@ export function createHubHandler(ctx) {
     const confirm = url.searchParams.get('confirm') === '1' || (!existing && companyGuess.uncertain);
     // The Company Short Name field: the saved letter's name, else the alias or the cleaned company name.
     const shortGuess = initialShortName(job, readiness.profile?.companyAliases || []).name;
-    const content = letterPanel({ date, jobId: id, job: shownJob, tracks, selectedTrack, company: existing?.record?.company || shortGuess || companyGuess.name || '', readiness, existing, engineLabel: `${engine.label} · ${engine.model}`, confirmCompany: confirm, companyUncertain: companyGuess.uncertain });
+    // The parts around the body for the copy buttons: a saved letter keeps the date it was written on.
+    const record = existing?.record || null;
+    const parts = assembleLetter({ profile: readiness.profile || {}, company: '', paragraphs: [], now: record?.createdAt ? new Date(record.createdAt) : ctx.now(), timeZone: record?.timeZone || config.timeZone || 'America/Chicago' });
+    const copy = { name: parts.name, contact: parts.contact, date: parts.date, signature: parts.signature };
+    const content = letterPanel({ copy, date, jobId: id, job: shownJob, tracks, selectedTrack, company: existing?.record?.company || shortGuess || companyGuess.name || '', readiness, existing, engineLabel: `${engine.label} · ${engine.model}`, confirmCompany: confirm, companyUncertain: companyGuess.uncertain });
     await page(response, 200, { active: 'letters', title: `Cover letter · ${companyGuess.name || job.title}`, content, script: LETTER_SCRIPT, error: url.searchParams.get('error') || '', notice: confirm ? `Confirm the company name${companyGuess.name ? ` (best guess: ${companyGuess.name})` : ''}, then Regenerate` : (url.searchParams.get('notice') || '') });
   }
 

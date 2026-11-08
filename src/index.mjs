@@ -441,7 +441,10 @@ function dedupe(jobs, dropped = null) {
       ...filled,
       source: [...new Set(`${existing.source}|${job.source}`.split('|'))].join(' | '),
       company: job.company || existing.company,
-      description: String(job.description || '').length > String(existing.description || '').length ? job.description : existing.description,
+      // The longer description wins, and its markup comes with it.
+      ...(String(job.description || '').length > String(existing.description || '').length
+        ? { description: job.description, descriptionHtml: job.descriptionHtml }
+        : { description: existing.description, descriptionHtml: existing.descriptionHtml }),
       url,
     } : { ...job, url });
   }

@@ -1,5 +1,6 @@
-import { LOCATION_SEPARATOR, normalizeLocation, canonicalUrl, cleanText, isoDate } from './utils.mjs';
+import { LOCATION_SEPARATOR, normalizeLocation, canonicalUrl, cleanText, htmlEscape, isoDate } from './utils.mjs';
 import { cleanWorkdayCompany, isTrustedSourceName, parsePostingDate } from './posting-fields.mjs';
+import { cleanDescriptionHtml } from './jd-html.mjs';
 
 function meta(html, key) {
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -148,6 +149,7 @@ function workdayEnrichment(originalJob, posting, finalUrl) {
     employmentType: cleanText(info.timeType || '') || originalJob.employmentType || '',
     salary: originalJob.salary || '',
     description: (cleanText(info.jobDescription) || originalJob.description || '').slice(0, 50000),
+    descriptionHtml: cleanText(info.jobDescription) ? cleanDescriptionHtml(info.jobDescription) : originalJob.descriptionHtml,
     postedAt: startDate || postedOn || originalJob.postedAt,
     freshnessBasis: startDate ? 'workday_start_date' : postedOn ? 'workday_posted_on' : originalJob.freshnessBasis,
     postedAtPrecision: startDate || postedOn ? 'date' : originalJob.postedAtPrecision,
@@ -173,9 +175,10 @@ export function smartRecruitersApiUrl(raw) {
 
 export function smartRecruitersEnrichment(originalJob, payload) {
   const sections = payload?.jobAd?.sections && typeof payload.jobAd.sections === 'object' ? payload.jobAd.sections : {};
-  const text = ['jobDescription', 'qualifications', 'additionalInformation', 'companyDescription']
-    .map(key => sections[key]?.text ? `${cleanText(sections[key].title || '')}\n${cleanText(sections[key].text)}` : '')
-    .filter(Boolean).join('\n');
+  const keys = ['jobDescription', 'qualifications', 'additionalInformation', 'companyDescription'].filter(key => sections[key]?.text);
+  const text = keys.map(key => `${cleanText(sections[key].title || '')}\n${cleanText(sections[key].text)}`).join('\n');
+  // Each section under its own heading, in the same order as the text.
+  const html = keys.map(key => `${sections[key].title ? `<h3>${htmlEscape(cleanText(sections[key].title))}</h3>` : ''}${sections[key].text}`).join('');
   if (!text) return null;
   const company = cleanText(payload.company?.name || '');
   const released = isoDate(payload.releasedDate);
@@ -188,6 +191,7 @@ export function smartRecruitersEnrichment(originalJob, payload) {
     location: originalJob.location || normalizeLocation(cleanText(String(payload.location?.fullLocation || '').replace(/(?:,\s*)+/g, ', '))),
     employmentType: cleanText(payload.typeOfEmployment?.label || '') || originalJob.employmentType || '',
     description: text.slice(0, 50000),
+    descriptionHtml: cleanDescriptionHtml(html),
     postedAt: released || originalJob.postedAt,
     freshnessBasis: released ? 'smartrecruiters_released_date' : originalJob.freshnessBasis,
     postedAtPrecision: released ? 'datetime' : originalJob.postedAtPrecision,
@@ -255,6 +259,7 @@ export async function enrichJob(job, network = {}, fetchImpl = fetch) {
           title: payload.title || originalJob.title,
           location: normalizeLocation(payload.location?.name || '') || originalJob.location,
           description: cleanText(payload.content || originalJob.description),
+          descriptionHtml: payload.content ? cleanDescriptionHtml(payload.content) : originalJob.descriptionHtml,
           postedAt: isoDate(payload.updated_at) || originalJob.postedAt,
           freshnessBasis: payload.updated_at ? 'greenhouse_updated_at' : originalJob.freshnessBasis,
           postedAtPrecision: payload.updated_at ? 'datetime' : originalJob.postedAtPrecision,
@@ -304,6 +309,8 @@ export async function enrichJob(job, network = {}, fetchImpl = fetch) {
       employmentType: employmentTypeFromPosting(posting || {}) || originalJob.employmentType || '',
       salary: salaryFromPosting(posting || {}) || originalJob.salary || '',
       description: (postingDescription || meta(body, 'description') || meta(body, 'og:description') || originalJob.description || '').slice(0, 50000),
+      // The JSON-LD description's markup; a page described only by its meta tags has none.
+      descriptionHtml: postingDescription ? cleanDescriptionHtml(posting.description) : meta(body, 'description') || meta(body, 'og:description') ? undefined : originalJob.descriptionHtml,
       postedAt: posted?.postedAt || originalJob.postedAt,
       finalUrl,
       url: finalUrl,

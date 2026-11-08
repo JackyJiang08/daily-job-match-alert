@@ -278,19 +278,19 @@ export function reportsPage({ dates, selected, reportBody, desktopPath, today, m
 // The on-demand JD loader (see report.mjs lazyDescription); the rest of REPORTS_SCRIPT is unchanged.
 export const JD_LOADER_SCRIPT = `
 (function () {
-  // A long Job Description arrives as its first 300 characters; opening it loads the full text once
-  // (GET /reports/<date>/jd/<card id>) and the section then reads exactly as before.
+  // A long Job Description arrives as its first 300 characters; opening it loads the full JD once
+  // (GET /reports/<date>/jd/<card id>: markup the server already cleaned, src/jd-html.mjs).
   document.addEventListener('toggle', function (event) {
     var details = event.target;
     if (!details || !details.open || !details.matches || !details.matches('details.jd[data-jd-src]')) return;
     var src = details.getAttribute('data-jd-src');
     if (details.getAttribute('data-jd-loading')) return;
     details.setAttribute('data-jd-loading', '1');
-    fetch(src, { headers: { accept: 'text/plain' } }).then(function (r) {
+    fetch(src, { headers: { accept: 'text/html' } }).then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.text();
-    }).then(function (text) {
-      details.querySelector('p').textContent = text;
+    }).then(function (html) {
+      details.querySelector('.jd-body').innerHTML = html;
       details.removeAttribute('data-jd-src');
       details.removeAttribute('data-jd-loading');
     }).catch(function () { details.removeAttribute('data-jd-loading'); });

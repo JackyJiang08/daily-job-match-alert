@@ -19,6 +19,7 @@ import { seenDropMessage } from './state-integrity.mjs';
 import { NOT_REVIEWED_TITLE, isNotReviewed, notReviewedHeadline, splitReportJobs } from './review-status.mjs';
 import { CLAUDE_SIGNED_OUT } from './engines/engine-errors.mjs';
 import { DATE_ONLY_GROUP_TITLE, STRICT_WINDOW_LABEL, splitStrictWindow, strictWindowDetail } from './strict-window.mjs';
+import { jobDescriptionHtml } from './jd-html.mjs';
 
 export const REPORT_TITLE = 'Daily Job Match Alert';
 export const WARNINGS_FILE_NAME = 'warnings.txt';
@@ -370,8 +371,8 @@ export function runDetailsView(jobs, meta, tracks, notReviewedCount = 0, window 
 }
 
 // lazyDescription { limit, src(card) }: a JD longer than `limit` characters (code points, so an emoji is
-// never cut in half) keeps only its first `limit` in the page plus the URL the full text loads from;
-// src returning null keeps the whole text.
+// never cut in half) keeps only its first `limit` in the page plus the URL the full JD (its markup) loads
+// from; src returning null keeps the whole JD.
 export const LAZY_DESCRIPTION_CHARACTERS = 300;
 
 function lazyDescription(card, { limit = LAZY_DESCRIPTION_CHARACTERS, src }) {
@@ -436,6 +437,12 @@ export function buildReportView(matchJobs, meta, options = {}) {
   const allCards = kept.map(item => cardView(item.job, tracks, meta.timeZone, options.decorate, item.review));
   const notReviewedCards = notReviewed.map(job => cardView(job, tracks, meta.timeZone, options.decorate, null));
   if (options.lazyDescription) for (const card of [...allCards, ...notReviewedCards]) lazyDescription(card, options.lazyDescription);
+  // The Job Description's markup (src/jd-html.mjs), for every card whose JD is in the page; a lazy card shows
+  // its preview as text and loads the markup when opened.
+  [...kept.map(item => item.job), ...notReviewed].forEach((job, index) => {
+    const card = index < allCards.length ? allCards[index] : notReviewedCards[index - allCards.length];
+    if (card.description && !card.descriptionSrc) card.descriptionHtml = jobDescriptionHtml(job);
+  });
   // The main list holds this run's window; postings the review budget carried from an earlier run are
   // a separate group under it. With the strict 24-hour window on, postings that may be older than 24 hours
   // (a date-only posting from before the run's day, no date) leave the main list for a folded group.

@@ -122,10 +122,10 @@ export function inlineAssets(html) {
     .replace(/<script src="\/assets\/(hub-[a-f0-9]{16}\.js)"><\/script>/g, (all, name) => `<script>${readAsset(name)?.body.toString('utf8') ?? ''}</script>`);
 }
 
-export const LAZY = /<details class="jd" data-jd-src="([^"]+)"><summary>Job Description<\/summary><p>([\s\S]*?)<\/p><\/details>/g;
+export const LAZY = /<details class="jd" data-jd-src="([^"]+)"><summary>Job Description<\/summary><div class="jd-body"><p>([\s\S]*?)<\/p><\/div><\/details>/g;
 
 // The page as it was before the change: assets inline, the JD loader taken out of the page script, and
-// every lazy JD replaced by its full text from the JD route, embedded the way the old page embedded it.
+// every lazy JD replaced by its full markup from the JD route, embedded the way the Desktop page embeds it.
 export async function asBefore(hub, html, root) {
   let text = inlineAssets(html);
   assert.ok(text.includes(JD_LOADER_SCRIPT));
@@ -134,7 +134,7 @@ export async function asBefore(hub, html, root) {
   for (const [whole, src] of lazy) {
     const reply = await hub.request(src);
     assert.equal(reply.status, 200, src);
-    text = text.replace(whole, `<details class="jd"><summary>Job Description</summary><p>${htmlEscape(reply.text)}</p></details>`);
+    text = text.replace(whole, `<details class="jd"><summary>Job Description</summary><div class="jd-body">${reply.text}</div></details>`);
   }
   return { text: normalizeHtml(text, { port: hub.port(), root }), lazy };
 }

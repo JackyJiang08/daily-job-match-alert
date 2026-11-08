@@ -520,6 +520,25 @@ disabled; do not expand them unless a task says so.
   Reviewed (Engine Unavailable)", DATE_ONLY_GROUP_TITLE "Date Only, May Be Older Than 24 Hours",
   LOCATION_NOT_STATED_LABEL "US Location Not Stated", STAGE_LABELS "Cover Letter Draft/Editor".
 
+## Cards, JD markup, letter copy (2026-11-08)
+- Why It Matches is not rendered (cards, hub, xlsx; the Matches sheet lost that column, the [unreviewed] tag moved
+  to the start of Gaps / Verify). job.reasons is still produced and stored for cover letters. Gaps / Verify shows
+  every item (no "N More" fold).
+- src/jd-html.mjs: sanitizeJobHtml whitelist (p br ul ol li strong b em i h1–h4 a[href http/https/mailto] +
+  target=_blank rel=noopener noreferrer; script/style/iframe/… dropped with content; other tags dropped, blocks →
+  <br>; no attributes; entities decoded, text re-escaped; balanced; Greenhouse's entity-escaped content decoded
+  once). Collectors set job.descriptionHtml (cleanDescriptionHtml → undefined when empty) beside the UNCHANGED
+  description the scorer reads (prompts pick fields; descriptionHtml never reaches a model). jobDescriptionHtml
+  (job) re-cleans at render, else textToParagraphs (blank line = paragraph, newline = <br>). Card: details.jd >
+  div.jd-body. Hub lazy JD: preview text <p>, GET /reports/<d>/jd/<id> returns text/html markup, loader sets
+  .jd-body innerHTML. slimJob's field whitelist drops descriptionHtml for postings that never went to review.
+- Letters: Open Letter (card action newTab, one-click markReady) opens a new tab. Letter page top row: Copy
+  Full Letter (btn) / Copy From Salutation (secondary) / #copy-status. src/cover-letter/plain-text.mjs
+  letterPlainText(parts, 'top'|'salutation') + salutationFor + LETTER_CLOSING (assembleLetter uses them); their
+  source is injected into LETTER_SCRIPT so page and tests share one implementation; parts {name, contact, date,
+  signature} come from data-letter (route: assembleLetter at record.createdAt), company/paragraphs from the page.
+  There were no per-paragraph copy buttons to remove.
+
 ## Scoring engines (src/engines/)
 - One interface per engine: verifyAuth(), reviewBatch(prompt, schema,
   { tempDirectory }), describeModel(), modelMatches(actual),

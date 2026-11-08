@@ -4,7 +4,6 @@
 import { htmlEscape } from './utils.mjs';
 import { REPORT_SCRIPT, REPORT_STYLES } from './report-theme.mjs';
 
-const VISIBLE_FACTS = 2;
 // Every link out of the report opens a new tab so the shortlist itself is never navigated away.
 export const EXTERNAL_LINK = 'target="_blank" rel="noopener noreferrer"';
 
@@ -42,14 +41,10 @@ export function renderScoreRing(score) {
   return `<div class="ring" style="--score:${value}" role="img" aria-label="Best score ${value}"><b>${value}</b></div>`;
 }
 
+// Every item is shown; nothing is folded behind "N More" (Gaps / Verify is open by default).
 function renderFacts(label, items, className) {
   if (!items.length) return '';
-  const visible = items.slice(0, VISIBLE_FACTS).map(item => `<li>${htmlEscape(item)}</li>`).join('');
-  const rest = items.slice(VISIBLE_FACTS);
-  const more = rest.length
-    ? `<details class="more"><summary>${rest.length} More</summary><ul class="facts ${className}">${rest.map(item => `<li>${htmlEscape(item)}</li>`).join('')}</ul></details>`
-    : '';
-  return `<div class="facts-label">${htmlEscape(label)}</div><ul class="facts ${className}">${visible}</ul>${more}`;
+  return `<div class="facts-label">${htmlEscape(label)}</div><ul class="facts ${className}">${items.map(item => `<li>${htmlEscape(item)}</li>`).join('')}</ul>`;
 }
 
 export function renderScores(card) {
@@ -77,12 +72,14 @@ export function renderJobCard(card) {
     `data-search="${htmlEscape(card.sort.search)}"`,
   ].join(' ');
   const badges = card.badges.length ? `<div class="badges">${card.badges.map(renderBadge).join('')}</div>` : '';
-  // The hub embeds only the first characters of a long JD and loads the rest when the section is opened
-  // (data-jd-src, REPORTS_SCRIPT); the Desktop file always carries the whole text.
+  // Folded by default. The posting's own paragraphs, headings, lists and bold (cleaned markup from
+  // src/jd-html.mjs), or plain text split at its line breaks. The hub embeds only the first characters of a
+  // long JD as text and loads the markup when the section is opened (data-jd-src, REPORTS_SCRIPT); the
+  // Desktop file always carries the whole JD.
   const description = !card.description ? ''
     : card.descriptionSrc
-      ? `<details class="jd" data-jd-src="${htmlEscape(card.descriptionSrc)}"><summary>Job Description</summary><p>${htmlEscape(card.descriptionPreview)}</p></details>`
-      : `<details class="jd"><summary>Job Description</summary><p>${htmlEscape(card.description)}</p></details>`;
+      ? `<details class="jd" data-jd-src="${htmlEscape(card.descriptionSrc)}"><summary>Job Description</summary><div class="jd-body"><p>${htmlEscape(card.descriptionPreview)}</p></div></details>`
+      : `<details class="jd"><summary>Job Description</summary><div class="jd-body">${card.descriptionHtml ?? `<p>${htmlEscape(card.description)}</p>`}</div></details>`;
   return `<article class="job" ${attributes}>
     ${renderScoreRing(card.bestScore)}
     <div class="job-body">
@@ -90,7 +87,6 @@ export function renderJobCard(card) {
       <p class="job-meta">${htmlEscape(card.company)} · ${htmlEscape(card.location)} · ${htmlEscape(card.roleLabel)}</p>
       ${renderScores(card)}
       ${badges}
-      ${renderFacts('Why It Matches', card.reasons, 'reasons')}
       ${renderFacts('Gaps / Verify', card.gaps, 'gaps')}
       ${description}
       ${card.alternates?.length ? `<p class="alternates">Also listed at: ${card.alternates.map(item => `<a ${EXTERNAL_LINK} href="${htmlEscape(item.url)}" title="${htmlEscape(item.label)}">${htmlEscape(new URL(item.url).hostname.replace(/^www\./, ''))}${item.label ? ` (${htmlEscape(item.label)})` : ''}</a>`).join(', ')}</p>` : ''}

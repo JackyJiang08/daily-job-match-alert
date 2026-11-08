@@ -618,7 +618,7 @@ test('generate → edit → save renders a PDF, records the letter, marks the ca
     assert.match(list.text, /href="\/letters\/2026-09-15\/Acme\/JaneDoe_Cover_Letter_Acme\.pdf">Download PDF<\/a>/);
     const report = await hub.request('GET', '/reports/2026-09-15');
     assert.doesNotMatch(report.text.split('<script>')[0], /data-badge="letter-/, 'no status badge: the only letter badge is "Check N details"');
-    assert.match(report.text, /<div class="actions"><a class="apply"[^>]*>Open Posting<\/a><a class="btn secondary small" href="\/letters\/2026-09-15\/Acme\/JaneDoe_Cover_Letter_Acme\.pdf">Download PDF<\/a><a class="btn secondary small" href="\/letters\/2026-09-15\/Acme">Open Letter<\/a><span class="meta"/, 'a saved letter gives the card exactly two buttons');
+    assert.match(report.text, /<div class="actions"><a class="apply"[^>]*>Open Posting<\/a><a class="btn secondary small" href="\/letters\/2026-09-15\/Acme\/JaneDoe_Cover_Letter_Acme\.pdf">Download PDF<\/a><a class="btn secondary small" href="\/letters\/2026-09-15\/Acme" target="_blank" rel="noopener noreferrer">Open Letter<\/a><span class="meta"/, 'a saved letter gives the card exactly two buttons');
     assert.doesNotMatch(report.text.split('<script>')[0], /Generate Cover Letter/, 'no one-click button once a letter exists (the page script mentions the label)');
     assert.match(list.text, /<a class="btn secondary small" href="\/letters\/2026-09-15\/Acme">Open<\/a> <a class="btn secondary small" href="\/letters\/2026-09-15\/Acme\/JaneDoe_Cover_Letter_Acme\.pdf">Download PDF<\/a>/, 'the Letters row has the same two actions');
 
@@ -691,7 +691,7 @@ test('one click on a card generates in the background: generating → ready with
     assert.equal(pdf.headers['content-disposition'], 'attachment; filename="JaneDoe_Cover_Letter_Acme.pdf"', 'the browser downloads it under the templated name');
     assert.equal(pdf.buffer.slice(0, 5).toString('latin1'), '%PDF-');
     const report = await hub.request('GET', '/reports/2026-09-15');
-    assert.match(report.text, /<a class="btn secondary small" href="\/letters\/2026-09-15\/Acme\/JaneDoe_Cover_Letter_Acme\.pdf">Download PDF<\/a><a class="btn secondary small" href="\/letters\/2026-09-15\/Acme">Open Letter<\/a>/);
+    assert.match(report.text, /<a class="btn secondary small" href="\/letters\/2026-09-15\/Acme\/JaneDoe_Cover_Letter_Acme\.pdf">Download PDF<\/a><a class="btn secondary small" href="\/letters\/2026-09-15\/Acme" target="_blank" rel="noopener noreferrer">Open Letter<\/a>/);
     assert.doesNotMatch(report.text.split('<script>')[0], /data-oneclick/);
     const opened = await hub.request('GET', '/letters/2026-09-15/Acme');
     assert.match(opened.text, /<article class="card" id="letter-editor" data-state="editing">/);

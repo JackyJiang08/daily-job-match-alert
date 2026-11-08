@@ -5,6 +5,7 @@
 import { formatLocalDateTime } from '../time-format.mjs';
 import { roleLabel } from '../report.mjs';
 import { normalizeLocation } from '../utils.mjs';
+import { LETTER_CLOSING, salutationFor } from './plain-text.mjs';
 
 export const MIN_PARAGRAPHS = 5;
 export const MAX_PARAGRAPHS = 7;
@@ -236,7 +237,7 @@ export function assembleLetter({ profile, company, paragraphs, now = new Date(),
   const name = String(profile.name || '').trim();
   const contact = [profile.phone, profile.email].map(item => String(item || '').trim()).filter(Boolean).join(' · ');
   const date = letterDate(now, timeZone);
-  const salutation = `Dear ${String(company || '').trim() || 'Hiring'} Recruiting Team,`;
+  const salutation = salutationFor(company);
   const signature = String(profile.signatureName || profile.name || '').trim();
   const markdown = [
     `# ${name}`,
@@ -248,11 +249,11 @@ export function assembleLetter({ profile, company, paragraphs, now = new Date(),
     '',
     ...paragraphs.flatMap(paragraph => [paragraph, '']),
     // The sign-off matches the samples: "Sincerely," and the name on consecutive lines, no blank line.
-    'Sincerely,',
+    LETTER_CLOSING,
     signature,
     '',
   ].join('\n');
-  return { name, contact, date, salutation, paragraphs, closing: 'Sincerely,', signature, markdown };
+  return { name, contact, date, salutation, paragraphs, closing: LETTER_CLOSING, signature, markdown };
 }
 
 export function letterMetadataLine(meta) {

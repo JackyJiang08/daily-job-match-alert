@@ -129,8 +129,10 @@ test('cards carry the ring score, compact track scores, the recommendation, and 
   assert.match(html, /<h2 class="job-title"><a target="_blank" rel="noopener noreferrer" href="https:\/\/example\.com\/jobs\/1">Data &amp; AI Analyst<\/a><\/h2>/);
   assert.match(html, /<p class="job-meta">Acme, Inc\. · Remote · New Grad<\/p>/);
   assert.match(html, /<div class="scores"><span class="track" data-track="data">Data <b>74<\/b><\/span><span class="sep">·<\/span><span class="track best" data-track="llm">LLM <b>87<\/b><\/span><span class="sep">·<\/span><span class="track" data-track="agent">AI Agent <b>85<\/b><\/span><span class="recommend">Apply with LLM Resume<\/span><\/div>/);
-  assert.match(html, /<div class="facts-label">Why It Matches<\/div><ul class="facts reasons"><li>one<\/li><li>two<\/li><\/ul><details class="more"><summary>2 More<\/summary><ul class="facts reasons"><li>three<\/li><li>four<\/li><\/ul><\/details>/);
-  assert.match(html, /<div class="facts-label">Gaps \/ Verify<\/div><ul class="facts gaps"><li>a<\/li><li>b<\/li><\/ul><details class="more"><summary>1 More<\/summary>/);
+  // Why It Matches stays in the payload for cover letters and is not shown; Gaps / Verify shows every item.
+  assert.doesNotMatch(html, /Why It Matches|class="facts reasons"|<li>one<\/li>/);
+  assert.match(html, /<div class="facts-label">Gaps \/ Verify<\/div><ul class="facts gaps"><li>a<\/li><li>b<\/li><li>c<\/li><\/ul>/);
+  assert.doesNotMatch(html, /<details class="more">/);
   assert.match(html, /<span class="meta" title="Posted Aug 27, 2026, 5:00 AM">Posted Aug 27, 5:00 AM · fixture<\/span>/, 'a JSON-LD datePosted with a clock time is precise and shows the local time');
   const dayOnly = buildHtml([{ ...job, postedAt: '2026-08-27T00:00:00.000Z' }], { ...meta, timeZone: 'America/Chicago' });
   assert.match(dayOnly, /<span class="meta" title="Date only: the source reports no time of day">Posted Aug 27 \(date only\) · fixture<\/span>/, 'a bare-date datePosted (stored as UTC midnight by older versions) shows the day it names, marked date only');
