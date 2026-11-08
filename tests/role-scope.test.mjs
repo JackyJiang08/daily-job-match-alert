@@ -201,9 +201,9 @@ test('each title falls into one role family bucket: data, AI/ML, software, produ
   assert.deepEqual(countByRoleFamily({}).map(row => row.key), ['product', 'consulting', 'ai_ml', 'data', 'software'], '"other" only when something landed there');
   assert.equal(roleFamilyCountsText(rows.slice(0, 2)), 'product 2 / 1 / 1 · consulting 1 / 0 / 0');
   const view = runDetailsView([], { date: '2026-10-16', roleFamilies: rows }, [{ id: 'data', label: 'Data' }]);
-  const row = view.rows.find(item => item.term === 'Candidates by role family');
+  const row = view.rows.find(item => item.term === 'Candidates by Role Family');
   assert.equal(row.detail, 'product 2 / 1 / 1 · consulting 1 / 0 / 0 · AI/ML 1 / 0 / 0 · data 1 / 1 / 0 · software 0 / 0 / 0 · other 1 / 0 / 0 (entered prescreen / review / matched)');
-  assert.equal(runDetailsView([], { date: '2026-10-16' }, [{ id: 'data', label: 'Data' }]).rows.some(item => item.term === 'Candidates by role family'), false, 'older payloads show no row');
+  assert.equal(runDetailsView([], { date: '2026-10-16' }, [{ id: 'data', label: 'Data' }]).rows.some(item => item.term === 'Candidates by Role Family'), false, 'older payloads show no row');
 });
 
 test('end to end: meta.roleFamilies counts what reached the prescreen, the review, and the matches', async () => {
@@ -211,7 +211,7 @@ test('end to end: meta.roleFamilies counts what reached the prescreen, the revie
   await fs.copyFile(new URL('./fixtures/data-resume.md', import.meta.url), path.join(root, 'data-resume.md'));
   const now = '2026-10-17T01:30:00.000Z';
   const config = {
-    lookbackHours: 24, timeZone: 'America/Chicago', minimumMatchScore: 0, reportDateOffsetDays: 0,
+    lookbackHours: 24, timeZone: 'America/Chicago', minimumMatchScore: 0,
     semanticMatching: { engine: 'local_only', acceptedMatchLevels: ['high', 'medium', 'low'], maxReviewedPerRun: 3 },
     prescreen: { enabled: false }, coverLetter: { autoGenerate: { enabled: false } }, reports: { xlsx: { enabled: false, required: false } },
     outputDirectory: './output', requireFullDescription: false,
@@ -259,7 +259,7 @@ test('end to end: meta.roleFamilies counts what reached the prescreen, the revie
     assert.equal(index.dates['2026-10-16'].matchCount, payload.matches.length);
     assert.equal(index.dates['2026-10-16'].complete, payload.complete === true);
     const html = await fs.readFile(path.join(root, 'output', (await fs.readdir(path.join(root, 'output')))[0], (await fs.readdir(path.join(root, 'output', (await fs.readdir(path.join(root, 'output')))[0]))).find(name => name.endsWith('.html'))), 'utf8');
-    assert.match(html, /Candidates by role family/);
+    assert.match(html, /Candidates by Role Family/);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

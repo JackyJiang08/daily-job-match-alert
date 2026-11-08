@@ -104,8 +104,8 @@ function sampleRows(samples, timeZone) {
 export function autoLettersSettingsCard(settings = {}) {
   return `<article class="card" id="auto-letters"><h2>Automatic Letters</h2>
     <form method="post" action="/settings/letters-auto" class="auto-letters-form">
-      <div class="field"><label class="check"><input type="checkbox" name="autoGenerate"${settings.enabled === false ? '' : ' checked'}> Write cover letters for new high matches after each run</label></div>
-      <label class="field"><span>Letters per run (0 = no limit; best scores first; postings with a letter or an uncertain company are skipped)</span><input type="number" name="maxPerRun" class="control-input" min="0" max="500" step="1" value="${Number(settings.maxPerRun ?? 0)}" required></label>
+      <div class="field"><label class="check"><input type="checkbox" name="autoGenerate"${settings.enabled === false ? '' : ' checked'}> Write Cover Letters for New High Matches After Each Run</label></div>
+      <label class="field"><span>Letters Per Run (0 = no limit; best scores first; postings with a letter or an uncertain company are skipped)</span><input type="number" name="maxPerRun" class="control-input" min="0" max="500" step="1" value="${Number(settings.maxPerRun ?? 0)}" required></label>
       <button class="btn" type="submit">Save</button>
       <p class="form-foot">Uses the Cover letter draft and editor assignments under Subscriptions &amp; Models. The report is written first; letters follow.</p>
     </form></article>`;
@@ -115,7 +115,7 @@ export function coverLetterSettingsSection({ profile, readiness, timeZone }) {
   const samples = profile.samples || [];
   const atLimit = samples.length >= MAX_SAMPLE_COUNT;
   const state = readiness.ready
-    ? '<span class="badge badge-good" data-letter-ready="yes">Ready to generate</span>'
+    ? '<span class="badge badge-good" data-letter-ready="yes">Ready to Generate</span>'
     : `<span class="badge badge-warn" data-letter-ready="no">Missing: ${htmlEscape(readiness.missing.join(', '))}</span>`;
   return `<article class="card" id="cover-letters"><h2>Cover Letters</h2>
   <p class="muted">Stored privately on this Mac and never shared. ${state}</p>
@@ -143,7 +143,7 @@ export function coverLetterSettingsSection({ profile, readiness, timeZone }) {
       ${atLimit ? `<p class="sample-limit" data-sample-limit="reached">Sample limit reached (${MAX_SAMPLE_COUNT}). Remove one to add another.</p>` : ''}
       <div class="upload-row">
         ${fileChooser('sample', '.pdf,.txt,application/pdf,text/plain', 'Choose Samples…', { multiple: true, disabled: atLimit, empty: 'No files chosen' })}
-        <label class="track-for"><span>Track for these files</span><select name="sampleTrack" class="control-input" aria-label="Track for these files">${trackOptions('')}</select></label>
+        <label class="track-for"><span>Track for These Files</span><select name="sampleTrack" class="control-input" aria-label="Track for these files">${trackOptions('')}</select></label>
       </div>
     </fieldset>
     <button class="btn" type="submit">Save Cover Letter Material</button>
@@ -180,11 +180,11 @@ export function lettersPage({ letters, timeZone = 'America/Chicago' }) {
   const rows = sorted.length
     ? `<table class="plain"><tr><th>Date</th><th>Company</th><th>Role</th><th>Track</th><th>Engine</th><th>Pages</th><th>Generated</th><th>Notes</th><th>File</th><th>Actions</th></tr>${sorted.map(letter => `<tr>
       <td>${htmlEscape(letter.date)}</td>
-      <td><a href="/letters/${letter.date}/${letter.slug}">${htmlEscape(letter.company)}</a>${looksLikeEntityCode(letter.company) ? ' <span class="badge badge-warn" data-badge="company-suspect" title="The salutation may not name the employer; open the letter and use Rename Company">Check company name</span>' : ''}</td>
+      <td><a href="/letters/${letter.date}/${letter.slug}">${htmlEscape(letter.company)}</a>${looksLikeEntityCode(letter.company) ? ' <span class="badge badge-warn" data-badge="company-suspect" title="The salutation may not name the employer; open the letter and use Rename Company">Check Company Name</span>' : ''}</td>
       <td>${htmlEscape(letter.jobTitle || '')}</td>
       <td>${trackBadge(letter.track) || htmlEscape(letter.trackLabel || '')}</td>
       <td>${htmlEscape(letter.engine || '')}${letter.model ? ` · ${htmlEscape(letter.model)}` : ''}</td>
-      <td>${letter.pdf ? `${letter.pdf.pages}${letter.pdf.layout && letter.pdf.layout !== 'letter-1in' ? ' <span class="badge badge-warn" data-badge="layout">reduced layout</span>' : ''}` : '—'}</td>
+      <td>${letter.pdf ? `${letter.pdf.pages}${letter.pdf.layout && letter.pdf.layout !== 'letter-1in' ? ' <span class="badge badge-warn" data-badge="layout">Reduced Layout</span>' : ''}` : '—'}</td>
       <td>${readable(letter.createdAt || letter.savedAt, timeZone)}</td>
       <td>${Array.isArray(letter.editorNotes) ? letter.editorNotes.length : 0}</td>
       <td><span class="mono">${htmlEscape(letter.pdfFileName || '')}</span></td>
@@ -254,7 +254,7 @@ export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, 
         <button class="btn" id="generate-button" type="button"${readiness.ready ? '' : ' disabled'}>Regenerate</button>
         <button class="btn secondary" id="save-button" type="button"${paragraphs.length ? '' : ' hidden'}>Save &amp; Render PDF</button>
         <button class="btn secondary" id="rename-button" type="button"${existing?.slug ? '' : ' hidden'} title="Replace the salutation and the file name and render the PDF again; the model is not called">Rename Company &amp; Re-render</button>
-        <button class="btn secondary" id="codex-button" type="button" hidden>Generate with Codex</button>
+        <button class="btn secondary" id="codex-button" type="button" hidden>Generate With Codex</button>
         ${download}
       </div>
       <p class="letter-status" id="letter-status"></p>
@@ -267,7 +267,7 @@ export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, 
     <p class="muted" id="letter-empty"${paragraphs.length ? ' hidden' : ''}>No draft yet. Regenerate writes one with the selected track and company name.</p>
     <div id="paragraphs">${paragraphEditor(paragraphs)}</div>
     <ul class="issues" id="letter-issues">${issues}</ul>
-    <details class="notes" id="editor-notes" open${notes ? '' : ' hidden'}><summary>Check before sending</summary><ul class="issues" id="editor-notes-list">${notes}</ul></details>
+    <details class="notes" id="editor-notes" open${notes ? '' : ' hidden'}><summary>Check Before Sending</summary><ul class="issues" id="editor-notes-list">${notes}</ul></details>
     <p class="letter-foot" id="letter-foot">${htmlEscape(footLine(record, engineLabel))}</p>
     <ul class="letter-foot foot-notes" id="letter-info-notes"${infoNotes ? '' : ' hidden'}>${infoNotes}</ul>
   </article>`;
@@ -448,7 +448,7 @@ export const ONECLICK_SCRIPT = `
     var old = actions && actions.querySelector('[data-codex]');
     if (old) old.remove();
     if (quota && quota.codexAvailable && actions) {
-      var codex = document.createElement('button'); codex.type = 'button'; codex.className = 'btn secondary small'; codex.setAttribute('data-codex', '1'); codex.textContent = 'Generate with Codex';
+      var codex = document.createElement('button'); codex.type = 'button'; codex.className = 'btn secondary small'; codex.setAttribute('data-codex', '1'); codex.textContent = 'Generate With Codex';
       codex.addEventListener('click', function () { codex.remove(); start(button, 'codex'); });
       button.insertAdjacentElement('afterend', codex);
     }

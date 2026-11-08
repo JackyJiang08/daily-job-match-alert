@@ -86,7 +86,7 @@ test('the second freshness check drops precise timestamps outside the window, ke
   assert.deepEqual(result.dropped.map(job => job.title), ['old precise', 'old jsonld timed']);
   assert.deepEqual(result.jobs.map(job => job.title), ['fresh precise', 'old day-level workday', 'old list', 'old jsonld bare date', 'deferred precise', 'no date', 'old email']);
   const rows = runDetailsView([], { date: '2026-09-19', droppedAfterPreciseTimestamps: 2, warnings: [] }, []).rows;
-  assert.equal(rows.find(row => row.term === 'Freshness check').detail, 'dropped 2 postings after precise timestamps');
+  assert.equal(rows.find(row => row.term === 'Freshness Check').detail, 'dropped 2 postings after precise timestamps');
 });
 
 test('cards show day-level dates without a time and say so on hover; precise ones show the local time', () => {

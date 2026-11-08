@@ -110,7 +110,7 @@ test('Run Details counts new and catch-up reviews apart; Settings → Pipeline s
   const meta = { date: '2026-10-30', timeZone: 'America/Chicago', resumeTracks: [{ id: 'data', label: 'Data' }], warnings: [], catchUp: { reviewedNew: 57, reviewedCatchUp: 40, candidates: 335, selected: 40, limit: 40, waiting: 180, expired: 115, maxAgeHours: 48 }, seen: { entries: 61000, pruned: 1200, retentionDays: 90 } };
   const rows = runDetailsView([], meta, [{ id: 'data', label: 'Data' }]).rows;
   assert.equal(rows.find(row => row.term === 'Reviewed').detail, '57 new posting(s) · 40 catch-up posting(s) · catch-up: 335 held, 40 taken after the new postings (catch-up budget 40), 180 waiting, 115 past 48 hours expired');
-  assert.equal(rows.find(row => row.term === 'Seen state').detail, '61000 entries · 1200 past 90 days removed this run');
+  assert.equal(rows.find(row => row.term === 'Seen State').detail, '61000 entries · 1200 past 90 days removed this run');
   const base = { minimumMatchScore: '70', acceptedMatchLevels: 'high', model: 'fable', hubPort: '4747' };
   assert.equal(validateSettings({ ...base, catchUpBudget: '25' }).catchUpBudget, 25);
   assert.equal(validateSettings(base).catchUpBudget, null, 'absent: config untouched');

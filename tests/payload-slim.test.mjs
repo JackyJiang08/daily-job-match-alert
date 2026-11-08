@@ -103,7 +103,7 @@ test('end to end: the pipeline stores a slim payload, a rerun keeps the rule, th
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'payload-slim-'));
   await fs.copyFile(new URL('./fixtures/data-resume.md', import.meta.url), path.join(root, 'data-resume.md'));
   const config = {
-    lookbackHours: 24, timeZone: 'America/Chicago', minimumMatchScore: 0, reportDateOffsetDays: 0,
+    lookbackHours: 24, timeZone: 'America/Chicago', minimumMatchScore: 0,
     semanticMatching: { engine: 'local_only', acceptedMatchLevels: ['high', 'medium', 'low'], maxReviewedPerRun: 0 },
     prescreen: { enabled: false }, coverLetter: { autoGenerate: { enabled: false } }, reports: { xlsx: { enabled: false, required: false } },
     outputDirectory: './output', requireFullDescription: false,

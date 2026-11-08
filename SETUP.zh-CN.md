@@ -4,16 +4,16 @@
 
 ## 它每晚做什么
 
-默认每天 **20:00 America/Chicago** 由 launchd 触发一次，无人值守：
+默认每天 **18:00 America/Chicago** 由 launchd 触发一次，无人值守：
 
 1. **采集。** 来源包括公开 GitHub 榜单（SimplifyJobs、Jobright、vanshb03、Zapply、zshah101）、当月的 Hacker News "Who is hiring" 帖、RemoteOK feed、由此前岗位链接（以及手动种子或可选的搜索发现）找到的 Greenhouse / Lever / Ashby / Workday / SmartRecruiters 公开 job board 接口，以及放进 `intake/eml` 的 `.eml` 提醒邮件。每个 board 每晚只轮询一次，带固定 user agent，并使用 ETag / If-Modified-Since 条件请求。
 2. **去重。** URL 规范化（去追踪参数、解析跳转）后与 `state/state.json` 比对，同一岗位即使三个来源都列出也只出现一次。
-3. **抓 JD。** board 接口直接给出完整正文；其他链接只抓取一次，Workday 页面改走租户公开的 JSON 接口。抓不到的岗位后续夜晚重试，被拒绝或已下线的直接关闭。抓取后若拿到精确到分钟的发布时间（board 接口、带时分秒的 JSON-LD `datePosted`），会重新严格套用回看窗口，超出者不评分、不写 seen；天级来源（榜单的 "3d"、Workday 的 "Posted 3 Days Ago"）换算成发布日期，并按该日当地时间 23:59 参与所有窗口判断：昨天发布的整天都算新鲜，"3 天前" 连积压队列也进不了。来源完全不给日期的岗位（如 Oracle Cloud 招聘页）才以首次发现时间为准，报告与 xlsx 的 Posted At 显示 "Unknown (found Sep 26)"，评审排在所有有日期岗位之后，连续两晚仍无日期则不再顺延。Run Details 按来源统计精确 / 天级 / 无日期的条数。每晚轮询的 board（Greenhouse、Lever、Ashby、Workday、SmartRecruiters，quiet 的除外）改用快照判断：上一次成功轮询（不超过 30 小时前）时不在 board 上、今晚首次出现的岗位记为 new since last poll，无论来源日期写什么都算窗口内；上一次轮询时已存在的岗位即使显示 "Posted Yesterday" 也排除（被评分配额顺延的除外）。新 board、上次轮询失败或快照过旧时回退到天级日期规则。快照存于 `state/ats-snapshots.json`。发布时间晚于本轮运行的视为时区解析错误，降为运行当天的天级日期：jobright.ai 页面的时间不带时区、实为 UTC，按 UTC 解析；其他不带时区的时间只保留日期。Run Details 记录修正条数。Workday 的实体名（如 `100000 Motorola Solutions, Inc.`）优先换成榜单或注册表里的公司标签，没有时做清洗；旧报告在渲染时同样清洗。报告卡片与 xlsx 的 Posted At 只在来源给出时间时显示时间，天级来源显示为 "Oct 8 (date only)"，快照判定的新岗位显示 "first seen Oct 9, 8:04 PM"。xlsx 有 Freshness 列（new since last poll / posted today / carried over / date only / undated）。因评分配额从前一晚顺延的岗位在报告中单独列在 "Carried over from yesterday" 分组，卡片注明首次发现时间，主列表只含本轮窗口内的岗位。
-4. **硬过滤。** 两条规则由代码强制执行，与模型无关：地点必须在美国（地点字段与 JD 都没有美国州名或城市、"United States"、"US-based" 或美国工作资格的说明时，卡片标记 `US location not stated`，投递前确认是否可在美国工作），岗位要求的毕业窗口必须与 `preferences.graduationDate` 相符。
+3. **抓 JD。** board 接口直接给出完整正文；其他链接只抓取一次，Workday 页面改走租户公开的 JSON 接口。抓不到的岗位后续夜晚重试，被拒绝或已下线的直接关闭。抓取后若拿到精确到分钟的发布时间（board 接口、带时分秒的 JSON-LD `datePosted`），会重新严格套用回看窗口，超出者不评分、不写 seen；天级来源（榜单的 "3d"、Workday 的 "Posted 3 Days Ago"）换算成发布日期，并按该日当地时间 23:59 参与所有窗口判断：昨天发布的整天都算新鲜，"3 天前" 连积压队列也进不了。来源完全不给日期的岗位（如 Oracle Cloud 招聘页）才以首次发现时间为准，报告与 xlsx 的 Posted At 显示 "Unknown (found Sep 26)"，评审排在所有有日期岗位之后，连续两晚仍无日期则不再顺延。Run Details 按来源统计精确 / 天级 / 无日期的条数。每晚轮询的 board（Greenhouse、Lever、Ashby、Workday、SmartRecruiters，quiet 的除外）改用快照判断：上一次成功轮询（不超过 30 小时前）时不在 board 上、今晚首次出现的岗位记为 new since last poll，无论来源日期写什么都算窗口内；上一次轮询时已存在的岗位即使显示 "Posted Yesterday" 也排除（被评分配额顺延的除外）。新 board、上次轮询失败或快照过旧时回退到天级日期规则。快照存于 `state/ats-snapshots.json`。发布时间晚于本轮运行的视为时区解析错误，降为运行当天的天级日期：jobright.ai 页面的时间不带时区、实为 UTC，按 UTC 解析；其他不带时区的时间只保留日期。Run Details 记录修正条数。Workday 的实体名（如 `100000 Motorola Solutions, Inc.`）优先换成榜单或注册表里的公司标签，没有时做清洗；旧报告在渲染时同样清洗。报告卡片与 xlsx 的 Posted At 只在来源给出时间时显示时间，天级来源显示为 "Oct 8 (date only)"，快照判定的新岗位显示 "first seen Oct 9, 8:04 PM"。xlsx 有 Freshness 列（new since last poll / posted today / carried over / date only / undated）。因评分配额从前一晚顺延的岗位在报告中单独列在 "Carried Over From Yesterday" 分组，卡片注明首次发现时间，主列表只含本轮窗口内的岗位。
+4. **硬过滤。** 两条规则由代码强制执行，与模型无关：地点必须在美国（地点字段与 JD 都没有美国州名或城市、"United States"、"US-based" 或美国工作资格的说明时，卡片标记 `US Location Not Stated`，投递前确认是否可在美国工作），岗位要求的毕业窗口必须与 `preferences.graduationDate` 相符。
 5. **订阅引擎评分。** 剩余岗位由 Claude Code CLI 或 Codex CLI（以 claude.ai 或 ChatGPT 订阅登录）逐轨评分，每条简历轨道得到 0–100 分、理由与 gaps，并推荐最合适的轨道。
-6. **写两个文件到桌面。** `~/Desktop/Daily Job Match Alert/<投递日期>/` 下生成一份自包含的 HTML 清单（可排序、搜索、深色模式、每张卡片折叠完整 JD）和一份 XLSX（每条轨道一列分数）。只有当本次运行有降级时才会多出 `warnings.txt`。
+6. **写两个文件到桌面。** `~/Desktop/Daily Job Match Alert/<运行日期>/` 下生成一份自包含的 HTML 清单（可排序、搜索、深色模式、每张卡片折叠完整 JD）和一份 XLSX（每条轨道一列分数）。只有当本次运行有降级时才会多出 `warnings.txt`。
 
-晚间运行写的是第二天的文件夹；漏跑后的早晨补跑填的是当天。同一投递日期再次运行会合并进当日报告而不是覆盖。
+每次运行都写入运行当天（本地日期）的文件夹，报告标题也是这一天：18:00 的定时运行、Run Now 与补跑都写当天（芝加哥 18:00 在 UTC 已是次日，以本地日期为准）。同一天再次运行会合并进当日报告，只增不减。2026-11-08 之前晚间运行写的是第二天的文件夹，这些历史文件夹不改名；切换后的第一次 18:00 运行会合并进前一晚为当天建好的文件夹，hub 的日期列表中每个日期只出现一次。运行时间以 `scripts/install-launchd.sh [hour] [minute]` 安装的计划为准（默认 18 0），hub 的 Next Run、overdue、自动补跑截止时间与休眠 board 的探测时间都从已安装的 LaunchAgent 读取。
 
 ## 本地中枢（hub）
 
@@ -43,7 +43,7 @@ Cover letter 由同一个订阅引擎根据你的 playbook、最多三封样稿�
 
 中枢还能感知订阅 plan：连接探测读取 CLI 报告的 plan（Claude 的 subscriptionType；Codex 的状态输出带账户类型时也读），侧栏、Status 页 Quota 卡、Settings 的引擎单选旁都显示。夜间运行记住上次看到的 plan，变化时发 macOS 通知 "Claude plan changed: max → pro. Review the model ladder in Settings."，Status 页顶部出现带 Review Settings 链接的横幅（若登录同时像是过期了，横幅会提示先运行 `claude auth login --claudeai`，因为过期会话可能被误认为 plan 变化）。哪些模型可用不靠写死的表：CLI 拒绝某个模型时（"not available on your plan"、"requires a Max subscription"、"model not found"），当次调用立即沿阶梯降一档完成，并把该模型连同 plan 与时间写入 `state/model-availability.json`；之后夜间评分与 cover letter 都跳过它，直到 plan 再次变化或 7 天后自动重试一次。Settings 中这类模型显示为 "(unavailable on Pro)" 且不可选，阶梯旁列出标记，Re-check Models 按钮清除标记。
 
-两者都以子进程运行，启动前删除全部 `ANTHROPIC_*`、`AWS_*`、`OPENAI_*` 环境变量以及 Bedrock / Vertex / Google 凭据开关，因此不可能走 API key 或网关；项目里没有任何 API 客户端。Console 计费、API key 登录、版本过低或 batch 失败都降级为本地关键词分数（标记 `unreviewed`）并写 warning，绝不回退到 API。没有经过模型评审的岗位一律不算匹配：不进匹配列表、匹配数与 xlsx 的 Matches 表，也不自动写求职信，改放在报告底部默认折叠的 "Not reviewed (engine unavailable)" 分组（xlsx 另有 "Not Reviewed" 表），页眉醒目写明有多少岗位未经模型评审。此前把这类岗位混进匹配列表的旧报告，在中枢里也按同样方式显示。订阅用量计入各自计划额度。每个 batch 实际使用的模型会从 CLI 输出中读出并记录为 `scoringModel`，与配置不符时给出 warning。
+两者都以子进程运行，启动前删除全部 `ANTHROPIC_*`、`AWS_*`、`OPENAI_*` 环境变量以及 Bedrock / Vertex / Google 凭据开关，因此不可能走 API key 或网关；项目里没有任何 API 客户端。Console 计费、API key 登录、版本过低或 batch 失败都降级为本地关键词分数（标记 `unreviewed`）并写 warning，绝不回退到 API。没有经过模型评审的岗位一律不算匹配：不进匹配列表、匹配数与 xlsx 的 Matches 表，也不自动写求职信，改放在报告底部默认折叠的 "Not Reviewed (Engine Unavailable)" 分组（xlsx 另有 "Not Reviewed" 表），页眉醒目写明有多少岗位未经模型评审。此前把这类岗位混进匹配列表的旧报告，在中枢里也按同样方式显示。订阅用量计入各自计划额度。每个 batch 实际使用的模型会从 CLI 输出中读出并记录为 `scoringModel`，与配置不符时给出 warning。
 
 ## 隐私模型
 
@@ -117,7 +117,7 @@ Cover letter 由同一个订阅引擎根据你的 playbook、最多三封样稿�
 - **预筛（两段式评分）。** 进入评分配额之前，轻量模型（Settings > Task assignments 的 Prescreen 阶段；默认 Codex + 注册表中最轻量的 ChatGPT 模型、effort low，也可改为 Claude Sonnet）每批 25 条为候选打分，输入为标题、公司、地点、roleType、JD 前 1,500 字符与每条简历轨道的摘要（约 1,200 字符，保留技能、项目名与关键数字，本地提取，缓存为 `resumes/{id}.digest.md`，简历变化时重建）。最终评审的模型、评分标准与门槛不变。前 `prescreen.shadowRuns` 晚（默认 3）为影子模式，不淘汰任何岗位，Run Details 与 Status 显示"若按阈值淘汰会丢失的最终高匹配数"（prescreen recall）。影子期结束后由所有者在 Settings（Pipeline 页）确认启用：`prescreen.threshold`（默认 55）及以上的岗位按预筛分排序进入评分配额，低于阈值的标记为 seen（`prescreened_out`），不进入顺延队列，并列在 Run Details 的折叠列表中。预筛失败（登录、限额、解析）时沿用本地排序并记 warning。Run Details 与 Status 显示漏斗（候选 → 预筛 → 通过 → 评审 → 匹配）及各阶段用量。
 - **补评。** 因引擎不可用（Claude 登出、额度限制）而积压的岗位不再挤占本轮新岗位：每轮先按下文的评分配额与新鲜度优先规则评审新岗位，再在独立的补评通道里评审积压岗位，每轮最多 `semanticMatching.catchUpBudget` 条（默认 40，`0` 为不限，Settings → Pipeline 可调），排序规则相同，且只补发布日期仍在 48 小时内的岗位，超出的直接过期、不再补评。预筛启用时，补评岗位同样先过预筛。Run Details 分别列出新岗位与补评岗位的评审数。
 - **seen 状态。** `state/state.json` 中每个岗位 URL（原始与最终）一条记录，以其哈希为键，只保留首次发现时间与重试、基线所需字段；岗位内容在每日 payload 里。最近一次尝试早于 90 天的记录每次运行都会清理，数量写入 Run Details。首次以新格式运行时先在备份目录做一次完整 zip 备份（`…-pre-seen-slim.zip`，不会被自动清理）再转换旧记录，`npm run restore -- <zip>` 可以还原；文件以紧凑 JSON 写入。
-- **评分配额。** `semanticMatching.maxReviewedPerRun`（默认 60，`0` 为不限）限制每晚送引擎评审的本地候选数。新鲜度优先于完整性：回看窗口内的当晚岗位永远排在积压之前，本地分数与顺延加权只在同一桶内重排。超出的岗位顺延且不写 seen，但只在发布时间（天级日期按当天 23:59 当地时间计；仅无日期岗位用首次发现时间）距今不超过 `lookbackHours + deferralGraceHours`（默认 24 + 24 小时）时仍可评审，超期的从队列移除、不评分（Run Details 记 "expired N backlog postings"）。Settings → Pipeline 的 "Include carried-over postings"（`semanticMatching.includeCarriedOver`，默认开）关掉后不再顺延：超出预算的岗位当晚不评审、也不留到下一晚（配额拒绝造成的顺延照旧保留）。Settings → Pipeline 的 "Strict 24-hour window"（`semanticMatching.strict24HourWindow`，默认关）开启后，报告主列表只保留确知在 24 小时内的岗位：精确时间在运行前 24 小时内、看板 new since last poll，或只有日期且日期是运行当天；写着"昨天"等更早日期的、以及没有日期的岗位移入折叠分组 "Date only, may be older than 24 hours"。Carried over 与 Not reviewed 分组不变，评分不变。报告页眉写明是否为严格模式及各分组条数。窗口内候选连续 3 晚超过预算时，warnings 与 Status 的 Quota 卡提示并显示近 7 晚的候选/预算数字。同一需求在多个招聘站路径出现（Workday 多站点）时合并为一张卡、只评审一次，备用链接列在卡片上。报告页眉按实际最早发布时间写明 "posted within the last 24 hours / N days"。
+- **评分配额。** `semanticMatching.maxReviewedPerRun`（默认 60，`0` 为不限）限制每晚送引擎评审的本地候选数。新鲜度优先于完整性：回看窗口内的当晚岗位永远排在积压之前，本地分数与顺延加权只在同一桶内重排。超出的岗位顺延且不写 seen，但只在发布时间（天级日期按当天 23:59 当地时间计；仅无日期岗位用首次发现时间）距今不超过 `lookbackHours + deferralGraceHours`（默认 24 + 24 小时）时仍可评审，超期的从队列移除、不评分（Run Details 记 "expired N backlog postings"）。Settings → Pipeline 的 "Include carried-over postings"（`semanticMatching.includeCarriedOver`，默认开）关掉后不再顺延：超出预算的岗位当晚不评审、也不留到下一晚（配额拒绝造成的顺延照旧保留）。Settings → Pipeline 的 "Strict 24-Hour Window"（`semanticMatching.strict24HourWindow`，默认开启，只有显式写 `false` 才关闭）让报告主列表只保留确知在 24 小时内的岗位：精确时间在运行前 24 小时内、看板 new since last poll，或只有日期且日期是运行当天；写着"昨天"等更早日期的、以及没有日期的岗位移入折叠分组 "Date Only, May Be Older Than 24 Hours"。Carried Over 与 Not Reviewed 分组不变，评分不变；条数为 0 的分组整组不显示。报告页眉只有日期标题和 "22 Matches · Ran 6:02 PM"；是否为严格模式、各分组条数以及主列表的发布时间范围（"posted within the last 24 hours"）都在 Run Details 中。额度、登出、断网、状态文件完整性等横幅照常显示。hub 与报告中的按钮、分组名、标签、表头与徽章统一为 Title Case。窗口内候选连续 3 晚超过预算时，warnings 与 Status 的 Quota 卡提示并显示近 7 晚的候选/预算数字。同一需求在多个招聘站路径出现（Workday 多站点）时合并为一张卡、只评审一次，备用链接列在卡片上。Run Details 按主列表实际最早发布时间写明 "posted within the last 24 hours / N days"。
 - **chaos 套件。** `npm run chaos` 在临时目录跑十四个场景，CI 每次执行：基线、全部采集源断网、订阅 CLI 不可用、畸形 `.eml`、XLSX 失败后恢复、某 ATS 接口返回 500、候选超出评审上限、Fable 周限额（降级到 Opus）、账户总限额（全部顺延并显示横幅）、state.json 损坏（从备份恢复并记 warning）等。每个场景都必须仍留下当日文件夹与 HTML。
 
 ## 快速开始
@@ -141,7 +141,7 @@ npm run payloads:compact          # 对已有 payload 一次性瘦身并压缩�
 npm run backup                    # 备份 private/、state/（不含 payload 与日志）与 config.json；npm run restore -- <zip> 恢复
 npm test && npm run demo && npm run chaos
 npm run run                       # 真实跑一次，检查桌面文件夹
-./scripts/install-launchd.sh 20 0 # 安装每晚定时（zsh）
+./scripts/install-launchd.sh 18 0 # 安装每晚定时（zsh）
 ./scripts/install-hub-launchd.sh  # 常驻中枢；然后打开 http://127.0.0.1:4747/
 ```
 

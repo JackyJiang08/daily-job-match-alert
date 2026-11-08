@@ -165,9 +165,9 @@ test('each CLI refusal maps to its status badge; weekly limits clear at reset, s
   assert.equal(apply('claude-fable-5-1', 'The model claude-fable-5-1 is not available on your plan.').state, 'not_on_plan');
   const limited = apply('claude-opus-5-5', "claude exited 1: You've reached your Opus limit. Your Opus limit resets at 9am (America/Chicago).");
   assert.equal(limited.state, 'weekly_limit');
-  assert.equal(statusText(limited, 'America/Chicago'), 'Weekly limit until Oct 7, 2026, 9:00 AM', 'the reset time the CLI gave');
+  assert.equal(statusText(limited, 'America/Chicago'), 'Weekly Limit Until Oct 7, 2026, 9:00 AM', 'the reset time the CLI gave');
   markWeeklyLimit(record, 'claude-sonnet-5-5', { at: NOW.toISOString(), resetsAt: null });
-  assert.equal(statusText(modelStatus(record, 'claude-sonnet-5-5', { now: NOW }), 'America/Chicago'), 'Weekly limit since Oct 6, 2026, 5:00 PM · no reset time given', 'no reset time: when it was seen, never an estimated date');
+  assert.equal(statusText(modelStatus(record, 'claude-sonnet-5-5', { now: NOW }), 'America/Chicago'), 'Weekly Limit Since Oct 6, 2026, 5:00 PM · No Reset Time Given', 'no reset time: when it was seen, never an estimated date');
   assert.equal(statusText(modelStatus(record, 'claude-fable-5-1', { now: NOW }), 'America/Chicago'), 'Unavailable on Pro');
   assert.equal(modelStatus(record, 'claude-haiku-4-5', { now: NOW }).state, 'not_verified');
   // A weekly limit lifts by itself at its reset time; one without a reset time after 24 hours.

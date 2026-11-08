@@ -2,7 +2,6 @@
   "lookbackHours": 24,
   "deferralGraceHours": 24,
   "timeZone": "America/Chicago",
-  "reportDateOffsetDays": 1,
   "minimumMatchScore": 70,
   "requireFullDescription": true,
   "minimumDescriptionCharacters": 200,
@@ -20,7 +19,7 @@
     "maxReviewedPerRun": 60,
     "catchUpBudget": 40,
     "includeCarriedOver": true,
-    "strict24HourWindow": false,
+    "strict24HourWindow": true,
     "quotaPolicy": {
       "fiveHourLimit": { "retryIntervalMs": 600000, "maxWaitMs": 5400000 },
       "modelLadder": ["claude-fable-5-1", "claude-opus-5-5"],

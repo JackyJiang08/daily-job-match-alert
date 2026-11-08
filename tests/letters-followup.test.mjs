@@ -169,8 +169,8 @@ test('Generate Missing Letters writes every high match without a letter and with
     assert.equal(started.status, 303);
     assert.match(decodeURIComponent(started.headers.location), /Writing 2 missing cover letter\(s\) in the background/);
     const during = (await hub.request('GET', '/reports/2026-09-15')).text;
-    assert.match(cardOf(during, 'Example Co 2'), /Letter generating…/, 'progress shows on the cards');
-    assert.match(during, /id="missing-letters" disabled[^>]*>Writing letters… 0 of 2<\/button>/);
+    assert.match(cardOf(during, 'Example Co 2'), /Letter Generating…/, 'progress shows on the cards');
+    assert.match(during, /id="missing-letters" disabled[^>]*>Writing Letters… 0 of 2<\/button>/);
     assert.equal((await hub.request('POST', '/letters/oneclick', { date: '2026-09-15', job: jobIdOf(job(3)) })).status, 409, 'the same letters lock: a one-click letter waits');
 
     release();
@@ -190,7 +190,7 @@ test('Generate Missing Letters writes every high match without a letter and with
 
 test('editor notes split into needs-review and info; the card shows only "Check N details", and only when something needs review', async () => {
   const notes = [
-    'Cover letter draft: Codex is not connected; used claude-opus-5-5 from the fallback chain',
+    'Cover Letter Draft: Codex is not connected; used claude-opus-5-5 from the fallback chain',
     'Editor: gpt-5.6-sol failed (timeout); reviewed with claude-opus-5-5',
     'unverified detail: a retail inventory dashboard',
     'salutation says Example Corp, body says Example Labs',
@@ -221,8 +221,8 @@ test('editor notes split into needs-review and info; the card shows only "Check 
     assert.match(cardOf(page, 'Example Co 2'), /<span class="badge badge-warn" data-badge="letter-check" title="unverified detail: a retail inventory dashboard\nsalutation says Example Corp, body says Example Labs\nThe 35% figure does not appear in the resume or the playbook">Check 3 details<\/span>/);
     const letters = await ctx.letterStore.listLetters();
     const opened = (await hub.request('GET', `/letters/2026-09-15/${letters.find(item => item.company === 'Example Co 2').slug}`)).text;
-    assert.match(opened, /<details class="notes" id="editor-notes" open><summary>Check before sending<\/summary><ul class="issues" id="editor-notes-list"><li>unverified detail: a retail inventory dashboard<\/li><li>salutation says Example Corp, body says Example Labs<\/li><li>The 35% figure does not appear in the resume or the playbook<\/li><\/ul><\/details>/);
-    assert.match(opened, /<ul class="letter-foot foot-notes" id="letter-info-notes"><li>Cover letter draft: Codex is not connected[^<]*<\/li><li>Editor: gpt-5\.6-sol failed[^<]*<\/li><li>Paragraph 3 uses an em dash[^<]*<\/li><li>Generated with claude-opus-5-5[^<]*<\/li><li>Condensed by the engine[^<]*<\/li><\/ul>/, 'info only in the footer');
+    assert.match(opened, /<details class="notes" id="editor-notes" open><summary>Check Before Sending<\/summary><ul class="issues" id="editor-notes-list"><li>unverified detail: a retail inventory dashboard<\/li><li>salutation says Example Corp, body says Example Labs<\/li><li>The 35% figure does not appear in the resume or the playbook<\/li><\/ul><\/details>/);
+    assert.match(opened, /<ul class="letter-foot foot-notes" id="letter-info-notes"><li>Cover Letter Draft: Codex is not connected[^<]*<\/li><li>Editor: gpt-5\.6-sol failed[^<]*<\/li><li>Paragraph 3 uses an em dash[^<]*<\/li><li>Generated with claude-opus-5-5[^<]*<\/li><li>Condensed by the engine[^<]*<\/li><\/ul>/, 'info only in the footer');
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });
@@ -242,7 +242,7 @@ test('US evidence in the description clears the location flag; without it the ba
   const silent = annotateEligibility({ ...remote, description: 'Work with SQL and dashboards. Remote friendly.' });
   assert.equal(silent.eligibility.location.verdict, 'unverified');
   assert.deepEqual(silent.gaps, [LOCATION_UNVERIFIED_GAP]);
-  assert.deepEqual(jobBadges(silent).map(badge => [badge.label, badge.title]), [['US location not stated', 'The posting does not state a US location; confirm you can work from the United States before applying']]);
+  assert.deepEqual(jobBadges(silent).map(badge => [badge.label, badge.title]), [['US Location Not Stated', 'The posting does not state a US location; confirm you can work from the United States before applying']]);
   // An older payload annotated before the description check: the card re-checks at render time.
   const legacy = { ...remote, matchLevel: 'high', semanticReviewed: true, bestScore: 80, scores: { data: 80 }, url: 'https://example.com/j', description: 'You must be authorized to work in the United States.', gaps: ['Location unverified — confirm US eligibility'], eligibility: { location: { verdict: 'unverified', marker: null }, exclusion: null } };
   const html = buildHtml([legacy], { date: '2026-09-15', resumeTracks: [{ id: 'data', label: 'Data' }], warnings: [] });
@@ -257,7 +257,7 @@ test('the quota banner and header line appear only when postings went unreviewed
   assert.equal(quiet.banner, null);
   assert.equal(quotaNote(quiet, 0), null);
   const rows = runDetailsView([], { date: '2026-09-15', resumeTracks: [], warnings: [], quota: quiet }, []).rows;
-  assert.match(rows.find(row => row.term === 'Subscription quota').detail, /^1 event\(s\) · scored by claude · claude-opus-5-5$/, 'the downgrade is a Run Details line');
+  assert.match(rows.find(row => row.term === 'Subscription Quota').detail, /^1 event\(s\) · scored by claude · claude-opus-5-5$/, 'the downgrade is a Run Details line');
   const html = buildHtml([], { date: '2026-09-15', resumeTracks: [], warnings: [], quota: quiet, quotaNote: quotaNote(quiet, 0) });
   assert.doesNotMatch(html, /data-banner="quota"|class="quota-note"/);
 
@@ -279,7 +279,7 @@ test('a weekly limit with no CLI reset time is held 24 hours (or to the owner\'s
   assert.deepEqual(limitHold(record.limits['claude-fable-5-1']), { until: '2026-10-09T01:11:38.336Z', source: 'hold' });
   const held = modelStatus(record, 'claude-fable-5-1', { now: new Date('2026-10-08T12:00:00Z'), timeZone: zone });
   assert.deepEqual([held.state, held.resetsAt], ['weekly_limit', null], 'no reset time is ever shown for a hold');
-  assert.equal(statusText(held, zone), 'Weekly limit since Oct 7, 2026, 8:11 PM · no reset time given');
+  assert.equal(statusText(held, zone), 'Weekly Limit Since Oct 7, 2026, 8:11 PM · No Reset Time Given');
   // The next nightly run (Thursday 8:00 PM) already tries Fable again.
   const copy = structuredClone(record);
   assert.deepEqual(pruneLimits(copy, { now: new Date('2026-10-09T01:00:00Z'), graceMs: HOLD_GRACE_MS }).map(item => item.model), ['claude-fable-5-1']);
@@ -290,13 +290,13 @@ test('a weekly limit with no CLI reset time is held 24 hours (or to the owner\'s
   assert.deepEqual(weeklyReset, { day: 'thu', time: '17:00' });
   assert.equal(nextWeeklyReset(at, weeklyReset, zone), '2026-10-08T22:00:00.000Z');
   const weekly = modelStatus(record, 'claude-fable-5-1', { now: new Date('2026-10-08T12:00:00Z'), weeklyReset, timeZone: zone });
-  assert.equal(statusText(weekly, zone), 'Weekly limit until Oct 8, 2026, 5:00 PM (weekly reset)');
+  assert.equal(statusText(weekly, zone), 'Weekly Limit Until Oct 8, 2026, 5:00 PM (Weekly Reset)');
   assert.deepEqual(pruneLimits(structuredClone(record), { now: new Date('2026-10-08T22:00:00Z'), weeklyReset, timeZone: zone }).map(item => item.model), ['claude-fable-5-1']);
   assert.equal(weeklyResetOf({ plans: { claude: { weeklyReset: { day: 'someday', time: '25:00' } } } }), null);
 
   // A reset time the CLI gave is kept and shown.
   markWeeklyLimit(record, 'claude-opus-5-5', { at, resetsAt: '2026-10-09T14:00:00Z' });
-  assert.equal(statusText(modelStatus(record, 'claude-opus-5-5', { now: new Date('2026-10-08T12:00:00Z'), weeklyReset, timeZone: zone }), zone), 'Weekly limit until Oct 9, 2026, 9:00 AM');
+  assert.equal(statusText(modelStatus(record, 'claude-opus-5-5', { now: new Date('2026-10-08T12:00:00Z'), weeklyReset, timeZone: zone }), zone), 'Weekly Limit Until Oct 9, 2026, 9:00 AM');
 
   // Migration: the 7-day estimate an older version wrote (Fable "until Oct 14") is dropped and recomputed.
   const migrated = normalizeAvailability({ version: 2, models: {}, limits: { 'claude-fable-5-1': { model: 'claude-fable-5-1', kind: 'weekly_limit', at, resetsAt: '2026-10-15T01:11:38.336Z' } } });
@@ -315,7 +315,7 @@ test('Settings > Subscriptions > Claude saves and clears the optional weekly res
   const hub = await startServer(ctx);
   try {
     const page = (await hub.request('GET', '/settings')).text;
-    assert.match(page, /<dt>Weekly reset<\/dt><dd data-weekly-reset><form class="inline weekly-reset" method="post" action="\/settings\/plans\/weekly-reset"><select name="day"[^>]*><option value="" selected>Not set<\/option>/);
+    assert.match(page, /<dt>Weekly Reset<\/dt><dd data-weekly-reset><form class="inline weekly-reset" method="post" action="\/settings\/plans\/weekly-reset"><select name="day"[^>]*><option value="" selected>Not set<\/option>/);
     assert.equal((page.match(/data-weekly-reset/g) || []).length, 1, 'Claude card only');
     assert.equal((await hub.request('POST', '/settings/plans/weekly-reset', { day: 'thu', time: '17:00' })).status, 303);
     assert.deepEqual(JSON.parse(await fs.readFile(path.join(root, 'config.json'), 'utf8')).plans.claude.weeklyReset, { day: 'thu', time: '17:00' });

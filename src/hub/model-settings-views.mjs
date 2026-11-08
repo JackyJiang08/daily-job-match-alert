@@ -35,6 +35,8 @@ function weeklyResetForm(value) {
   return `<form class="inline weekly-reset" method="post" action="/settings/plans/weekly-reset"><select name="day" class="control-input small-input" aria-label="Weekly reset day">${days}</select> <input type="time" name="time" class="control-input small-input" aria-label="Weekly reset time" value="${htmlEscape(value?.time || '')}"> <button class="btn secondary small" type="submit">Save</button></form><span class="muted">Optional, local time. Without it a limit with no reset time is held for 24 hours.</span>`;
 }
 
+const PLAN_SOURCE_LABELS = { auto: 'Auto', manual: 'Manual' };
+
 function subscriptionCard(card, { timeZone, connectionRow, refresh }) {
   const plan = card.plan;
   const providerKey = card.provider === 'anthropic' ? 'claude' : 'chatgpt';
@@ -53,7 +55,7 @@ function subscriptionCard(card, { timeZone, connectionRow, refresh }) {
   return `<article class="card sub-card" data-provider="${card.provider}">
     <div class="sub-plan">
       <div class="sub-head"><h3>${htmlEscape(card.name)}</h3>${refresh}</div>
-      <p class="plan-name" data-plan-name="${providerKey}">${htmlEscape(plan.label)} <span class="badge badge-muted" data-plan-source="${htmlEscape(plan.source || 'unknown')}">${htmlEscape(plan.source || 'unknown')}</span></p>
+      <p class="plan-name" data-plan-name="${providerKey}">${htmlEscape(plan.label)} <span class="badge badge-muted" data-plan-source="${htmlEscape(plan.source || 'unknown')}">${htmlEscape(PLAN_SOURCE_LABELS[plan.source] || 'Unknown')}</span></p>
       <p class="plan-meta">${source}</p>
       ${pending}
       ${manualForm}
@@ -62,9 +64,9 @@ function subscriptionCard(card, { timeZone, connectionRow, refresh }) {
       <dl class="conn">${connectionRow(engineName, card.engine, card.connection)}</dl>
       <dl class="kv sub-kv">
         ${card.connection?.version ? `<dt>CLI</dt><dd>${engineName} CLI ${htmlEscape(card.connection.version)}</dd>` : ''}
-        <dt>Last 7 days</dt><dd data-plan-usage="${card.engine}">${usage}</dd>
-        <dt>Last limit</dt><dd data-last-limit="${card.engine}">${limit}</dd>
-        ${card.weeklyReset ? `<dt>Weekly reset</dt><dd data-weekly-reset>${weeklyResetForm(card.weeklyReset.value)}</dd>` : ''}
+        <dt>Last 7 Days</dt><dd data-plan-usage="${card.engine}">${usage}</dd>
+        <dt>Last Limit</dt><dd data-last-limit="${card.engine}">${limit}</dd>
+        ${card.weeklyReset ? `<dt>Weekly Reset</dt><dd data-weekly-reset>${weeklyResetForm(card.weeklyReset.value)}</dd>` : ''}
       </dl>
     </div>
   </article>`;
@@ -79,17 +81,17 @@ function modelRow(model, { timeZone }) {
   return `<tr data-model="${htmlEscape(model.id)}"><td><span class="mono">${htmlEscape(model.id)}</span><br>${model.alias ? `<span class="alias">${htmlEscape(model.alias)}</span> · ` : ''}${test}</td><td>${version}</td><td>${statusBadge(model.status, model.statusText)}</td><td class="nowrap" title="${model.status.lastUsedAt ? htmlEscape(formatLocalDateTime(model.status.lastUsedAt, timeZone)) : ''}">${model.status.lastUsedAt ? htmlEscape(formatLocalShort(model.status.lastUsedAt, timeZone)) : '<span class="muted">Never</span>'}</td><td>${used}</td></tr>`;
 }
 
-const MODEL_HEAD = '<tr><th>Model</th><th>Current version</th><th>On this plan</th><th>Last used</th><th>Used by</th></tr>';
+const MODEL_HEAD = '<tr><th>Model</th><th>Current Version</th><th>On This Plan</th><th>Last Used</th><th>Used By</th></tr>';
 // Stage names in the narrow "Used by" column; the full name is the tooltip.
-const SHORT_STAGE = { 'Cover letter draft': 'Letter draft', 'Cover letter editor': 'Letter editor' };
+const SHORT_STAGE = { 'Cover Letter Draft': 'Letter Draft', 'Cover Letter Editor': 'Letter Editor' };
 
 function modelsTable(card, options) {
   const shown = card.models.filter(model => !model.folded);
   const folded = card.models.filter(model => model.folded);
   const more = folded.length
-    ? `<details class="all-models"><summary>Show all models (${folded.length} more)</summary><div class="table-scroll"><table class="plain models-table">${MODEL_HEAD}${folded.map(model => modelRow(model, options)).join('')}</table></div></details>`
+    ? `<details class="all-models"><summary>Show All Models (${folded.length} More)</summary><div class="table-scroll"><table class="plain models-table">${MODEL_HEAD}${folded.map(model => modelRow(model, options)).join('')}</table></div></details>`
     : '';
-  return `<article class="card model-card" data-provider="${card.provider}"><h3>${htmlEscape(card.name)} models</h3><div class="table-scroll"><table class="plain models-table">${MODEL_HEAD}${shown.map(model => modelRow(model, options)).join('')}</table></div>${more}</article>`;
+  return `<article class="card model-card" data-provider="${card.provider}"><h3>${htmlEscape(card.name)} Models</h3><div class="table-scroll"><table class="plain models-table">${MODEL_HEAD}${shown.map(model => modelRow(model, options)).join('')}</table></div>${more}</article>`;
 }
 
 // One select with every registry model, grouped by provider; the script keeps it to the chosen engine.
@@ -123,7 +125,7 @@ export function assignmentsForm(view, settings) {
   const rows = view.stages.map(row => {
     const editable = ['scoring', 'letterDraft', 'letterEditor'].includes(row.stage);
     if (row.linked) return `<tr data-stage="supplemental"><th scope="row">${htmlEscape(row.label)}</th><td colspan="3"><span class="muted">Follows Scoring (${htmlEscape(row.engine)} · <span class="mono">${htmlEscape(row.model || '—')}</span>)</span></td><td>${chainTags(row, catalog, false)}</td></tr>`;
-    const editorSwitch = row.stage === 'letterEditor' ? `<label class="check small"><input type="checkbox" name="editorReview"${settings.editorReview ? ' checked' : ''}> Run the editor pass</label>` : '';
+    const editorSwitch = row.stage === 'letterEditor' ? `<label class="check small"><input type="checkbox" name="editorReview"${settings.editorReview ? ' checked' : ''}> Run the Editor Pass</label>` : '';
     if (row.engine === null) {
       return `<tr data-stage="${row.stage}"><th scope="row">${htmlEscape(row.label)}${editorSwitch ? `<br>${editorSwitch}` : ''}</th><td colspan="3"><span class="muted">${row.stage === 'prescreen' ? 'No prescreen (Scoring is local only)' : 'Placeholder engine (Scoring is local only)'}</span> ${engineSelect({ ...row, engine: 'local_only' })}<input type="hidden" name="${row.stage}_placeholder" value="1"></td><td><span class="muted">—</span></td></tr>`;
     }
@@ -134,9 +136,9 @@ export function assignmentsForm(view, settings) {
     return `<tr data-stage="${row.stage}"${row.off ? ' class="stage-off"' : ''}><th scope="row">${htmlEscape(row.label)}${editor ? `<br>${editor}` : ''}</th><td>${engineSelect(row)}</td><td>${model}</td><td>${effort}</td><td>${chain}</td></tr>`;
   }).join('');
   return `<form method="post" action="/settings/assignments" id="assignments-form" class="card assignments-card">
-    <h2>Task assignments</h2>
+    <h2>Task Assignments</h2>
     <input type="hidden" name="assignmentsPresent" value="1"><input type="hidden" name="editorReviewPresent" value="1">
-    <div class="table-scroll"><table class="plain assignments"><tr><th>Stage</th><th>Engine</th><th>Model</th><th>Effort</th><th>Fallback chain</th></tr>${rows}</table></div>
+    <div class="table-scroll"><table class="plain assignments"><tr><th>Stage</th><th>Engine</th><th>Model</th><th>Effort</th><th>Fallback Chain</th></tr>${rows}</table></div>
     <p class="form-foot">Scoring's chain is the model ladder; a ChatGPT model at its end takes over the review on a weekly account limit or when Claude is signed out (at the run-start login check or mid-run), as long as Codex is signed in. A Codex step that is not connected is skipped and noted in the letter's Editor notes.</p>
     <button class="btn" type="submit">Save Assignments</button>
   </form>`;

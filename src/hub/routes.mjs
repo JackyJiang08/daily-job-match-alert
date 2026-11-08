@@ -232,7 +232,7 @@ export function createHubHandler(ctx) {
           const id = jobIdOf(job);
           const letter = lettersByJob.get(id);
           if (!letter && pending.has(id)) {
-            return { actions: [{ button: true, disabled: true, label: 'Letter generating…', data: { autoletter: '1', job: id } }], badges: [{ key: 'letter-generating', label: 'Letter generating…', tone: 'note', title: 'The automatic cover-letter pass after the nightly run is writing this letter' }] };
+            return { actions: [{ button: true, disabled: true, label: 'Letter Generating…', data: { autoletter: '1', job: id } }], badges: [{ key: 'letter-generating', label: 'Letter Generating…', tone: 'note', title: 'The automatic cover-letter pass after the nightly run is writing this letter' }] };
           }
           // A saved letter gets just Download PDF (once rendered) and Open Letter. The only badge is
           // "Check N details" when the editor flagged something the owner must confirm; how the letter was
@@ -615,13 +615,13 @@ export function createHubHandler(ctx) {
         const letterOpen = /^\/letters\/(\d{4}-\d{2}-\d{2})\/([A-Za-z0-9]{1,80})$/.exec(url.pathname);
         if (letterOpen) {
           const existing = await ctx.letterStore.loadLetter(letterOpen[1], letterOpen[2]);
-          if (!existing) return await page(response, 404, { active: 'letters', title: 'Not found', content: '<h1 class="hub-title">Letter not found</h1>' });
+          if (!existing) return await page(response, 404, { active: 'letters', title: 'Not Found', content: '<h1 class="hub-title">Letter Not Found</h1>' });
           return await getLetterPanel(url, response, { date: letterOpen[1], jobId: existing.record.jobId, existing });
         }
         const letterFile = /^\/letters\/(\d{4}-\d{2}-\d{2})\/([A-Za-z0-9]{1,80})\/([^/]{1,200})$/.exec(url.pathname);
         if (letterFile) return await getLetterDownload(letterFile[1], letterFile[2], letterFile[3], response);
         if (url.pathname === '/healthz') return json(response, 200, { ok: true });
-        return await page(response, 404, { active: '', title: 'Not found', content: '<h1 class="hub-title">Not found</h1>' });
+        return await page(response, 404, { active: '', title: 'Not Found', content: '<h1 class="hub-title">Not Found</h1>' });
       }
       if (request.method === 'POST') {
         await handlePost(url, request, response);

@@ -3,13 +3,13 @@
 // A posting that only got the local triage score because the engine was unavailable (matchLevel
 // 'unreviewed', scoringEngine 'local_fallback') never counts as a match: it is not in the match list, the
 // xlsx Matches sheet, or the match count, and no automatic letter is written for it. It goes into the
-// report's folded "Not reviewed (engine unavailable)" group and the xlsx "Not Reviewed" sheet instead.
+// report's folded "Not Reviewed (Engine Unavailable)" group and the xlsx "Not Reviewed" sheet instead.
 // A local_only configuration (no engine at all, on purpose) is not "unavailable" and is left alone.
 // Payloads written before this rule may still hold such postings in `matches`; every view splits them out
 // at render time, so those days read the same way.
 import { canonicalUrl } from './utils.mjs';
 
-export const NOT_REVIEWED_TITLE = 'Not reviewed (engine unavailable)';
+export const NOT_REVIEWED_TITLE = 'Not Reviewed (Engine Unavailable)';
 
 export function isNotReviewed(job) {
   return job?.matchLevel === 'unreviewed' || job?.scoringEngine === 'local_fallback';

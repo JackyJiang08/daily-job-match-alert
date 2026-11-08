@@ -38,7 +38,7 @@ export function availabilityPath(root) {
 export const MARK_KINDS = ['not_on_plan', 'unknown_model'];
 export const LIMIT_HOLD_HOURS = 24;
 // A nightly run that starts this close to the end of a 24-hour hold already retries the model, so a limit
-// met at 20:05 is tried again by the next 20:00 run.
+// met a few minutes into a run is tried again by the next day's run at the same time, whatever the schedule.
 export const HOLD_GRACE_MS = 2 * 60 * 60 * 1000;
 const ESTIMATED_RESET_MS = 7 * 24 * 60 * 60 * 1000;
 export const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];

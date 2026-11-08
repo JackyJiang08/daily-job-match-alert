@@ -8,7 +8,7 @@ import path from 'node:path';
 import { jobScores, reportTracks, trackScore } from './resume-tracks.mjs';
 import { renderReportPage } from './report-components.mjs';
 import { warningText } from './warnings.mjs';
-import { formatLocalDateTime, formatLocalDay, formatLocalShort } from './time-format.mjs';
+import { formatLocalDateTime, formatLocalDay, formatLocalShort, formatLocalTime, localDate } from './time-format.mjs';
 import { normalizeLocation, sha256 } from './utils.mjs';
 import { companyIsUncertain, displayCompanyName, freshnessLabel, isNewSinceLastPoll, postedAtPrecision, postedText } from './posting-fields.mjs';
 import { describeQuota } from './engines/quota.mjs';
@@ -18,17 +18,18 @@ import { roleFamilyCountsText } from './role-families.mjs';
 import { seenDropMessage } from './state-integrity.mjs';
 import { NOT_REVIEWED_TITLE, isNotReviewed, notReviewedHeadline, splitReportJobs } from './review-status.mjs';
 import { CLAUDE_SIGNED_OUT } from './engines/engine-errors.mjs';
-import { DATE_ONLY_GROUP_TITLE, splitStrictWindow, strictWindowHeadline } from './strict-window.mjs';
+import { DATE_ONLY_GROUP_TITLE, STRICT_WINDOW_LABEL, splitStrictWindow, strictWindowDetail } from './strict-window.mjs';
 
 export const REPORT_TITLE = 'Daily Job Match Alert';
 export const WARNINGS_FILE_NAME = 'warnings.txt';
-export const CARRIED_OVER_TITLE = 'Carried over from yesterday';
+export const CARRIED_OVER_TITLE = 'Carried Over From Yesterday';
+export const MAIN_LIST_TITLE = 'Main List';
 
 const ROLE_LABELS = { internship: 'Internship', new_grad: 'New Grad', entry_level: 'Entry Level', unknown: 'Unknown Role Type' };
 const ENRICHMENT_BADGES = {
-  blocked: { key: 'blocked', label: 'Fetch blocked', tone: 'bad', title: 'The site refused the description fetch; only the alert text was scored' },
-  removed: { key: 'removed', label: 'Posting removed', tone: 'bad', title: 'The posting returned 404 or 410 when fetched' },
-  login_wall: { key: 'login_wall', label: 'Login wall', tone: 'warn', title: 'The posting sits behind a login; only the alert text was scored' },
+  blocked: { key: 'blocked', label: 'Fetch Blocked', tone: 'bad', title: 'The site refused the description fetch; only the alert text was scored' },
+  removed: { key: 'removed', label: 'Posting Removed', tone: 'bad', title: 'The posting returned 404 or 410 when fetched' },
+  login_wall: { key: 'login_wall', label: 'Login Wall', tone: 'warn', title: 'The posting sits behind a login; only the alert text was scored' },
 };
 
 export function roleLabel(roleType) {
@@ -48,8 +49,8 @@ function readableTimestamp(value, timeZone) {
 }
 
 function matchLabel(count) {
-  if (count === 0) return 'No matches';
-  return `${count} ${count === 1 ? 'match' : 'matches'}`;
+  if (count === 0) return 'No Matches';
+  return `${count} ${count === 1 ? 'Match' : 'Matches'}`;
 }
 
 // An unverified location that the description does not settle either (older payloads were annotated
@@ -83,12 +84,12 @@ export function jobBadges(job, review = null) {
     badges.push({ key: 'location-unverified', label: LOCATION_NOT_STATED_LABEL, tone: 'note', title: LOCATION_NOT_STATED_TITLE });
   }
   if (companyIsUncertain(job)) {
-    badges.push({ key: 'company-uncertain', label: 'Company name uncertain', tone: 'warn', title: 'No source gave a usable employer name; confirm it before applying or generating a letter' });
+    badges.push({ key: 'company-uncertain', label: 'Company Name Uncertain', tone: 'warn', title: 'No source gave a usable employer name; confirm it before applying or generating a letter' });
   }
   if (job.enrichment === 'failed') {
-    badges.push(ENRICHMENT_BADGES[job.enrichmentReason] || { key: 'jd-not-fetched', label: 'JD not fetched', tone: 'warn', title: job.enrichmentError || 'The posting could not be fetched; only the alert text was scored' });
+    badges.push(ENRICHMENT_BADGES[job.enrichmentReason] || { key: 'jd-not-fetched', label: 'JD Not Fetched', tone: 'warn', title: job.enrichmentError || 'The posting could not be fetched; only the alert text was scored' });
   } else if (!job.enrichment && /email/i.test(String(job.source || ''))) {
-    badges.push({ key: 'email-only', label: 'Email only', tone: 'note', title: 'The description comes from the alert email; the posting page was not fetched' });
+    badges.push({ key: 'email-only', label: 'Email Only', tone: 'note', title: 'The description comes from the alert email; the posting page was not fetched' });
   }
   for (const extra of Array.isArray(job.badges) ? job.badges : []) {
     const label = String(extra?.label ?? extra ?? '').trim();
@@ -210,15 +211,19 @@ function sourcesSummary(stats) {
 }
 
 // Everything that used to sit in the page header or the warnings panel, folded into one list.
-export function runDetailsView(jobs, meta, tracks, notReviewedCount = 0) {
+// `window` (from buildReportView): the strict 24-hour window and group counts, and the main list's posting
+// window; the page header used to carry both.
+export function runDetailsView(jobs, meta, tracks, notReviewedCount = 0, window = null) {
   const rows = [];
   const exclusions = meta.eligibilityExclusions || null;
   const warnings = meta.warnings || [];
-  rows.push({ term: 'Application date', detail: `${readableDate(meta.date)}${meta.runDate && meta.runDate !== meta.date ? ` (run on ${readableDate(meta.runDate)})` : ''}` });
-  if (meta.lookbackHours != null) rows.push({ term: 'Lookback window', detail: `${meta.lookbackHours} hours` });
-  rows.push({ term: 'Resume tracks', detail: tracks.map(track => track.label).join(', ') });
-  rows.push({ term: 'Scoring model', detail: meta.scoringModel || 'unknown' });
-  if (meta.minimumMatchScore != null) rows.push({ term: 'Minimum score', detail: String(meta.minimumMatchScore) });
+  rows.push({ term: 'Report Date', detail: `${readableDate(meta.date)}${meta.runDate && meta.runDate !== meta.date ? ` (run on ${readableDate(meta.runDate)})` : ''}` });
+  if (window?.strict) rows.push({ term: STRICT_WINDOW_LABEL, detail: window.strict });
+  if (window?.posted) rows.push({ term: 'Posting Window', detail: `${MAIN_LIST_TITLE}: ${window.posted}` });
+  if (meta.lookbackHours != null) rows.push({ term: 'Lookback Window', detail: `${meta.lookbackHours} hours` });
+  rows.push({ term: 'Resume Tracks', detail: tracks.map(track => track.label).join(', ') });
+  rows.push({ term: 'Scoring Model', detail: meta.scoringModel || 'unknown' });
+  if (meta.minimumMatchScore != null) rows.push({ term: 'Minimum Score', detail: String(meta.minimumMatchScore) });
   if (meta.reviewedCount != null || meta.collectedCount != null) {
     const counts = [];
     if (meta.collectedCount != null) counts.push(`${meta.collectedCount} collected`);
@@ -229,16 +234,16 @@ export function runDetailsView(jobs, meta, tracks, notReviewedCount = 0) {
   if (meta.autoLetters) {
     const auto = meta.autoLetters;
     rows.push({
-      term: 'Automatic cover letters',
+      term: 'Automatic Cover Letters',
       detail: `${Number(auto.generated || 0)} generated · ${Number(auto.failed || 0)} failed${auto.engines?.length ? ` · ${auto.engines.join('; ')}` : ''}${auto.usage?.calls ? ` · ${describeTotals(auto.usage)}` : ''}`,
       items: [auto.stopReason, auto.skipped?.existing ? `${auto.skipped.existing} already had a letter` : null, auto.skipped?.uncertain ? `${auto.skipped.uncertain} skipped: company name uncertain` : null, auto.skipped?.overLimit ? `${auto.skipped.overLimit} over the per-run limit` : null].filter(Boolean),
     });
   }
   if (meta.networkOutage) rows.push({ term: 'Network', detail: meta.networkOutage.detail || meta.networkOutage.message });
-  if (meta.authExpired) rows.push({ term: 'Claude login', detail: `${meta.authExpired.message}${meta.authExpired.takenOverBy ? ` (${meta.authExpired.takenOverBy} reviewed the postings)` : meta.authExpired.deferred ? ` (${meta.authExpired.deferred} deferred)` : ''}` });
+  if (meta.authExpired) rows.push({ term: 'Claude Login', detail: `${meta.authExpired.message}${meta.authExpired.takenOverBy ? ` (${meta.authExpired.takenOverBy} reviewed the postings)` : meta.authExpired.deferred ? ` (${meta.authExpired.deferred} deferred)` : ''}` });
   if (meta.quota?.events?.length) {
     const events = meta.quota.events.map(event => `${describeQuota(event, { timeZone: meta.timeZone })}: ${event.action}${event.detail ? ` (${event.detail})` : ''}`);
-    rows.push({ term: 'Subscription quota', detail: `${events.length} event(s)${meta.quota.effectiveModel || meta.quota.effectiveEngine ? ` · scored by ${meta.quota.effectiveEngine || 'claude'}${meta.quota.effectiveModel ? ` · ${meta.quota.effectiveModel}` : ''}` : ''}${meta.quota.deferredByQuota ? ` · ${meta.quota.deferredByQuota} deferred` : ''}`, items: events });
+    rows.push({ term: 'Subscription Quota', detail: `${events.length} event(s)${meta.quota.effectiveModel || meta.quota.effectiveEngine ? ` · scored by ${meta.quota.effectiveEngine || 'claude'}${meta.quota.effectiveModel ? ` · ${meta.quota.effectiveModel}` : ''}` : ''}${meta.quota.deferredByQuota ? ` · ${meta.quota.deferredByQuota} deferred` : ''}`, items: events });
   }
   if (meta.freshness) {
     const fresh = meta.freshness;
@@ -257,13 +262,13 @@ export function runDetailsView(jobs, meta, tracks, notReviewedCount = 0) {
     });
   }
   if (meta.droppedAfterPreciseTimestamps != null) {
-    rows.push({ term: 'Freshness check', detail: `dropped ${Number(meta.droppedAfterPreciseTimestamps)} postings after precise timestamps` });
+    rows.push({ term: 'Freshness Check', detail: `dropped ${Number(meta.droppedAfterPreciseTimestamps)} postings after precise timestamps` });
   }
   if (meta.runCounts) {
     const counts = meta.runCounts;
     const scored = counts.scoredByModel || [];
     const total = scored.reduce((sum, item) => sum + item.count, 0);
-    rows.push({ term: 'Scored by model (this run)', detail: `${total} scored${counts.localScores ? ` · ${counts.localScores} kept local scores (unreviewed)` : ''}`, items: scored.map(item => `${item.label}: ${item.count}`) });
+    rows.push({ term: 'Scored by Model (This Run)', detail: `${total} scored${counts.localScores ? ` · ${counts.localScores} kept local scores (unreviewed)` : ''}`, items: scored.map(item => `${item.label}: ${item.count}`) });
     rows.push({ term: 'Deferred', detail: `${counts.deferred.budget + counts.deferred.quota} (review budget ${counts.deferred.budget} · quota ${counts.deferred.quota})` });
     rows.push({ term: 'Expired', detail: `${counts.expired} backlog posting(s) past the grace period, not scored` });
   }
@@ -271,7 +276,7 @@ export function runDetailsView(jobs, meta, tracks, notReviewedCount = 0) {
     const prefilter = meta.prefilter;
     const dropped = Array.isArray(prefilter.titleExcluded) ? prefilter.titleExcluded : [];
     rows.push({
-      term: 'Prefiltered out',
+      term: 'Prefiltered Out',
       detail: `${Number(prefilter.titleExcludedCount ?? dropped.length)} skipped by title · ${Number(prefilter.locationExcludedCount || 0)} skipped by a non-US location (before enrichment)`,
       items: (prefilter.bySource || []).map(entry => `${entry.source}: title ${Number(entry.title || 0)} · location ${Number(entry.location || 0)}`),
       folded: dropped.length ? { id: 'prefilter-titles', summary: `Show ${dropped.length} postings skipped by title`, items: dropped.map(item => `${item.company || 'Unknown company'} · ${item.title || 'Untitled'} · ${item.source || 'unknown source'} · ${item.rule}`) } : null,
@@ -282,7 +287,7 @@ export function runDetailsView(jobs, meta, tracks, notReviewedCount = 0) {
     rows.push({ term: 'Funnel', detail: funnelText(meta.funnel), items: ['prescreen', 'review', 'supplemental'].filter(purpose => byPurpose[purpose]?.calls).map(purpose => `${purpose}: ${describeTotals(byPurpose[purpose])}`) });
   }
   if (Array.isArray(meta.roleFamilies) && meta.roleFamilies.length) {
-    rows.push({ term: 'Candidates by role family', detail: `${roleFamilyCountsText(meta.roleFamilies)} (entered prescreen / review / matched)` });
+    rows.push({ term: 'Candidates by Role Family', detail: `${roleFamilyCountsText(meta.roleFamilies)} (entered prescreen / review / matched)` });
   }
   if (meta.prescreen) {
     const prescreen = meta.prescreen;
@@ -297,7 +302,7 @@ export function runDetailsView(jobs, meta, tracks, notReviewedCount = 0) {
   if (meta.usage?.total?.calls) {
     const usage = meta.usage;
     rows.push({
-      term: 'Subscription usage',
+      term: 'Subscription Usage',
       detail: describeTotals(usage.total),
       items: [
         ...Object.entries(usage.byModel || {}).map(([model, totals]) => `${model}${totals.effort ? ` (${totals.effort} effort)` : ''}: ${describeTotals(totals)}`),
@@ -308,13 +313,13 @@ export function runDetailsView(jobs, meta, tracks, notReviewedCount = 0) {
   if (meta.datePrecision) {
     const precision = meta.datePrecision;
     const perSource = (Array.isArray(precision.bySource) ? precision.bySource : []).map(entry => `${entry.source}: ${precisionCounts(entry)}`);
-    rows.push({ term: 'Date precision', detail: `${precisionCounts(precision)} (by source below)`, items: perSource });
+    rows.push({ term: 'Date Precision', detail: `${precisionCounts(precision)} (by source below)`, items: perSource });
   }
   if (meta.candidateCount != null) {
     const limit = Number(meta.maxReviewedPerRun || 0);
     const inWindow = meta.candidateInWindowCount != null ? ` (${Number(meta.candidateInWindowCount)} within the window)` : '';
     const expired = `${meta.expiredBacklogCount != null ? ` · expired ${Number(meta.expiredBacklogCount)} backlog postings` : ''}${meta.undatedAbandonedCount ? ` · stopped carrying ${Number(meta.undatedAbandonedCount)} undated postings` : ''}`;
-    rows.push({ term: 'Review budget', detail: `${Number(meta.candidateCount)} candidates${inWindow} · ${Number(meta.reviewedThisRun || 0)} reviewed · ${Number(meta.deferredCount || 0)} deferred${expired}${meta.earlyCareerCount ? ` · ${Number(meta.earlyCareerCount)} early-career full-time weighed like internships` : ''}${limit > 0 ? ` (limit ${limit} per run)` : ' (no limit)'}`, items: meta.budgetAlert ? [meta.budgetAlert.message] : [] });
+    rows.push({ term: 'Review Budget', detail: `${Number(meta.candidateCount)} candidates${inWindow} · ${Number(meta.reviewedThisRun || 0)} reviewed · ${Number(meta.deferredCount || 0)} deferred${expired}${meta.earlyCareerCount ? ` · ${Number(meta.earlyCareerCount)} early-career full-time weighed like internships` : ''}${limit > 0 ? ` (limit ${limit} per run)` : ' (no limit)'}`, items: meta.budgetAlert ? [meta.budgetAlert.message] : [] });
   }
   // New postings and the catch-up lane (postings held while the engine was unavailable), reviewed apart.
   if (meta.catchUp) {
@@ -324,14 +329,14 @@ export function runDetailsView(jobs, meta, tracks, notReviewedCount = 0) {
       : '';
     rows.push({ term: 'Reviewed', detail: `${Number(catchUp.reviewedNew)} new posting(s) · ${Number(catchUp.reviewedCatchUp)} catch-up posting(s)${lane}` });
   }
-  if (meta.seen) rows.push({ term: 'Seen state', detail: `${Number(meta.seen.entries)} entries · ${Number(meta.seen.pruned)} past ${Number(meta.seen.retentionDays)} days removed this run` });
+  if (meta.seen) rows.push({ term: 'Seen State', detail: `${Number(meta.seen.entries)} entries · ${Number(meta.seen.pruned)} past ${Number(meta.seen.retentionDays)} days removed this run` });
   if (Array.isArray(meta.sourceCounts) && meta.sourceCounts.length) {
     rows.push({ term: 'Sources', detail: sourcesSummary(meta.sourceCounts), items: meta.sourceCounts.map(sourceLine) });
   }
   if (exclusions) {
     const total = Number(exclusions.location || 0) + Number(exclusions.graduation || 0);
     rows.push({
-      term: 'Hard filter',
+      term: 'Hard Filter',
       detail: total
         ? `${total} excluded: ${Number(exclusions.location || 0)} outside the United States, ${Number(exclusions.graduation || 0)} outside the graduation window`
         : 'Nothing excluded',
@@ -341,7 +346,7 @@ export function runDetailsView(jobs, meta, tracks, notReviewedCount = 0) {
   if (meta.trigger) rows.push({ term: 'Trigger', detail: String(meta.trigger) });
   if (meta.engine) rows.push({ term: 'Engine', detail: String(meta.engine) });
   if (meta.runsToday) {
-    rows.push({ term: 'Updates today', detail: `Daily update #${Number(meta.runsToday)}${meta.lastUpdatedAt ? ` · last updated ${readableTimestamp(meta.lastUpdatedAt, meta.timeZone)}` : ''}` });
+    rows.push({ term: 'Updates Today', detail: `Daily update #${Number(meta.runsToday)}${meta.lastUpdatedAt ? ` · last updated ${readableTimestamp(meta.lastUpdatedAt, meta.timeZone)}` : ''}` });
   } else if (meta.generatedAt) {
     rows.push({ term: 'Generated', detail: readableTimestamp(meta.generatedAt, meta.timeZone) });
   }
@@ -395,16 +400,16 @@ export function postingWindowLabel(jobs, meta) {
   return `posted within the last ${days} days`;
 }
 
-// `windowJobs` (the main list under the strict 24-hour window) sets the posting-window phrase; the match
-// count is the day's whole.
-export function mastheadSubtitle(jobs, meta, { withDate = true, windowJobs = jobs } = {}) {
-  const parts = [];
-  if (withDate) parts.push(readableDate(meta.date));
-  parts.push(matchLabel(jobs.length));
-  const window = postingWindowLabel(windowJobs, meta);
-  if (window) parts.push(window);
+// "22 Matches · Ran 6:02 PM": the day's matches and the time of the latest run. A run on another local day
+// than the report's (a folder from before 2026-11, when evening runs wrote the next day's report) keeps its
+// date: "Ran Nov 7, 8:00 PM".
+export function mastheadSubtitle(jobs, meta) {
+  const parts = [matchLabel(jobs.length)];
   const ranAt = meta.completedAt || meta.lastUpdatedAt || null;
-  if (ranAt) parts.push(`Ran ${formatLocalShort(ranAt, meta.timeZone)}`);
+  if (ranAt && !Number.isNaN(new Date(ranAt).getTime())) {
+    const sameDay = localDate(new Date(ranAt), meta.timeZone || 'America/Chicago') === meta.date;
+    parts.push(`Ran ${sameDay ? formatLocalTime(ranAt, meta.timeZone) : formatLocalShort(ranAt, meta.timeZone)}`);
+  }
   return parts.join(' · ');
 }
 
@@ -418,7 +423,7 @@ export function signedOutBanner(auth) {
 }
 
 // The view object consumed by report-components; the hub renders the same view inside its shell with
-// `embedded: true`, which titles the masthead with the date instead of repeating the product name.
+// `embedded: true`. Both title the masthead with the report's date.
 // `jobs` are the day's matches; a posting no model reviewed (an older payload kept them there) moves to the
 // folded Not reviewed group, together with options.notReviewed (the hub's list) or the ones found in
 // options.reviewed (the pipeline passes the day's reviewed list).
@@ -439,17 +444,23 @@ export function buildReportView(matchJobs, meta, options = {}) {
   const cards = allCards.filter((card, index) => !card.carriedOver && !dateOnlyJobs.has(kept[index].job));
   const dateOnlyCards = allCards.filter((card, index) => dateOnlyJobs.has(kept[index].job));
   const carriedCards = allCards.filter(card => card.carriedOver);
-  // Payloads from before the setting record no mode and keep their header as it was.
-  const windowNote = meta.strictWindow && strictWindowHeadline({ enabled: strict.enabled, main: cards.length, dateOnly: dateOnlyCards.length, carried: carriedCards.length, notReviewed: notReviewedCards.length, carriedTitle: CARRIED_OVER_TITLE, notReviewedTitle: NOT_REVIEWED_TITLE }) || null;
+  // Run Details: the strict window and the group counts (payloads from before the setting record no mode and
+  // get no line), and the posting window of the main list alone.
+  const window = {
+    strict: meta.strictWindow ? strictWindowDetail({ enabled: strict.enabled, groups: [
+      { title: MAIN_LIST_TITLE, count: cards.length },
+      ...(strict.enabled ? [{ title: DATE_ONLY_GROUP_TITLE, count: dateOnlyCards.length }] : []),
+      { title: CARRIED_OVER_TITLE, count: carriedCards.length },
+      { title: NOT_REVIEWED_TITLE, count: notReviewedCards.length },
+    ] }) : null,
+    posted: postingWindowLabel(strict.main, meta),
+  };
   const roleTypes = [...new Set(jobs.map(job => job.roleType || 'unknown'))].map(value => ({ value, label: roleLabel(value) }));
-  const embedded = options.embedded === true;
   return {
     title: REPORT_TITLE,
     dateLabel: readableDate(meta.date),
     matchLabel: matchLabel(jobs.length),
-    masthead: embedded
-      ? { title: readableDate(meta.date), subtitle: mastheadSubtitle(jobs, meta, { withDate: false, windowJobs: strict.main }), windowNote, note: meta.quotaNote || null }
-      : { title: REPORT_TITLE, subtitle: mastheadSubtitle(jobs, meta, { windowJobs: strict.main }), windowNote, note: meta.quotaNote || null },
+    masthead: { title: readableDate(meta.date), subtitle: mastheadSubtitle(jobs, meta), note: meta.quotaNote || null },
     toolbar: { roleTypes, tracks, quiet: jobs.length < 5, total: jobs.length },
     authBanner: signedOutBanner(meta.authExpired),
     banner: meta.authExpired ? null : (meta.quota?.banner || null),
@@ -460,8 +471,8 @@ export function buildReportView(matchJobs, meta, options = {}) {
     dateOnly: strict.enabled && dateOnlyCards.length ? { title: DATE_ONLY_GROUP_TITLE, note: 'Strict 24-hour window: the source gives only a date before the run\'s day (such as "Posted Yesterday"), or no date at all, so these postings may be older than 24 hours. They were reviewed like the rest.', cards: dateOnlyCards } : null,
     carried: carriedCards.length ? { title: CARRIED_OVER_TITLE, note: 'Deferred by the review budget on an earlier run and reviewed now; each card says when it was first found.', cards: carriedCards } : null,
     notReviewed: notReviewedCards.length ? { title: NOT_REVIEWED_TITLE, note: 'Local triage scores only: no model reviewed these postings, so none of them counts as a match and no cover letter is written for them automatically. Verify the fit yourself.', cards: notReviewedCards } : null,
-    emptyMessage: strict.enabled && dateOnlyCards.length && !cards.length ? `No match is known to be posted within 24 hours; see "${DATE_ONLY_GROUP_TITLE}" below.` : 'No new postings cleared the configured threshold for this date.',
-    runDetails: runDetailsView(jobs, meta, tracks, notReviewed.length),
+    emptyMessage: 'No new postings cleared the configured threshold for this date.',
+    runDetails: runDetailsView(jobs, meta, tracks, notReviewed.length, window),
     footer: `Generated locally. Scores are triage aids, not facts. Verify eligibility, posting date, and JD before applying. No applications were submitted.${meta.authExpired ? ` ${meta.authExpired.message}` : ''}`,
   };
 }

@@ -109,7 +109,7 @@ test('a pass writes the letters on the draft and editor assignments (engine, mod
     assert.equal(existsSync(lettersLockPath(root)), false, 'the letters lock is released');
     assert.equal(reports.length, 1);
     const rows = runDetailsView([], { date: '2026-09-15', resumeTracks: [], warnings: [], autoLetters: reports[0] }, []).rows;
-    assert.match(rows.find(row => row.term === 'Automatic cover letters').detail, /^2 generated · 0 failed · codex · gpt-5\.6-sol \(medium\) · 400 in · 160 out \(4 calls\)$/);
+    assert.match(rows.find(row => row.term === 'Automatic Cover Letters').detail, /^2 generated · 0 failed · codex · gpt-5\.6-sol \(medium\) · 400 in · 160 out \(4 calls\)$/);
     // The next pass finds letters on file and writes only the remaining posting.
     calls.length = 0;
     const second = await runAutoLetters({ config: await ctx.loadConfig(), date: '2026-09-15', newMatchUrls: matches.map(item => item.url), ctx });
@@ -128,7 +128,7 @@ test('without Codex the chain falls back to Claude Opus and notes it; a chain th
     assert.equal(outcome.generated, 3);
     assert.ok(offline.calls.every(call => call.engine === 'claude' && call.model === 'claude-opus-5-5'), 'every call on the fallback');
     const letter = (await offline.ctx.letterStore.listLetters())[0];
-    assert.equal(letter.editorNotes[0], 'Cover letter draft: Codex is not connected; used claude-opus-5-5 from the fallback chain');
+    assert.equal(letter.editorNotes[0], 'Cover Letter Draft: Codex is not connected; used claude-opus-5-5 from the fallback chain');
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
@@ -151,7 +151,7 @@ test('without Codex the chain falls back to Claude Opus and notes it; a chain th
     assert.match(warnings[0].message, /stopped after Example Co 2 failed: .*; 2 posting\(s\) are queued for the next run or Run Now/);
     const written = await failing.ctx.letterStore.listLetters();
     assert.deepEqual(written.map(letter => letter.company), ['Example Co 3']);
-    assert.match(written[0].editorNotes.join('\n'), /Cover letter draft: gpt-5\.6-sol failed \(.*usage limit.*\); used claude-opus-5-5/);
+    assert.match(written[0].editorNotes.join('\n'), /Cover Letter Draft: gpt-5\.6-sol failed \(.*usage limit.*\); used claude-opus-5-5/);
   } finally {
     await fs.rm(root2, { recursive: true, force: true });
   }
@@ -212,7 +212,7 @@ test('after a full run the report is on disk and the run lock released before th
     const payload = JSON.parse(await fs.readFile(path.join(root, 'state', `report-payload-${summary.meta.date}.json`), 'utf8'));
     assert.equal(payload.meta.autoLetters.generated, summary.meta.matchCount, 'the outcome reaches the payload');
     const html = await fs.readFile(summary.htmlPath, 'utf8');
-    assert.match(html, /<dt>Automatic cover letters<\/dt><dd>\d+ generated · 0 failed · codex · gpt-5\.6-sol \(medium\)/, 'and the Desktop report');
+    assert.match(html, /<dt>Automatic Cover Letters<\/dt><dd>\d+ generated · 0 failed · codex · gpt-5\.6-sol \(medium\)/, 'and the Desktop report');
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

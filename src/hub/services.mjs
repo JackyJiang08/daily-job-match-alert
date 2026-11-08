@@ -28,6 +28,7 @@ import { HubLockedError } from './config-file.mjs';
 import { prescreenOverview } from '../prescreen.mjs';
 import { DEFAULT_TITLE_FAMILIES, NON_FAMILY_TERMS } from '../prefilter.mjs';
 import { targetRoleFamilies } from '../role-families.mjs';
+import { DEFAULT_SCHEDULE } from '../schedule.mjs';
 import { entryAsPayload, syncReportsIndex } from '../reports-index.mjs';
 import { MAXIMUM_RETENTION_DAYS, MINIMUM_RETENTION_DAYS, listPayloadFiles, readPayloadFile, retentionDays } from '../payload-store.mjs';
 import { loadStatusSummary, summaryAsPayload } from '../status-summary.mjs';
@@ -363,7 +364,7 @@ function scheduledInstant(now, zone, hour, minute, dayOffset) {
 }
 
 // Next wall-clock occurrence of hour:minute in the given zone strictly after `now`.
-export function nextScheduledRun(now, timeZone, hour = 20, minute = 0) {
+export function nextScheduledRun(now, timeZone, hour = DEFAULT_SCHEDULE.hour, minute = DEFAULT_SCHEDULE.minute) {
   const zone = timeZone || 'America/Chicago';
   for (let offset = 0; offset <= 2; offset += 1) {
     const instant = scheduledInstant(now, zone, hour, minute, offset);
@@ -373,7 +374,7 @@ export function nextScheduledRun(now, timeZone, hour = 20, minute = 0) {
 }
 
 // Most recent occurrence at or before `now`: the run that should already have happened.
-export function previousScheduledRun(now, timeZone, hour = 20, minute = 0) {
+export function previousScheduledRun(now, timeZone, hour = DEFAULT_SCHEDULE.hour, minute = DEFAULT_SCHEDULE.minute) {
   const zone = timeZone || 'America/Chicago';
   for (let offset = 0; offset >= -2; offset -= 1) {
     const instant = scheduledInstant(now, zone, hour, minute, offset);
@@ -390,7 +391,7 @@ export async function installedSchedule(ctx) {
     const minute = /<key>Minute<\/key>\s*<integer>(\d+)<\/integer>/.exec(text)?.[1];
     if (hour != null) return { hour: Number(hour), minute: Number(minute || 0), installed: true, path: plist };
   } catch {}
-  return { hour: 20, minute: 0, installed: false, path: plist };
+  return { ...DEFAULT_SCHEDULE, installed: false, path: plist };
 }
 
 // Small summary for the sidebar of every page: last run time and result, next run time. When the most
@@ -779,7 +780,7 @@ export async function readSettings(ctx) {
     maxReviewedPerRun: semantic.maxReviewedPerRun == null ? 60 : Number(semantic.maxReviewedPerRun),
     catchUpBudget: catchUpBudgetOf(semantic.catchUpBudget),
     includeCarriedOver: semantic.includeCarriedOver !== false,
-    strict24HourWindow: semantic.strict24HourWindow === true,
+    strict24HourWindow: semantic.strict24HourWindow !== false,
     autoCatchUp: autoCatchUpEnabled(config),
     titleFamilies: Array.isArray(config.preferences?.titleFamilies) ? config.preferences.titleFamilies.map(String) : [...DEFAULT_TITLE_FAMILIES],
     targetRoleFamilies: targetRoleFamilies(config.preferences),

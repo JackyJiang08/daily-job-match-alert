@@ -64,28 +64,14 @@ function arg(argv, name, fallback = null) {
   return index >= 0 && argv[index + 1] ? argv[index + 1] : fallback;
 }
 
-function localTimeSeconds(now, timeZone) {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(now);
-  const value = type => Number(parts.find(item => item.type === type)?.value || 0);
-  return (value('hour') % 24) * 3600 + value('minute') * 60 + value('second');
-}
-
-export function resolveRunDates(argv = process.argv, timeZone = 'America/Chicago', configuredOffsetDays = 1) {
+// The report date is the run's own local day: the 18:00 run, a Run Now and a catch-up all write that day's
+// folder and title, and a second run on the same day merges into it. (Until 2026-11 a run after 14:00 wrote
+// the next day's folder; those folders keep their names, and the config key reportDateOffsetDays is ignored.)
+export function resolveRunDates(argv = process.argv, timeZone = 'America/Chicago') {
   const now = new Date(arg(argv, '--now', new Date().toISOString()));
   if (Number.isNaN(now.getTime())) throw new Error('--now must be a valid ISO date');
-  const reportDateOffsetDays = localTimeSeconds(now, timeZone) <= 14 * 60 * 60 ? 0 : Number(configuredOffsetDays);
-  return {
-    now,
-    runDate: dateWithOffset(now, timeZone, 0),
-    applicationDate: dateWithOffset(now, timeZone, reportDateOffsetDays),
-    reportDateOffsetDays,
-  };
+  const runDate = dateWithOffset(now, timeZone, 0);
+  return { now, runDate, applicationDate: runDate };
 }
 
 // The notification and warning for a state file that did not parse and was replaced by its newest readable
@@ -1086,7 +1072,7 @@ async function runPipeline(config, clock, options = {}) {
   });
   // A posting the review budget deferred on an earlier run is carried over: it keeps the time it was first
   // found (and, for a board posting that was new since the last poll then, that basis) and is shown in the
-  // report's "Carried over from yesterday" group, never in the main list.
+  // report's "Carried Over From Yesterday" group, never in the main list.
   const stamped = unseenCandidates.map(job => {
     const entry = deferredStatus(state, job).entry;
     if (!entry) return { ...job, originalUrl: job.originalUrl || job.url, discoveredAt: job.discoveredAt || now.toISOString() };
@@ -1434,7 +1420,7 @@ export async function main(options = {}) {
   const argv = options.argv || process.argv;
   const configPath = arg(argv, '--config', 'config.json');
   const config = await loadConfig(configPath);
-  const clock = resolveRunDates(argv, config.timeZone || 'America/Chicago', Number(config.reportDateOffsetDays ?? 1));
+  const clock = resolveRunDates(argv, config.timeZone || 'America/Chicago');
   const lock = await acquireRunLock(path.join(config.root, 'state', '.lock'), options.lockOptions);
   if (!lock.acquired) {
     console.warn(`Daily Job Match Alert is already running with PID ${lock.pid}; this invocation will exit.`);

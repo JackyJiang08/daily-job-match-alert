@@ -103,7 +103,7 @@ test('the nightly run defers every candidate on an expired login, warns plainly,
   assert.match(html, /<div class="banner" data-banner="auth" style="[^"]+">Claude signed out\. 3 posting\(s\) were deferred to the next run and are not lost\. Run `claude auth login --claudeai` in Terminal\.<\/div>/);
   assert.doesNotMatch(html, /data-banner="quota"/);
   assert.match(html, /<footer class="foot">Generated locally\.[^<]*Claude is signed out\. Run `claude auth login --claudeai` in Terminal, then try again\.<\/footer>/);
-  assert.match(html, /<dt>Claude login<\/dt><dd>Claude is signed out\.[^<]*\(3 deferred\)<\/dd>/);
+  assert.match(html, /<dt>Claude Login<\/dt><dd>Claude is signed out\.[^<]*\(3 deferred\)<\/dd>/);
 });
 
 test('Session expired is a distinct connection state from Not connected and clears with a refresh', () => {

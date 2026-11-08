@@ -42,10 +42,10 @@ test('the run breakdown counts scoring by engine and model, deferrals by cause, 
   assert.deepEqual(counts, { scoredByModel: [{ label: 'claude · claude-opus-5-5', count: 2 }, { label: 'codex · gpt-5.6-sol', count: 1 }], localScores: 1, deferred: { budget: 2, quota: 3 }, prescreenedOut: 0, prefilteredOut: { title: 4, location: 1 }, expired: 6 });
   const rows = runDetailsView([], { date: '2026-10-07', resumeTracks: [], warnings: [], runCounts: counts, prefilter: { titleExcluded: [], titleExcludedCount: 4, locationExcludedCount: 1, bySource: [] } }, []).rows;
   const byTerm = Object.fromEntries(rows.map(row => [row.term, row]));
-  assert.equal(byTerm['Scored by model (this run)'].detail, '3 scored · 1 kept local scores (unreviewed)');
-  assert.deepEqual(byTerm['Scored by model (this run)'].items, ['claude · claude-opus-5-5: 2', 'codex · gpt-5.6-sol: 1']);
+  assert.equal(byTerm['Scored by Model (This Run)'].detail, '3 scored · 1 kept local scores (unreviewed)');
+  assert.deepEqual(byTerm['Scored by Model (This Run)'].items, ['claude · claude-opus-5-5: 2', 'codex · gpt-5.6-sol: 1']);
   assert.equal(byTerm.Deferred.detail, '5 (review budget 2 · quota 3)');
-  assert.equal(byTerm['Prefiltered out'].detail, '4 skipped by title · 1 skipped by a non-US location (before enrichment)');
+  assert.equal(byTerm['Prefiltered Out'].detail, '4 skipped by title · 1 skipped by a non-US location (before enrichment)');
   assert.equal(byTerm.Expired.detail, '6 backlog posting(s) past the grace period, not scored');
   assert.equal(Object.hasOwn(byTerm, 'Reviewed jobs (this run)'), false);
 

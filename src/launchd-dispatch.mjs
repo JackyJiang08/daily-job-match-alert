@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { caffeinated } from './caffeinate.mjs';
 import { normalizeState } from './state.mjs';
+import { DEFAULT_SCHEDULE } from './schedule.mjs';
 
 function arg(name, fallback = null) {
   const index = process.argv.indexOf(name);
@@ -26,7 +27,7 @@ export function launchdTrigger(options = {}) {
   if (requested !== 'auto') throw new Error(`Unknown launchd trigger mode: ${requested}`);
   const now = options.now instanceof Date ? options.now : new Date(options.now || Date.now());
   const scheduled = new Date(now);
-  scheduled.setHours(Number(options.hour ?? 20), Number(options.minute ?? 0), 0, 0);
+  scheduled.setHours(Number(options.hour ?? DEFAULT_SCHEDULE.hour), Number(options.minute ?? DEFAULT_SCHEDULE.minute), 0, 0);
   const lastSuccess = options.lastSuccessfulRun ? new Date(options.lastSuccessfulRun).getTime() : Number.NaN;
   return now >= scheduled && (!Number.isFinite(lastSuccess) || lastSuccess < scheduled.getTime())
     ? 'scheduled'
@@ -53,8 +54,8 @@ export async function dispatchLaunchd(options = {}) {
   const trigger = launchdTrigger({
     requested: options.requested || process.env.DAILY_JOB_MATCH_ALERT_TRIGGER || 'auto',
     now: options.now || new Date(),
-    hour: options.hour ?? process.env.DAILY_JOB_MATCH_ALERT_SCHEDULE_HOUR ?? 20,
-    minute: options.minute ?? process.env.DAILY_JOB_MATCH_ALERT_SCHEDULE_MINUTE ?? 0,
+    hour: options.hour ?? process.env.DAILY_JOB_MATCH_ALERT_SCHEDULE_HOUR ?? DEFAULT_SCHEDULE.hour,
+    minute: options.minute ?? process.env.DAILY_JOB_MATCH_ALERT_SCHEDULE_MINUTE ?? DEFAULT_SCHEDULE.minute,
     lastSuccessfulRun: state.lastSuccessfulRun,
   });
   const entrypoint = fileURLToPath(new URL(trigger === 'scheduled' ? './index.mjs' : './catchup.mjs', import.meta.url));

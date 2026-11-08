@@ -79,7 +79,7 @@ test('a known non-US location is dropped before enrichment, counted per source, 
   ]);
 
   const meta = { date: '2026-10-05', timeZone: 'America/Chicago', lookbackHours: 24, resumeTracks: [{ id: 'data', label: 'Data' }], warnings: [], prefilter: { titleExcluded: result.titleExcluded, titleExcludedCount: 2, locationExcludedCount: 1, bySource: result.bySource } };
-  const row = runDetailsView([], meta, meta.resumeTracks).rows.find(item => item.term === 'Prefiltered out');
+  const row = runDetailsView([], meta, meta.resumeTracks).rows.find(item => item.term === 'Prefiltered Out');
   assert.equal(row.detail, '2 skipped by title · 1 skipped by a non-US location (before enrichment)');
   assert.deepEqual(row.items, ['Example Corp (Greenhouse): title 1 · location 1', 'Zapply Internships 2027: title 1 · location 0']);
   const html = buildHtml([], meta);
@@ -229,7 +229,7 @@ test('Run Details shows this run\'s usage totals by model and purpose; the revie
   const at = NOW.toISOString();
   const usage = summarizeUsage([...usageEntries(claudeUsageFromEnvelope(claudeFixture.envelope), { purpose: 'review', at }), ...usageEntries(codexUsageFromJsonl(codexExec, { model: 'gpt-6-astra', effort: 'medium' }), { purpose: 'supplemental', at })]);
   const meta = { date: '2026-10-05', resumeTracks: [], warnings: [], usage };
-  const row = runDetailsView([], meta, []).rows.find(item => item.term === 'Subscription usage');
+  const row = runDetailsView([], meta, []).rows.find(item => item.term === 'Subscription Usage');
   assert.equal(row.detail, '229k in · 3.9k out · 233k cache read · 19k cache write · 1.7k reasoning (2 calls)');
   assert.deepEqual(row.items, [
     'claude-fable-5-1: 2 in · 3.8k out · 4.2k cache read · 19k cache write · 1.7k reasoning (1 call)',
@@ -237,7 +237,7 @@ test('Run Details shows this run\'s usage totals by model and purpose; the revie
     'review: 2 in · 3.8k out · 4.2k cache read · 19k cache write · 1.7k reasoning (1 call)',
     'supplemental: 229k in · 54 out · 229k cache read (1 call)',
   ]);
-  assert.equal(runDetailsView([], { ...meta, usage: summarizeUsage([]) }, []).rows.some(item => item.term === 'Subscription usage'), false, 'no calls, no row');
+  assert.equal(runDetailsView([], { ...meta, usage: summarizeUsage([]) }, []).rows.some(item => item.term === 'Subscription Usage'), false, 'no calls, no row');
 
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'review-totals-'));
   try {

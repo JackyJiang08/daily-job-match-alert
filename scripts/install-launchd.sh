@@ -1,6 +1,6 @@
 #!/bin/zsh
 # Installs the nightly LaunchAgent. Run with zsh (the shebang does that when executed directly):
-#   ./scripts/install-launchd.sh [hour] [minute]     default 20:00 local time
+#   ./scripts/install-launchd.sh [hour] [minute]     default 18:00 local time
 if [ -z "${ZSH_VERSION:-}" ]; then
   echo "install-launchd.sh must be run with zsh, not bash or sh. 请用 zsh 运行：zsh scripts/install-launchd.sh [hour] [minute]，或直接 ./scripts/install-launchd.sh" >&2
   exit 2
@@ -8,7 +8,7 @@ fi
 set -euo pipefail
 
 project_dir="${0:A:h:h}"
-hour="${1:-20}"
+hour="${1:-18}"
 minute="${2:-0}"
 node_bin="${DAILY_JOB_MATCH_ALERT_NODE:-${JOB_RADAR_NODE:-$(command -v node)}}"
 agent_dir="$HOME/Library/LaunchAgents"

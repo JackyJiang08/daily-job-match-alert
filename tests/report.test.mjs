@@ -34,14 +34,14 @@ test('HTML output escapes remote content, links the posting, and keeps the JD fo
   assert.doesNotMatch(html, /<link |src="http|https:\/\/cdn/);
 });
 
-test('the masthead is two lines: the title, then a readable date with the match count', () => {
+test('the masthead is two lines: the report date as the title, then the match count', () => {
   assert.equal(readableDate('2026-09-11'), 'September 11, 2026');
   assert.equal(readableDate('not-a-date'), 'not-a-date');
   const nine = buildHtml(Array.from({ length: 9 }, (_, index) => ({ ...job, url: `https://example.com/jobs/${index}` })), { ...meta, date: '2026-09-11' });
-  assert.equal(header(nine), '<h1>Daily Job Match Alert</h1><p class="sub">September 11, 2026 · 9 matches</p>');
+  assert.equal(header(nine), '<h1>September 11, 2026</h1><p class="sub">9 Matches</p>');
   assert.match(nine, /<title>Daily Job Match Alert — September 11, 2026<\/title>/);
-  assert.equal(header(buildHtml([job], meta)), '<h1>Daily Job Match Alert</h1><p class="sub">August 27, 2026 · 1 match</p>');
-  assert.equal(header(buildHtml([], meta)), '<h1>Daily Job Match Alert</h1><p class="sub">August 27, 2026 · No matches</p>');
+  assert.equal(header(buildHtml([job], meta)), '<h1>August 27, 2026</h1><p class="sub">1 Match</p>');
+  assert.equal(header(buildHtml([], meta)), '<h1>August 27, 2026</h1><p class="sub">No Matches</p>');
   assert.doesNotMatch(nine, /linear-gradient/);
   assert.doesNotMatch(header(nine), /scored by|Resume tracks|excluded/);
 });
@@ -66,16 +66,16 @@ test('run metadata lives only in the collapsed Run details block, including the 
   const details = html.match(/<details class="run" id="run-details"><summary>Run Details<\/summary>([\s\S]*?)<\/details>/)[1];
   assert.ok(details, 'Run details block is missing');
   assert.doesNotMatch(html, /<details class="run"[^>]*\bopen\b/, 'Run details must be collapsed by default');
-  assert.match(details, /<dt>Application date<\/dt><dd>August 27, 2026 \(run on August 26, 2026\)<\/dd>/);
-  assert.match(details, /<dt>Lookback window<\/dt><dd>24 hours<\/dd>/);
-  assert.match(details, /<dt>Scoring model<\/dt><dd>claude-fable-5<\/dd>/);
-  assert.match(details, /<dt>Resume tracks<\/dt><dd>Data, AI<\/dd>/);
-  assert.match(details, /<dt>Minimum score<\/dt><dd>70<\/dd>/);
+  assert.match(details, /<dt>Report Date<\/dt><dd>August 27, 2026 \(run on August 26, 2026\)<\/dd>/);
+  assert.match(details, /<dt>Lookback Window<\/dt><dd>24 hours<\/dd>/);
+  assert.match(details, /<dt>Scoring Model<\/dt><dd>claude-fable-5<\/dd>/);
+  assert.match(details, /<dt>Resume Tracks<\/dt><dd>Data, AI<\/dd>/);
+  assert.match(details, /<dt>Minimum Score<\/dt><dd>70<\/dd>/);
   assert.match(details, /<dt>Postings<\/dt><dd>12 collected · 7 reviewed · 1 matched<\/dd>/, 'the posting no model reviewed is not a match');
-  assert.match(details, /<dt>Hard filter<\/dt><dd>3 excluded: 2 outside the United States, 1 outside the graduation window<ul><li>Globex — Data Analyst \(Toronto\): location outside the United States<\/li><li>Initech — BI Intern: Class of 2026 only<\/li><\/ul><\/dd>/);
-  assert.match(details, /<dt>Updates today<\/dt><dd>Daily update #2 · last updated Aug 27, 2026, 8:30 AM<\/dd>/);
+  assert.match(details, /<dt>Hard Filter<\/dt><dd>3 excluded: 2 outside the United States, 1 outside the graduation window<ul><li>Globex — Data Analyst \(Toronto\): location outside the United States<\/li><li>Initech — BI Intern: Class of 2026 only<\/li><\/ul><\/dd>/);
+  assert.match(details, /<dt>Updates Today<\/dt><dd>Daily update #2 · last updated Aug 27, 2026, 8:30 AM<\/dd>/);
   assert.doesNotMatch(html, /\bUTC\b/);
-  assert.match(details, /<dt>Status<\/dt><dd>1 posting was not reviewed by a model \(engine unavailable\); they are listed under Not reviewed \(engine unavailable\), not among the matches<ul><li>Resume PDF\(s\) recovered from iCloud before this run: data<\/li><li>2 pipeline warning\(s\), see warnings\.txt beside this file<\/li><\/ul><\/dd>/);
+  assert.match(details, /<dt>Status<\/dt><dd>1 posting was not reviewed by a model \(engine unavailable\); they are listed under Not Reviewed \(Engine Unavailable\), not among the matches<ul><li>Resume PDF\(s\) recovered from iCloud before this run: data<\/li><li>2 pipeline warning\(s\), see warnings\.txt beside this file<\/li><\/ul><\/dd>/);
   // The warning lines themselves never reach the page.
   assert.doesNotMatch(html, /network unavailable|batch fallback|Pipeline warnings/);
   // Outside the block, none of the run metadata appears.
@@ -86,16 +86,20 @@ test('run metadata lives only in the collapsed Run details block, including the 
 test('the masthead names the run time in the configured zone, and the embedded view is titled by date', () => {
   const ran = { ...meta, timeZone: 'America/Chicago', completedAt: '2026-09-13T01:00:00Z', trigger: 'scheduled', runsToday: 1, lastUpdatedAt: '2026-09-13T01:00:00Z' };
   const html = buildHtml([job], { ...ran, date: '2026-09-13' });
-  assert.equal(header(html), '<h1>Daily Job Match Alert</h1><p class="sub">September 13, 2026 · 1 match · posted within the last 17 days · Ran Sep 12, 8:00 PM</p>');
-  assert.equal(mastheadSubtitle([job], { ...ran, date: '2026-09-13' }), 'September 13, 2026 · 1 match · posted within the last 17 days · Ran Sep 12, 8:00 PM');
+  // A folder from before 2026-11 (the evening run wrote the next day's report) keeps the run's date.
+  assert.equal(header(html), '<h1>September 13, 2026</h1><p class="sub">1 Match · Ran Sep 12, 8:00 PM</p>');
+  assert.equal(mastheadSubtitle([job], { ...ran, date: '2026-09-13' }), '1 Match · Ran Sep 12, 8:00 PM');
+  // A run on the report's own day shows the time alone.
+  assert.equal(mastheadSubtitle([job], { ...ran, date: '2026-09-12' }), '1 Match · Ran 8:00 PM');
+  assert.match(html, /<dt>Posting Window<\/dt><dd>Main List: posted within the last 17 days<\/dd>/, 'the posting window moved to Run Details');
   assert.match(html, /<dt>Trigger<\/dt><dd>scheduled<\/dd>/);
   assert.match(buildHtml([job], { ...ran, engine: 'codex', scoringModel: 'gpt-5.6-sol' }), /<dt>Engine<\/dt><dd>codex<\/dd>/);
   assert.doesNotMatch(html, /\bUTC\b/);
   const embedded = buildReportView([job], { ...ran, date: '2026-09-13' }, { embedded: true });
-  assert.deepEqual(embedded.masthead, { title: 'September 13, 2026', subtitle: '1 match · posted within the last 17 days · Ran Sep 12, 8:00 PM', windowNote: null, note: null }, 'no quota event, no quota line');
-  assert.equal(buildReportView([job], meta).masthead.subtitle, 'August 27, 2026 · 1 match', 'no run time when the payload has none');
+  assert.deepEqual(embedded.masthead, { title: 'September 13, 2026', subtitle: '1 Match · Ran Sep 12, 8:00 PM', note: null }, 'no quota event, no quota line');
+  assert.equal(buildReportView([job], meta).masthead.subtitle, '1 Match', 'no run time when the payload has none');
   // Older payloads without completedAt fall back to lastUpdatedAt.
-  assert.equal(mastheadSubtitle([], { date: '2026-08-27', timeZone: 'America/Chicago', lastUpdatedAt: '2026-08-27T13:30:00Z' }), 'August 27, 2026 · No matches · Ran Aug 27, 8:30 AM');
+  assert.equal(mastheadSubtitle([], { date: '2026-08-27', timeZone: 'America/Chicago', lastUpdatedAt: '2026-08-27T13:30:00Z' }), 'No Matches · Ran 8:30 AM');
 });
 
 test('card locations are normalized at render time so historical payloads read correctly', () => {
@@ -125,8 +129,8 @@ test('cards carry the ring score, compact track scores, the recommendation, and 
   assert.match(html, /<h2 class="job-title"><a target="_blank" rel="noopener noreferrer" href="https:\/\/example\.com\/jobs\/1">Data &amp; AI Analyst<\/a><\/h2>/);
   assert.match(html, /<p class="job-meta">Acme, Inc\. · Remote · New Grad<\/p>/);
   assert.match(html, /<div class="scores"><span class="track" data-track="data">Data <b>74<\/b><\/span><span class="sep">·<\/span><span class="track best" data-track="llm">LLM <b>87<\/b><\/span><span class="sep">·<\/span><span class="track" data-track="agent">AI Agent <b>85<\/b><\/span><span class="recommend">Apply with LLM Resume<\/span><\/div>/);
-  assert.match(html, /<div class="facts-label">Why It Matches<\/div><ul class="facts reasons"><li>one<\/li><li>two<\/li><\/ul><details class="more"><summary>2 more<\/summary><ul class="facts reasons"><li>three<\/li><li>four<\/li><\/ul><\/details>/);
-  assert.match(html, /<div class="facts-label">Gaps \/ Verify<\/div><ul class="facts gaps"><li>a<\/li><li>b<\/li><\/ul><details class="more"><summary>1 more<\/summary>/);
+  assert.match(html, /<div class="facts-label">Why It Matches<\/div><ul class="facts reasons"><li>one<\/li><li>two<\/li><\/ul><details class="more"><summary>2 More<\/summary><ul class="facts reasons"><li>three<\/li><li>four<\/li><\/ul><\/details>/);
+  assert.match(html, /<div class="facts-label">Gaps \/ Verify<\/div><ul class="facts gaps"><li>a<\/li><li>b<\/li><\/ul><details class="more"><summary>1 More<\/summary>/);
   assert.match(html, /<span class="meta" title="Posted Aug 27, 2026, 5:00 AM">Posted Aug 27, 5:00 AM · fixture<\/span>/, 'a JSON-LD datePosted with a clock time is precise and shows the local time');
   const dayOnly = buildHtml([{ ...job, postedAt: '2026-08-27T00:00:00.000Z' }], { ...meta, timeZone: 'America/Chicago' });
   assert.match(dayOnly, /<span class="meta" title="Date only: the source reports no time of day">Posted Aug 27 \(date only\) · fixture<\/span>/, 'a bare-date datePosted (stored as UTC midnight by older versions) shows the day it names, marked date only');
@@ -170,13 +174,13 @@ test('semantic markers render as badges instead of text prefixes', () => {
   assert.deepEqual(jobBadges({ ...job, matchLevel: 'medium' }).map(badge => badge.label), ['Match: medium']);
   assert.deepEqual(jobBadges({ ...job, eligibility: { location: { verdict: 'unverified' } } }).map(badge => badge.key), ['location-unverified']);
   assert.deepEqual(jobBadges({ ...job, enrichment: 'failed', enrichmentReason: 'login_wall' }).map(badge => [badge.key, badge.tone]), [['login_wall', 'warn']]);
-  assert.deepEqual(jobBadges({ ...job, enrichment: 'failed', enrichmentReason: 'blocked' }).map(badge => badge.label), ['Fetch blocked']);
-  assert.deepEqual(jobBadges({ ...job, enrichment: 'failed' }).map(badge => badge.label), ['JD not fetched']);
+  assert.deepEqual(jobBadges({ ...job, enrichment: 'failed', enrichmentReason: 'blocked' }).map(badge => badge.label), ['Fetch Blocked']);
+  assert.deepEqual(jobBadges({ ...job, enrichment: 'failed' }).map(badge => badge.label), ['JD Not Fetched']);
   assert.deepEqual(jobBadges({ ...job, enrichment: undefined, source: 'Handshake email alert' }).map(badge => badge.key), ['email-only']);
   assert.deepEqual(jobBadges({ ...job, badges: ['Referral available', { key: 'hot', label: 'Hot', tone: 'bad' }] }).map(badge => badge.key), ['referral-available', 'hot']);
 
   const html = buildHtml([{ ...job, matchLevel: 'unreviewed', scoringEngine: 'local_fallback', location: 'Remote', gaps: ['Location unverified — confirm US eligibility'], eligibility: { location: { verdict: 'unverified', marker: null }, exclusion: null } }], meta);
-  assert.match(html, /<div class="badges"><span class="badge badge-warn" data-badge="unreviewed" title="[^"]+">Unreviewed<\/span><span class="badge" data-badge="location-unverified" title="The posting does not state a US location; confirm you can work from the United States before applying">US location not stated<\/span><\/div>/);
+  assert.match(html, /<div class="badges"><span class="badge badge-warn" data-badge="unreviewed" title="[^"]+">Unreviewed<\/span><span class="badge" data-badge="location-unverified" title="The posting does not state a US location; confirm you can work from the United States before applying">US Location Not Stated<\/span><\/div>/);
   assert.match(html, /US location not stated: confirm you can work from the United States/, 'an older payload\'s gap reads with the new wording');
   assert.doesNotMatch(html, /\[unreviewed\]|Match level:/);
   const clean = buildHtml([job], meta);

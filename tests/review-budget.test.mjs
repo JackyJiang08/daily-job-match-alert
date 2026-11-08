@@ -53,8 +53,8 @@ test('over the limit, the best local scores are reviewed and the rest are deferr
   assert.equal(deferredStatus(state, { url: 'https://x/2' }).deferred, false);
   assert.equal(isJobSeen(state, { url: 'https://x/3' }), false, 'a deferred posting is not marked seen');
   const rows = runDetailsView([], { date: '2026-09-19', candidateCount: 4, reviewedThisRun: 2, deferredCount: 2, maxReviewedPerRun: 2, warnings: [] }, []).rows;
-  assert.equal(rows.find(row => row.term === 'Review budget').detail, '4 candidates · 2 reviewed · 2 deferred (limit 2 per run)');
-  assert.equal(runDetailsView([], { date: '2026-09-19', candidateCount: 4, reviewedThisRun: 4, deferredCount: 0, maxReviewedPerRun: 0, warnings: [] }, []).rows.find(row => row.term === 'Review budget').detail, '4 candidates · 4 reviewed · 0 deferred (no limit)');
+  assert.equal(rows.find(row => row.term === 'Review Budget').detail, '4 candidates · 2 reviewed · 2 deferred (limit 2 per run)');
+  assert.equal(runDetailsView([], { date: '2026-09-19', candidateCount: 4, reviewedThisRun: 4, deferredCount: 0, maxReviewedPerRun: 0, warnings: [] }, []).rows.find(row => row.term === 'Review Budget').detail, '4 candidates · 4 reviewed · 0 deferred (no limit)');
 });
 
 test('a posting deferred twice is reviewed first on the third run, and one deferral only nudges the ranking', () => {
@@ -179,7 +179,7 @@ test('near-duplicate postings (same company, normalized title, and location on d
   assert.equal(mergeNearDuplicates([]).mergedCount, 0);
 });
 
-test('the masthead describes the real posting window of the report', () => {
+test('the posting window (now a Run Details line) describes the real window of the main list; the header does not', () => {
   const meta = { date: '2026-09-19', timeZone: 'America/Chicago', completedAt: '2026-09-19T01:00:00Z' };
   assert.equal(postingWindowLabel([{ postedAt: '2026-09-18T20:00:00Z' }, { postedAt: '2026-09-18T02:00:00Z' }], meta), 'posted within the last 24 hours');
   assert.equal(postingWindowLabel([{ postedAt: '2026-09-18T20:00:00Z' }, { postedAt: '2026-09-17T12:00:00Z' }], meta), 'posted within the last 2 days');
@@ -187,6 +187,6 @@ test('the masthead describes the real posting window of the report', () => {
   assert.equal(postingWindowLabel([{ title: 'undated' }], meta), null);
   assert.equal(postingWindowLabel([], meta), null);
   assert.equal(postingWindowLabel([{ postedAt: '2026-09-18T20:00:00Z' }], { date: '2026-09-19' }), null, 'no run time, no window (never the wall clock)');
-  assert.equal(mastheadSubtitle([{ postedAt: '2026-09-18T20:00:00Z' }], meta), 'September 19, 2026 · 1 match · posted within the last 24 hours · Ran Sep 18, 8:00 PM');
-  assert.equal(mastheadSubtitle([], meta), 'September 19, 2026 · No matches · Ran Sep 18, 8:00 PM');
+  assert.equal(mastheadSubtitle([{ postedAt: '2026-09-18T20:00:00Z' }], meta), '1 Match · Ran Sep 18, 8:00 PM');
+  assert.equal(mastheadSubtitle([], meta), 'No Matches · Ran Sep 18, 8:00 PM');
 });

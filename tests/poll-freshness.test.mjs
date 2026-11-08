@@ -162,7 +162,7 @@ function card(overrides = {}) {
   return { source: 'Workday · Example Corp', company: 'Example Corp', title: 'Data Analyst I', location: 'Chicago, IL', roleType: 'entry_level', url: 'https://example.com/1', scores: { data: 81 }, bestScore: 81, recommendedTrack: 'data', reasons: ['SQL'], gaps: [], matchLevel: 'high', semanticReviewed: true, ...overrides };
 }
 
-test('carried-over postings render in their own "Carried over from yesterday" group with their first-seen time; the main list keeps tonight\'s window', () => {
+test('carried-over postings render in their own "Carried Over From Yesterday" group with their first-seen time; the main list keeps tonight\'s window', () => {
   const meta = { date: '2026-10-10', timeZone: ZONE, resumeTracks: TRACKS, warnings: [], completedAt: TONIGHT.toISOString() };
   const jobs = [
     card({ url: 'https://example.com/new', postedAt: '2026-10-08T12:00:00.000Z', postedAtPrecision: 'date', freshnessBasis: NEW_SINCE_LAST_POLL, firstSeenAt: TONIGHT.toISOString(), previousPollAt: LAST_NIGHT.toISOString() }),
@@ -175,19 +175,20 @@ test('carried-over postings render in their own "Carried over from yesterday" gr
   assert.equal(view.carried.cards[0].footnote, 'Posted Oct 8 (date only) · first seen Oct 8, 8:04 PM · Workday · Example Corp');
   assert.equal(view.cards[0].footnote, 'first seen Oct 9, 8:04 PM · Workday · Example Corp');
   assert.match(view.cards[0].footnoteTitle, /not on the board at the previous poll \(Oct 8, 8:04 PM\)/);
-  assert.equal(view.masthead.subtitle.includes('posted within the last 24 hours'), true, 'the carried posting does not stretch the headline window');
+  assert.equal(view.runDetails.rows.find(row => row.term === 'Posting Window').detail, 'Main List: posted within the last 24 hours', 'the carried posting does not stretch the main list\'s window');
 
   const html = buildHtml(jobs, meta);
   const main = html.indexOf('<section class="jobs" id="jobs">');
-  const group = html.indexOf('<h2 class="group-title" id="carried-over">Carried over from yesterday <span class="group-count">(1)</span></h2>');
+  const group = html.indexOf('<h2 class="group-title" id="carried-over">Carried Over From Yesterday <span class="group-count">(1)</span></h2>');
   const carried = html.indexOf('<section class="jobs carried" id="jobs-carried">');
   assert.ok(main >= 0 && group > main && carried > group, 'main list, then the group heading, then the carried cards');
   assert.ok(html.indexOf('https://example.com/old') > carried, 'the carried card sits in its group');
   assert.ok(html.indexOf('https://example.com/new') < group, 'the new card sits in the main list');
 
-  // Only carried postings: the main list says it is empty and the group still shows.
+  // Only carried postings: the empty main list is not shown at all; the group is.
   const onlyCarried = buildHtml([jobs[1]], meta);
-  assert.match(onlyCarried, /No new postings cleared the configured threshold for this date\.[\s\S]*Carried over from yesterday/);
+  assert.doesNotMatch(onlyCarried, /No new postings cleared the configured threshold|id="jobs"/);
+  assert.match(onlyCarried, /Carried Over From Yesterday/);
 });
 
 test('Run Details reports the freshness rule, the postings left out, carried-over counts, and corrected future times', () => {
@@ -279,7 +280,7 @@ async function prepareProject() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'poll-freshness-'));
   await fs.copyFile(new URL('./fixtures/data-resume.md', import.meta.url), path.join(root, 'data-resume.md'));
   const config = {
-    lookbackHours: 24, timeZone: ZONE, minimumMatchScore: 0, reportDateOffsetDays: 0,
+    lookbackHours: 24, timeZone: ZONE, minimumMatchScore: 0,
     semanticMatching: { engine: 'local_only', acceptedMatchLevels: ['high', 'medium', 'low'], maxReviewedPerRun: 1 },
     prescreen: { enabled: false },
     coverLetter: { autoGenerate: { enabled: false } },
@@ -340,7 +341,7 @@ test('end to end: night one judges by dates and defers one posting; night two ca
     const html = await fs.readFile(path.join(root, 'output', '2026-10-09', 'Daily Job Match Alert - 2026-10-09.html'), 'utf8');
     assert.match(html, /<dt>Freshness<\/dt><dd>1 new since last poll · 1 board\(s\) compared with the previous poll, 0 judged by posting dates · 1 already on the board at the last poll left out · 1 carried over · 0 future posting time\(s\) corrected/);
     assert.ok(second.matches.some(job => job.carriedOver), 'the carried posting is a match at minimum score 0');
-    assert.match(html, /<h2 class="group-title" id="carried-over">Carried over from yesterday/);
+    assert.match(html, /<h2 class="group-title" id="carried-over">Carried Over From Yesterday/);
     const snapshots = JSON.parse(await fs.readFile(path.join(root, 'state', 'ats-snapshots.json'), 'utf8'));
     assert.equal(snapshots.boards['greenhouse:examplecorp'].count, 4);
     assert.doesNotMatch(JSON.stringify(JSON.parse(await fs.readFile(path.join(root, 'state', 'ats-boards.json'), 'utf8'))), /"ids"/, 'the registry the hub reads stays free of snapshot ids');
@@ -377,7 +378,7 @@ test('with carried-over postings switched off, nothing is carried: the budget le
   }
 });
 
-test('the run records the strict 24-hour window setting, and its report header says so', async () => {
+test('the run records the strict 24-hour window setting (on by default), and Run Details says so; the header does not', async () => {
   const { root, configPath } = await prepareProject();
   const silence = [console.log, console.warn, console.error];
   console.log = console.warn = console.error = () => {};
@@ -386,15 +387,18 @@ test('the run records the strict 24-hour window setting, and its report header s
     await main({ argv: ['node', 'index.mjs', '--config', configPath, '--now', LAST_NIGHT.toISOString()], atsFetchImpl: async () => jsonResponse({ jobs }), autoLetters: false });
     const payloadFile = path.join(root, 'state', 'report-payload-2026-10-08.json');
     const htmlFile = path.join(root, 'output', '2026-10-08', 'Daily Job Match Alert - 2026-10-08.html');
-    assert.deepEqual(JSON.parse(await fs.readFile(payloadFile, 'utf8')).meta.strictWindow, { enabled: false, hours: 24 }, 'off by default');
-    assert.match(await fs.readFile(htmlFile, 'utf8'), /data-window-note>Strict 24-hour window: off · Main list \(1\)/);
+    assert.deepEqual(JSON.parse(await fs.readFile(payloadFile, 'utf8')).meta.strictWindow, { enabled: true, hours: 24 }, 'on by default');
+    let html = await fs.readFile(htmlFile, 'utf8');
+    assert.match(html, /<dt>Strict 24-Hour Window<\/dt><dd>On · Main List \(1\)<\/dd>/, 'empty groups are left out of the line');
+    assert.doesNotMatch(html, /data-window-note|<p class="sub">[^<]*(?:posted within|Strict)/);
     const config = JSON.parse(await fs.readFile(configPath, 'utf8'));
-    config.semanticMatching.strict24HourWindow = true;
+    config.semanticMatching.strict24HourWindow = false;
     await fs.writeFile(configPath, JSON.stringify(config));
     await fs.rm(path.join(root, 'state', 'state.json'), { force: true });
     await main({ argv: ['node', 'index.mjs', '--config', configPath, '--now', LAST_NIGHT.toISOString()], atsFetchImpl: async () => jsonResponse({ jobs }), autoLetters: false });
-    assert.deepEqual(JSON.parse(await fs.readFile(payloadFile, 'utf8')).meta.strictWindow, { enabled: true, hours: 24 });
-    assert.match(await fs.readFile(htmlFile, 'utf8'), /data-window-note>Strict 24-hour window: on · Main list \(1\) · Date only, may be older than 24 hours \(0\)/);
+    assert.deepEqual(JSON.parse(await fs.readFile(payloadFile, 'utf8')).meta.strictWindow, { enabled: false, hours: 24 }, 'an explicit false turns it off');
+    html = await fs.readFile(htmlFile, 'utf8');
+    assert.match(html, /<dt>Strict 24-Hour Window<\/dt><dd>Off · Main List \(1\)<\/dd>/);
   } finally {
     [console.log, console.warn, console.error] = silence;
     await fs.rm(root, { recursive: true, force: true });

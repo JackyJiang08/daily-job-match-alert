@@ -207,7 +207,7 @@ test('Run Details counts date precision per source and reports undated postings 
   });
   const meta = { date: '2026-09-26', timeZone: ZONE, resumeTracks: [{ id: 'data', label: 'Data' }], warnings: [], datePrecision: summary, candidateCount: 6, candidateInWindowCount: 3, reviewedThisRun: 4, deferredCount: 0, expiredBacklogCount: 1, undatedAbandonedCount: 2, maxReviewedPerRun: 120 };
   const rows = runDetailsView([], meta, meta.resumeTracks).rows;
-  const precision = rows.find(row => row.term === 'Date precision');
+  const precision = rows.find(row => row.term === 'Date Precision');
   assert.equal(precision.detail, '2 precise · 2 date only · 2 undated (by source below)');
   assert.deepEqual(precision.items, [
     'Example Corp (Greenhouse): 2 precise · 0 date only · 0 undated',
@@ -215,6 +215,6 @@ test('Run Details counts date precision per source and reports undated postings 
     'unknown source: 0 precise · 0 date only · 1 undated',
     'Zapply Internships 2027: 0 precise · 1 date only · 0 undated',
   ]);
-  assert.equal(rows.find(row => row.term === 'Review budget').detail, '6 candidates (3 within the window) · 4 reviewed · 0 deferred · expired 1 backlog postings · stopped carrying 2 undated postings (limit 120 per run)');
-  assert.equal(runDetailsView([], { ...meta, datePrecision: undefined }, meta.resumeTracks).rows.some(row => row.term === 'Date precision'), false, 'older payloads have no row');
+  assert.equal(rows.find(row => row.term === 'Review Budget').detail, '6 candidates (3 within the window) · 4 reviewed · 0 deferred · expired 1 backlog postings · stopped carrying 2 undated postings (limit 120 per run)');
+  assert.equal(runDetailsView([], { ...meta, datePrecision: undefined }, meta.resumeTracks).rows.some(row => row.term === 'Date Precision'), false, 'older payloads have no row');
 });

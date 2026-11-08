@@ -13,18 +13,18 @@ import { formatLocalDateTime } from '../time-format.mjs';
 import { usageWindow } from '../engines/usage.mjs';
 
 export const STATUS_LABELS = {
-  available: 'Available', not_verified: 'Not verified', weekly_limit: 'Weekly limit', not_on_plan: 'Unavailable', unknown_model: 'Unknown model',
+  available: 'Available', not_verified: 'Not Verified', weekly_limit: 'Weekly Limit', not_on_plan: 'Unavailable', unknown_model: 'Unknown Model',
 };
 export const STATUS_TONES = { available: 'good', not_verified: 'muted', weekly_limit: 'warn', not_on_plan: 'bad', unknown_model: 'bad' };
 const BLOCKING = new Set(['not_on_plan', 'unknown_model', 'weekly_limit']);
 
-// "Available", "Unavailable on Pro", "Weekly limit until Oct 8, 2026, 9:00 AM" (the CLI's reset time, or
-// "(weekly reset)" for the owner's), "Weekly limit since … · no reset time given" (never an estimated
-// date), "Unknown model", "Not verified".
+// "Available", "Unavailable on Pro", "Weekly Limit Until Oct 8, 2026, 9:00 AM" (the CLI's reset time, or
+// "(Weekly Reset)" for the owner's), "Weekly Limit Since … · No Reset Time Given" (never an estimated
+// date), "Unknown Model", "Not Verified".
 export function statusText(status, timeZone, plan = null) {
   if (status.state === 'weekly_limit') {
-    if (status.resetsAt) return `Weekly limit until ${formatLocalDateTime(status.resetsAt, timeZone)}${status.resetSource === 'weekly_reset' ? ' (weekly reset)' : ''}`;
-    return `Weekly limit since ${formatLocalDateTime(status.at, timeZone)} · no reset time given`;
+    if (status.resetsAt) return `Weekly Limit Until ${formatLocalDateTime(status.resetsAt, timeZone)}${status.resetSource === 'weekly_reset' ? ' (Weekly Reset)' : ''}`;
+    return `Weekly Limit Since ${formatLocalDateTime(status.at, timeZone)} · No Reset Time Given`;
   }
   if (status.state === 'not_on_plan') return `Unavailable on ${planLabel(status.plan || plan)}`;
   return STATUS_LABELS[status.state] || status.state;

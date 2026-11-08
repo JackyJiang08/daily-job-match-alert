@@ -19,7 +19,7 @@ import { modelKey } from './model-availability.mjs';
 
 export const STAGES = ['scoring', 'supplemental', 'letterDraft', 'letterEditor', 'prescreen'];
 export const LETTER_STAGES = ['letterDraft', 'letterEditor'];
-export const STAGE_LABELS = { scoring: 'Scoring', supplemental: 'Supplemental', letterDraft: 'Cover letter draft', letterEditor: 'Cover letter editor', prescreen: 'Prescreen' };
+export const STAGE_LABELS = { scoring: 'Scoring', supplemental: 'Supplemental', letterDraft: 'Cover Letter Draft', letterEditor: 'Cover Letter Editor', prescreen: 'Prescreen' };
 const DEFAULT_LETTER_EFFORTS = { letterDraft: 'medium', letterEditor: 'high' };
 
 export function defaultLetterAssignment(stage, catalog = DEFAULT_CATALOG) {

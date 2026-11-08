@@ -8,6 +8,7 @@ import { formatCount, formatDateLabel, formatElapsed, formatLocalDateTime, forma
 import { planLabel } from '../engines/quota.mjs';
 import { USAGE_PURPOSES, describeTotals, formatTokens } from '../engines/usage.mjs';
 import { htmlEscape } from '../utils.mjs';
+import { DEFAULT_SCHEDULE, scheduleClock } from '../schedule.mjs';
 import { describePrescreen, funnelText, recallText } from '../prescreen-text.mjs';
 import { LETTER_STYLES, autoLettersSettingsCard, coverLetterSettingsSection } from './letter-views.mjs';
 import { MODEL_SETTINGS_STYLES, assignmentsForm, settingsTabs, subscriptionsAndModels } from './model-settings-views.mjs';
@@ -181,7 +182,7 @@ function renderMiniStatus(sidebar, timeZone, now) {
   const chatgptLine = lines.chatgpt && lines.chatgpt.plan ? `<span data-plan="chatgpt">${htmlEscape(lines.chatgpt.sidebar)}</span>` : null;
   const planBlock = claudeLine || chatgptLine ? `<b>Plan</b>${[claudeLine, chatgptLine].filter(Boolean).join('<br>')}` : '';
   const auth = `${sidebar.claudeAuth?.expired ? '<b>Login</b><span class="bad" data-auth="expired">Claude signed out</span>' : ''}${planBlock}`;
-  return `<div class="mini"><b>Last run</b>${last}<b>Next run</b>${next}${auth}</div>`;
+  return `<div class="mini"><b>Last Run</b>${last}<b>Next Run</b>${next}${auth}</div>`;
 }
 
 export function renderHubPage({ active, title, content, notice = '', error = '', port, script = '', sidebar = null, timeZone, now = null }) {
@@ -240,7 +241,7 @@ export function renderDateList({ dates, selected, today }) {
     items.push(`<li data-month="${htmlEscape(key)}"${item.matchCount === 0 ? ' data-empty="1"' : ''}${collapsed ? ' hidden' : ''}><a href="/reports/${item.date}"${classes ? ` class="${classes}"` : ''} title="${item.date}${isToday ? ' (today)' : isFuture ? ' (after today)' : ''}"><span>${htmlEscape(formatDateLabel(item.date))}</span>${count}${tag}</a></li>`);
   }
   const jump = todayTarget(dates, today);
-  return `<div class="datetools"><a class="today-link" href="/reports/${jump.date}" id="today-link" title="${jump.isToday ? `Today's report (${jump.date})` : `No report for today; newest report (${jump.date})`}">${jump.isToday ? 'Today' : 'Latest'}</a><label><input type="checkbox" id="only-matches"> Only days with matches</label></div><ul class="datelist" id="datelist">${items.join('')}</ul>`;
+  return `<div class="datetools"><a class="today-link" href="/reports/${jump.date}" id="today-link" title="${jump.isToday ? `Today's report (${jump.date})` : `No report for today; newest report (${jump.date})`}">${jump.isToday ? 'Today' : 'Latest'}</a><label><input type="checkbox" id="only-matches"> Only Days With Matches</label></div><ul class="datelist" id="datelist">${items.join('')}</ul>`;
 }
 
 // The date the "Today" shortcut and the default selection point at: today's report when it exists,
@@ -262,7 +263,7 @@ function updateSalutationsControl(selected, missing) {
 
 function missingLettersControl(selected, missing) {
   if (!missing || (!missing.count && !missing.running)) return updateSalutationsControl(selected, missing);
-  if (missing.running) return `<button class="btn small" type="button" id="missing-letters" disabled title="Cover letters are being written; the cards update as they finish">Writing letters… ${Number(missing.done || 0)} of ${Number(missing.planned || 0)}</button>`;
+  if (missing.running) return `<button class="btn small" type="button" id="missing-letters" disabled title="Cover letters are being written; the cards update as they finish">Writing Letters… ${Number(missing.done || 0)} of ${Number(missing.planned || 0)}</button>`;
   return `<form class="inline" method="post" action="/letters/missing" id="missing-letters-form"><input type="hidden" name="date" value="${htmlEscape(selected)}"><button class="btn small" type="submit" id="missing-letters" title="Write a letter for every high match on this date that has none and a trusted company name">Generate Missing Letters (${Number(missing.count)})</button></form>${updateSalutationsControl(selected, missing)}`;
 }
 
@@ -359,8 +360,8 @@ function locationBadge(track) {
   const title = track.pdf ? ` title="${htmlEscape(track.pdf)}"` : '';
   if (track.managed) return `<span class="badge" data-badge="hub"${title}>Hub</span>`;
   if (track.onDesktop) return `<span class="badge" data-badge="desktop"${title}>On Desktop</span>`;
-  if (track.pdf) return `<span class="badge badge-warn" data-badge="external"${title}>External file</span>`;
-  return '<span class="badge badge-bad" data-badge="no-pdf">No PDF configured</span>';
+  if (track.pdf) return `<span class="badge badge-warn" data-badge="external"${title}>External File</span>`;
+  return '<span class="badge badge-bad" data-badge="no-pdf">No PDF Configured</span>';
 }
 
 function trackCard(track, timeZone) {
@@ -368,10 +369,10 @@ function trackCard(track, timeZone) {
     ? '<span class="badge badge-good" data-badge="enabled">Enabled</span>'
     : '<span class="badge badge-muted" data-badge="disabled">Disabled</span>';
   const rows = [];
-  rows.push(`<dt>PDF</dt><dd>${track.pdf ? `<span class="mono" title="${htmlEscape(track.pdf)}">${htmlEscape(track.pdfName)}</span>${track.pdfExists ? '' : ' <span class="badge badge-bad" data-badge="missing">File not found</span>'}` : '—'}</dd>`);
-  if (track.uploadedAt) rows.push(`<dt>Last upload</dt><dd>${htmlEscape(formatLocalDateTime(track.uploadedAt, timeZone))}</dd>`);
+  rows.push(`<dt>PDF</dt><dd>${track.pdf ? `<span class="mono" title="${htmlEscape(track.pdf)}">${htmlEscape(track.pdfName)}</span>${track.pdfExists ? '' : ' <span class="badge badge-bad" data-badge="missing">File Not Found</span>'}` : '—'}</dd>`);
+  if (track.uploadedAt) rows.push(`<dt>Last Upload</dt><dd>${htmlEscape(formatLocalDateTime(track.uploadedAt, timeZone))}</dd>`);
   if (track.extraction) {
-    rows.push(`<dt>Text extraction</dt><dd>${track.extraction.ok ? `${formatCount(track.extraction.characters)} characters (checked ${htmlEscape(formatLocalDateTime(track.extraction.checkedAt, timeZone))})` : `Failed: ${htmlEscape(track.extraction.error)}`}</dd>`);
+    rows.push(`<dt>Text Extraction</dt><dd>${track.extraction.ok ? `${formatCount(track.extraction.characters)} characters (checked ${htmlEscape(formatLocalDateTime(track.extraction.checkedAt, timeZone))})` : `Failed: ${htmlEscape(track.extraction.error)}`}</dd>`);
   }
   rows.push(`<dt>Profile</dt><dd>${track.profile.exists
     ? `<span title="${htmlEscape(track.profile.path)}">Profile synced${track.lastSync ? ` ${htmlEscape(formatLocalDay(track.lastSync, timeZone))}` : ''} · ${formatCount(track.profile.characters)} characters</span>`
@@ -406,7 +407,7 @@ export function resumesPage({ tracksView, timeZone }) {
   const add = tracksView.legacy ? '' : `<article class="card"><h2>Add Track</h2>
     <form method="post" action="/resumes/add" enctype="multipart/form-data">
       <label class="field"><span>ID (letters, digits, _ or -)</span><input type="text" name="trackId" class="control-input" pattern="[A-Za-z][A-Za-z0-9_-]{0,31}" required></label>
-      <label class="field"><span>Label shown in reports</span><input type="text" name="label" class="control-input" required></label>
+      <label class="field"><span>Label Shown in Reports</span><input type="text" name="label" class="control-input" required></label>
       <div class="field"><span>PDF</span><label class="file"><input type="file" name="file" accept=".pdf,application/pdf" required><span class="btn secondary">Choose PDF…</span><span class="file-name">No file chosen</span></label></div>
       <button class="btn" type="submit">Add Track</button>
     </form></article>`;
@@ -421,8 +422,8 @@ function dayRow(day) {
   const body = day.warningsText
     ? `<pre class="log">${htmlEscape(day.warningsText)}</pre>`
     : `<p class="muted">No warnings.txt for this date${day.count ? ' (the folder may have been moved)' : ''}.</p>`;
-  const count = `<span class="${day.count ? 'count-some' : 'count-zero'}">${day.count} warning${day.count === 1 ? '' : 's'}</span>`;
-  return `<details class="day"><summary>${htmlEscape(formatDateLabel(day.date))} · ${count}${day.matchCount != null ? ` <span class="muted">· ${day.matchCount} match${day.matchCount === 1 ? '' : 'es'}</span>` : ''}</summary>${body}</details>`;
+  const count = `<span class="${day.count ? 'count-some' : 'count-zero'}">${day.count} Warning${day.count === 1 ? '' : 's'}</span>`;
+  return `<details class="day"><summary>${htmlEscape(formatDateLabel(day.date))} · ${count}${day.matchCount != null ? ` <span class="muted">· ${day.matchCount} Match${day.matchCount === 1 ? '' : 'es'}</span>` : ''}</summary>${body}</details>`;
 }
 
 // Every source the nightly run can draw on: enabled state, last success, postings added by the last
@@ -437,7 +438,7 @@ function sourceRow(row, timeZone) {
   const notes = [];
   if (row.quiet && !row.dormant) notes.push('<span class="badge badge-muted" data-badge="quiet" title="No new posting for 30 days; polled weekly">Quiet</span>');
   if (row.dormant) notes.push(`<span class="badge badge-bad" data-badge="dormant" title="${htmlEscape(row.error || '')}">Dormant</span> <form class="inline" method="post" action="/status/sources/resume"><input type="hidden" name="board" value="${htmlEscape(row.key)}"><button class="btn secondary small" type="submit">Resume Polling</button></form>${row.nextProbeAt ? ` <span class="muted" data-next-probe="${htmlEscape(row.nextProbeAt)}">Next probe ${htmlEscape(formatLocalDateTime(row.nextProbeAt, timeZone))}${row.lastProbeAt ? ` · last probe ${htmlEscape(formatLocalDay(row.lastProbeAt, timeZone))}: ${htmlEscape(row.lastProbeResult || 'failed')}` : ''}</span>` : ''}`);
-  else if (row.outage) notes.push(`<span class="badge badge-muted" data-badge="outage" title="This Mac's network was down during the run; not counted as a failure">Network outage</span> <span class="muted">${htmlEscape(row.outage)}</span>`);
+  else if (row.outage) notes.push(`<span class="badge badge-muted" data-badge="outage" title="This Mac's network was down during the run; not counted as a failure">Network Outage</span> <span class="muted">${htmlEscape(row.outage)}</span>`);
   else if (row.error) notes.push(`<span class="badge badge-warn" data-badge="failing">Failing${row.consecutiveFailures > 1 ? ` (${row.consecutiveFailures} in a row)` : ''}</span> <span class="muted">${htmlEscape(row.error)}</span>`);
   else if (row.skipped) notes.push(`<span class="muted">Not polled (${htmlEscape(row.skipped)})</span>`);
   else if (row.baselineCount != null && row.newCount == null) notes.push(`<span class="muted">Baseline of ${row.baselineCount} recorded</span>`);
@@ -453,16 +454,16 @@ function quotaCard(quota, timeZone) {
     : '<span class="muted">No limit reached so far</span>';
   const effective = quota.effectiveEngine === 'codex'
     ? 'codex (fallback engine)'
-    : `${htmlEscape(quota.effectiveEngine)} · ${htmlEscape(quota.effectiveModel || 'default')}${quota.effectiveModel && quota.configuredModel && quota.effectiveModel !== quota.configuredModel ? ` <span class="badge badge-warn" data-badge="downgraded">downgraded from ${htmlEscape(quota.configuredModel)}</span>` : ''}`;
+    : `${htmlEscape(quota.effectiveEngine)} · ${htmlEscape(quota.effectiveModel || 'default')}${quota.effectiveModel && quota.configuredModel && quota.effectiveModel !== quota.configuredModel ? ` <span class="badge badge-warn" data-badge="downgraded">Downgraded From ${htmlEscape(quota.configuredModel)}</span>` : ''}`;
   return `<article class="card" id="quota-card"><h2>Quota</h2><dl class="kv">
-    <dt>Last limit event</dt><dd id="quota-last">${event}</dd>
-    <dt>Plan</dt><dd id="quota-plan">${quota.plans?.claude ? `Claude · ${htmlEscape(planLabel(quota.plans.claude))}` : '<span class="muted">Claude plan unknown</span>'}${quota.plans?.codex ? ` · Codex · ${htmlEscape(planLabel(quota.plans.codex))}` : ''}${quota.modelAvailability?.unavailable?.length ? ` · <span class="badge badge-warn" data-badge="unavailable-models">unavailable: ${htmlEscape(quota.modelAvailability.unavailable.join(', '))}</span>` : ''}</dd>
-    <dt>Model in effect</dt><dd id="quota-model">${effective}</dd>
-    <dt>Deferred postings</dt><dd id="quota-deferred">${Number(quota.deferredCount || 0)} waiting for the next run${quota.deferredByQuota ? ` · ${Number(quota.deferredByQuota)} of them because of a limit` : ''}</dd>
+    <dt>Last Limit Event</dt><dd id="quota-last">${event}</dd>
+    <dt>Plan</dt><dd id="quota-plan">${quota.plans?.claude ? `Claude · ${htmlEscape(planLabel(quota.plans.claude))}` : '<span class="muted">Claude plan unknown</span>'}${quota.plans?.codex ? ` · Codex · ${htmlEscape(planLabel(quota.plans.codex))}` : ''}${quota.modelAvailability?.unavailable?.length ? ` · <span class="badge badge-warn" data-badge="unavailable-models">Unavailable: ${htmlEscape(quota.modelAvailability.unavailable.join(', '))}</span>` : ''}</dd>
+    <dt>Model in Effect</dt><dd id="quota-model">${effective}</dd>
+    <dt>Deferred Postings</dt><dd id="quota-deferred">${Number(quota.deferredCount || 0)} waiting for the next run${quota.deferredByQuota ? ` · ${Number(quota.deferredByQuota)} of them because of a limit` : ''}</dd>
     <dt>Policy</dt><dd>Ladder ${htmlEscape((quota.modelLadder || []).join(' → '))} · ${quota.fallbackEngine ? `Codex fallback on` : 'no engine fallback'}</dd>
     ${usageRows(quota.usage)}
     ${noticeRows(quota.notices, timeZone)}
-    ${quota.budgetHistory?.length ? `<dt>Candidates vs budget</dt><dd id="quota-history">${quota.budgetAlert ? `<span class="badge badge-warn" data-badge="budget-alert">Over budget ${Number(quota.budgetAlert.nights)} nights running</span> <span class="muted">Raise Max Reviewed Per Run or tighten the prefilter.</span><br>` : ''}<span class="mono">${quota.budgetHistory.map(entry => `${htmlEscape(entry.date)} ${Number(entry.inWindow)}/${Number(entry.limit) || '∞'}`).join(' · ')}</span> <span class="muted">(in-window candidates / budget, last ${quota.budgetHistory.length} nights${quota.expiredBacklogCount ? `; ${Number(quota.expiredBacklogCount)} backlog postings expired last run` : ''})</span></dd>` : ''}
+    ${quota.budgetHistory?.length ? `<dt>Candidates vs Budget</dt><dd id="quota-history">${quota.budgetAlert ? `<span class="badge badge-warn" data-badge="budget-alert">Over Budget ${Number(quota.budgetAlert.nights)} Nights Running</span> <span class="muted">Raise Max Reviewed Per Run or tighten the prefilter.</span><br>` : ''}<span class="mono">${quota.budgetHistory.map(entry => `${htmlEscape(entry.date)} ${Number(entry.inWindow)}/${Number(entry.limit) || '∞'}`).join(' · ')}</span> <span class="muted">(in-window candidates / budget, last ${quota.budgetHistory.length} nights${quota.expiredBacklogCount ? `; ${Number(quota.expiredBacklogCount)} backlog postings expired last run` : ''})</span></dd>` : ''}
   </dl></article>`;
 }
 
@@ -471,7 +472,7 @@ function quotaCard(quota, timeZone) {
 function noticeRows(notices, timeZone) {
   if (!notices?.length) return '';
   const items = notices.map(notice => `<li data-notice-kind="${htmlEscape(notice.kind || '')}"><span class="muted">${htmlEscape(formatLocalDateTime(notice.at, timeZone))} · ${htmlEscape(notice.source)} · ${htmlEscape(notice.kind || 'unclassified')}${notice.model ? ` · ${htmlEscape(notice.model)}` : ''}${notice.action ? ` · ${htmlEscape(notice.action)}` : ''}</span><br><q>${htmlEscape(notice.text)}</q></li>`).join('');
-  return `<dt>CLI notices</dt><dd id="quota-notices"><ul class="plain-list notice-list">${items}</ul></dd>`;
+  return `<dt>CLI Notices</dt><dd id="quota-notices"><ul class="plain-list notice-list">${items}</ul></dd>`;
 }
 
 // Subscription usage over the last seven nights: totals by full model id and by purpose, and one figure
@@ -492,13 +493,13 @@ function autoLettersCard(auto, timeZone) {
   if (!auto) return '';
   const settings = auto.settings || {};
   const config = `${settings.enabled === false ? 'Off' : Number(settings.maxPerRun || 0) > 0 ? `On · up to ${Number(settings.maxPerRun)} per run` : 'On · every new high match'} <a href="/settings?tab=letters#auto-letters">Settings</a>`;
-  if (!auto.date) return `<article class="card" id="auto-letters-card"><h2>Automatic Cover Letters</h2><dl class="kv"><dt>Setting</dt><dd>${config}</dd><dt>Last pass</dt><dd><span class="muted">None yet</span></dd></dl></article>`;
+  if (!auto.date) return `<article class="card" id="auto-letters-card"><h2>Automatic Cover Letters</h2><dl class="kv"><dt>Setting</dt><dd>${config}</dd><dt>Last Pass</dt><dd><span class="muted">None yet</span></dd></dl></article>`;
   const state = auto.running ? `<span class="badge badge-good" data-badge="letters-running">Running</span> ${Number(auto.done)} of ${Number(auto.planned)} done` : auto.state === 'stopped' ? '<span class="badge badge-warn" data-badge="letters-stopped">Stopped</span>' : auto.state === 'interrupted' ? '<span class="badge badge-warn" data-badge="letters-interrupted">Interrupted</span>' : '<span class="badge badge-muted" data-badge="letters-done">Done</span>';
   const skipped = auto.skipped ? [auto.skipped.existing ? `${auto.skipped.existing} already had a letter` : '', auto.skipped.uncertain ? `${auto.skipped.uncertain} with an uncertain company` : '', auto.skipped.overLimit ? `${auto.skipped.overLimit} over the per-run limit` : ''].filter(Boolean).join(' · ') : '';
   const usage = auto.usage?.calls ? describeTotals(auto.usage) : '—';
   return `<article class="card" id="auto-letters-card"><h2>Automatic Cover Letters</h2><dl class="kv">
     <dt>Setting</dt><dd>${config}</dd>
-    <dt>Last pass</dt><dd>${state} · ${htmlEscape(auto.date)} · ${htmlEscape(formatLocalDateTime(auto.finishedAt || auto.startedAt, timeZone))}</dd>
+    <dt>Last Pass</dt><dd>${state} · ${htmlEscape(auto.date)} · ${htmlEscape(formatLocalDateTime(auto.finishedAt || auto.startedAt, timeZone))}</dd>
     <dt>Letters</dt><dd id="auto-letters-counts">${Number(auto.generated)} generated · ${Number(auto.failed)} failed${auto.carriedOver ? ` · ${Number(auto.carriedOver)} from the queue` : ''}${skipped ? ` <span class="muted">(skipped: ${htmlEscape(skipped)})</span>` : ''}${auto.queued ? `<br><span class="muted">${Number(auto.queued)} queued for the next run or Run Now</span>` : ''}</dd>
     <dt>Engines</dt><dd>${auto.engines?.length ? htmlEscape(auto.engines.join('; ')) : '<span class="muted">—</span>'}</dd>
     <dt>Usage</dt><dd>${htmlEscape(usage)}</dd>
@@ -574,7 +575,7 @@ export function statusPage({ status, timeZone }) {
   const nextRunLine = running.running
     ? `<span class="badge badge-good" data-badge="running">Running</span>${running.since ? ` since ${at(running.since)} · ${htmlEscape(formatElapsed(running.since, status.now))} so far` : ''}${running.pid ? ` <span class="muted">(PID ${running.pid})</span>` : ''}${nextRun.at ? `<br><span class="muted">Next scheduled ${at(nextRun.at)}</span>` : ''}`
     : nextRun.at
-      ? `${at(nextRun.at)}${status.overdue ? ` <span class="badge badge-bad" data-badge="overdue">overdue${status.waitingOnQuota ? ' (waiting on quota)' : ''}</span>` : status.dueNow ? ' <span class="badge badge-warn" data-badge="due-now">due now</span>' : ''}${nextRun.installed ? '' : ' <span class="badge badge-warn" data-badge="not-installed">LaunchAgent not installed; showing the 20:00 default</span>'}`
+      ? `${at(nextRun.at)}${status.overdue ? ` <span class="badge badge-bad" data-badge="overdue">Overdue${status.waitingOnQuota ? ' (Waiting on Quota)' : ''}</span>` : status.dueNow ? ' <span class="badge badge-warn" data-badge="due-now">Due Now</span>' : ''}${nextRun.installed ? '' : ` <span class="badge badge-warn" data-badge="not-installed">LaunchAgent Not Installed</span> <span class="muted">showing the ${scheduleClock(DEFAULT_SCHEDULE)} default</span>`}`
       : '—';
   const authBanner = status.claudeAuth?.expired
     ? `<div class="flash error" data-banner="auth-expired">Claude signed out. Run <code>claude auth login --claudeai</code> in Terminal, then Refresh. Until then the nightly review goes to Codex when a ChatGPT model ends Scoring's fallback chain and Codex is signed in; otherwise the postings wait for the next run.${status.claudeAuth.at ? ` <span class="muted">Seen ${at(status.claudeAuth.at)}${status.claudeAuth.source ? ` (${htmlEscape(status.claudeAuth.source)})` : ''}.</span>` : ''} <form class="inline" method="post" action="/settings/connections/refresh"><input type="hidden" name="back" value="status"><button class="btn secondary small" type="submit">Refresh</button></form></div>`
@@ -586,12 +587,12 @@ export function statusPage({ status, timeZone }) {
   ${integrityBanner(status.integrity, at)}${planBanner}
   ${authBanner}
   <article class="card"><h2>Runs</h2><dl class="kv">
-    <dt>Last run</dt><dd>${lastRunLine}</dd>
+    <dt>Last Run</dt><dd>${lastRunLine}</dd>
     <dt>Engine</dt><dd>${lastRun.engine ? `${htmlEscape(lastRun.engine)}${lastRun.scoringModel ? ` · ${htmlEscape(lastRun.scoringModel)}` : ''}` : (lastRun.scoringModel ? htmlEscape(lastRun.scoringModel) : '—')}</dd>
     ${lastRun.funnel ? `<dt>Funnel</dt><dd id="status-funnel">${htmlEscape(funnelText(lastRun.funnel))}${lastRun.stageUsage ? `<br><span class="muted">${htmlEscape(lastRun.stageUsage)}</span>` : ''}</dd>` : ''}
     ${lastRun.prescreen ? `<dt>Prescreen</dt><dd id="status-prescreen">${htmlEscape(describePrescreen(lastRun.prescreen))}${lastRun.prescreenOverview?.mode === 'shadow' ? `<br><span class="muted">Shadow period: ${Number(lastRun.prescreenOverview.shadowRunsDone)} of ${Number(lastRun.prescreenOverview.shadowRuns)} nights · ${htmlEscape(recallText(lastRun.prescreenOverview.finalMatches, lastRun.prescreenOverview.lost))} · <a href="/settings?tab=pipeline#prescreen">Settings</a></span>` : ''}</dd>` : ''}
-    ${lastRun.candidateCount != null ? `<dt>Review budget</dt><dd>${Number(lastRun.candidateCount)} candidates · ${Number(lastRun.reviewedThisRun || 0)} reviewed · ${Number(lastRun.deferredCount || 0)} deferred${Number(lastRun.maxReviewedPerRun) > 0 ? ` · limit ${Number(lastRun.maxReviewedPerRun)} per run` : ' · no limit'}</dd>` : ''}
-    <dt>Next run</dt><dd>${nextRunLine}</dd>
+    ${lastRun.candidateCount != null ? `<dt>Review Budget</dt><dd>${Number(lastRun.candidateCount)} candidates · ${Number(lastRun.reviewedThisRun || 0)} reviewed · ${Number(lastRun.deferredCount || 0)} deferred${Number(lastRun.maxReviewedPerRun) > 0 ? ` · limit ${Number(lastRun.maxReviewedPerRun)} per run` : ' · no limit'}</dd>` : ''}
+    <dt>Next Run</dt><dd>${nextRunLine}</dd>
     <dt>Catch-up</dt><dd id="catch-up-line">${catchUpLine(status.autoCatchUp, at)}</dd>
     <dt>Lock</dt><dd id="lock-line">${lockLine}</dd>
     <dt>Backup</dt><dd id="backup-line">${backupLine(status.backup, at)}</dd>
@@ -629,7 +630,7 @@ function hubCard(hub, timeZone) {
   const cacheLine = `${Number(cache.renderHits || 0)} hit(s), ${Number(cache.renderMisses || 0)} miss(es) · ${Number(cache.renders || 0)} render(s) and ${Number(cache.days || 0)} day(s) held${last ? ` · last cleared ${htmlEscape(formatLocalDateTime(last.at, timeZone))} (${htmlEscape(last.reason)})` : ''}`;
   return `<article class="card" id="hub-card"><h2>Hub</h2>
   <p class="muted">Reports and Status page requests since the hub started (newest first; also in the hub log). Stages: reports index, payload read, eligibility and location re-check, letter status scan, Status summary and the rest of the Status data, HTML render, sidebar.</p>
-  <dl class="kv"><dt>Render cache</dt><dd id="hub-cache">${cacheLine}</dd></dl>
+  <dl class="kv"><dt>Render Cache</dt><dd id="hub-cache">${cacheLine}</dd></dl>
   ${rows ? `<table class="plain" id="hub-timings"><tr><th>When</th><th>Page</th><th>Status</th><th>Total</th><th>Stages</th><th>Size</th><th>Cache</th></tr>${rows}</table>` : '<p class="muted" id="hub-timings">No Reports or Status requests yet.</p>'}
 </article>`;
 }
@@ -682,25 +683,25 @@ export const STATUS_SCRIPT = `
 
 export function connectionRow(name, engine, item) {
   if (!item) return `<dt>${htmlEscape(name)}</dt><dd><span class="muted">Not checked</span></dd>`;
-  const stale = item.configuredMissing && item.configured ? ` <span class="badge badge-warn" data-conn="stale-config" title="config points at ${htmlEscape(item.configured)}, which does not exist">config path missing</span>` : '';
+  const stale = item.configuredMissing && item.configured ? ` <span class="badge badge-warn" data-conn="stale-config" title="config points at ${htmlEscape(item.configured)}, which does not exist">Config Path Missing</span>` : '';
   const where = item.path ? `<br><span class="muted mono" title="${htmlEscape((item.searched || []).join('\n'))}">${htmlEscape(item.path)}${item.source === 'config' ? ' (from config)' : ''}</span>${stale}` : '';
   const savePath = item.path && item.source !== 'config'
     ? `<form class="inline" method="post" action="/settings/cli-path"><input type="hidden" name="engine" value="${engine}"><input type="hidden" name="path" value="${htmlEscape(item.path)}"><button class="btn secondary small" type="submit">Save This Path to Config</button></form>`
     : '';
   if (!item.installed) {
-    return `<dt>${htmlEscape(name)}</dt><dd><span class="badge badge-muted" data-conn="missing">Not found on this Mac</span> <span class="muted">Install with <code>${htmlEscape(item.hint)}</code>${item.configured ? `; config points at <code>${htmlEscape(item.configured)}</code>` : ''}</span><br><span class="muted" title="${htmlEscape((item.searched || []).join('\n'))}">Searched PATH, ~/.local/bin, /opt/homebrew/bin, /usr/local/bin, ~/.npm-global/bin, and nvm.</span></dd>`;
+    return `<dt>${htmlEscape(name)}</dt><dd><span class="badge badge-muted" data-conn="missing">Not Found on This Mac</span> <span class="muted">Install with <code>${htmlEscape(item.hint)}</code>${item.configured ? `; config points at <code>${htmlEscape(item.configured)}</code>` : ''}</span><br><span class="muted" title="${htmlEscape((item.searched || []).join('\n'))}">Searched PATH, ~/.local/bin, /opt/homebrew/bin, /usr/local/bin, ~/.npm-global/bin, and nvm.</span></dd>`;
   }
   if (item.sessionExpired || item.signedOut) return `<dt>${htmlEscape(name)}</dt><dd><span class="badge badge-bad" data-conn="expired">Signed out</span> <span class="muted">Run <code>claude auth login --claudeai</code> in Terminal, then Refresh.</span>${item.reason ? `<br><span class="muted">${htmlEscape(item.reason)}</span>` : ''}${where}</dd>`;
   if (item.connected) return `<dt>${htmlEscape(name)}</dt><dd><span class="badge badge-good" data-conn="connected">Connected</span> ${htmlEscape(item.detail)}${where}${savePath ? ` ${savePath}` : ''}</dd>`;
-  return `<dt>${htmlEscape(name)}</dt><dd><span class="badge badge-warn" data-conn="disconnected">Not connected</span> <span class="muted">Sign in from a terminal: <code>${htmlEscape(item.hint)}</code></span>${item.reason ? `<br><span class="muted">${htmlEscape(item.reason)}</span>` : ''}${where}${savePath ? ` ${savePath}` : ''}</dd>`;
+  return `<dt>${htmlEscape(name)}</dt><dd><span class="badge badge-warn" data-conn="disconnected">Not Connected</span> <span class="muted">Sign in from a terminal: <code>${htmlEscape(item.hint)}</code></span>${item.reason ? `<br><span class="muted">${htmlEscape(item.reason)}</span>` : ''}${where}${savePath ? ` ${savePath}` : ''}</dd>`;
 }
 
 function engineBadge(item) {
   if (!item) return '';
   if (item.sessionExpired || item.signedOut) return '<span class="badge badge-bad" data-engine-state="expired">Signed out</span>';
   if (item.connected) return '<span class="badge badge-good" data-engine-state="connected">Connected</span>';
-  if (!item.installed) return '<span class="badge badge-muted" data-engine-state="missing">Not found</span>';
-  return '<span class="badge badge-warn" data-engine-state="disconnected">Not connected</span>';
+  if (!item.installed) return '<span class="badge badge-muted" data-engine-state="missing">Not Found</span>';
+  return '<span class="badge badge-warn" data-engine-state="disconnected">Not Connected</span>';
 }
 
 // Settings in three tabs: Subscriptions & Models (subscription cards, model tables, task assignments),
@@ -715,9 +716,9 @@ function prescreenSettingsCard(prescreen) {
   const enforceNote = prescreen.canEnforce ? 'The shadow period is complete; check the recall above before enforcing.' : `Available after ${Number(prescreen.shadowRuns)} shadow nights (${done} done).`;
   return `<article class="card" id="prescreen"><h2>Prescreen</h2>
   <p class="muted">A light model scores every candidate against short resume digests before the final review. The final review's model, rubric, and thresholds do not change.</p>
-  <dl class="kv"><dt>Mode</dt><dd id="prescreen-mode">${mode}</dd><dt>Shadow recall</dt><dd id="prescreen-recall">${htmlEscape(recall)}</dd></dl>
+  <dl class="kv"><dt>Mode</dt><dd id="prescreen-mode">${mode}</dd><dt>Shadow Recall</dt><dd id="prescreen-recall">${htmlEscape(recall)}</dd></dl>
   <form method="post" action="/settings/prescreen" id="prescreen-form">
-    <div class="field"><label class="check"><input type="checkbox" name="enabled"${prescreen.enabled ? ' checked' : ''}> Run the prescreen</label></div>
+    <div class="field"><label class="check"><input type="checkbox" name="enabled"${prescreen.enabled ? ' checked' : ''}> Run the Prescreen</label></div>
     <label class="field"><span>Prescreen Threshold (0–100)</span><input type="number" name="threshold" class="control-input" min="0" max="100" step="1" value="${Number(prescreen.threshold)}" required></label>
     <div class="field"><label class="check"><input type="checkbox" name="enforce"${prescreen.enforce ? ' checked' : ''}${prescreen.canEnforce || prescreen.enforce ? '' : ' disabled'}> Enforce: skip postings below the threshold (marked seen, listed in Run Details)</label><span class="muted">${htmlEscape(enforceNote)}</span></div>
     <button class="btn" type="submit">Save Prescreen</button>
@@ -748,18 +749,18 @@ export function settingsPage({ settings, connections = null, timeZone, coverLett
       <div class="field"><span>Accepted Match Levels</span>${levels}</div>
       <label class="field"><span>Max Reviewed Per Run (0 = no limit)</span><input type="number" name="maxReviewedPerRun" class="control-input" min="0" max="5000" step="1" value="${Number(settings.maxReviewedPerRun ?? 60)}" required></label>
       <label class="field"><span>Catch-up Budget (0 = no limit)</span><input type="number" name="catchUpBudget" class="control-input" min="0" max="5000" step="1" value="${Number(settings.catchUpBudget ?? 40)}" required><span class="muted">Postings held while the engine was unavailable (Claude signed out, a usage limit) are reviewed after each run's new postings, at most this many per run, while their posting date is within 48 hours.</span></label>
-      <div class="field"><label class="check"><input type="checkbox" name="includeCarriedOver"${settings.includeCarriedOver !== false ? ' checked' : ''}> Include carried-over postings</label><span class="muted">Postings over the review limit wait for the next run and appear under "Carried over from yesterday". Off: they are left unreviewed and not carried.</span></div>
-      <div class="field"><label class="check"><input type="checkbox" name="strict24HourWindow"${settings.strict24HourWindow === true ? ' checked' : ''}> Strict 24-hour window</label><span class="muted">On: the report's main list keeps only postings with a precise time within 24 hours, new since the last poll, or dated the run's own day. Date-only postings from an earlier day ("Posted Yesterday") and undated ones move to the folded group "Date only, may be older than 24 hours". Applies from the next run.</span></div>
-      <div class="field"><label class="check"><input type="checkbox" name="autoCatchUp"${settings.autoCatchUp !== false ? ' checked' : ''}> Auto catch-up after network outage</label><span class="muted">When the nightly run is cut short by this Mac's network, the hub checks every 10 minutes and reruns it once the network is back (at most twice a day, until the next nightly run).</span></div>
+      <div class="field"><label class="check"><input type="checkbox" name="includeCarriedOver"${settings.includeCarriedOver !== false ? ' checked' : ''}> Include Carried-Over Postings</label><span class="muted">Postings over the review limit wait for the next run and appear under "Carried over from yesterday". Off: they are left unreviewed and not carried.</span></div>
+      <div class="field"><label class="check"><input type="checkbox" name="strict24HourWindow"${settings.strict24HourWindow !== false ? ' checked' : ''}> Strict 24-Hour Window</label><span class="muted">On: the report's main list keeps only postings with a precise time within 24 hours, new since the last poll, or dated the run's own day. Date-only postings from an earlier day ("Posted Yesterday") and undated ones move to the folded group "Date Only, May Be Older Than 24 Hours". On by default. Applies from the next run.</span></div>
+      <div class="field"><label class="check"><input type="checkbox" name="autoCatchUp"${settings.autoCatchUp !== false ? ' checked' : ''}> Auto Catch-Up After Network Outage</label><span class="muted">When the nightly run is cut short by this Mac's network, the hub checks every 10 minutes and reruns it once the network is back (at most twice a day, until the next nightly run).</span></div>
     </fieldset>
-    <fieldset class="group"><legend>Role scope</legend>
+    <fieldset class="group"><legend>Role Scope</legend>
       <input type="hidden" name="roleScopePresent" value="1">
-      ${tagEditor('titleFamilies', settings.titleFamilies || [], { label: 'Title families', placeholder: 'Add a family, then Enter', hint: 'Postings from ATS boards, Hacker News, RemoteOK, and search discovery must name one of these in the title (whole words; the last word also takes common endings). "Associate" passes only beside a family word.' })}
-      ${tagEditor('targetRoleFamilies', settings.targetRoleFamilies || [], { label: 'Target role families', placeholder: 'Add a role family, then Enter', hint: 'Given to the prescreen and the review: postings in these families are judged on what the role asks for, and a product or consulting role is not marked down for not being a data role. The score bands stay the same.' })}
+      ${tagEditor('titleFamilies', settings.titleFamilies || [], { label: 'Title Families', placeholder: 'Add a family, then Enter', hint: 'Postings from ATS boards, Hacker News, RemoteOK, and search discovery must name one of these in the title (whole words; the last word also takes common endings). "Associate" passes only beside a family word.' })}
+      ${tagEditor('targetRoleFamilies', settings.targetRoleFamilies || [], { label: 'Target Role Families', placeholder: 'Add a role family, then Enter', hint: 'Given to the prescreen and the review: postings in these families are judged on what the role asks for, and a product or consulting role is not marked down for not being a data role. The score bands stay the same.' })}
     </fieldset>
     <fieldset class="group"><legend>Reports</legend>
       <div class="field"><label class="check"><input type="checkbox" name="xlsxRequired"${settings.xlsxRequired ? ' checked' : ''}> Require XLSX Workbook (fail the run when it cannot be written)</label></div>
-      <label class="field" id="payload-retention"><span>Keep full day payloads for (days)</span><input type="number" name="payloadRetentionDays" class="control-input" min="31" max="3650" step="1" value="${Number(settings.payloadRetentionDays ?? 90)}" required><span class="muted">Older days keep only their matches and the Run Summary. Payloads over 30 days old are stored gzipped; the Reports pages read both.</span></label>
+      <label class="field" id="payload-retention"><span>Keep Full Day Payloads for (Days)</span><input type="number" name="payloadRetentionDays" class="control-input" min="31" max="3650" step="1" value="${Number(settings.payloadRetentionDays ?? 90)}" required><span class="muted">Older days keep only their matches and the Run Summary. Payloads over 30 days old are stored gzipped; the Reports pages read both.</span></label>
     </fieldset>
     <fieldset class="group"><legend>Hub</legend>
       <label class="field"><span>Port (takes effect after the hub restarts)</span><input type="number" name="hubPort" class="control-input" min="1024" max="65535" step="1" value="${Number(settings.hubPort)}" required></label>

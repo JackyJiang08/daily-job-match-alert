@@ -1,10 +1,10 @@
 # Daily Job Match Alert — Project Context
 Nightly unattended job-discovery pipeline (Node 20+, ESM, zero-framework).
-Runs 20:00 America/Chicago via launchd. Collects new Data / AI-ML internship,
+Runs 18:00 America/Chicago via launchd (2026-11-08; was 20:00). Collects new Data / AI-ML internship,
 new-grad, entry-level postings from public sources (SimplifyJobs GitHub lists,
 public ATS endpoints incl. Workday CXS); scores each JD against N configurable
 private resume tracks with the Claude Code subscription CLI; writes one dated
-folder per application date to the Desktop: an HTML shortlist, an XLSX
+folder per run date (the run's local day) to the Desktop: an HTML shortlist, an XLSX
 workbook, and warnings.txt only when warnings exist. Same-day reruns merge
 into that date's report (never shrink). Email-alert collectors exist but are
 disabled; do not expand them unless a task says so.
@@ -171,7 +171,7 @@ disabled; do not expand them unless a task says so.
   at+7d estimate is dropped on read). limitHold: CLI reset → owner's
   config.plans.claude.weeklyReset { day, time } (Settings > Claude card,
   POST /settings/plans/weekly-reset) → 24 h (nightly prune has a 2 h grace so
-  the next 20:00 run retries the preferred model). Until then runs skip it.
+  the next day's run at the same time retries the preferred model). Until then runs skip it.
   The report banner/header quotaNote appear only when postings went
   unreviewed or Codex took over; a Fable → Opus step is a Run Details line. The CLI's words
   (sanitizeNotice: no command path, ids, e-mail, URL query; 300 chars) go to
@@ -280,18 +280,19 @@ disabled; do not expand them unless a task says so.
   conditional headers. freshnessInstant/isUndated/holdsToExactWindow treat NEW by firstSeenAt.
 - Carried over: a job whose state.deferred entry exists when stamped gets carriedOver, firstSeenAt (entry
   discoveredAt), restored NEW basis; markDeferred(state, job, at, reason 'budget'|'quota'). Report: separate
-  "Carried over from yesterday" group (view.carried, section#jobs-carried; the script sorts each
+  "Carried Over From Yesterday" group (view.carried, section#jobs-carried; the script sorts each
   section.jobs). semanticMatching.includeCarriedOver (Settings > Pipeline, pipelinePresent marker) false →
   clearBudgetDeferrals at startup and no budget deferral kept (quota ones stay).
 - Strict 24-hour window (src/strict-window.mjs, 2026-11-03): semanticMatching.strict24HourWindow (Settings >
-  Pipeline checkbox, pipelinePresent marker, default off) → meta.strictWindow {enabled, hours: 24}. Render-time
+  Pipeline checkbox, pipelinePresent marker, default ON since 2026-11-08: strictWindowEnabled is `!== false`)
+  → meta.strictWindow {enabled, hours: 24}. Render-time
   only (buildReportView): of the non-carried reviewed matches, main keeps NEW-since-poll, precise postedAt ≤ 24 h
   before meta.generatedAt, and date-only whose postingDay ≥ meta.runDate (run's local day); the rest (earlier
   date-only, undated, precise older e.g. email) → view.dateOnly, folded details#date-only holding
   section.jobs#jobs-date-only (sorted/filtered by the page script). Carried over / Not reviewed untouched; match
-  count, xlsx, letters unchanged. Header line p[data-window-note] "Strict 24-hour window: on|off · Main list (N) ·
-  [Date only, may be older than 24 hours (N) ·] Carried over from yesterday (N) · Not reviewed (engine
-  unavailable) (N)"; absent for payloads without meta.strictWindow (keeps hub snapshots). Don't edit
+  count, xlsx, letters unchanged. Since 2026-11-08 the header has no window line: Run Details row "Strict 24-Hour
+  Window" = strictWindowDetail "On|Off · Main List (N) · <non-empty groups (N)>" (absent for payloads without
+  meta.strictWindow) and row "Posting Window" = "Main List: " + postingWindowLabel(main list only). Don't edit
   REPORT_SCRIPT text casually: it is embedded in every page and the hub snapshot tests compare whole pages.
 - Dates: parsePostingDate (JSON-LD datePosted, Workday startDate, search page_age): bare date → noon UTC
   calendar date; midnight → date; zoneless clock time → ZONELESS_TIME_ZONES (jobright.ai = UTC, verified
@@ -496,8 +497,28 @@ disabled; do not expand them unless a task says so.
   warning, the Run Details, and the Status Quota card). Near-duplicates (same
   company + normalized title + location, different URLs) merge into one card
   with `alternates` links and one review; alternates are marked seen with the
-  primary. The masthead says "posted within the last 24 hours / N days" from
-  the report's oldest posting date at run time.
+  primary. Run Details "Posting Window" says "posted within the last 24 hours /
+  N days" from the main list's oldest posting date at run time.
+
+## Schedule, report date, header, Title Case (2026-11-08)
+- Schedule: src/schedule.mjs DEFAULT_SCHEDULE {18, 0} is only the fallback; install-launchd.sh default 18 0. The
+  hub reads the plist (installedSchedule) for Next Run / overdue (sidebarSummary), auto catch-up deadline,
+  dormant probe "Next probe"; launchd-dispatch reads DAILY_JOB_MATCH_ALERT_SCHEDULE_HOUR/MINUTE. HOLD_GRACE_MS
+  (2 h) is schedule-independent. Never hard-code a run hour.
+- Report date: resolveRunDates → applicationDate = runDate = the run's local day (18:00 CST is 00:00Z next
+  day; local wins). reportDateOffsetDays and the old 14:00 cut-off are gone (config key ignored). Folders from
+  before 2026-11-08 (evening run → next day) keep their names; the first 18:00 run merges into that day's
+  existing payload (mergeReviewedJobs, only adds). Run Details "Report Date" adds "(run on …)" when they differ.
+- Header (masthead): title = readableDate(meta.date) (standalone and hub alike); subtitle mastheadSubtitle =
+  "N Matches · Ran 6:02 PM" (time alone when completedAt's local day = meta.date, else "Ran Nov 7, 8:00 PM");
+  quotaNote line stays; banners (auth, quota, network, integrity, not reviewed) unchanged. A group with no cards
+  is not rendered (main list too when other groups have cards); the empty state only when nothing at all.
+- Title Case for buttons, summaries/h1–h3, labels, th, dt, badges/tags, <b> labels in hub + report (not the
+  xlsx, not prose, not data values). tests/title-case.test.mjs scans rendered hub pages, the letter panel and
+  the Desktop report with tests/helpers/title-case.mjs (minor words lower case after the first word; words
+  with a capital pass). Constants: CARRIED_OVER_TITLE "Carried Over From Yesterday", NOT_REVIEWED_TITLE "Not
+  Reviewed (Engine Unavailable)", DATE_ONLY_GROUP_TITLE "Date Only, May Be Older Than 24 Hours",
+  LOCATION_NOT_STATED_LABEL "US Location Not Stated", STAGE_LABELS "Cover Letter Draft/Editor".
 
 ## Scoring engines (src/engines/)
 - One interface per engine: verifyAuth(), reviewBatch(prompt, schema,

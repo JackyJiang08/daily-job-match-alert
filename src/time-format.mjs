@@ -35,6 +35,13 @@ export function formatLocalShort(value, timeZone) {
   return date.toLocaleString('en-US', { timeZone: safeZone(timeZone), month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
+// "6:02 PM"
+export function formatLocalTime(value, timeZone) {
+  const date = parse(value);
+  if (!date) return value ? String(value) : '';
+  return date.toLocaleString('en-US', { timeZone: safeZone(timeZone), hour: 'numeric', minute: '2-digit' });
+}
+
 // "Sep 4" from an ISO timestamp
 export function formatLocalDay(value, timeZone) {
   const date = parse(value);

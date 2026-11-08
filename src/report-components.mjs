@@ -14,9 +14,7 @@ export function renderMasthead(view) {
   // A quota limit that touched the run gets one line under the subtitle: how many postings it held back and
   // which engine or model took over.
   const note = view.masthead?.note ? `<p class="sub quota-note" data-quota-note>${htmlEscape(view.masthead.note)}</p>` : '';
-  // Whether the strict 24-hour window is on, and how many postings each group holds.
-  const windowNote = view.masthead?.windowNote ? `<p class="sub" data-window-note>${htmlEscape(view.masthead.windowNote)}</p>` : '';
-  return `<header class="masthead"><h1>${htmlEscape(title)}</h1><p class="sub">${htmlEscape(subtitle)}</p>${windowNote}${note}</header>`;
+  return `<header class="masthead"><h1>${htmlEscape(title)}</h1><p class="sub">${htmlEscape(subtitle)}</p>${note}</header>`;
 }
 
 function option(value, label, selected = false) {
@@ -49,7 +47,7 @@ function renderFacts(label, items, className) {
   const visible = items.slice(0, VISIBLE_FACTS).map(item => `<li>${htmlEscape(item)}</li>`).join('');
   const rest = items.slice(VISIBLE_FACTS);
   const more = rest.length
-    ? `<details class="more"><summary>${rest.length} more</summary><ul class="facts ${className}">${rest.map(item => `<li>${htmlEscape(item)}</li>`).join('')}</ul></details>`
+    ? `<details class="more"><summary>${rest.length} More</summary><ul class="facts ${className}">${rest.map(item => `<li>${htmlEscape(item)}</li>`).join('')}</ul></details>`
     : '';
   return `<div class="facts-label">${htmlEscape(label)}</div><ul class="facts ${className}">${visible}</ul>${more}`;
 }
@@ -121,9 +119,8 @@ export function renderEmptyState(message) {
 export function renderReportBody(view) {
   const carried = view.carried?.cards?.length ? view.carried : null;
   const dateOnly = view.dateOnly?.cards?.length ? view.dateOnly : null;
-  const main = view.cards.length
-    ? `<section class="jobs" id="jobs">${view.cards.map(renderJobCard).join('\n')}</section>`
-    : (carried || dateOnly ? renderEmptyState(view.emptyMessage) : '');
+  // A group with no postings is not shown at all, the main list included when other groups hold matches.
+  const main = view.cards.length ? `<section class="jobs" id="jobs">${view.cards.map(renderJobCard).join('\n')}</section>` : '';
   // Strict 24-hour window: postings that may be older than 24 hours, folded under the main list. They are
   // reviewed matches, so the section stays a section.jobs the page script sorts, filters, and counts.
   const dateOnlyGroup = dateOnly

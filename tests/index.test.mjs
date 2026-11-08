@@ -31,34 +31,20 @@ test('collector failures become warnings while other sources still return jobs',
   assert.match(warnings[0].message, /network unavailable/);
 });
 
-test('a --now morning catch-up uses the same local day as the application date', () => {
-  const dates = resolveRunDates(
-    ['node', 'src/index.mjs', '--now', '2026-08-27T09:00:00-05:00'],
-    'America/Chicago',
-    1,
-  );
-  assert.equal(dates.runDate, '2026-08-27');
-  assert.equal(dates.applicationDate, '2026-08-27');
-  assert.equal(dates.reportDateOffsetDays, 0);
-});
-
-test('a --now run after 14:00 keeps the next-day application date', () => {
-  const dates = resolveRunDates(
-    ['node', 'src/index.mjs', '--now', '2026-08-27T20:00:00-05:00'],
-    'America/Chicago',
-    1,
-  );
-  assert.equal(dates.runDate, '2026-08-27');
-  assert.equal(dates.applicationDate, '2026-08-28');
-  assert.equal(dates.reportDateOffsetDays, 1);
-});
-
-test('the --now 14:00 boundary still belongs to the same-day catch-up window', () => {
-  const dates = resolveRunDates(
-    ['node', 'src/index.mjs', '--now', '2026-08-27T14:00:00-05:00'],
-    'America/Chicago',
-    1,
-  );
-  assert.equal(dates.applicationDate, '2026-08-27');
-  assert.equal(dates.reportDateOffsetDays, 0);
+test('the report date is the run\'s local day, also when 18:00 Chicago is already the next day in UTC', () => {
+  for (const [now, day] of [
+    ['2026-11-08T18:00:00-06:00', '2026-11-08'], // 2026-11-09T00:00Z
+    ['2026-11-08T18:02:00-06:00', '2026-11-08'],
+    ['2026-11-08T23:59:00-06:00', '2026-11-08'],
+    ['2026-08-27T18:00:00-05:00', '2026-08-27'], // daylight time: 23:00Z the same day
+    ['2026-08-27T20:00:00-05:00', '2026-08-27'], // a run after the old 14:00 cut-off no longer moves to the next day
+    ['2026-08-27T09:00:00-05:00', '2026-08-27'],
+    ['2026-11-09T00:30:00-06:00', '2026-11-09'],
+  ]) {
+    const dates = resolveRunDates(['node', 'src/index.mjs', '--now', now], 'America/Chicago');
+    assert.equal(dates.runDate, day, now);
+    assert.equal(dates.applicationDate, day, now);
+  }
+  // An old config that still carries reportDateOffsetDays: 1 changes nothing.
+  assert.equal(resolveRunDates(['node', 'src/index.mjs', '--now', '2026-11-08T18:00:00-06:00'], 'America/Chicago', 1).applicationDate, '2026-11-08');
 });

@@ -199,6 +199,6 @@ test('the run summary and the report banner describe an account-wide refusal and
   const meta = { date: '2026-09-19', timeZone: 'America/Chicago', resumeTracks: [{ id: 'data', label: 'Data' }], warnings: [], quota: halted };
   const html = renderReportBody(buildReportView([], meta));
   assert.match(html, /<div class="banner" data-banner="quota">Claude subscription weekly account limit reached; expected to reset Sep 22, 2026, 9:00 AM; 37 posting\(s\) were deferred to the next run and are not lost<\/div>/);
-  assert.match(html, /<dt>Subscription quota<\/dt><dd>1 event\(s\) · scored by claude · claude-fable-5-1 · 37 deferred<ul><li>Claude subscription weekly account limit reached; expected to reset Sep 22, 2026, 9:00 AM: deferred \(codex fallback is not connected\)<\/li><\/ul><\/dd>/);
+  assert.match(html, /<dt>Subscription Quota<\/dt><dd>1 event\(s\) · scored by claude · claude-fable-5-1 · 37 deferred<ul><li>Claude subscription weekly account limit reached; expected to reset Sep 22, 2026, 9:00 AM: deferred \(codex fallback is not connected\)<\/li><\/ul><\/dd>/);
   assert.doesNotMatch(renderReportBody(buildReportView([], { ...meta, quota: waited })), /data-banner="quota"/);
 });

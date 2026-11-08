@@ -7,7 +7,7 @@ import { unique } from './utils.mjs';
 export const LOCATION_UNVERIFIED_GAP = 'US location not stated: confirm you can work from the United States';
 // The wording older payloads carry; replaced on the next pass and at render time.
 export const LEGACY_LOCATION_GAP = 'Location unverified — confirm US eligibility';
-export const LOCATION_NOT_STATED_LABEL = 'US location not stated';
+export const LOCATION_NOT_STATED_LABEL = 'US Location Not Stated';
 export const LOCATION_NOT_STATED_TITLE = 'The posting does not state a US location; confirm you can work from the United States before applying';
 
 // Any of these in the location field marks a posting as outside the United States, unless a US marker is

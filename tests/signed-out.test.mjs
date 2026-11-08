@@ -219,19 +219,19 @@ test('the postings the 10-28 / 10-29 runs left unreviewed go back into the queue
   }
 });
 
-test('the report: postings no model reviewed leave the matches for a folded "Not reviewed (engine unavailable)" group, with a header line', () => {
+test('the report: postings no model reviewed leave the matches for a folded "Not Reviewed (Engine Unavailable)" group, with a header line', () => {
   const meta = { date: '2026-10-28', timeZone: 'America/Chicago', resumeTracks: [{ id: 'data', label: 'Data' }], warnings: [] };
   const reviewed = fixtureJob(1);
   const legacy = fixtureJob(2, { matchLevel: 'unreviewed', semanticReviewed: false, scoringEngine: 'local_fallback', url: 'https://jobs.example.com/legacy' });
   const notMatched = fixtureJob(3, { matchLevel: 'unreviewed', semanticReviewed: false, scoringEngine: 'local_fallback', url: 'https://jobs.example.com/other', bestScore: 41 });
   const excluded = fixtureJob(4, { matchLevel: 'unreviewed', scoringEngine: 'local_fallback', url: 'https://jobs.example.com/abroad', eligibility: { exclusion: 'location' } });
   const view = buildReportView([reviewed, legacy], meta, { reviewed: [reviewed, legacy, notMatched, excluded] });
-  assert.equal(view.matchLabel, '1 match');
+  assert.equal(view.matchLabel, '1 Match');
   assert.deepEqual(view.cards.map(card => card.url), [reviewed.url]);
   assert.deepEqual(view.notReviewed.cards.map(card => card.url), [legacy.url, notMatched.url], 'every unreviewed posting of the day the hard filters kept, best first');
   const html = renderReportBody(view);
   assert.match(html, /<div class="banner" data-banner="not-reviewed" style="background:var\(--bad-bg\);color:var\(--bad-ink\);font-weight:650">2 postings were not reviewed by a model: /);
-  assert.match(html, /<details class="run" id="not-reviewed"><summary>Not reviewed \(engine unavailable\) <span class="group-count">\(2\)<\/span><\/summary>/);
+  assert.match(html, /<details class="run" id="not-reviewed"><summary>Not Reviewed \(Engine Unavailable\) <span class="group-count">\(2\)<\/span><\/summary>/);
   assert.doesNotMatch(html, /<details class="run" id="not-reviewed" open/, 'folded by default');
   const main = html.match(/<section class="jobs" id="jobs">([\s\S]*?)<\/section>/)[1];
   assert.equal((main.match(/<article class="job"/g) || []).length, 1);
@@ -248,9 +248,9 @@ test('the hub shows an older day that mixed unreviewed postings into its matches
   const hub = await startReportHub(root);
   try {
     const page = await hub.request('/reports/2026-10-17');
-    assert.match(page.text, /<p class="sub">1 match · /);
+    assert.match(page.text, /<p class="sub">1 Match · /);
     assert.match(page.text, /<span>Sat, Oct 17<\/span><span class="n">1 match<\/span>/, 'the date list too');
-    assert.match(page.text, /<details class="run" id="not-reviewed"><summary>Not reviewed \(engine unavailable\) <span class="group-count">\(2\)<\/span>/);
+    assert.match(page.text, /<details class="run" id="not-reviewed"><summary>Not Reviewed \(Engine Unavailable\) <span class="group-count">\(2\)<\/span>/);
     assert.match(page.text, /data-banner="not-reviewed"[^>]*>2 postings were not reviewed by a model/);
     // Example Corp 1 has its letter; the two unreviewed postings are not offered to Generate Missing Letters.
     assert.doesNotMatch(page.text, /id="missing-letters"/);

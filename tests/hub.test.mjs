@@ -151,11 +151,11 @@ test('Reports lists dates newest first with counts, titles the report by date, a
     assert.equal(list.status, 200);
     assert.match(list.text, /<title>Report 2026-08-27 — Daily Job Match Alert Hub<\/title>/);
     assert.match(list.text, /<p class="brand">Job Match Hub<\/p>/);
-    assert.match(list.text, /<div class="datetools"><a class="today-link" href="\/reports\/2026-08-27" id="today-link" title="Today's report \(2026-08-27\)">Today<\/a><label><input type="checkbox" id="only-matches"> Only days with matches<\/label><\/div>/);
+    assert.match(list.text, /<div class="datetools"><a class="today-link" href="\/reports\/2026-08-27" id="today-link" title="Today's report \(2026-08-27\)">Today<\/a><label><input type="checkbox" id="only-matches"> Only Days With Matches<\/label><\/div>/);
     assert.match(list.text, /<ul class="datelist" id="datelist"><li class="month" data-month="2026-08" data-current="1">August 2026<\/li><li data-month="2026-08"><a href="\/reports\/2026-08-27" class="active today" title="2026-08-27 \(today\)"><span>Thu, Aug 27<\/span><span class="n">1 match<\/span><span class="tag" data-tag="today">Today<\/span><\/a><\/li><li data-month="2026-08" data-empty="1"><a href="\/reports\/2026-08-26" class="quiet" title="2026-08-26"><span>Wed, Aug 26<\/span><span class="n">0 matches<\/span><\/a><\/li><\/ul>/);
     assert.match(list.text, /localStorage\.getItem\(key\)/, 'the toggle remembers itself');
     assert.doesNotMatch(list.text, /<h1 class="hub-title">Reports<\/h1>/, 'no page heading above the report');
-    assert.match(list.text, /<header class="masthead"><h1>August 27, 2026<\/h1><p class="sub">1 match · posted within the last 24 hours · Ran Aug 26, 8:00 PM<\/p><\/header>/);
+    assert.match(list.text, /<header class="masthead"><h1>August 27, 2026<\/h1><p class="sub">1 Match · Ran Aug 26, 8:00 PM<\/p><\/header>/);
     assert.equal((list.text.match(/<h1/g) || []).length, 1, 'a single h1 on the page');
     assert.match(list.text, /<a class="btn secondary small" href="\/desktop\/2026-08-27" target="_blank" rel="noopener noreferrer" title="[^"]*output\/2026-08-27\/Daily Job Match Alert - 2026-08-27\.html">Open Desktop Copy<\/a><a class="btn secondary small" href="\/desktop\/2026-08-27\/xlsx"[^>]*>Download XLSX<\/a>/);
     assert.doesNotMatch(list.text, /file:\/\//);
@@ -163,12 +163,12 @@ test('Reports lists dates newest first with counts, titles the report by date, a
     assert.match(list.text, /<article class="job"/);
     assert.match(list.text, /<form class="toolbar/);
     assert.match(list.text, /<dt>Trigger<\/dt><dd>scheduled<\/dd>/);
-    assert.match(list.text, /<div class="mini"><b>Last run<\/b><span class="ok">✓<\/span> Aug 26, 8:00 PM<b>Next run<\/b><span id="next-run" data-at="2026-08-28T01:00:00\.000Z" data-overdue-suffix="">Aug 27, 8:00 PM · <span class="rel">in 13h<\/span><\/span><\/div>/);
+    assert.match(list.text, /<div class="mini"><b>Last Run<\/b><span class="ok">✓<\/span> Aug 26, 8:00 PM<b>Next Run<\/b><span id="next-run" data-at="2026-08-27T23:00:00\.000Z" data-overdue-suffix="">Aug 27, 6:00 PM · <span class="rel">in 11h<\/span><\/span><\/div>/);
     assert.doesNotMatch(list.text, /\bUTC\b/);
     assert.match(list.text, /<a href="\/reports" class="active">Reports<\/a>/);
     const day = await hub.request('GET', '/reports/2026-08-26');
     assert.equal(day.status, 200);
-    assert.match(day.text, /<h1>August 26, 2026<\/h1><p class="sub">No matches · Ran Aug 25, 8:00 PM<\/p>/);
+    assert.match(day.text, /<h1>August 26, 2026<\/h1><p class="sub">No Matches · Ran Aug 25, 8:00 PM<\/p>/);
     assert.match(day.text, /No new postings cleared the configured threshold/);
     assert.match(day.text, /<a href="\/reports\/2026-08-26" class="active quiet"/);
     assert.equal((await hub.request('GET', '/reports/2026-01-01')).status, 404);
@@ -208,7 +208,7 @@ test('Reports reads payloads from disk on every request and normalizes locations
     assert.doesNotMatch(after.text, /Boston, MA Johnston/);
     assert.equal(await fs.readFile(file, 'utf8'), raw, 'the payload on disk is untouched');
     await fs.writeFile(file, JSON.stringify({ meta: payloadMeta('2026-08-28', { matchCount: 0 }), matches: [], reviewed: [], complete: true }));
-    assert.match((await hub.request('GET', '/reports/2026-08-28')).text, /No matches/, 'a rewritten payload is re-read, never served from memory');
+    assert.match((await hub.request('GET', '/reports/2026-08-28')).text, /No Matches/, 'a rewritten payload is re-read, never served from memory');
     await fs.rm(file);
     assert.equal((await hub.request('GET', '/reports/2026-08-28')).status, 404);
   } finally {
@@ -239,7 +239,7 @@ test('earlier months start collapsed with a toggle, the current and later months
   const hub = await startHub(root);
   try {
     const list = await hub.request('GET', '/reports');
-    assert.match(list.text, /<div class="datetools"><a class="today-link" href="\/reports\/2026-08-27" id="today-link"[^>]*>Today<\/a><label><input type="checkbox" id="only-matches"> Only days with matches<\/label><\/div>/, 'the shortcut and the toggle share one row');
+    assert.match(list.text, /<div class="datetools"><a class="today-link" href="\/reports\/2026-08-27" id="today-link"[^>]*>Today<\/a><label><input type="checkbox" id="only-matches"> Only Days With Matches<\/label><\/div>/, 'the shortcut and the toggle share one row');
     assert.match(list.text, /<li class="month" data-month="2026-09"><button type="button" class="month-toggle" aria-expanded="true">September 2026<\/button><\/li><li data-month="2026-09"><a href="\/reports\/2026-09-02"/, 'a later month (the tomorrow report) starts open');
     assert.match(list.text, /<li class="month" data-month="2026-08" data-current="1">August 2026<\/li><li data-month="2026-08"><a href="\/reports\/2026-08-27" class="active today"/, 'the current month has no toggle');
     assert.match(list.text, /<li class="month" data-month="2026-07" data-collapsed="1"><button type="button" class="month-toggle" aria-expanded="false">July 2026<\/button><\/li><li data-month="2026-07" hidden><a href="\/reports\/2026-07-15"/, 'an earlier month starts collapsed with its days hidden');
@@ -307,8 +307,8 @@ test('uploading a PDF stores it under private/resumes, repoints only that track,
     assert.match(after.text, /<div class="flash notice">llm: stored<\/div>/);
     const llmCard = after.text.match(/<article class="card" data-track="llm">[\s\S]*?<\/article>/)[0];
     assert.match(llmCard, /<span class="badge" data-badge="hub" title="[^"]*private\/resumes\/llm\/[^"]*">Hub<\/span>/);
-    assert.match(llmCard, /<dt>Last upload<\/dt><dd>Aug 27, 2026, 7:00 AM<\/dd>/);
-    assert.match(llmCard, /<dt>Text extraction<\/dt><dd>1,234 characters \(checked Aug 27, 2026, 7:00 AM\)<\/dd>/);
+    assert.match(llmCard, /<dt>Last Upload<\/dt><dd>Aug 27, 2026, 7:00 AM<\/dd>/);
+    assert.match(llmCard, /<dt>Text Extraction<\/dt><dd>1,234 characters \(checked Aug 27, 2026, 7:00 AM\)<\/dd>/);
     assert.match(llmCard, /Profile not extracted yet/);
 
     for (let index = 0; index < 5; index += 1) {
@@ -520,12 +520,12 @@ test('Status merges runs into one card, formats every time in the configured zon
   try {
     const page = await hub.request('GET', '/status');
     assert.equal(page.status, 200);
-    assert.match(page.text, /<h2>Runs<\/h2><dl class="kv">\s*<dt>Last run<\/dt><dd>Aug 26, 2026, 8:00 PM · scheduled · success · 1 match · <a href="\/reports\/2026-08-27">report<\/a><\/dd>\s*<dt>Engine<\/dt><dd>local_only<\/dd>\s*<dt>Next run<\/dt><dd>Aug 27, 2026, 8:00 PM <span class="badge badge-warn" data-badge="not-installed">[^<]*<\/span><\/dd>\s*<dt>Catch-up<\/dt><dd id="catch-up-line">Nothing to catch up<\/dd>\s*<dt>Lock<\/dt><dd id="lock-line">Free<\/dd>/);
+    assert.match(page.text, /<h2>Runs<\/h2><dl class="kv">\s*<dt>Last Run<\/dt><dd>Aug 26, 2026, 8:00 PM · scheduled · success · 1 match · <a href="\/reports\/2026-08-27">report<\/a><\/dd>\s*<dt>Engine<\/dt><dd>local_only<\/dd>\s*<dt>Next Run<\/dt><dd>Aug 27, 2026, 6:00 PM <span class="badge badge-warn" data-badge="not-installed">LaunchAgent Not Installed<\/span> <span class="muted">showing the 18:00 default<\/span><\/dd>\s*<dt>Catch-up<\/dt><dd id="catch-up-line">Nothing to catch up<\/dd>\s*<dt>Lock<\/dt><dd id="lock-line">Free<\/dd>/);
     assert.doesNotMatch(page.text, /<h2>Last run<\/h2>|<h2>Schedule<\/h2>|<h2>Fatal error reports<\/h2>|\bUTC\b/);
     assert.match(page.text, /<div id="run-progress" hidden>/);
     assert.match(page.text, /<h2>Warnings<\/h2>/);
-    assert.match(page.text, /<summary>Thu, Aug 27 · <span class="count-some">2 warnings<\/span> <span class="muted">· 1 match<\/span><\/summary><pre class="log">Daily Job Match Alert — 2026-08-27 — 2 warnings\n\[collector \/ Job board\] network unavailable/);
-    assert.match(page.text, /<summary>Wed, Aug 26 · <span class="count-zero">0 warnings<\/span> <span class="muted">· 0 matches<\/span><\/summary><p class="muted">No warnings\.txt/);
+    assert.match(page.text, /<summary>Thu, Aug 27 · <span class="count-some">2 Warnings<\/span> <span class="muted">· 1 Match<\/span><\/summary><pre class="log">Daily Job Match Alert — 2026-08-27 — 2 warnings\n\[collector \/ Job board\] network unavailable/);
+    assert.match(page.text, /<summary>Wed, Aug 26 · <span class="count-zero">0 Warnings<\/span> <span class="muted">· 0 Matches<\/span><\/summary><p class="muted">No warnings\.txt/);
     assert.match(page.text, /<h2>Error Reports<\/h2><table class="plain">[\s\S]*?<a href="\/status\/error\/ERROR-2026-08-20\.html" title="[^"]*">ERROR-2026-08-20\.html<\/a>/);
     assert.match(page.text, /id="run-card" data-time-zone="America\/Chicago"/);
     const report = await hub.request('GET', '/status/error/ERROR-2026-08-20.html');
@@ -539,14 +539,14 @@ test('Status merges runs into one card, formats every time in the configured zon
     const older = JSON.parse(await fs.readFile(path.join(root, 'state', 'report-payload-2026-08-27.json'), 'utf8'));
     delete older.meta.trigger;
     await fs.writeFile(path.join(root, 'state', 'report-payload-2026-08-27.json'), JSON.stringify(older));
-    assert.match((await hub.request('GET', '/status')).text, /<dt>Last run<\/dt><dd>Aug 26, 2026, 8:00 PM · success · 1 match/, 'no trigger shown when the payload has none');
+    assert.match((await hub.request('GET', '/status')).text, /<dt>Last Run<\/dt><dd>Aug 26, 2026, 8:00 PM · success · 1 match/, 'no trigger shown when the payload has none');
 
     await fs.mkdir(path.join(root, 'Library', 'LaunchAgents'), { recursive: true });
     await fs.writeFile(path.join(root, 'Library', 'LaunchAgents', 'com.dailyjobmatchalert.daily.plist'), '<plist><dict><key>StartCalendarInterval</key><dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>30</integer></dict></dict></plist>');
     const installed = await hub.request('GET', '/status');
-    assert.match(installed.text, /<dt>Next run<\/dt><dd>Aug 28, 2026, 6:30 AM <span class="badge badge-bad" data-badge="overdue">overdue<\/span><\/dd>/, 'the Runs card marks the missed 6:30 slot');
+    assert.match(installed.text, /<dt>Next Run<\/dt><dd>Aug 28, 2026, 6:30 AM <span class="badge badge-bad" data-badge="overdue">Overdue<\/span><\/dd>/, 'the Runs card marks the missed 6:30 slot');
     assert.doesNotMatch(installed.text, /LaunchAgent not installed/);
-    assert.match(installed.text, /<b>Next run<\/b><span id="next-run" data-at="2026-08-27T11:30:00\.000Z" data-overdue-suffix="">Aug 27, 6:30 AM · <span class="rel overdue">overdue<\/span><\/span><\/div>/, 'the 6:30 slot passed 30 minutes ago with no run since, so the sidebar flags it instead of pointing at tomorrow');
+    assert.match(installed.text, /<b>Next Run<\/b><span id="next-run" data-at="2026-08-27T11:30:00\.000Z" data-overdue-suffix="">Aug 27, 6:30 AM · <span class="rel overdue">overdue<\/span><\/span><\/div>/, 'the 6:30 slot passed 30 minutes ago with no run since, so the sidebar flags it instead of pointing at tomorrow');
 
     assert.equal(nextScheduledRun(new Date('2026-08-27T12:00:00Z'), 'America/Chicago', 20, 0).toISOString(), '2026-08-28T01:00:00.000Z');
     assert.equal(nextScheduledRun(new Date('2026-08-27T01:30:00Z'), 'America/Chicago', 20, 0).toISOString(), '2026-08-28T01:00:00.000Z', 'after 20:00 local the next slot is tomorrow');
@@ -583,14 +583,14 @@ test('Status lists every source with its last success and new-posting count, and
     assert.match(page.text, /<tr data-source="simplifyNewGrad"><td>SimplifyJobs New Grad<\/td><td><span class="badge badge-muted" data-badge="disabled">Disabled<\/span><\/td><td>Aug 26, 2026, 8:00 PM<\/td><td>120<\/td>/, 'a built-in source shows the last run time as its success and the count from the payload');
     assert.match(page.text, /<tr data-source="emailFiles"><td>Email files<\/td><td><span class="badge badge-good" data-badge="enabled">Enabled<\/span><\/td><td><span class="muted">Never<\/span><\/td><td>0<\/td><td><span class="badge badge-warn" data-badge="failing">Failing<\/span> <span class="muted">ENOENT<\/span><\/td>/);
     assert.match(page.text, /<tr data-source="greenhouse:examplecorp"><td>Greenhouse · Example Corp <span class="muted">greenhouse<\/span><\/td><td><span class="badge badge-good" data-badge="enabled">Enabled<\/span><\/td><td>Aug 26, 2026, 8:00 PM<\/td><td>3 <span class="muted">of 40 listed<\/span><\/td><td><span class="muted">OK<\/span><\/td>/);
-    assert.match(page.text, /<tr data-source="lever:broken"><td>Lever · Broken Co <span class="muted">lever<\/span><\/td><td><span class="badge badge-good" data-badge="enabled">Enabled<\/span><\/td><td>Aug 18, 2026, 8:00 PM<\/td><td>0 <span class="muted">of 12 listed<\/span><\/td><td><span class="badge badge-bad" data-badge="dormant" title="HTTP 500">Dormant<\/span> <form class="inline" method="post" action="\/status\/sources\/resume"><input type="hidden" name="board" value="lever:broken"><button class="btn secondary small" type="submit">Resume Polling<\/button><\/form> <span class="muted" data-next-probe="2026-09-26T01:00:00.000Z">Next probe Sep 25, 2026, 8:00 PM<\/span><\/td>/);
+    assert.match(page.text, /<tr data-source="lever:broken"><td>Lever · Broken Co <span class="muted">lever<\/span><\/td><td><span class="badge badge-good" data-badge="enabled">Enabled<\/span><\/td><td>Aug 18, 2026, 8:00 PM<\/td><td>0 <span class="muted">of 12 listed<\/span><\/td><td><span class="badge badge-bad" data-badge="dormant" title="HTTP 500">Dormant<\/span> <form class="inline" method="post" action="\/status\/sources\/resume"><input type="hidden" name="board" value="lever:broken"><button class="btn secondary small" type="submit">Resume Polling<\/button><\/form> <span class="muted" data-next-probe="2026-09-25T23:00:00.000Z">Next probe Sep 25, 2026, 6:00 PM<\/span><\/td>/);
     assert.doesNotMatch(page.text, /\bUTC\b/);
     assert.match(page.text, /<p class="muted" id="sources-summary">3 ATS boards · 1 quiet \(polled weekly\) · 1 dormant · 0 disabled<\/p>/);
     assert.match(page.text, /<tr data-source="ashby:sleepy">[\s\S]*?<span class="badge badge-muted" data-badge="quiet"[^>]*>Quiet<\/span>/);
-    assert.match(page.text, /<dt>Review budget<\/dt><dd>150 candidates · 120 reviewed · 30 deferred · limit 120 per run<\/dd>/);
+    assert.match(page.text, /<dt>Review Budget<\/dt><dd>150 candidates · 120 reviewed · 30 deferred · limit 120 per run<\/dd>/);
 
     const report = await hub.request('GET', '/reports/2026-08-27');
-    assert.match(report.text, /<dt>Review budget<\/dt><dd>150 candidates · 120 reviewed · 30 deferred \(limit 120 per run\)<\/dd>/);
+    assert.match(report.text, /<dt>Review Budget<\/dt><dd>150 candidates · 120 reviewed · 30 deferred \(limit 120 per run\)<\/dd>/);
     assert.match(report.text, /<dt>Sources<\/dt><dd>4 polled · 123 posting\(s\) collected · 2 failed<ul><li>SimplifyJobs New Grad: 120 collected<\/li><li>Email files: failed \(ENOENT\)<\/li><li>Greenhouse · Example Corp: 3 new, 40 listed<\/li><li>Lever · Broken Co: failed \(HTTP 500\)<\/li><\/ul><\/dd>/, 'Run Details carries one line per source');
 
     const resumed = await hub.form('/status/sources/resume', { board: 'lever:broken' });
@@ -656,12 +656,12 @@ test('the Quota card shows the last limit event, the model in effect, and the de
   try {
     const page = await hub.request('GET', '/status');
     assert.match(page.text, /<article class="card" id="quota-card"><h2>Quota<\/h2>/);
-    assert.match(page.text, /<dt>Last limit event<\/dt><dd id="quota-last">Claude subscription claude-fable-5-1 weekly limit reached; expected to reset Aug 29, 2026, 9:00 AM · Aug 26, 2026, 8:02 PM · <span class="badge badge-warn" data-badge="quota-action">downgraded<\/span> <span class="muted">switched to opus<\/span> <span class="muted">\(nightly run\)<\/span><\/dd>/);
-    assert.match(page.text, /<dt>Model in effect<\/dt><dd id="quota-model">claude · claude-opus-5-5 <span class="badge badge-warn" data-badge="downgraded">downgraded from claude-fable-5-1<\/span><\/dd>/, 'aliases stored by an older run are shown as registry ids');
-    assert.match(page.text, /<dt>Deferred postings<\/dt><dd id="quota-deferred">2 waiting for the next run<\/dd>/);
+    assert.match(page.text, /<dt>Last Limit Event<\/dt><dd id="quota-last">Claude subscription claude-fable-5-1 weekly limit reached; expected to reset Aug 29, 2026, 9:00 AM · Aug 26, 2026, 8:02 PM · <span class="badge badge-warn" data-badge="quota-action">downgraded<\/span> <span class="muted">switched to opus<\/span> <span class="muted">\(nightly run\)<\/span><\/dd>/);
+    assert.match(page.text, /<dt>Model in Effect<\/dt><dd id="quota-model">claude · claude-opus-5-5 <span class="badge badge-warn" data-badge="downgraded">Downgraded From claude-fable-5-1<\/span><\/dd>/, 'aliases stored by an older run are shown as registry ids');
+    assert.match(page.text, /<dt>Deferred Postings<\/dt><dd id="quota-deferred">2 waiting for the next run<\/dd>/);
     assert.match(page.text, /<dt>Policy<\/dt><dd>Ladder claude-fable-5-1 → claude-opus-5-5 · Codex fallback on<\/dd>/);
     assert.doesNotMatch(page.text, /\bUTC\b/);
-    assert.doesNotMatch(page.text, /<dt>Candidates vs budget<\/dt>/, 'no history yet, no row');
+    assert.doesNotMatch(page.text, /<dt>Candidates vs Budget<\/dt>/, 'no history yet, no row');
     const withHistory = JSON.parse(await fs.readFile(statePath, 'utf8'));
     withHistory.budgetHistory = [{ date: '2026-08-25', inWindow: 130, limit: 120 }, { date: '2026-08-26', inWindow: 141, limit: 120 }, { date: '2026-08-27', inWindow: 150, limit: 120 }];
     await fs.writeFile(statePath, JSON.stringify(withHistory));
@@ -669,7 +669,7 @@ test('the Quota card shows the last limit event, the model in effect, and the de
     alertPayload.meta.budgetAlert = { nights: 3, message: 'Candidates inside the lookback window have exceeded the review budget for 3 nights in a row', history: withHistory.budgetHistory };
     alertPayload.meta.expiredBacklogCount = 4;
     await fs.writeFile(payloadPath, JSON.stringify(alertPayload));
-    assert.match((await hub.request('GET', '/status')).text, /<dt>Candidates vs budget<\/dt><dd id="quota-history"><span class="badge badge-warn" data-badge="budget-alert">Over budget 3 nights running<\/span> <span class="muted">Raise Max Reviewed Per Run or tighten the prefilter\.<\/span><br><span class="mono">2026-08-25 130\/120 · 2026-08-26 141\/120 · 2026-08-27 150\/120<\/span> <span class="muted">\(in-window candidates \/ budget, last 3 nights; 4 backlog postings expired last run\)<\/span><\/dd>/);
+    assert.match((await hub.request('GET', '/status')).text, /<dt>Candidates vs Budget<\/dt><dd id="quota-history"><span class="badge badge-warn" data-badge="budget-alert">Over Budget 3 Nights Running<\/span> <span class="muted">Raise Max Reviewed Per Run or tighten the prefilter\.<\/span><br><span class="mono">2026-08-25 130\/120 · 2026-08-26 141\/120 · 2026-08-27 150\/120<\/span> <span class="muted">\(in-window candidates \/ budget, last 3 nights; 4 backlog postings expired last run\)<\/span><\/dd>/);
 
     // A cover-letter refusal seen by this hub process outranks an older run event.
     hub.ctx.quotaLog.record({ kind: 'accountWeeklyLimit', at: '2026-08-27T13:00:00Z', action: 'refused', source: 'cover-letter', engine: 'claude', model: 'fable' });
@@ -743,10 +743,10 @@ test('the sidebar and the Runs card tell a run in progress from a due, overdue, 
   const hubRunning = await startHub(running, { alivePids: [9001] });
   try {
     const reports = await hubRunning.request('GET', '/reports');
-    assert.match(reports.text, /<b>Next run<\/b><span id="next-run" data-running="1" data-since="2026-08-27T11:40:00\.000Z"><span class="ok">Running<\/span> since Aug 27, 6:40 AM · <span class="rel" id="running-elapsed">20m<\/span><\/span><\/div>/);
+    assert.match(reports.text, /<b>Next Run<\/b><span id="next-run" data-running="1" data-since="2026-08-27T11:40:00\.000Z"><span class="ok">Running<\/span> since Aug 27, 6:40 AM · <span class="rel" id="running-elapsed">20m<\/span><\/span><\/div>/);
     assert.doesNotMatch(/<div class="mini">[\s\S]*?<\/nav>/.exec(reports.text)[0], /due now|overdue/, 'no due or overdue wording in the sidebar while a run is in progress');
     const status = await hubRunning.request('GET', '/status');
-    assert.match(status.text, /<dt>Next run<\/dt><dd><span class="badge badge-good" data-badge="running">Running<\/span> since Aug 27, 2026, 6:40 AM · 20m so far <span class="muted">\(PID 9001\)<\/span><br><span class="muted">Next scheduled Aug 28, 2026, 6:30 AM<\/span><\/dd>/);
+    assert.match(status.text, /<dt>Next Run<\/dt><dd><span class="badge badge-good" data-badge="running">Running<\/span> since Aug 27, 2026, 6:40 AM · 20m so far <span class="muted">\(PID 9001\)<\/span><br><span class="muted">Next scheduled Aug 28, 2026, 6:30 AM<\/span><\/dd>/);
     assert.doesNotMatch(status.text, /data-badge="overdue"|data-badge="due-now"/);
   } finally {
     await hubRunning.close();
@@ -760,7 +760,7 @@ test('the sidebar and the Runs card tell a run in progress from a due, overdue, 
   const hubDue = await startHub(due, { now: '2026-08-27T11:50:00Z' });
   try {
     assert.match((await hubDue.request('GET', '/reports')).text, /<span id="next-run" data-at="2026-08-27T11:30:00\.000Z" data-overdue-suffix="">Aug 27, 6:30 AM · <span class="rel">due now<\/span><\/span>/);
-    assert.match((await hubDue.request('GET', '/status')).text, /<dt>Next run<\/dt><dd>Aug 28, 2026, 6:30 AM <span class="badge badge-warn" data-badge="due-now">due now<\/span><\/dd>/);
+    assert.match((await hubDue.request('GET', '/status')).text, /<dt>Next Run<\/dt><dd>Aug 28, 2026, 6:30 AM <span class="badge badge-warn" data-badge="due-now">Due Now<\/span><\/dd>/);
   } finally {
     await hubDue.close();
     await fs.rm(due, { recursive: true, force: true });
@@ -777,10 +777,10 @@ test('the sidebar and the Runs card tell a run in progress from a due, overdue, 
   const hubWaiting = await startHub(waiting);
   try {
     assert.match((await hubWaiting.request('GET', '/reports')).text, /<span id="next-run" data-at="2026-08-27T11:30:00\.000Z" data-overdue-suffix=" \(waiting on quota\)">Aug 27, 6:30 AM · <span class="rel overdue">overdue \(waiting on quota\)<\/span><\/span>/);
-    assert.match((await hubWaiting.request('GET', '/status')).text, /<dt>Next run<\/dt><dd>Aug 28, 2026, 6:30 AM <span class="badge badge-bad" data-badge="overdue">overdue \(waiting on quota\)<\/span><\/dd>/);
+    assert.match((await hubWaiting.request('GET', '/status')).text, /<dt>Next Run<\/dt><dd>Aug 28, 2026, 6:30 AM <span class="badge badge-bad" data-badge="overdue">Overdue \(Waiting on Quota\)<\/span><\/dd>/);
     // A later, different event ends the suffix.
     hubWaiting.ctx.quotaLog.record({ kind: 'accountWeeklyLimit', at: '2026-08-27T11:00:00Z', action: 'deferred' });
-    assert.match((await hubWaiting.request('GET', '/status')).text, /data-badge="overdue">overdue<\/span>/);
+    assert.match((await hubWaiting.request('GET', '/status')).text, /data-badge="overdue">Overdue<\/span>/);
   } finally {
     await hubWaiting.close();
     await fs.rm(waiting, { recursive: true, force: true });
@@ -827,7 +827,7 @@ test('Connections shows the resolved CLI path, a not-found message with the inst
   try {
     const page = await hub.request('GET', '/settings');
     assert.match(page.text, /<dt>Claude<\/dt><dd><span class="badge badge-good" data-conn="connected">Connected<\/span> Claude · Max · claude\.ai<br><span class="muted mono" title="\/usr\/bin\/claude\n\/Users\/me\/\.local\/bin\/claude">\/Users\/me\/\.local\/bin\/claude<\/span> <form class="inline" method="post" action="\/settings\/cli-path"><input type="hidden" name="engine" value="claude"><input type="hidden" name="path" value="\/Users\/me\/\.local\/bin\/claude"><button class="btn secondary small" type="submit">Save This Path to Config<\/button><\/form><\/dd>/);
-    assert.match(page.text, /<dt>Codex<\/dt><dd><span class="badge badge-muted" data-conn="missing">Not found on this Mac<\/span> <span class="muted">Install with <code>npm i -g @openai\/codex<\/code>; config points at <code>\/nowhere\/codex<\/code><\/span><br><span class="muted" title="[^"]*">Searched PATH, ~\/\.local\/bin, \/opt\/homebrew\/bin, \/usr\/local\/bin, ~\/\.npm-global\/bin, and nvm\.<\/span><\/dd>/);
+    assert.match(page.text, /<dt>Codex<\/dt><dd><span class="badge badge-muted" data-conn="missing">Not Found on This Mac<\/span> <span class="muted">Install with <code>npm i -g @openai\/codex<\/code>; config points at <code>\/nowhere\/codex<\/code><\/span><br><span class="muted" title="[^"]*">Searched PATH, ~\/\.local\/bin, \/opt\/homebrew\/bin, \/usr\/local\/bin, ~\/\.npm-global\/bin, and nvm\.<\/span><\/dd>/);
     assert.doesNotMatch(page.text, /Not installed/);
 
     const binary = path.join(root, 'claude-bin');
@@ -989,10 +989,10 @@ test('Test sends one short prompt to one model through a fake engine, updates it
     const refused = await hub.form('/settings/models/test', { model: 'gpt-5.5', confirm: '1' });
     assert.match(decodeURIComponent(refused.headers.location), /error=gpt-5\.5: Generation failed \(the gpt-5\.5 model is not available/);
     assert.doesNotMatch(decodeURIComponent(refused.headers.location), /[{}]|is_error/);
-    assert.match(await status('gpt-5.5'), /data-model-state="unknown_model">Unknown model/);
+    assert.match(await status('gpt-5.5'), /data-model-state="unknown_model">Unknown Model/);
     reply = 'weekly';
     await hub.form('/settings/models/test', { model: 'claude-opus-5-5', confirm: '1' });
-    assert.match(await status('claude-opus-5-5'), /data-model-state="weekly_limit">Weekly limit until Aug 27, 2026, 9:00 AM/);
+    assert.match(await status('claude-opus-5-5'), /data-model-state="weekly_limit">Weekly Limit Until Aug 27, 2026, 9:00 AM/);
 
     // Guards: no confirmation, a name outside the registry, the run lock held, a letter generating.
     calls.length = 0;
@@ -1054,24 +1054,24 @@ test('Subscriptions & Models shows each plan with source and detection time, 7-d
     assert.match(markup, /<a href="\/settings\?tab=models" aria-current="page" class="active">Subscriptions &amp; Models<\/a>/, 'the default tab');
     // Subscriptions: plan, source and detection time, scheduled change, CLI, tokens per model, last limit.
     const claudeCard = /<article class="card sub-card" data-provider="anthropic">([\s\S]*?)<\/article>/.exec(markup)[1];
-    assert.match(claudeCard, /<p class="plan-name" data-plan-name="claude">Max <span class="badge badge-muted" data-plan-source="auto">auto<\/span><\/p>\s*<p class="plan-meta">Detected automatically from auth status · checked Aug 27, 2026, 7:00 AM<\/p>\s*<p class="plan-change" data-plan-pending="2026-09-01">Switches to Pro on Sep 1, 2026<\/p>/);
+    assert.match(claudeCard, /<p class="plan-name" data-plan-name="claude">Max <span class="badge badge-muted" data-plan-source="auto">Auto<\/span><\/p>\s*<p class="plan-meta">Detected automatically from auth status · checked Aug 27, 2026, 7:00 AM<\/p>\s*<p class="plan-change" data-plan-pending="2026-09-01">Switches to Pro on Sep 1, 2026<\/p>/);
     assert.match(claudeCard, /<dt>CLI<\/dt><dd>Claude CLI 2\.1\.292<\/dd>/);
     assert.match(claudeCard, /<dd data-plan-usage="claude"><ul class="plain-list sub-usage"><li><span class="mono">claude-opus-5-5<\/span> 23k in · 3\.8k out<\/li><\/ul><\/dd>/);
     assert.match(claudeCard, /<dd data-last-limit="claude">Claude subscription claude-opus-5-5 weekly limit reached; expected to reset Aug 29, 2026, 9:00 AM <span class="muted">· Aug 26, 2026, 8:02 PM · downgraded<\/span><br><span class="muted">Expected to reset Aug 29, 2026, 9:00 AM<\/span><\/dd>/);
     const chatgptCard = /<article class="card sub-card" data-provider="openai">([\s\S]*?)<\/article>/.exec(markup)[1];
-    assert.match(chatgptCard, /<p class="plan-name" data-plan-name="chatgpt">Plus <span class="badge badge-muted" data-plan-source="auto">auto<\/span><\/p>\s*<p class="plan-meta">Detected automatically from auth\.json · checked/);
+    assert.match(chatgptCard, /<p class="plan-name" data-plan-name="chatgpt">Plus <span class="badge badge-muted" data-plan-source="auto">Auto<\/span><\/p>\s*<p class="plan-meta">Detected automatically from auth\.json · checked/);
     assert.match(chatgptCard, /<dd data-plan-usage="codex">[\s\S]*?gpt-5\.6-sol<\/span> 5\.0k in · 300 out/);
     assert.match(chatgptCard, /<dd data-last-limit="codex"><span class="muted">None recorded<\/span><\/dd>/);
     // Models: current version (and a newer release), availability on this plan, last use, stages; unused models fold.
     const row = id => new RegExp(`<tr data-model="${id.replace(/\./g, '\\.')}">([\\s\\S]*?)<\\/tr>`).exec(markup)?.[1] || '';
     assert.match(row('claude-fable-5-1'), /<td><span class="mono">claude-fable-5-1<\/span><br><span class="alias">fable<\/span> · <form class="inline test-form"[\s\S]*?<\/form><\/td><td><span class="muted">—<\/span><\/td><td><span class="badge badge-bad" data-model-state="not_on_plan">Unavailable on Max<\/span><\/td><td class="nowrap" title=""><span class="muted">Never<\/span><\/td><td><span class="stage primary" title="Scoring">Scoring<\/span><\/td>/);
-    assert.match(row('claude-opus-5-5'), /<span class="stage" title="Scoring \(fallback\)">Scoring<\/span> <span class="stage" title="Cover letter draft \(fallback\)">Letter draft<\/span> <span class="stage" title="Cover letter editor \(fallback\)">Letter editor<\/span>/, 'the ladder step and both letter fallbacks');
-    assert.match(row('claude-opus-5-5'), /<span class="badge badge-warn" data-model-state="weekly_limit">Weekly limit until Aug 29, 2026, 9:00 AM<\/span>/);
+    assert.match(row('claude-opus-5-5'), /<span class="stage" title="Scoring \(fallback\)">Scoring<\/span> <span class="stage" title="Cover Letter Draft \(fallback\)">Letter Draft<\/span> <span class="stage" title="Cover Letter Editor \(fallback\)">Letter Editor<\/span>/, 'the ladder step and both letter fallbacks');
+    assert.match(row('claude-opus-5-5'), /<span class="badge badge-warn" data-model-state="weekly_limit">Weekly Limit Until Aug 29, 2026, 9:00 AM<\/span>/);
     assert.match(row('claude-sonnet-5-5'), /<td><span class="mono">claude-sonnet-5-6<\/span><br><span class="new-version" data-new-version="claude-sonnet-5-6">New version: claude-sonnet-5-6<\/span><\/td>/);
     assert.match(row('claude-haiku-4-5'), /<td><span class="mono">claude-haiku-4-5-20251001<\/span><\/td><td><span class="badge badge-good" data-model-state="available">Available<\/span><\/td>/);
     assert.match(row('gpt-5.6-sol'), /<td><span class="mono">gpt-5\.6-sol<\/span><br><form class="inline test-form" method="post" action="\/settings\/models\/test" data-test-model="gpt-5\.6-sol">[\s\S]*?<button class="link-button" type="submit"[^>]*>Test<\/button><\/form><\/td>/, 'Test is an inline secondary action in the model cell');
     const openaiModels = /<article class="card model-card" data-provider="openai">([\s\S]*?)<\/article>/.exec(markup)[1];
-    assert.match(openaiModels, /<details class="all-models"><summary>Show all models \(3 more\)<\/summary>[\s\S]*?data-model="gpt-5\.6-terra"[\s\S]*?data-model="gpt-6-astra"[\s\S]*?<\/details>/);
+    assert.match(openaiModels, /<details class="all-models"><summary>Show All Models \(3 More\)<\/summary>[\s\S]*?data-model="gpt-5\.6-terra"[\s\S]*?data-model="gpt-6-astra"[\s\S]*?<\/details>/);
     assert.equal((/<\/table><\/div><details/.exec(openaiModels) ? openaiModels.split('<details')[0] : '').includes('gpt-5.6-terra'), false, 'unused models are only in the folded list');
     assert.match(markup, /<form method="post" action="\/settings\/models\/recheck" class="inline"><button class="link-button" type="submit"[^>]*>Re-check Models<\/button><\/form>/);
     // Task assignments: inline engine, model, and effort; chains as tags; blocked steps greyed with the reason.
@@ -1079,12 +1079,12 @@ test('Subscriptions & Models shows each plan with source and detection time, 7-d
     assert.match(stage('scoring'), /<select name="scoring_engine"[^>]*><option value="claude" selected>claude<\/option><option value="codex">codex<\/option><\/select>/);
     assert.match(stage('scoring'), /<option value="claude-fable-5-1" data-provider="anthropic" data-efforts="" selected>claude-fable-5-1 \(fable\)<\/option>/);
     assert.match(stage('scoring'), /<select name="scoring_effort"[^>]* disabled>/, 'effort applies to Codex only');
-    assert.match(stage('scoring'), /<span class="tag head off"><span class="mono">claude-fable-5-1<\/span> <span class="why">· Unavailable on Max<\/span><\/span><span class="arrow" aria-hidden="true">→<\/span><ol class="chain-tags"><li class="tag off" data-id="claude-opus-5-5"><span class="mono">claude-opus-5-5<\/span> <span class="why">· Weekly limit until Aug 29, 2026, 9:00 AM<\/span><input type="hidden" name="fallback_scoring" value="claude-opus-5-5">[\s\S]*?<li class="tag" data-id="gpt-5\.6-sol">/, 'the ladder, then Codex for a weekly account limit (on by default)');
+    assert.match(stage('scoring'), /<span class="tag head off"><span class="mono">claude-fable-5-1<\/span> <span class="why">· Unavailable on Max<\/span><\/span><span class="arrow" aria-hidden="true">→<\/span><ol class="chain-tags"><li class="tag off" data-id="claude-opus-5-5"><span class="mono">claude-opus-5-5<\/span> <span class="why">· Weekly Limit Until Aug 29, 2026, 9:00 AM<\/span><input type="hidden" name="fallback_scoring" value="claude-opus-5-5">[\s\S]*?<li class="tag" data-id="gpt-5\.6-sol">/, 'the ladder, then Codex for a weekly account limit (on by default)');
     assert.match(stage('supplemental'), /Follows Scoring \(claude · <span class="mono">claude-fable-5-1<\/span>\)/);
     assert.match(stage('letterDraft'), /<option value="codex" selected>codex<\/option>[\s\S]*?<option value="gpt-5\.6-sol" data-provider="openai" data-efforts="low medium high xhigh max ultra" selected>[\s\S]*?<select name="letterDraft_effort"[^>]*><option value="">CLI default<\/option><option value="low">low<\/option><option value="medium" selected>medium<\/option>/, 'the draft default: codex, gpt-5.6-sol, medium');
     assert.match(stage('letterDraft'), /<li class="tag off" data-id="claude-opus-5-5">/, 'falling back to the Claude ladder (opus)');
     assert.match(stage('letterEditor'), /<option value="high" selected>high<\/option>/, 'the editor default: high');
-    assert.match(stage('letterEditor'), /<input type="checkbox" name="editorReview" checked> Run the editor pass/);
+    assert.match(stage('letterEditor'), /<input type="checkbox" name="editorReview" checked> Run the Editor Pass/);
     assert.match(row('gpt-5.6-luna'), /<span class="stage primary" title="Prescreen">Prescreen<\/span>/, 'the lightest ChatGPT model is the prescreen default');
     assert.match(stage('prescreen'), /<option value="codex" selected>codex<\/option>[\s\S]*?<option value="gpt-5\.6-luna"[^>]* selected>[\s\S]*?<option value="low" selected>low<\/option>[\s\S]*?None: on failure the local order is kept/, 'the prescreen default: codex, the lightest model, low, no chain');
     assert.match(page, /@media \(max-width:1000px\)\{\.pair-grid\{grid-template-columns:1fr\}\}/, 'the pairs stack on narrow screens');
@@ -1099,7 +1099,7 @@ test('Task assignments save each letter stage on its own, validate engine, model
   const hub = await startHub(root);
   try {
     const page = (await hub.request('GET', '/settings')).text.split('<script>')[0];
-    assert.match(page, /<tr data-stage="letterDraft"><th scope="row">Cover letter draft<\/th><td colspan="3"><span class="muted">Placeholder engine \(Scoring is local only\)<\/span>/, 'a local-only config keeps the placeholder until a letter stage is set');
+    assert.match(page, /<tr data-stage="letterDraft"><th scope="row">Cover Letter Draft<\/th><td colspan="3"><span class="muted">Placeholder engine \(Scoring is local only\)<\/span>/, 'a local-only config keeps the placeholder until a letter stage is set');
     const save = fields => hub.form('/settings/assignments', { assignmentsPresent: '1', editorReviewPresent: '1', ...fields });
     const saved = await save({ letterDraft_engine: 'claude', letterDraft_model: 'claude-sonnet-5-5', fallback_letterDraft: ['gpt-5.6-terra'], letterEditor_engine: 'codex', letterEditor_model: 'gpt-5.6-terra', letterEditor_effort: 'xhigh' });
     assert.equal(saved.status, 303);
@@ -1114,10 +1114,10 @@ test('Task assignments save each letter stage on its own, validate engine, model
     assert.match(/<tr data-stage="letterEditor"[^>]*>([\s\S]*?)<\/tr>/.exec(after)[1], /<option value="xhigh" selected>xhigh<\/option>/);
     assert.match(after, /<tr data-stage="letterEditor" class="stage-off">/, 'an editor that is off is dimmed');
     const errorOf = async fields => decodeURIComponent((await save(fields)).headers.location);
-    assert.match(await errorOf({ letterDraft_engine: 'claude', letterDraft_model: 'claude-sonnet-5-5', letterDraft_effort: 'high' }), /Cover letter draft: reasoning effort applies to Codex models only/);
-    assert.match(await errorOf({ letterEditor_engine: 'codex', letterEditor_model: 'gpt-5.5', letterEditor_effort: 'ultra' }), /Cover letter editor: gpt-5\.5 accepts the efforts low, medium, high, xhigh/);
-    assert.match(await errorOf({ letterDraft_engine: 'codex', letterDraft_model: 'claude-opus-5-5' }), /Cover letter draft: claude-opus-5-5 is not a ChatGPT model in the registry/);
-    assert.match(await errorOf({ letterDraft_engine: 'claude', letterDraft_model: 'claude-opus-5-5', fallback_letterDraft: ['claude-opus-5-5'] }), /Cover letter draft: claude-opus-5-5 is already the stage's model/);
+    assert.match(await errorOf({ letterDraft_engine: 'claude', letterDraft_model: 'claude-sonnet-5-5', letterDraft_effort: 'high' }), /Cover Letter Draft: reasoning effort applies to Codex models only/);
+    assert.match(await errorOf({ letterEditor_engine: 'codex', letterEditor_model: 'gpt-5.5', letterEditor_effort: 'ultra' }), /Cover Letter Editor: gpt-5\.5 accepts the efforts low, medium, high, xhigh/);
+    assert.match(await errorOf({ letterDraft_engine: 'codex', letterDraft_model: 'claude-opus-5-5' }), /Cover Letter Draft: claude-opus-5-5 is not a ChatGPT model in the registry/);
+    assert.match(await errorOf({ letterDraft_engine: 'claude', letterDraft_model: 'claude-opus-5-5', fallback_letterDraft: ['claude-opus-5-5'] }), /Cover Letter Draft: claude-opus-5-5 is already the stage's model/);
     assert.match(await errorOf({ letterDraft_engine: 'claude', letterDraft_model: 'claude-opus-5-5', fallback_letterDraft: ['gpt-5.5', 'gpt-5.5'] }), /appears twice in the fallback chain/);
     config = await readConfig(root);
     assert.equal(config.models.assignments.letterDraft.model, 'claude-sonnet-5-5', 'nothing is written on a validation error');
@@ -1139,8 +1139,8 @@ test('while the automatic pass writes letters, cards say so and manual letters w
   const hub = await startHub(root, { alivePids: [777] });
   try {
     const reports = (await hub.request('GET', '/reports/2026-08-27')).text;
-    assert.match(reports.split('<script>')[0], /<button type="button" class="btn secondary small" data-autoletter="1" data-job="[0-9a-f]{16}" disabled>Letter generating…<\/button>/);
-    assert.match(reports, /data-badge="letter-generating"[^>]*>Letter generating…<\/span>/);
+    assert.match(reports.split('<script>')[0], /<button type="button" class="btn secondary small" data-autoletter="1" data-job="[0-9a-f]{16}" disabled>Letter Generating…<\/button>/);
+    assert.match(reports, /data-badge="letter-generating"[^>]*>Letter Generating…<\/span>/);
     assert.doesNotMatch(reports.split('<script>')[0], /data-oneclick/, 'no Generate button while the pass is on it');
     const blocked = await hub.form('/letters/oneclick', { date: '2026-08-27', job: jobId });
     assert.equal(blocked.status, 409);
@@ -1171,7 +1171,7 @@ test('while the automatic pass writes letters, cards say so and manual letters w
 
     // Settings → Cover Letters exposes the switch and the per-run limit.
     const settings = (await hub.request('GET', '/settings?tab=letters')).text;
-    assert.match(settings, /<article class="card" id="auto-letters"><h2>Automatic Letters<\/h2>[\s\S]*?<input type="checkbox" name="autoGenerate" checked> Write cover letters for new high matches after each run[\s\S]*?0 = no limit[\s\S]*?name="maxPerRun"[^>]*value="0"/);
+    assert.match(settings, /<article class="card" id="auto-letters"><h2>Automatic Letters<\/h2>[\s\S]*?<input type="checkbox" name="autoGenerate" checked> Write Cover Letters for New High Matches After Each Run[\s\S]*?0 = no limit[\s\S]*?name="maxPerRun"[^>]*value="0"/);
     const saved = await hub.form('/settings/letters-auto', { maxPerRun: '3' });
     assert.equal(saved.status, 303);
     assert.deepEqual((await readConfig(root)).coverLetter.autoGenerate, { enabled: false, maxPerRun: 3 });
@@ -1187,24 +1187,28 @@ test('Settings > Pipeline has "Include carried-over postings" (default on); only
   const hub = await startHub(root);
   try {
     const page = await hub.request('GET', '/settings?tab=pipeline');
-    assert.match(page.text, /<legend>Matching<\/legend>[\s\S]*?<input type="checkbox" name="includeCarriedOver" checked> Include carried-over postings<\/label>[\s\S]*?<\/fieldset>/, 'on when config says nothing');
+    assert.match(page.text, /<legend>Matching<\/legend>[\s\S]*?<input type="checkbox" name="includeCarriedOver" checked> Include Carried-Over Postings<\/label>[\s\S]*?<\/fieldset>/, 'on when config says nothing');
     const off = await hub.form('/settings', { pipelinePresent: '1', minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' });
     assert.equal(off.status, 303);
     assert.equal((await readConfig(root)).semanticMatching.includeCarriedOver, false, 'an unchecked box on the Pipeline form turns it off');
-    assert.match((await hub.request('GET', '/settings?tab=pipeline')).text, /<input type="checkbox" name="includeCarriedOver"> Include carried-over postings/);
+    assert.match((await hub.request('GET', '/settings?tab=pipeline')).text, /<input type="checkbox" name="includeCarriedOver"> Include Carried-Over Postings/);
     const other = await hub.form('/settings', { minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' });
     assert.equal(other.status, 303);
     assert.equal((await readConfig(root)).semanticMatching.includeCarriedOver, false, 'a form without the Pipeline marker leaves it alone');
     await hub.form('/settings', { pipelinePresent: '1', includeCarriedOver: 'on', minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' });
     assert.equal((await readConfig(root)).semanticMatching.includeCarriedOver, true);
     assert.equal(validateSettings({ minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' }).includeCarriedOver, null);
-    // "Strict 24-hour window" sits beside it, off by default.
-    assert.match(page.text, /<input type="checkbox" name="strict24HourWindow"> Strict 24-hour window<\/label>/);
+    // "Strict 24-Hour Window" sits beside it, on by default.
+    assert.match(page.text, /<input type="checkbox" name="strict24HourWindow" checked> Strict 24-Hour Window<\/label>/, 'on by default');
     await hub.form('/settings', { pipelinePresent: '1', includeCarriedOver: 'on', strict24HourWindow: 'on', minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' });
     assert.equal((await readConfig(root)).semanticMatching.strict24HourWindow, true);
-    assert.match((await hub.request('GET', '/settings?tab=pipeline')).text, /<input type="checkbox" name="strict24HourWindow" checked> Strict 24-hour window<\/label>/);
+    assert.match((await hub.request('GET', '/settings?tab=pipeline')).text, /<input type="checkbox" name="strict24HourWindow" checked> Strict 24-Hour Window<\/label>/);
     await hub.form('/settings', { minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' });
     assert.equal((await readConfig(root)).semanticMatching.strict24HourWindow, true, 'a form without the Pipeline marker leaves it alone');
+    // Unchecked on the Pipeline form turns it off, and the box stays unchecked.
+    await hub.form('/settings', { pipelinePresent: '1', includeCarriedOver: 'on', minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' });
+    assert.equal((await readConfig(root)).semanticMatching.strict24HourWindow, false);
+    assert.match((await hub.request('GET', '/settings?tab=pipeline')).text, /<input type="checkbox" name="strict24HourWindow"> Strict 24-Hour Window<\/label>/);
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });
@@ -1219,7 +1223,7 @@ test('Settings > Pipeline has "Auto catch-up after network outage" (default on);
   const hub = await startHub(root);
   try {
     const page = await hub.request('GET', '/settings?tab=pipeline');
-    assert.match(page.text, /<input type="checkbox" name="autoCatchUp" checked> Auto catch-up after network outage<\/label>/, 'on when config says nothing');
+    assert.match(page.text, /<input type="checkbox" name="autoCatchUp" checked> Auto Catch-Up After Network Outage<\/label>/, 'on when config says nothing');
     hub.ctx.autoCatchUp.start();
     const status = await hub.request('GET', '/status');
     const line = status.text.match(/<dd id="catch-up-line">([\s\S]*?)<\/dd>/)[1];
@@ -1229,7 +1233,7 @@ test('Settings > Pipeline has "Auto catch-up after network outage" (default on);
 
     await hub.form('/settings', { pipelinePresent: '1', includeCarriedOver: 'on', minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' });
     assert.deepEqual((await readConfig(root)).autoCatchUp, { enabled: false }, 'an unchecked box on the Pipeline form turns it off');
-    assert.match((await hub.request('GET', '/settings?tab=pipeline')).text, /<input type="checkbox" name="autoCatchUp"> Auto catch-up after network outage/);
+    assert.match((await hub.request('GET', '/settings?tab=pipeline')).text, /<input type="checkbox" name="autoCatchUp"> Auto Catch-Up After Network Outage/);
     assert.match((await hub.request('GET', '/status')).text, /Auto catch-up after network outage is off/);
     await hub.form('/settings', { minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' });
     assert.deepEqual((await readConfig(root)).autoCatchUp, { enabled: false }, 'a form without the Pipeline marker leaves it alone');

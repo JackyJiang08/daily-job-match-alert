@@ -1,8 +1,9 @@
 // The strict 24-hour window (Settings > Pipeline, semanticMatching.strict24HourWindow): where each kind of
-// posting date lands with the switch on and off, and the report header that names the mode and group counts.
+// posting date lands with the switch on and off, the default (on), and the Run Details line that names the mode
+// and the group counts now that the header carries only the date, the match count and the run time.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DATE_ONLY_GROUP_TITLE, STRICT_WINDOW_HOURS, splitStrictWindow, strictWindowEnabled, strictWindowHeadline, strictWindowPlacement } from '../src/strict-window.mjs';
+import { DATE_ONLY_GROUP_TITLE, STRICT_WINDOW_HOURS, splitStrictWindow, strictWindowDetail, strictWindowEnabled, strictWindowPlacement } from '../src/strict-window.mjs';
 import { CARRIED_OVER_TITLE, buildHtml, buildReportView } from '../src/report.mjs';
 import { NOT_REVIEWED_TITLE } from '../src/review-status.mjs';
 import { validateSettings } from '../src/hub/services.mjs';
@@ -54,8 +55,10 @@ test('strict window off (and payloads from before the setting): every posting st
     assert.equal(split.main.length, jobs.length);
     assert.deepEqual(split.dateOnly, []);
   }
-  assert.equal(strictWindowEnabled({}), false, 'default off');
+  assert.equal(strictWindowEnabled({}), true, 'default on');
+  assert.equal(strictWindowEnabled({ semanticMatching: {} }), true);
   assert.equal(strictWindowEnabled({ semanticMatching: { strict24HourWindow: true } }), true);
+  assert.equal(strictWindowEnabled({ semanticMatching: { strict24HourWindow: false } }), false, 'only an explicit false turns it off');
 });
 
 test('the report: strict on adds the folded date-only group; Carried over and Not reviewed are the same either way', () => {
@@ -66,35 +69,58 @@ test('the report: strict on adds the folded date-only group; Carried over and No
   assert.deepEqual(urlsOf(strict.dateOnly.cards), ['precise-old', 'yesterday', 'undated']);
   assert.deepEqual(urlsOf(strict.carried.cards), ['carried']);
   assert.deepEqual(urlsOf(strict.notReviewed.cards), ['not-reviewed']);
-  assert.match(strict.masthead.subtitle, /^November 3, 2026 · 7 matches · posted within the last 24 hours · Ran /, 'the count is all the day\'s matches, carried over included; the window phrase is the main list\'s');
+  assert.equal(strict.masthead.title, 'November 3, 2026');
+  assert.equal(strict.masthead.subtitle, '7 Matches · Ran Nov 2, 7:40 PM', 'the count is all the day\'s matches, carried over included; no window phrase');
 
   const lenient = buildReportView(jobs, off);
   assert.deepEqual(urlsOf(lenient.cards), ['precise', 'precise-old', 'new-since-poll', 'today', 'yesterday', 'undated']);
   assert.equal(lenient.dateOnly, null);
   assert.deepEqual(urlsOf(lenient.carried.cards), ['carried']);
   assert.deepEqual(urlsOf(lenient.notReviewed.cards), ['not-reviewed']);
-  assert.match(lenient.masthead.subtitle, /7 matches · posted within the last 2 days/);
+  assert.equal(lenient.masthead.subtitle, '7 Matches · Ran Nov 2, 7:40 PM');
+  const term = (view, name) => view.runDetails.rows.find(row => row.term === name)?.detail;
+  assert.equal(term(strict, 'Posting Window'), 'Main List: posted within the last 24 hours', 'measured over the main list alone');
+  assert.equal(term(lenient, 'Posting Window'), 'Main List: posted within the last 2 days');
 
   const html = buildHtml(jobs, on);
-  assert.match(html, /<details class="run" id="date-only"><summary>Date only, may be older than 24 hours <span class="group-count">\(3\)<\/span><\/summary>[\s\S]*?<section class="jobs date-only" id="jobs-date-only">/);
+  assert.match(html, /<details class="run" id="date-only"><summary>Date Only, May Be Older Than 24 Hours <span class="group-count">\(3\)<\/span><\/summary>[\s\S]*?<section class="jobs date-only" id="jobs-date-only">/);
   assert.ok(html.indexOf('id="jobs"') < html.indexOf('id="date-only"') && html.indexOf('id="date-only"') < html.indexOf('id="carried-over"'), 'main list, then the date-only group, then Carried over');
   assert.doesNotMatch(buildHtml(jobs, off), /id="date-only"/);
 });
 
-test('the header names the mode and every group\'s count', () => {
+test('the header is the date and "N Matches · Ran <time>"; the mode and the group counts are in Run Details, without empty groups', () => {
   const jobs = Object.values(POSTINGS);
   const header = html => html.match(/<header class="masthead">([\s\S]*?)<\/header>/)[1];
-  assert.match(header(buildHtml(jobs, on)), /<p class="sub" data-window-note>Strict 24-hour window: on · Main list \(3\) · Date only, may be older than 24 hours \(3\) · Carried over from yesterday \(1\) · Not reviewed \(engine unavailable\) \(1\)<\/p>/);
-  assert.match(header(buildHtml(jobs, off)), /<p class="sub" data-window-note>Strict 24-hour window: off · Main list \(6\) · Carried over from yesterday \(1\) · Not reviewed \(engine unavailable\) \(1\)<\/p>/);
-  assert.equal(buildReportView([], off).masthead.windowNote, 'Strict 24-hour window: off · Main list (0) · Carried over from yesterday (0) · Not reviewed (engine unavailable) (0)');
-  assert.equal(buildReportView([], RUN).masthead.windowNote, null, 'a payload from before the setting records no mode: no line');
-  assert.doesNotMatch(buildHtml([POSTINGS.precise], RUN), /data-window-note/);
-  assert.equal(strictWindowHeadline({ enabled: true, main: 0, dateOnly: 2, carried: 0, notReviewed: 0, carriedTitle: CARRIED_OVER_TITLE, notReviewedTitle: NOT_REVIEWED_TITLE }), 'Strict 24-hour window: on · Main list (0) · Date only, may be older than 24 hours (2) · Carried over from yesterday (0) · Not reviewed (engine unavailable) (0)');
-  // Only date-only postings: the main list says where they went instead of "nothing cleared the threshold".
+  // A run on the report's own local day (the 18:00 run since 2026-11): the time alone.
+  const today = { ...on, date: '2026-11-02' };
+  assert.equal(header(buildHtml(jobs, today)), '<h1>November 2, 2026</h1><p class="sub">7 Matches · Ran 7:40 PM</p>');
+  for (const meta of [on, off, today]) assert.doesNotMatch(header(buildHtml(jobs, meta)), /Strict|posted within|Main List|data-window-note/);
+  const term = (meta, list = jobs) => buildReportView(list, meta).runDetails.rows.find(row => row.term === 'Strict 24-Hour Window')?.detail;
+  assert.equal(term(on), 'On · Main List (3) · Date Only, May Be Older Than 24 Hours (3) · Carried Over From Yesterday (1) · Not Reviewed (Engine Unavailable) (1)');
+  assert.equal(term(off), 'Off · Main List (6) · Carried Over From Yesterday (1) · Not Reviewed (Engine Unavailable) (1)');
+  assert.equal(term(on, [POSTINGS.precise]), 'On · Main List (1)', 'a group with nothing in it is left out of the line');
+  assert.equal(term(off, []), 'Off · Main List (0)');
+  assert.equal(term(RUN), undefined, 'a payload from before the setting records no mode: no line');
+  assert.equal(strictWindowDetail({ enabled: true, groups: [{ title: 'Main List', count: 0 }, { title: DATE_ONLY_GROUP_TITLE, count: 2 }, { title: CARRIED_OVER_TITLE, count: 0 }, { title: NOT_REVIEWED_TITLE, count: 0 }] }), 'On · Main List (0) · Date Only, May Be Older Than 24 Hours (2)');
+  assert.match(buildHtml(jobs, on), /<dt>Strict 24-Hour Window<\/dt><dd>On · Main List \(3\) · /);
+  // The embedded hub view has the same header and the same line.
+  const embedded = buildReportView(jobs, today, { embedded: true });
+  assert.deepEqual(embedded.masthead, { title: 'November 2, 2026', subtitle: '7 Matches · Ran 7:40 PM', note: null });
+});
+
+test('a group with no postings is not shown at all, the main list included', () => {
+  // Only date-only postings: no empty main list, no "nothing cleared the threshold"; just the folded group.
   const onlyOld = buildHtml([POSTINGS.yesterday], on);
-  assert.match(onlyOld, /No match is known to be posted within 24 hours; see &quot;Date only, may be older than 24 hours&quot; below\./);
-  // The embedded hub view carries the same line.
-  assert.match(buildReportView(jobs, on, { embedded: true }).masthead.windowNote, /^Strict 24-hour window: on · Main list \(3\)/);
+  assert.doesNotMatch(onlyOld, /id="jobs"|No new postings cleared|No match is known/);
+  assert.match(onlyOld, /<details class="run" id="date-only"><summary>Date Only, May Be Older Than 24 Hours <span class="group-count">\(1\)<\/span>/);
+  // Only main-list postings: none of the other groups appear.
+  const onlyMain = buildHtml([POSTINGS.precise], on);
+  assert.match(onlyMain, /<section class="jobs" id="jobs">/);
+  assert.doesNotMatch(onlyMain, /id="date-only"|id="carried-over"|id="not-reviewed"/);
+  // Nothing at all: the one empty-state line.
+  assert.match(buildHtml([], on), /<div class="empty">No new postings cleared the configured threshold for this date\.<\/div>/);
+  // A quota note stays in the header; it needs the owner's attention.
+  assert.match(buildHtml([POSTINGS.precise], { ...on, quotaNote: '3 postings waited for the weekly limit' }), /<header class="masthead"><h1>[^<]+<\/h1><p class="sub">1 Match · Ran [^<]+<\/p><p class="sub quota-note" data-quota-note>3 postings waited for the weekly limit<\/p><\/header>/);
 });
 
 test('Settings → Pipeline validates the switch; a form without the Pipeline marker leaves it alone', () => {

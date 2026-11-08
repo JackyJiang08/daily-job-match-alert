@@ -460,7 +460,7 @@ test('the panel disables Generate until the material exists, and Settings collec
     assert.equal(saved.status, 303);
     assert.match(decodeURIComponent(saved.headers.location), /^\/settings\?tab=letters&notice=Contact block saved; playbook playbook\.md \(\d+ characters\); added sample sample\.txt \(\d+ characters\)#cover-letters$/, 'the notice sits before the fragment so the browser shows it');
     const after = await hub.request('GET', '/settings?tab=letters');
-    assert.match(after.text, /data-letter-ready="yes">Ready to generate/);
+    assert.match(after.text, /data-letter-ready="yes">Ready to Generate/);
     assert.match(after.text, /value="Jane Doe"/);
     assert.match(after.text, /<table class="material" id="playbook-row"><colgroup>[^<]*(<col class="c-[a-z]+">){5}<\/colgroup><tr data-playbook="playbook\.md">\s*<td><span class="mono">playbook\.md<\/span><\/td>\s*<td class="meta"><\/td>\s*<td class="meta">\d+ characters<\/td>\s*<td class="meta">Sep 15, 2026, 10:00 AM<\/td>\s*<td class="actions"><label class="file"><input type="file" name="playbook"[^>]*><span class="btn secondary small">Replace<\/span><span class="file-name"><\/span><\/label> <button class="btn secondary small" type="submit" formaction="\/settings\/cover-letter\/remove-playbook" formnovalidate>Remove<\/button><\/td>/, 'the playbook row shares the sample row layout');
     assert.doesNotMatch(after.text, /Choose Playbook…/, 'Replace is the only trigger once a playbook exists');
@@ -470,14 +470,14 @@ test('the panel disables Generate until the material exists, and Settings collec
     assert.match(after.text, /Stored privately on this Mac and never shared\./);
     assert.doesNotMatch(after.text, /private\/cover-letter|config\.json|\{FirstLast\}/);
     assert.match(after.text, /<legend>Contact Block<\/legend>\s*<div class="two-col">/);
-    assert.match((await hub.request('GET', '/settings')).text, /<tr data-stage="letterEditor"><th scope="row">Cover letter editor<br><label class="check small"><input type="checkbox" name="editorReview" checked> Run the editor pass<\/label>/, 'the editor switch sits on the editor stage in Task assignments');
+    assert.match((await hub.request('GET', '/settings')).text, /<tr data-stage="letterEditor"><th scope="row">Cover Letter Editor<br><label class="check small"><input type="checkbox" name="editorReview" checked> Run the Editor Pass<\/label>/, 'the editor switch sits on the editor stage in Task assignments');
 
     // A second single-file upload is kept alongside the first; a multi-file upload keeps every file.
     const profileBefore = JSON.parse(await fs.readFile(path.join(root, 'private', 'cover-letter', 'profile.json'), 'utf8'));
     const second = await hub.upload('/settings/cover-letter', PROFILE, [{ field: 'sample', name: 'second.txt', data: Buffer.from('Second sample letter body, long enough to be stored as a style reference for the writer too.') }]);
     assert.match(decodeURIComponent(second.headers.location), /added sample second\.txt/);
     // A batch upload tags every file in it with the "Track for these files" choice, replacements included.
-    assert.match(after.text, /<div class="upload-row">\s*<label class="file"><input type="file" name="sample"[^>]*multiple><span class="btn secondary">Choose Samples…<\/span><span class="file-name">No files chosen<\/span><\/label>\s*<label class="track-for"><span>Track for these files<\/span><select name="sampleTrack" class="control-input" aria-label="Track for these files"><option value="" selected>Not tagged<\/option><option value="data">Data<\/option><option value="llm">LLM<\/option><option value="agent">AI Agent<\/option><\/select><\/label>/);
+    assert.match(after.text, /<div class="upload-row">\s*<label class="file"><input type="file" name="sample"[^>]*multiple><span class="btn secondary">Choose Samples…<\/span><span class="file-name">No files chosen<\/span><\/label>\s*<label class="track-for"><span>Track for These Files<\/span><select name="sampleTrack" class="control-input" aria-label="Track for these files"><option value="" selected>Not tagged<\/option><option value="data">Data<\/option><option value="llm">LLM<\/option><option value="agent">AI Agent<\/option><\/select><\/label>/);
     const multi = await hub.upload('/settings/cover-letter', PROFILE, [
       { field: 'sample', name: 'third.txt', data: Buffer.from('Third sample letter body, long enough to be stored as a style reference for the writer too.') },
       { field: 'sample', name: 'fourth.txt', data: Buffer.from('Fourth sample letter body, long enough to be stored as a style reference for the writer too.') },
@@ -590,7 +590,7 @@ test('generate → edit → save renders a PDF, records the letter, marks the ca
     assert.equal((await hub.request('GET', '/letters/2026-09-15/Acme')).status, 200);
     const reopened = (await hub.request('GET', '/letters/2026-09-15/Acme')).text;
     assert.match(reopened, /I edited this paragraph by hand before rendering\./);
-    assert.match(reopened, /<details class="notes" id="editor-notes" open hidden><summary>Check before sending<\/summary><ul class="issues" id="editor-notes-list"><\/ul><\/details>/, 'a rule fix the editor applied needs no check');
+    assert.match(reopened, /<details class="notes" id="editor-notes" open hidden><summary>Check Before Sending<\/summary><ul class="issues" id="editor-notes-list"><\/ul><\/details>/, 'a rule fix the editor applied needs no check');
     assert.match(reopened, /<ul class="letter-foot foot-notes" id="letter-info-notes"><li>Paragraph 1 lacks the GPA<\/li><\/ul>/, 'it is an info note in the footer');
     assert.match(reopened, /<p class="letter-foot" id="letter-foot">Samples used: sample\.txt · Engine: claude · claude-fable-5 · PDF via pdfkit<\/p>/);
     assert.match(reopened, /<p class="letter-counts" id="letter-counts">\d+ words · 5 paragraphs · 1 page<\/p>\s*<p class="muted" id="letter-empty" hidden>[^<]*<\/p>\s*<div id="paragraphs"><div class="para-row"><span class="num">1<\/span><textarea class="para" name="paragraph" data-index="0">/);
@@ -765,7 +765,7 @@ test('a quota refusal reaches the panel and the card as a plain sentence with a 
 
     hub.ctx.connections = { status: async () => ({ codex: { connected: true } }) };
     const refusedWithCodex = JSON.parse((await hub.form('/letters/generate', { date: '2026-09-15', job: jobId, track: 'data', company: 'Acme' })).text);
-    assert.equal(refusedWithCodex.quota.codexAvailable, true, 'the panel can offer Generate with Codex');
+    assert.equal(refusedWithCodex.quota.codexAvailable, true, 'the panel can offer Generate With Codex');
     const viaCodex = await hub.form('/letters/generate', { date: '2026-09-15', job: jobId, track: 'data', company: 'Acme', engine: 'codex' });
     assert.equal(viaCodex.status, 200);
     assert.equal(JSON.parse(viaCodex.text).engine, 'codex');
@@ -779,7 +779,7 @@ test('a quota refusal reaches the panel and the card as a plain sentence with a 
     assert.deepEqual(failed.quota, { kind: 'accountWeeklyLimit', model: null, resetsAt: '2026-09-23T21:46:40.000Z' });
     assert.match(failed.error, /weekly account limit reached; expected to reset/);
     const status = JSON.parse((await hub.request('GET', '/letters/oneclick.json')).text);
-    assert.equal(status.codexAvailable, true, 'the card can offer Generate with Codex');
+    assert.equal(status.codexAvailable, true, 'the card can offer Generate With Codex');
     const codexOneClick = await hub.form('/letters/oneclick', { date: '2026-09-15', job: jobId, engine: 'codex' });
     assert.equal(codexOneClick.status, 202);
     const ready = await hub.ctx.letterJobs.settle();
@@ -787,8 +787,8 @@ test('a quota refusal reaches the panel and the card as a plain sentence with a 
     assert.equal(ready.result.engine, 'codex');
     const panel = await hub.request('GET', '/letters/2026-09-15/Acme');
     assert.equal(panel.status, 200, 'the one-click letter was saved under the fixture company slug');
-    assert.match(panel.text, /<button class="btn secondary" id="codex-button" type="button" hidden>Generate with Codex<\/button>/);
-    assert.match(panel.text, /Generate with Codex/);
+    assert.match(panel.text, /<button class="btn secondary" id="codex-button" type="button" hidden>Generate With Codex<\/button>/);
+    assert.match(panel.text, /Generate With Codex/);
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });
@@ -826,7 +826,7 @@ test('an uncertain company blocks one-click generation and Save & Render, sends 
     assert.match(settings.text, /<span>File Name Prefix \(letters are saved as Prefix_Cover_Letter_Company\.pdf\)<\/span><input type="text" name="fileNamePrefix" class="control-input" value="MollyDoe"/, 'the prefix defaults to the everyday name plus surname');
 
     const report = await hub.request('GET', '/reports/2026-09-15');
-    assert.match(report.text, /data-badge="company-uncertain"[^>]*>Company name uncertain<\/span>/, 'the card flags the unusable name');
+    assert.match(report.text, /data-badge="company-uncertain"[^>]*>Company Name Uncertain<\/span>/, 'the card flags the unusable name');
     const gated = await hub.form('/letters/oneclick', { date: '2026-09-15', job: vagueId });
     assert.equal(gated.status, 200);
     const gate = JSON.parse(gated.text);
@@ -882,7 +882,7 @@ test('an uncertain company blocks one-click generation and Save & Render, sends 
     await fs.writeFile(path.join(badDirectory, 'letter.json'), JSON.stringify({ jobId, company: 'US101', track: 'data', trackLabel: 'Data', engine: 'claude', model: 'x', paragraphs: ['a'], pdfFileName: 'JaneDoe_Cover_Letter_US101.pdf', pdf: { pages: 1 }, createdAt: '2026-09-15T15:00:00Z', savedAt: '2026-09-15T15:00:00Z' }));
     await fs.writeFile(path.join(badDirectory, 'letter.md'), '# x');
     const list = await hub.request('GET', '/letters');
-    assert.match(list.text, /<a href="\/letters\/2026-09-15\/US101">US101<\/a> <span class="badge badge-warn" data-badge="company-suspect"[^>]*>Check company name<\/span>/);
+    assert.match(list.text, /<a href="\/letters\/2026-09-15\/US101">US101<\/a> <span class="badge badge-warn" data-badge="company-suspect"[^>]*>Check Company Name<\/span>/);
     assert.match(list.text, /<a href="\/letters\/2026-09-15\/GuidehouseFederal">Guidehouse Federal<\/a><\/td>/, 'a valid name carries no badge');
     assert.match(list.text, /<td><span class="mono">MollyDoe_Cover_Letter_GuidehouseFederal\.pdf<\/span><\/td>/);
 
@@ -942,11 +942,11 @@ test('an expired Claude login reaches the card and the panel as one sentence, fl
     const status = await hub.request('GET', '/status');
     assert.match(status.text, /<div class="flash error" data-banner="auth-expired">Claude signed out\. Run <code>claude auth login --claudeai<\/code> in Terminal, then Refresh\. Until then the nightly review goes to Codex when a ChatGPT model ends Scoring's fallback chain and Codex is signed in; otherwise the postings wait for the next run\. <span class="muted">Seen Sep 15, 2026, 10:00 AM \(hub\)\.<\/span> <form class="inline" method="post" action="\/settings\/connections\/refresh">/);
 
-    // With Codex signed in, the same failure offers Generate with Codex, and a Codex generation succeeds.
+    // With Codex signed in, the same failure offers Generate With Codex, and a Codex generation succeeds.
     hub.ctx.connections = { status: async () => ({ claude: { installed: true, connected: true, detail: 'Claude · Max · claude.ai' }, codex: { installed: true, connected: true, detail: 'Codex · ChatGPT' } }), reset() {} };
     const withCodex = JSON.parse((await hub.form('/letters/generate', { date: '2026-09-15', job: jobId, track: 'data', company: 'Acme' })).text);
     assert.equal(withCodex.codexAvailable, true);
-    assert.equal(JSON.parse((await hub.request('GET', '/letters/oneclick.json')).text).codexAvailable, true, 'the card can offer Generate with Codex');
+    assert.equal(JSON.parse((await hub.request('GET', '/letters/oneclick.json')).text).codexAvailable, true, 'the card can offer Generate With Codex');
     const viaCodex = await hub.form('/letters/generate', { date: '2026-09-15', job: jobId, track: 'data', company: 'Acme', engine: 'codex' });
     assert.equal(viaCodex.status, 200);
     assert.match((await hub.request('GET', '/settings')).text, /data-conn="expired"/, 'a Codex success does not vouch for the Claude login');
@@ -1102,7 +1102,7 @@ test('a cover letter follows the same weekly rule: an unnamed notice is settled 
     assert.equal(out.status, 429);
     assert.equal(JSON.parse(out.text).quota.kind, 'accountWeeklyLimit');
     const status = (await hub.request('GET', '/status')).text;
-    assert.match(status, /<dt>CLI notices<\/dt><dd id="quota-notices"><ul class="plain-list notice-list"><li data-notice-kind="ambiguousWeeklyLimit">[\s\S]*?cover-letter · ambiguousWeeklyLimit · claude-opus-5-5 · refused<\/span><br><q>You&#39;re out of usage credits\. Switch to another model, or manage usage credits at https:\/\/claude\.ai\/settings\/usage, to continue\.<\/q><\/li>/, 'newest first, in the CLI\'s own (sanitized) words');
+    assert.match(status, /<dt>CLI Notices<\/dt><dd id="quota-notices"><ul class="plain-list notice-list"><li data-notice-kind="ambiguousWeeklyLimit">[\s\S]*?cover-letter · ambiguousWeeklyLimit · claude-opus-5-5 · refused<\/span><br><q>You&#39;re out of usage credits\. Switch to another model, or manage usage credits at https:\/\/claude\.ai\/settings\/usage, to continue\.<\/q><\/li>/, 'newest first, in the CLI\'s own (sanitized) words');
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });
@@ -1131,7 +1131,7 @@ test('letter stages run on their own assignments; without a Codex connection bot
     // The test hub's Codex is not connected: the defaults (codex / gpt-5.6-sol) fall back to claude-opus-5-5.
     const offline = JSON.parse((await hub.form('/letters/generate', { date: '2026-09-15', job: jobId, track: 'data', company: 'Acme' })).text);
     assert.deepEqual(calls.map(call => [call.engine, call.model, call.kind]), [['claude', 'claude-opus-5-5', 'draft'], ['claude', 'claude-opus-5-5', 'editor']]);
-    assert.deepEqual(offline.editorNotes.slice(0, 2), ['Cover letter draft: Codex is not connected; used claude-opus-5-5 from the fallback chain', 'Cover letter editor: Codex is not connected; used claude-opus-5-5 from the fallback chain']);
+    assert.deepEqual(offline.editorNotes.slice(0, 2), ['Cover Letter Draft: Codex is not connected; used claude-opus-5-5 from the fallback chain', 'Cover Letter Editor: Codex is not connected; used claude-opus-5-5 from the fallback chain']);
     assert.equal(offline.model, 'claude-opus-5-5');
 
     // Codex connected: draft at medium effort, editor at high, each on its own engine.

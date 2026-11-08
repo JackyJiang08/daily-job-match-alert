@@ -47,7 +47,6 @@ function baseConfig(directory) {
   return {
     lookbackHours: 24,
     timeZone: 'America/Chicago',
-    reportDateOffsetDays: 1,
     minimumMatchScore: 20,
     requireFullDescription: true,
     minimumDescriptionCharacters: 200,
@@ -213,7 +212,7 @@ const scenarios = {
     assert.equal(run.exitCode, 0, `baseline exited ${run.exitCode}`);
     assert.deepEqual(artifacts.warnings, [], `baseline produced warnings: ${warningLines(artifacts.warnings).join(' | ')}`);
     assert.equal(await readWarningsFile(config, run), null, 'a warning-free run must not write warnings.txt');
-    assert.match(artifacts.html, /<p class="sub">August 27, 2026 · \d+ match/);
+    assert.match(artifacts.html, /<h1>August 27, 2026<\/h1><p class="sub">\d+ Match(?:es)? · Ran 7:00 AM<\/p>/);
     assert.ok(run.summary.meta.matchCount >= 1, 'baseline produced no matches');
     assert.ok(artifacts.xlsxPath, 'baseline did not write the xlsx');
     const { sheet, headers } = await readMatches(artifacts.xlsxPath);
@@ -495,7 +494,7 @@ scenarios['review-cap'] = async function reviewCap() {
   assert.ok(deferral, `no review budget warning: ${warningLines(artifacts.warnings).join(' | ')}`);
   assert.equal(deferral.level, 'info');
   assert.match(deferral.message, /^deferred \d+ postings to the next run \(review limit 1 per run\)/);
-  assert.match(artifacts.html, /Review budget<\/dt><dd>\d+ candidates \(\d+ within the window\) · 1 reviewed · \d+ deferred · expired \d+ backlog postings(?: · \d+ early-career full-time weighed like internships)? \(limit 1 per run\)/);
+  assert.match(artifacts.html, /Review Budget<\/dt><dd>\d+ candidates \(\d+ within the window\) · 1 reviewed · \d+ deferred · expired \d+ backlog postings(?: · \d+ early-career full-time weighed like internships)? \(limit 1 per run\)/);
   const state = JSON.parse(await fs.readFile(path.join(directory, 'state', 'state.json'), 'utf8'));
   const deferredUrls = Object.values(state.deferred || {}).map(entry => entry.url);
   assert.equal(deferredUrls.length, first.summary.meta.deferredCount, 'every deferred posting is recorded');
@@ -529,7 +528,7 @@ scenarios['fable-weekly-limit'] = async function fableWeeklyLimit() {
   assert.ok(!artifacts.warnings.some(warning => /MODEL MISMATCH/.test(warning.message)), `a strategic downgrade must not be a mismatch: ${warningLines(artifacts.warnings).join(' | ')}`);
   const audit = artifacts.warnings.find(warning => warning.level === 'info' && /scored by claude-opus-5-5: claude-fable-5-1 weekly limit/.test(warning.message));
   assert.ok(audit, `no audit line for the downgrade: ${warningLines(artifacts.warnings).join(' | ')}`);
-  assert.match(artifacts.html, /Subscription quota<\/dt><dd>1 event\(s\) · scored by claude · claude-opus-5-5/);
+  assert.match(artifacts.html, /Subscription Quota<\/dt><dd>1 event\(s\) · scored by claude · claude-opus-5-5/);
   assert.doesNotMatch(artifacts.html, /data-banner="quota"/, 'a downgrade needs no banner');
   assert.doesNotMatch(artifacts.html, /data-badge="unreviewed"/, 'nothing fell back to local scores');
   return `Fable refused, run scored by opus (${run.summary.meta.matchCount} match(es)), info audit line, no mismatch warning`;
