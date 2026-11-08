@@ -29,6 +29,7 @@ import { prescreenOverview } from '../prescreen.mjs';
 import { DEFAULT_TITLE_FAMILIES, NON_FAMILY_TERMS } from '../prefilter.mjs';
 import { targetRoleFamilies } from '../role-families.mjs';
 import { DEFAULT_SCHEDULE } from '../schedule.mjs';
+import { connectionNoteLimit } from '../outreach/messages.mjs';
 import { entryAsPayload, syncReportsIndex } from '../reports-index.mjs';
 import { MAXIMUM_RETENTION_DAYS, MINIMUM_RETENTION_DAYS, listPayloadFiles, readPayloadFile, retentionDays } from '../payload-store.mjs';
 import { loadStatusSummary, summaryAsPayload } from '../status-summary.mjs';
@@ -798,6 +799,7 @@ export async function readSettings(ctx) {
     payloadRetentionDays: retentionDays(config),
     editorReview: config.coverLetter?.editorReview !== false,
     autoLetters: autoLetterSettings(config),
+    outreach: { connectionNoteLimit: connectionNoteLimit(config), searchCandidates: config.outreach?.searchCandidates === true },
     prescreen: prescreenOverview(config, await readStateView(ctx)),
     hubPort: Number(config.hub?.port || 4747),
   };
@@ -1206,6 +1208,15 @@ export async function savePrescreen(ctx, form) {
     return true;
   }, { fs: ctx.io, pidAlive: ctx.pidAlive });
   return { enabled, threshold, enforce };
+}
+
+// Settings > Cover Letters "Reach Out": config.outreach { connectionNoteLimit, searchCandidates }.
+export async function saveOutreachSettings(ctx, settings) {
+  await updateConfigFile(ctx.configPath, config => {
+    config.outreach = { ...(config.outreach && typeof config.outreach === 'object' ? config.outreach : {}), ...settings };
+    return true;
+  }, { fs: ctx.io, pidAlive: ctx.pidAlive });
+  return settings;
 }
 
 export async function saveAutoLetters(ctx, form) {

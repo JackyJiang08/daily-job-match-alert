@@ -119,7 +119,7 @@ test('the salutation and the file name use the short name, with spaces and speci
 });
 
 test('the draft prompt asks for shortName (or names the alias); the editor checks the short name; condensing returns the body only', () => {
-  assert.deepEqual(LETTER_SCHEMA.required, ['paragraphs', 'shortName']);
+  assert.deepEqual(LETTER_SCHEMA.required, ['paragraphs', 'shortName', 'connectionNote', 'followUpMessage']);
   assert.deepEqual(BODY_SCHEMA.required, ['paragraphs']);
   const base = { playbook: 'P', track: { id: 'data', label: 'Data' }, resumeText: 'R', job: posting('Johnson & Johnson', 'At Johnson & Johnson…') };
   const asked = buildCoverLetterPrompt(base);

@@ -5,6 +5,8 @@ import { reviewBadge } from '../cover-letter/notes.mjs';
 import { buildReportView, reviewReportJobs } from '../report.mjs';
 import { jobDescriptionHtml } from '../jd-html.mjs';
 import { assembleLetter } from '../cover-letter/compose.mjs';
+import { contactedByJob, findCandidates, outreachPanelHtml, resumeDownload, saveFirstName, setContacted, validateOutreachSettings } from './outreach.mjs';
+import { OUTREACH_SCRIPT } from './outreach-views.mjs';
 import path from 'node:path';
 import { resolvePayloadFile } from '../payload-store.mjs';
 import { createHash } from 'node:crypto';
@@ -15,12 +17,12 @@ import { HubLockedError } from './config-file.mjs';
 import { parseMultipart } from './multipart.mjs';
 import {
   HubInputError, annotateConnections, assertDate, buildStatusView, claudeAuthView, clearModelAvailability, configuredCliCommands, desktopCopyPath, desktopWorkbookPath, listReportSummaries, loadTracksView, modelAvailabilityView, readErrorReport,
-  autoLettersView, latestReportSummary, readReportPayload, readSettings, resumeAtsBoard, saveAssignments, saveAutoLetters, savePrescreen, saveWeeklyReset, saveCliPath, saveSettings, selectResumeVersion, setTrackEnabled, sidebarSummary, uploadResumePdf, ModelTestBusyError, savePlan, testModel,
+  autoLettersView, latestReportSummary, readReportPayload, readSettings, resumeAtsBoard, saveAssignments, saveAutoLetters, saveOutreachSettings, savePrescreen, saveWeeklyReset, saveCliPath, saveSettings, selectResumeVersion, setTrackEnabled, sidebarSummary, uploadResumePdf, ModelTestBusyError, savePlan, testModel,
 } from './services.mjs';
 import { localDate } from '../time-format.mjs';
 import { LETTER_SCRIPT, ONECLICK_SCRIPT, SAMPLE_TRACK_SCRIPT, letterPanel, lettersPage, trackLabelOf } from './letter-views.mjs';
 import { todayTarget } from './views.mjs';
-import { findLetterJob, generateLetter, initialShortName, jobIdOf, letterCompanyFor, letterEngineFor, oneClickLetter, renameLetter, saveLetter, updateSalutations } from './letters.mjs';
+import { findLetterJob, generateLetter, generateOutreachMessages, initialShortName, jobIdOf, letterCompanyFor, letterEngineFor, oneClickLetter, renameLetter, saveLetter, updateSalutations } from './letters.mjs';
 import { LetterBusyError } from './letter-jobs.mjs';
 import { QuotaError, describeQuota } from '../engines/quota.mjs';
 import { AuthExpiredError, EngineError, humanizeEngineError } from '../engines/engine-errors.mjs';
@@ -224,17 +226,22 @@ export function createHubHandler(ctx) {
       }
       // Postings the automatic letters pass is still working through (state/letters-auto.json).
       const autoStatus = await timer.phase('letters', () => autoLettersView(ctx));
-      const renderKey = [day.key, await timer.phase('letters', () => lettersVersion(selected, autoStatus)), await configVersion(), timeZone].join('#');
+      // Reach Out: the cards show "Contacted Nov 8", so the contacted marks are part of the render key.
+      const contacted = await contactedByJob(ctx, timeZone);
+      const renderKey = [day.key, await timer.phase('letters', () => lettersVersion(selected, autoStatus)), await configVersion(), timeZone, contacted.version].join('#');
       let rendered = ctx.reportCache.getRender(renderKey);
       timer.note('cache', rendered ? 'hit' : 'miss');
       if (!rendered) {
         const lettersByJob = await timer.phase('letters', () => ctx.letterStore.lettersByJob().catch(() => new Map()));
         const pending = new Set(autoStatus?.running ? autoStatus.pending : []);
+        // Every card gets Reach Out (the drawer, src/hub/outreach-views.mjs) and, once ticked, "Contacted Nov 8".
+        const reach = id => ({ button: true, label: 'Reach Out', data: { reach: '1', date: selected, job: id } });
+        const contactedBadge = id => (contacted.labels.has(id) ? [{ key: 'contacted', label: contacted.labels.get(id), tone: 'note', title: 'Marked as contacted in the Reach Out panel' }] : []);
         const decorate = job => {
           const id = jobIdOf(job);
           const letter = lettersByJob.get(id);
           if (!letter && pending.has(id)) {
-            return { actions: [{ button: true, disabled: true, label: 'Letter Generating…', data: { autoletter: '1', job: id } }], badges: [{ key: 'letter-generating', label: 'Letter Generating…', tone: 'note', title: 'The automatic cover-letter pass after the nightly run is writing this letter' }] };
+            return { actions: [{ button: true, disabled: true, label: 'Letter Generating…', data: { autoletter: '1', job: id } }, reach(id)], badges: [...contactedBadge(id), { key: 'letter-generating', label: 'Letter Generating…', tone: 'note', title: 'The automatic cover-letter pass after the nightly run is writing this letter' }] };
           }
           // A saved letter gets just Download PDF (once rendered) and Open Letter. The only badge is
           // "Check N details" when the editor flagged something the owner must confirm; how the letter was
@@ -245,9 +252,9 @@ export function createHubHandler(ctx) {
           return {
             actions: letter
               // Open Letter opens a new tab, so the report stays where it was for checking the JD.
-              ? [...download, { href: `/letters/${letter.date}/${letter.slug}`, label: 'Open Letter', newTab: true }]
-              : [{ button: true, label: 'Generate Cover Letter', data: { oneclick: '1', date: selected, job: id } }],
-            badges: check ? [check] : [],
+              ? [...download, { href: `/letters/${letter.date}/${letter.slug}`, label: 'Open Letter', newTab: true }, reach(id)]
+              : [{ button: true, label: 'Generate Cover Letter', data: { oneclick: '1', date: selected, job: id } }, reach(id)],
+            badges: [...contactedBadge(id), ...(check ? [check] : [])],
           };
         };
         const lazy = { src: card => (day.shared.has(card.id) ? null : `/reports/${selected}/jd/${card.id}`) };
@@ -258,7 +265,7 @@ export function createHubHandler(ctx) {
       desktopPath = desktopCopyPath(config, selected);
       missingLetters = { count: rendered.missingCount, letters: rendered.letterCount || 0, running: Boolean(autoStatus?.running), done: autoStatus?.done || 0, planned: autoStatus?.planned || 0 };
     }
-    await page(response, 200, { active: 'reports', title: selected ? `Report ${selected}` : 'Reports', content: reportsPage({ dates, selected, reportBody, desktopPath, today, missingLetters }), script: REPORTS_SCRIPT + ONECLICK_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' }, timer);
+    await page(response, 200, { active: 'reports', title: selected ? `Report ${selected}` : 'Reports', content: reportsPage({ dates, selected, reportBody, desktopPath, today, missingLetters }), script: REPORTS_SCRIPT + ONECLICK_SCRIPT + OUTREACH_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' }, timer);
   }
 
   // GET /reports/<date>/jd/<card id>: the full Job Description of one card as the markup the Desktop report
@@ -457,6 +464,27 @@ export function createHubHandler(ctx) {
         redirect(response, '/settings', `Saved ${result.path} as semanticMatching.${result.engine}Command`);
         return;
       }
+      case '/outreach/messages': {
+        json(response, 200, await generateOutreachMessages(ctx, { date: assertDate(fields.date), jobId: fields.job }));
+        return;
+      }
+      case '/outreach/name': {
+        json(response, 200, await saveFirstName(ctx, { jobId: fields.job, firstName: fields.firstName }));
+        return;
+      }
+      case '/outreach/contacted': {
+        json(response, 200, await setContacted(ctx, { jobId: fields.job, contacted: fields.contacted }));
+        return;
+      }
+      case '/outreach/candidates': {
+        json(response, 200, await findCandidates(ctx, { date: assertDate(fields.date), jobId: fields.job }));
+        return;
+      }
+      case '/settings/outreach': {
+        const saved = await saveOutreachSettings(ctx, validateOutreachSettings(fields));
+        redirect(response, '/settings?tab=letters#reach-out', `Reach Out saved: notes up to ${saved.connectionNoteLimit} characters, candidate search ${saved.searchCandidates ? 'on' : 'off'}`);
+        return;
+      }
       case '/letters/generate': {
         json(response, 200, await generateLetter(ctx, { date: assertDate(fields.date), jobId: fields.job, trackId: fields.track || null, company: fields.company, companyEdited: fields.companyEdited === '1', engine: fields.engine || null }));
         return;
@@ -619,6 +647,12 @@ export function createHubHandler(ctx) {
           const status = ctx.letterJobs.status();
           return json(response, 200, status.quota || status.errorKind === 'auth_expired' ? { ...status, codexAvailable: await codexAvailable() } : status);
         }
+        if (url.pathname === '/outreach/panel') return send(response, 200, await outreachPanelHtml(ctx, { date: assertDate(url.searchParams.get('date')), jobId: url.searchParams.get('job') }));
+        if (url.pathname === '/outreach/resume') {
+          const resume = await resumeDownload(ctx, { date: assertDate(url.searchParams.get('date')), jobId: url.searchParams.get('job') });
+          response.writeHead(200, { 'content-type': 'application/pdf', 'content-disposition': `attachment; filename="${resume.fileName.replace(/[^\x20-\x7e]|["\\]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(resume.fileName)}`, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+          return response.end(resume.content);
+        }
         if (url.pathname === '/letters/new') return await getLetterPanel(url, response, { date: assertDate(url.searchParams.get('date')), jobId: url.searchParams.get('job') });
         const letterOpen = /^\/letters\/(\d{4}-\d{2}-\d{2})\/([A-Za-z0-9]{1,80})$/.exec(url.pathname);
         if (letterOpen) {
@@ -639,8 +673,8 @@ export function createHubHandler(ctx) {
       }
       return send(response, 405, 'Method not allowed', 'text/plain; charset=utf-8');
     } catch (error) {
-      const wantsJson = url.pathname === '/run' || url.pathname === '/letters/generate' || url.pathname === '/letters/save' || url.pathname === '/letters/rename' || url.pathname === '/letters/oneclick' || url.pathname === '/settings/cover-letter/sample-track' || url.pathname.endsWith('.json');
-      const letterRoute = url.pathname.startsWith('/letters/');
+      const wantsJson = (url.pathname.startsWith('/outreach/') && request.method === 'POST') || url.pathname === '/run' || url.pathname === '/letters/generate' || url.pathname === '/letters/save' || url.pathname === '/letters/rename' || url.pathname === '/letters/oneclick' || url.pathname === '/settings/cover-letter/sample-track' || url.pathname.endsWith('.json');
+      const letterRoute = url.pathname.startsWith('/letters/') || url.pathname === '/outreach/messages';
       const status = error instanceof HubInputError || error instanceof LetterInputError ? 400 : error instanceof HubLockedError || error instanceof LetterBusyError ? 409 : error instanceof QuotaError ? 429 : error instanceof AuthExpiredError ? 401 : error instanceof EngineError ? 502 : Number(error?.status) || 500;
       // Letter routes never echo an engine's raw text: a humanized line goes out, the raw text to the log.
       const humanized = letterRoute && (status === 500 || status === 502 || status === 401) ? humanizeEngineError(error) : null;

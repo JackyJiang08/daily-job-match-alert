@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { BODY_SCHEMA, LETTER_SCHEMA, REVIEW_SCHEMA, buildCondensePrompt, buildCoverLetterPrompt, buildReviewPrompt, selectSamples, validateParagraphs } from './compose.mjs';
 import { resolveShortName } from './short-name.mjs';
+import { DEFAULT_CONNECTION_NOTE_LIMIT, outreachFrom } from '../outreach/messages.mjs';
 
 export function paragraphsFrom(output, key = 'paragraphs') {
   if (Array.isArray(output?.[key])) return output[key];
@@ -87,7 +88,8 @@ export async function generateCoverLetter({ engine, reviewEngines = null, inputs
   const preset = resolveShortName({ job: inputs.job, ...naming });
   const presetName = preset.source === 'owner' || preset.source === 'alias' ? preset.name : null;
   return withTempDirectory(io, tempRoot, async tempDirectory => {
-    const prompt = buildCoverLetterPrompt({ ...inputs, samples, shortName: presetName });
+    const outreachLimit = inputs.outreachLimit || DEFAULT_CONNECTION_NOTE_LIMIT;
+    const prompt = buildCoverLetterPrompt({ ...inputs, samples, shortName: presetName, outreachLimit });
     const response = await engine.generateText(prompt, { schema: LETTER_SCHEMA, tempDirectory });
     const draft = validateParagraphs(paragraphsFrom(response.output));
     const modelShortName = shortNameFrom(response.output);
@@ -122,8 +124,10 @@ export async function generateCoverLetter({ engine, reviewEngines = null, inputs
       }
     }
     const words = validateParagraphs(paragraphs).wordCount;
+    // The Reach Out texts from the same call (empty when the engine left them out).
+    const outreach = outreachFrom(response.output, { limit: outreachLimit });
     return {
-      paragraphs, issues, wordCount: words, ok: draft.ok,
+      paragraphs, issues, wordCount: words, ok: draft.ok, outreach,
       company, shortName: { name: shortName.name, source: shortName.source, fallback: shortName.fallback, modelValue: shortName.modelValue || null, rejected: shortName.rejected || null },
       engine: engine.id, engineLabel: engine.label, model: response.scoringModel || engine.model || 'unknown', effort: engine.effort || null,
       reviewed, editorNotes: [...handoffNotes, ...editorNotes], revisionAdopted,

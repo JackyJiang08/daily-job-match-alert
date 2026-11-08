@@ -11,6 +11,7 @@ import { htmlEscape } from '../utils.mjs';
 import { DEFAULT_SCHEDULE, scheduleClock } from '../schedule.mjs';
 import { describePrescreen, funnelText, recallText } from '../prescreen-text.mjs';
 import { LETTER_STYLES, autoLettersSettingsCard, coverLetterSettingsSection } from './letter-views.mjs';
+import { OUTREACH_STYLES, outreachSettingsCard } from './outreach-views.mjs';
 import { MODEL_SETTINGS_STYLES, assignmentsForm, settingsTabs, subscriptionsAndModels } from './model-settings-views.mjs';
 
 export const HUB_TITLE = 'Daily Job Match Alert Hub';
@@ -193,7 +194,7 @@ export function renderHubPage({ active, title, content, notice = '', error = '',
   ].join('');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${htmlEscape(title)} — ${htmlEscape(HUB_TITLE)}</title>
-<link rel="stylesheet" href="${assetPath(`${REPORT_STYLES}${HUB_STYLES}${LETTER_STYLES}${MODEL_SETTINGS_STYLES}`, 'css')}"></head>
+<link rel="stylesheet" href="${assetPath(`${REPORT_STYLES}${HUB_STYLES}${LETTER_STYLES}${MODEL_SETTINGS_STYLES}${OUTREACH_STYLES}`, 'css')}"></head>
 <body><div class="hub"><nav class="hub-nav"><p class="brand">${htmlEscape(HUB_BRAND)}</p>${nav}${renderMiniStatus(sidebar, timeZone, now)}</nav>
 <main class="hub-main"><div class="hub-content">${flash}${content}</div></main></div>
 <script src="${assetPath(`${REPORT_SCRIPT}${HUB_SCRIPT}${script}`, 'js')}"></script>
@@ -272,7 +273,9 @@ export function reportsPage({ dates, selected, reportBody, desktopPath, today, m
   const body = reportBody
     ? `<div class="report-head">${missingLettersControl(selected, missingLetters)}<a class="btn secondary small" href="/desktop/${selected}" target="_blank" rel="noopener noreferrer" title="${htmlEscape(desktopPath)}">Open Desktop Copy</a><a class="btn secondary small" href="/desktop/${selected}/xlsx" title="Download the Desktop workbook">Download XLSX</a></div><div class="page">${reportBody}</div>`
     : `<p class="muted">${dates.length ? 'Pick a date on the left.' : 'Run the pipeline once and its report will appear here.'}</p>`;
-  return `<div class="split"><aside id="date-column">${list}</aside><section>${body}</section></div>`;
+  // The Reach Out drawer (src/hub/outreach-views.mjs), filled when a card's Reach Out button is pressed.
+  const drawer = reportBody ? '<aside class="reach-drawer" id="reach-drawer" hidden aria-label="Reach Out"></aside>' : '';
+  return `<div class="split"><aside id="date-column">${list}</aside><section>${body}</section></div>${drawer}`;
 }
 
 // The on-demand JD loader (see report.mjs lazyDescription); the rest of REPORTS_SCRIPT is unchanged.
@@ -738,7 +741,7 @@ function tagEditor(name, tags, { label, hint, placeholder }) {
 export function settingsPage({ settings, connections = null, timeZone, coverLetter = null, modelView = null, tab = 'models' }) {
   const active = ['models', 'pipeline', 'letters'].includes(tab) ? tab : 'models';
   const head = `<h1 class="hub-title">Settings</h1>${settingsTabs(active)}`;
-  if (active === 'letters') return `${head}${autoLettersSettingsCard(settings.autoLetters)}${coverLetter ? coverLetterSettingsSection({ ...coverLetter, timeZone }) : '<p class="muted">Cover-letter material is not available.</p>'}`;
+  if (active === 'letters') return `${head}${autoLettersSettingsCard(settings.autoLetters)}${outreachSettingsCard(settings.outreach)}${coverLetter ? coverLetterSettingsSection({ ...coverLetter, timeZone }) : '<p class="muted">Cover-letter material is not available.</p>'}`;
   if (active === 'pipeline') {
     const levels = ['high', 'medium', 'low'].map(level => `<label class="check"><input type="checkbox" name="acceptedMatchLevels" value="${level}"${settings.acceptedMatchLevels.includes(level) ? ' checked' : ''}> ${level.charAt(0).toUpperCase()}${level.slice(1)}</label>`).join('');
     return `${head}

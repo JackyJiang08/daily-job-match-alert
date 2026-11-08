@@ -342,6 +342,19 @@ table.material .file .file-name{max-width:100px}
 .stage-off{opacity:.65}
 @media (max-width:1000px){.pair-grid{grid-template-columns:1fr}}
 @media (max-width:640px){.sub-card{grid-template-columns:1fr}}
+
+.reach-drawer{position:fixed;top:0;right:0;bottom:0;width:min(440px,100%);overflow:auto;background:var(--surface);border-left:1px solid var(--line);box-shadow:-8px 0 24px rgba(16,24,40,.12);z-index:50;padding:var(--space-4)}
+.reach-drawer[hidden]{display:none}
+.reach-head{display:flex;align-items:center;justify-content:space-between;gap:var(--space-2)}
+.reach-head h2{margin:0;font-size:var(--fs-title)}
+.reach-role{margin:var(--space-2) 0 var(--space-3)}
+.reach-section{margin:0 0 var(--space-4)}
+.reach-section h3{margin:0 0 var(--space-2);font-size:var(--fs-body);font-weight:650}
+.reach-links{display:flex;flex-wrap:wrap;gap:var(--space-2)}
+.reach-text{white-space:pre-wrap;margin:0 0 var(--space-2);padding:var(--space-3);background:var(--bg);border-radius:var(--radius-sm);font-size:var(--fs-body);line-height:1.5}
+.reach-count{font-weight:400;color:var(--ink-3);font-size:var(--fs-meta)}
+.reach-count.over{color:var(--bad-ink);font-weight:650}
+.reach-warning{margin:0 0 var(--space-2);padding:var(--space-2) var(--space-3);border-radius:var(--radius-sm);background:var(--warn-bg);color:var(--warn-ink);font-size:var(--fs-meta)}
 </style></head>
 <body><div class="hub"><nav class="hub-nav"><p class="brand">Job Match Hub</p><a href="/reports" class="active">Reports</a><a href="/resumes">Resumes</a><a href="/letters">Letters</a><a href="/status">Status</a><a href="/settings">Settings</a><div class="mini"><b>Last Run</b><span class="ok">✓</span> Oct 16, 8:00 PM<b>Next Run</b><span id="next-run" data-at="2026-10-17T23:00:00.000Z" data-overdue-suffix="">Oct 17, 6:00 PM · <span class="rel">in 8h</span></span></div></nav>
 <main class="hub-main"><div class="hub-content"><div class="split"><aside id="date-column"><div class="datetools"><a class="today-link" href="/reports/2026-10-17" id="today-link" title="Today's report (2026-10-17)">Today</a><label><input type="checkbox" id="only-matches"> Only Days With Matches</label></div><ul class="datelist" id="datelist"><li class="month" data-month="2026-10" data-current="1">October 2026</li><li data-month="2026-10"><a href="/reports/2026-10-17" class="active today" title="2026-10-17 (today)"><span>Sat, Oct 17</span><span class="n">4 matches</span><span class="tag" data-tag="today">Today</span></a></li><li data-month="2026-10" data-empty="1"><a href="/reports/2026-10-16" class="quiet" title="2026-10-16"><span>Fri, Oct 16</span><span class="n">0 matches</span></a></li><li data-month="2026-10"><a href="/reports/2026-10-15" title="2026-10-15"><span>Thu, Oct 15</span><span class="n">1 match</span></a></li></ul></aside><section><div class="report-head"><form class="inline" method="post" action="/letters/missing" id="missing-letters-form"><input type="hidden" name="date" value="2026-10-17"><button class="btn small" type="submit" id="missing-letters" title="Write a letter for every high match on this date that has none and a trusted company name">Generate Missing Letters (3)</button></form><form class="inline" method="post" action="/letters/update-salutations" id="update-salutations-form"><input type="hidden" name="date" value="2026-10-17"><button class="btn secondary small" type="submit" id="update-salutations" title="Use the company's short name in the salutation and the file name of every letter on this date and render the PDFs again. The letter bodies are not rewritten and no subscription quota is used.">Update Salutations (1)</button></form><a class="btn secondary small" href="/desktop/2026-10-17" target="_blank" rel="noopener noreferrer" title="ROOT/output/2026-10-17/Daily Job Match Alert - 2026-10-17.html">Open Desktop Copy</a><a class="btn secondary small" href="/desktop/2026-10-17/xlsx" title="Download the Desktop workbook">Download XLSX</a></div><div class="page"><header class="masthead"><h1>October 17, 2026</h1><p class="sub">4 Matches · Ran Oct 16, 8:00 PM</p></header>
@@ -364,7 +377,7 @@ table.material .file .file-name{max-width:100px}
       <div class="facts-label">Gaps / Verify</div><ul class="facts gaps"><li>JD skill not found in resume: dbt</li></ul>
       <details class="jd"><summary>Job Description</summary><div class="jd-body"><p>About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience. About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience. About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience. About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience. About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience. About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience.</p></div></details>
       
-      <div class="actions"><a class="apply" target="_blank" rel="noopener noreferrer" href="https://jobs.example.com/1">Open Posting</a><a class="btn secondary small" href="/letters/2026-10-17/ExampleCorp1" target="_blank" rel="noopener noreferrer">Open Letter</a><span class="meta" title="Date only: the source reports no time of day">Posted Oct 17 (date only) · Example Board</span></div>
+      <div class="actions"><a class="apply" target="_blank" rel="noopener noreferrer" href="https://jobs.example.com/1">Open Posting</a><a class="btn secondary small" href="/letters/2026-10-17/ExampleCorp1" target="_blank" rel="noopener noreferrer">Open Letter</a><button type="button" class="btn secondary small" data-reach="1" data-date="2026-10-17" data-job="8275fbf134959526">Reach Out</button><span class="meta" title="Date only: the source reports no time of day">Posted Oct 17 (date only) · Example Board</span></div>
     </div>
   </article>
 <article class="job" data-score="82" data-company="example corp 2" data-posted="1792245600000" data-role="new_grad" data-track="data" data-search="example corp 2 data analyst 2">
@@ -377,7 +390,7 @@ table.material .file .file-name{max-width:100px}
       <div class="facts-label">Gaps / Verify</div><ul class="facts gaps"><li>JD skill not found in resume: dbt</li></ul>
       <details class="jd"><summary>Job Description</summary><div class="jd-body"><p>Short JD: under three hundred characters, kept whole. &lt;i&gt;tags&lt;/i&gt; &amp; &quot;quotes&quot;.</p></div></details>
       
-      <div class="actions"><a class="apply" target="_blank" rel="noopener noreferrer" href="https://jobs.example.com/2">Open Posting</a><button type="button" class="btn secondary small" data-oneclick="1" data-date="2026-10-17" data-job="5bd5bc6f5abe2957">Generate Cover Letter</button><span class="meta" title="Date only: the source reports no time of day">Posted Oct 17 (date only) · Example Board</span></div>
+      <div class="actions"><a class="apply" target="_blank" rel="noopener noreferrer" href="https://jobs.example.com/2">Open Posting</a><button type="button" class="btn secondary small" data-oneclick="1" data-date="2026-10-17" data-job="5bd5bc6f5abe2957">Generate Cover Letter</button><button type="button" class="btn secondary small" data-reach="1" data-date="2026-10-17" data-job="5bd5bc6f5abe2957">Reach Out</button><span class="meta" title="Date only: the source reports no time of day">Posted Oct 17 (date only) · Example Board</span></div>
     </div>
   </article>
 <article class="job" data-score="84" data-company="example corp 4" data-posted="1792245600000" data-role="new_grad" data-track="data" data-search="example corp 4 data analyst 4">
@@ -390,7 +403,7 @@ table.material .file .file-name{max-width:100px}
       <div class="facts-label">Gaps / Verify</div><ul class="facts gaps"><li>JD skill not found in resume: dbt</li></ul>
       <details class="jd"><summary>Job Description</summary><div class="jd-body"><p>ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé😀 tail after the emoji at index 299</p></div></details>
       
-      <div class="actions"><a class="apply" target="_blank" rel="noopener noreferrer" href="https://jobs.example.com/4">Open Posting</a><button type="button" class="btn secondary small" data-oneclick="1" data-date="2026-10-17" data-job="6b5f0394e6f8ff52">Generate Cover Letter</button><span class="meta" title="Date only: the source reports no time of day">Posted Oct 17 (date only) · Example Board</span></div>
+      <div class="actions"><a class="apply" target="_blank" rel="noopener noreferrer" href="https://jobs.example.com/4">Open Posting</a><button type="button" class="btn secondary small" data-oneclick="1" data-date="2026-10-17" data-job="6b5f0394e6f8ff52">Generate Cover Letter</button><button type="button" class="btn secondary small" data-reach="1" data-date="2026-10-17" data-job="6b5f0394e6f8ff52">Reach Out</button><span class="meta" title="Date only: the source reports no time of day">Posted Oct 17 (date only) · Example Board</span></div>
     </div>
   </article></section><h2 class="group-title" id="carried-over">Carried Over From Yesterday <span class="group-count">(1)</span></h2><p class="group-note">Deferred by the review budget on an earlier run and reviewed now; each card says when it was first found.</p><section class="jobs carried" id="jobs-carried"><article class="job" data-score="83" data-company="example corp 3" data-posted="1792245600000" data-role="new_grad" data-track="data" data-search="example corp 3 data analyst 3">
     <div class="ring" style="--score:83" role="img" aria-label="Best score 83"><b>83</b></div>
@@ -402,11 +415,11 @@ table.material .file .file-name{max-width:100px}
       <div class="facts-label">Gaps / Verify</div><ul class="facts gaps"><li>Location not stated: verify the posting allows work from the United States</li></ul>
       <details class="jd"><summary>Job Description</summary><div class="jd-body"><p>About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience. About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience. About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience. About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience. About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience. About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience.</p></div></details>
       
-      <div class="actions"><a class="apply" target="_blank" rel="noopener noreferrer" href="https://jobs.example.com/3">Open Posting</a><button type="button" class="btn secondary small" data-oneclick="1" data-date="2026-10-17" data-job="619c505b17f5836b">Generate Cover Letter</button><span class="meta" title="Carried over: deferred by the review budget on an earlier run and reviewed now. Date only: the source reports no time of day">Posted Oct 17 (date only) · first seen Oct 15, 9:00 PM · Example Board</span></div>
+      <div class="actions"><a class="apply" target="_blank" rel="noopener noreferrer" href="https://jobs.example.com/3">Open Posting</a><button type="button" class="btn secondary small" data-oneclick="1" data-date="2026-10-17" data-job="619c505b17f5836b">Generate Cover Letter</button><button type="button" class="btn secondary small" data-reach="1" data-date="2026-10-17" data-job="619c505b17f5836b">Reach Out</button><span class="meta" title="Carried over: deferred by the review budget on an earlier run and reviewed now. Date only: the source reports no time of day">Posted Oct 17 (date only) · first seen Oct 15, 9:00 PM · Example Board</span></div>
     </div>
   </article></section><div class="empty" id="no-results" hidden>No matches for the current filters.</div>
 <details class="run" id="run-details"><summary>Run Details</summary><dl><dt>Report Date</dt><dd>October 17, 2026</dd><dt>Posting Window</dt><dd>Main List: posted within the last 24 hours</dd><dt>Lookback Window</dt><dd>24 hours</dd><dt>Resume Tracks</dt><dd>Data, LLM</dd><dt>Scoring Model</dt><dd>local_only</dd><dt>Postings</dt><dd>6 reviewed · 4 matched</dd><dt>Trigger</dt><dd>scheduled</dd><dt>Updates Today</dt><dd>Daily update #1 · last updated Oct 16, 2026, 8:00 PM</dd><dt>Status</dt><dd>No semantic review ran; scores are local triage only<ul><li>1 match(es) do not state a US location; confirm you can work from the United States before applying</li><li>No pipeline warnings</li></ul></dd></dl></details>
-<footer class="foot">Generated locally. Scores are triage aids, not facts. Verify eligibility, posting date, and JD before applying. No applications were submitted.</footer></div></section></div></div></main></div>
+<footer class="foot">Generated locally. Scores are triage aids, not facts. Verify eligibility, posting date, and JD before applying. No applications were submitted.</footer></div></section></div><aside class="reach-drawer" id="reach-drawer" hidden aria-label="Reach Out"></aside></div></main></div>
 <script>
 (function () {
   // The main list and the carried-over group sort and filter separately; the count covers both.
@@ -634,6 +647,91 @@ table.material .file .file-name{max-width:100px}
   }
   buttons.forEach(function (button) { button.addEventListener('click', function () { start(button, null); }); });
   poll();
+})();
+
+(function () {
+  var drawer = document.getElementById('reach-drawer');
+  if (!drawer) return;
+  var current = null;
+  function post(url, body) {
+    var form = Object.keys(body).map(function (key) { return encodeURIComponent(key) + '=' + encodeURIComponent(body[key]); }).join('&');
+    return fetch(url, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' }, body: form })
+      .then(function (r) { return r.json().then(function (data) { if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status)); return data; }); });
+  }
+  function panel() { return drawer.querySelector('#reach-panel'); }
+  function say(text, error) { var s = drawer.querySelector('#reach-status'); if (s) { s.textContent = text || ''; s.className = 'letter-status' + (error ? ' error' : ''); } }
+  function fillName() {
+    var p = panel(); if (!p) return;
+    var input = drawer.querySelector('#reach-first-name');
+    var name = input ? input.value.replace(/\s+/g, ' ').trim() : '';
+    drawer.querySelectorAll('[data-reach-text]').forEach(function (node) {
+      var text = node.getAttribute('data-template') || '';
+      node.textContent = name ? text.split(p.getAttribute('data-placeholder')).join(name) : text;
+      var count = node.parentNode.querySelector('[data-reach-count]');
+      if (count) {
+        var limit = Number(count.getAttribute('data-limit'));
+        count.textContent = node.textContent.length + ' / ' + limit;
+        count.classList.toggle('over', node.textContent.length > limit);
+      }
+    });
+  }
+  function open(button) {
+    current = button;
+    drawer.hidden = false;
+    drawer.innerHTML = '<p class="muted">Loading…</p>';
+    fetch('/outreach/panel?date=' + encodeURIComponent(button.getAttribute('data-date')) + '&job=' + encodeURIComponent(button.getAttribute('data-job')), { headers: { accept: 'text/html' } })
+      .then(function (r) { return r.text().then(function (html) { if (!r.ok) throw new Error(html); return html; }); })
+      .then(function (html) { drawer.innerHTML = html; fillName(); })
+      .catch(function (error) { drawer.innerHTML = '<p class="letter-status error">' + String(error.message || error).replace(/[<&]/g, '') + '</p>'; });
+  }
+  function markCard(label) {
+    if (!current) return;
+    var card = current.closest('.job');
+    if (!card) return;
+    var badges = card.querySelector('.badges');
+    var old = card.querySelector('[data-badge="contacted"]');
+    if (old) old.remove();
+    if (!label) return;
+    if (!badges) { badges = document.createElement('div'); badges.className = 'badges'; card.querySelector('.job-body').insertBefore(badges, card.querySelector('.facts-label') || card.querySelector('.actions')); }
+    var badge = document.createElement('span'); badge.className = 'badge'; badge.setAttribute('data-badge', 'contacted'); badge.textContent = label; badges.appendChild(badge);
+  }
+  document.addEventListener('click', function (event) {
+    var reach = event.target.closest && event.target.closest('[data-reach]');
+    if (reach) { event.preventDefault(); open(reach); return; }
+    if (!drawer.contains(event.target)) return;
+    var p = panel();
+    if (event.target.closest('[data-reach-close]')) { drawer.hidden = true; return; }
+    var copy = event.target.closest('[data-reach-copy]');
+    if (copy) {
+      var node = drawer.querySelector('#' + copy.getAttribute('data-reach-copy') + ' [data-reach-text]');
+      var text = node ? node.textContent : '';
+      var done = function () { say('Copied to the clipboard.'); };
+      if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(done, function () { say('Could not copy; select the text and copy it by hand.', true); });
+      else { var area = document.createElement('textarea'); area.value = text; document.body.appendChild(area); area.select(); try { document.execCommand('copy'); done(); } catch (e) { say('Could not copy; select the text and copy it by hand.', true); } document.body.removeChild(area); }
+      return;
+    }
+    if (event.target.closest('[data-reach-generate]')) {
+      var generate = event.target.closest('[data-reach-generate]'); generate.disabled = true; say('Writing the messages…');
+      post('/outreach/messages', { date: p.getAttribute('data-date'), job: p.getAttribute('data-job') }).then(function () { open(current); }).catch(function (error) { generate.disabled = false; say(error.message, true); });
+      return;
+    }
+    if (event.target.closest('[data-reach-candidates]')) {
+      var search = event.target.closest('[data-reach-candidates]'); search.disabled = true; say('Searching…');
+      post('/outreach/candidates', { date: p.getAttribute('data-date'), job: p.getAttribute('data-job') }).then(function () { open(current); }).catch(function (error) { search.disabled = false; say(error.message, true); });
+    }
+  });
+  document.addEventListener('input', function (event) { if (event.target && event.target.id === 'reach-first-name') fillName(); });
+  document.addEventListener('change', function (event) {
+    var p = panel(); if (!p || !drawer.contains(event.target)) return;
+    if (event.target.id === 'reach-first-name') post('/outreach/name', { job: p.getAttribute('data-job'), firstName: event.target.value }).catch(function (error) { say(error.message, true); });
+    if (event.target.id === 'reach-contacted') {
+      post('/outreach/contacted', { job: p.getAttribute('data-job'), contacted: event.target.checked ? '1' : '0' }).then(function (result) {
+        var label = drawer.querySelector('#reach-contacted-label'); if (label) label.textContent = result.label || '';
+        markCard(result.label || null);
+      }).catch(function (error) { say(error.message, true); });
+    }
+  });
+  document.addEventListener('keydown', function (event) { if (event.key === 'Escape' && !drawer.hidden) drawer.hidden = true; });
 })();
 </script>
 </body></html>

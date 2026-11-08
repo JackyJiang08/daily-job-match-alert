@@ -48,6 +48,8 @@ export function createHubContext(options) {
     managedResumeDirectory: path.join(privateDirectory, 'resumes'),
     extractText: options.extractText || ((file, settings) => extractPdfText(file, settings)),
     loadConfig: options.loadConfig || (() => loadConfig(configPath, { notify: () => {} })),
+    // The only outgoing request of Reach Out is the optional candidate search API (src/outreach/candidates.mjs).
+    fetchImpl: options.fetchImpl || ((...args) => fetch(...args)),
   };
   ctx.letterStore = options.letterStore || createLetterStore({
     root, io, now,

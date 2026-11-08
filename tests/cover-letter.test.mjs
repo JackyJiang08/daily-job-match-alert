@@ -57,7 +57,7 @@ test('the prompt carries the playbook, the chosen track resume, the samples with
     resumeText: 'RESUME TEXT FOR LLM TRACK',
     job: { title: 'LLM Engineer', company: 'Globex', location: 'Boston, MA Johnston, RI', roleType: 'new_grad', description: 'Build RAG systems.', reasons: ['RAG match'], gaps: ['No Kubernetes'] },
   });
-  assert.match(prompt, /^RULES:\n1\. You write cover letters\. Output ONLY JSON: \{ "paragraphs": string\[\], "shortName": string \}/);
+  assert.match(prompt, /^RULES:\n1\. You write cover letters\. Output ONLY JSON: \{ "paragraphs": string\[\], "shortName": string, "connectionNote": string, "followUpMessage": string \}/);
   assert.match(prompt, /\n2\. Company naming: return "shortName", the name the company most often uses for itself in the JOB POSTING description/);
   assert.match(prompt, /Body length: 460 to 600 words/);
   assert.match(prompt, /Never use an em dash or an en dash/);
@@ -618,7 +618,7 @@ test('generate → edit → save renders a PDF, records the letter, marks the ca
     assert.match(list.text, /href="\/letters\/2026-09-15\/Acme\/JaneDoe_Cover_Letter_Acme\.pdf">Download PDF<\/a>/);
     const report = await hub.request('GET', '/reports/2026-09-15');
     assert.doesNotMatch(report.text.split('<script>')[0], /data-badge="letter-/, 'no status badge: the only letter badge is "Check N details"');
-    assert.match(report.text, /<div class="actions"><a class="apply"[^>]*>Open Posting<\/a><a class="btn secondary small" href="\/letters\/2026-09-15\/Acme\/JaneDoe_Cover_Letter_Acme\.pdf">Download PDF<\/a><a class="btn secondary small" href="\/letters\/2026-09-15\/Acme" target="_blank" rel="noopener noreferrer">Open Letter<\/a><span class="meta"/, 'a saved letter gives the card exactly two buttons');
+    assert.match(report.text, /<div class="actions"><a class="apply"[^>]*>Open Posting<\/a><a class="btn secondary small" href="\/letters\/2026-09-15\/Acme\/JaneDoe_Cover_Letter_Acme\.pdf">Download PDF<\/a><a class="btn secondary small" href="\/letters\/2026-09-15\/Acme" target="_blank" rel="noopener noreferrer">Open Letter<\/a><button type="button" class="btn secondary small" data-reach="1" data-date="2026-09-15" data-job="[a-f0-9]{16}">Reach Out<\/button><span class="meta"/, 'a saved letter gives the card its two letter buttons, then Reach Out');
     assert.doesNotMatch(report.text.split('<script>')[0], /Generate Cover Letter/, 'no one-click button once a letter exists (the page script mentions the label)');
     assert.match(list.text, /<a class="btn secondary small" href="\/letters\/2026-09-15\/Acme">Open<\/a> <a class="btn secondary small" href="\/letters\/2026-09-15\/Acme\/JaneDoe_Cover_Letter_Acme\.pdf">Download PDF<\/a>/, 'the Letters row has the same two actions');
 

@@ -342,6 +342,19 @@ table.material .file .file-name{max-width:100px}
 .stage-off{opacity:.65}
 @media (max-width:1000px){.pair-grid{grid-template-columns:1fr}}
 @media (max-width:640px){.sub-card{grid-template-columns:1fr}}
+
+.reach-drawer{position:fixed;top:0;right:0;bottom:0;width:min(440px,100%);overflow:auto;background:var(--surface);border-left:1px solid var(--line);box-shadow:-8px 0 24px rgba(16,24,40,.12);z-index:50;padding:var(--space-4)}
+.reach-drawer[hidden]{display:none}
+.reach-head{display:flex;align-items:center;justify-content:space-between;gap:var(--space-2)}
+.reach-head h2{margin:0;font-size:var(--fs-title)}
+.reach-role{margin:var(--space-2) 0 var(--space-3)}
+.reach-section{margin:0 0 var(--space-4)}
+.reach-section h3{margin:0 0 var(--space-2);font-size:var(--fs-body);font-weight:650}
+.reach-links{display:flex;flex-wrap:wrap;gap:var(--space-2)}
+.reach-text{white-space:pre-wrap;margin:0 0 var(--space-2);padding:var(--space-3);background:var(--bg);border-radius:var(--radius-sm);font-size:var(--fs-body);line-height:1.5}
+.reach-count{font-weight:400;color:var(--ink-3);font-size:var(--fs-meta)}
+.reach-count.over{color:var(--bad-ink);font-weight:650}
+.reach-warning{margin:0 0 var(--space-2);padding:var(--space-2) var(--space-3);border-radius:var(--radius-sm);background:var(--warn-bg);color:var(--warn-ink);font-size:var(--fs-meta)}
 </style></head>
 <body><div class="hub"><nav class="hub-nav"><p class="brand">Job Match Hub</p><a href="/reports">Reports</a><a href="/resumes">Resumes</a><a href="/letters">Letters</a><a href="/status" class="active">Status</a><a href="/settings">Settings</a><div class="mini"><b>Last Run</b><span class="ok">✓</span> Oct 16, 8:00 PM<b>Next Run</b><span id="next-run" data-at="2026-10-17T23:00:00.000Z" data-overdue-suffix="">Oct 17, 6:00 PM · <span class="rel">in 8h</span></span></div></nav>
 <main class="hub-main"><div class="hub-content"><h1 class="hub-title">Status</h1>

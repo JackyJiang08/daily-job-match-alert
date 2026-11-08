@@ -3,12 +3,15 @@
 import { classifyEditorNotes, reviewBadge } from '../cover-letter/notes.mjs';
 import { STAGE_LABELS, stageAssignments, stageChain } from '../engines/assignments.mjs';
 import { normalizeCatalog } from '../engines/catalog.mjs';
+import os from 'node:os';
 import path from 'node:path';
 import { enabledResumeTracks } from '../config.mjs';
 import { createEngine, normalizeEngineId, resolveModel } from '../engines/index.mjs';
 import { assembleLetter } from '../cover-letter/compose.mjs';
 import { condenseCoverLetter, generateCoverLetter } from '../cover-letter/generate.mjs';
 import { graduationTerms } from '../cover-letter/compose.mjs';
+import { OUTREACH_SCHEMA, buildOutreachPrompt, connectionNoteLimit, outreachFrom } from '../outreach/messages.mjs';
+import { saveOutreachMessages } from '../outreach/store.mjs';
 import { renderLetterPdf } from '../cover-letter/pdf.mjs';
 import { LetterInputError } from '../cover-letter/store.mjs';
 import { sha256 } from '../utils.mjs';
@@ -272,10 +275,14 @@ export async function generateLetter(ctx, { date, jobId, trackId, company, compa
   // wrote the draft, including a ladder step it moved to.
   const reviewEngines = editorPlan && editorPlan.entries.some(entry => entry.engine) ? editorPlan.entries.map(entry => letterEngineFor(ctx, config, entry)) : null;
   const generated = await withStageChain(ctx, config, draftPlan, async engine => {
-    const result = await generateCoverLetter({ engine, reviewEngines, inputs: { playbook, samples, track, resumeText: text, job, graduation, naming: { chainName, aliases, fixed } }, review, io: ctx.io });
+    const result = await generateCoverLetter({ engine, reviewEngines, inputs: { playbook, samples, track, resumeText: text, job, graduation, naming: { chainName, aliases, fixed }, outreachLimit: connectionNoteLimit(config) }, review, io: ctx.io });
     if (strict && (!result.ok || !result.paragraphs?.length)) throw new Error(`the draft from ${engine.model || engine.id} did not parse into a letter (${(result.issues || []).map(issue => issue.message || issue.kind || issue).slice(0, 2).join('; ') || 'no paragraphs'})`);
     return result;
   });
+  // The Reach Out texts written in the same call go to the panel's state (private/outreach/state.json).
+  if (generated.result.outreach?.connectionNote || generated.result.outreach?.followUpMessage) {
+    await saveOutreachMessages(ctx.root, id, generated.result.outreach, { io: ctx.io, now: ctx.now(), source: 'letter' }).catch(() => {});
+  }
   const leading = [...draftPlan.notes, ...(editorPlan?.notes || []), ...generated.chainNotes, ...(generated.downgradeNote ? [generated.downgradeNote] : [])];
   const result = { ...generated.result, editorNotes: [...leading, ...(generated.result.editorNotes || [])], ...(generated.downgradeNote ? { downgradeNote: generated.downgradeNote } : {}) };
   const levels = classifyEditorNotes(result.editorNotes);
@@ -422,4 +429,33 @@ export async function updateSalutations(ctx, { date }) {
     outcome.updated.push({ from: letter.company, to: next.name, pdfFileName: renamed.pdfFileName });
   }
   return outcome;
+}
+
+// Reach Out texts for a posting without a letter (the panel's Generate Messages): one call on the cover
+// letter draft assignment, with the recommended track's resume and the playbook when there is one. The result
+// is kept in private/outreach/state.json.
+export async function generateOutreachMessages(ctx, { date, jobId }) {
+  const config = await ctx.loadConfig();
+  const { job, id, tracks } = await findLetterJob(ctx, date, jobId);
+  const { text } = await resumeTextFor(ctx, config, job.recommendedTrack || tracks[0]?.id);
+  const material = await ctx.letterStore.loadMaterial().catch(() => ({ playbook: '' }));
+  const readiness = await ctx.letterStore.readiness().catch(() => ({ profile: {} }));
+  const company = initialShortName(job, readiness.profile?.companyAliases || []).name || letterCompanyFor(job).name;
+  const limit = connectionNoteLimit(config);
+  const prompt = buildOutreachPrompt({ resumeText: text, playbook: material.playbook || '', job, company, graduation: graduationTerms(config.preferences?.graduationDate), limit });
+  const plan = await letterStagePlan(ctx, config, 'letterDraft');
+  const generated = await withStageChain(ctx, config, plan, async engine => {
+    const tempDirectory = await ctx.io.mkdtemp(path.join(os.tmpdir(), 'daily-job-match-alert-outreach-'));
+    try {
+      const response = await engine.generateText(prompt, { schema: OUTREACH_SCHEMA, tempDirectory });
+      const messages = outreachFrom(response.output, { limit });
+      if (!messages.connectionNote && !messages.followUpMessage) throw new Error(`${engine.model || engine.id} returned no messages`);
+      return { ...messages, engine: engine.id, model: response.scoringModel || engine.model || null };
+    } finally {
+      await ctx.io.rm(tempDirectory, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+  const result = generated.result;
+  await saveOutreachMessages(ctx.root, id, result, { io: ctx.io, now: ctx.now(), source: 'panel' });
+  return { jobId: id, connectionNote: result.connectionNote, followUpMessage: result.followUpMessage, limit, issues: result.issues, notes: generated.chainNotes || [] };
 }

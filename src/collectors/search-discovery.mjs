@@ -133,7 +133,7 @@ export async function readSearchUsage(file, io = fs) {
   }
 }
 
-async function writeSearchUsage(file, usage, io = fs) {
+export async function writeSearchUsage(file, usage, io = fs) {
   await writeJsonAtomic(file, usage, { io });
 }
 
@@ -142,14 +142,15 @@ function scrub(text, apiKey) {
   return apiKey ? value.split(apiKey).join('[redacted]') : value;
 }
 
-export function searchRequest(provider, query, apiKey, userAgent = 'DailyJobMatchAlert/0.1') {
+// `recent: false` (the Reach Out candidate search) drops the past-day filter and asks for `count` results.
+export function searchRequest(provider, query, apiKey, userAgent = 'DailyJobMatchAlert/0.1', { recent = true, count = RESULTS_PER_QUERY } = {}) {
   if (provider === 'tavily') {
     return {
       url: 'https://api.tavily.com/search',
       init: {
         method: 'POST',
         headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json', accept: 'application/json', 'user-agent': userAgent },
-        body: JSON.stringify({ query, topic: 'general', time_range: 'day', country: 'united states', max_results: RESULTS_PER_QUERY, search_depth: 'basic' }),
+        body: JSON.stringify({ query, topic: 'general', ...(recent ? { time_range: 'day' } : {}), country: 'united states', max_results: count, search_depth: 'basic' }),
       },
     };
   }
@@ -157,8 +158,8 @@ export function searchRequest(provider, query, apiKey, userAgent = 'DailyJobMatc
   url.searchParams.set('q', query);
   url.searchParams.set('country', 'US');
   url.searchParams.set('search_lang', 'en');
-  url.searchParams.set('freshness', 'pd');
-  url.searchParams.set('count', String(RESULTS_PER_QUERY));
+  if (recent) url.searchParams.set('freshness', 'pd');
+  url.searchParams.set('count', String(count));
   return { url: url.toString(), init: { method: 'GET', headers: { 'x-subscription-token': apiKey, accept: 'application/json', 'user-agent': userAgent } } };
 }
 

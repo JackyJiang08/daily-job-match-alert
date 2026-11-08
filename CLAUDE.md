@@ -539,6 +539,26 @@ disabled; do not expand them unless a task says so.
   signature} come from data-letter (route: assembleLetter at record.createdAt), company/paragraphs from the page.
   There were no per-paragraph copy buttons to remove.
 
+## Reach Out (2026-11-08)
+- HARD: never request, fetch, or log in to linkedin.com; never send messages. src/outreach/links.mjs builds the
+  URLs only (LinkedIn people search ?keywords=encodeURIComponent(…), Google ?q=…) and assertNotLinkedIn guards
+  the one outgoing request (candidate search API via ctx.fetchImpl, added to createHubContext). Tests assert it
+  at the network layer (ctx.fetchImpl spy + global fetch blocked).
+- contacts.mjs extractJdContacts(description) (labeled role, "contact X at email", "Name, Recruiter",
+  recruiting mailboxes; accommodation/privacy/etc. addresses dropped). candidates.mjs: config.outreach.
+  searchCandidates (default false) + search-discovery provider/key/monthly cap (searchRequest recent:false,
+  count 10), ≤3 linkedin.com/in results from the API's titles/snippets, one query per posting (cached).
+- messages.mjs: LETTER_SCHEMA now requires connectionNote + followUpMessage (OUTREACH_PROPERTIES); letterRules
+  (outreachLimit) adds outreachRules; generateCoverLetter returns result.outreach (outreachFrom: dashes →
+  commas, greeting "Hi {First Name},", note ≤ connectionNoteLimit(config) 100–300 default 200, follow-up ≤ 750);
+  hub generateLetter saves it (source letter). generateOutreachMessages = one OUTREACH_SCHEMA call on the
+  letterDraft plan (panel Generate Messages). Identity facts come from the RESUME (no personal data in code).
+- Store private/outreach/state.json by job id: firstName, contactedAt, messages, candidates. Hub: GET
+  /outreach/panel (HTML fragment for the drawer), GET /outreach/resume (recommended track PDF, original name:
+  managed "<stamp>-" prefix stripped), POST /outreach/{messages,name,contacted,candidates}, POST
+  /settings/outreach. Cards: Reach Out button (data-reach) on every match + "Contacted Nov 8" badge; the render
+  cache key includes contactedByJob().version. Drawer + OUTREACH_SCRIPT in src/hub/outreach-views.mjs.
+
 ## Scoring engines (src/engines/)
 - One interface per engine: verifyAuth(), reviewBatch(prompt, schema,
   { tempDirectory }), describeModel(), modelMatches(actual),
