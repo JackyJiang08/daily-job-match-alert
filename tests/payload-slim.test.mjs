@@ -8,6 +8,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { assertSameContent } from './helpers/page-content.mjs';
 import zlib from 'node:zlib';
 import { identifyBoard, normalizeRegistry, OUTAGE_REPAIR_MIGRATION, registerBoards } from '../src/collectors/ats-boards.mjs';
 import { main as runMain, mergeReviewedJobs } from '../src/index.mjs';
@@ -284,7 +285,7 @@ test('gzip: a slim .json.gz payload renders the same Reports pages (snapshot) an
     for (const [name, url] of [['report-page.html', '/reports/2026-10-17'], ['reports-list.html', '/reports'], ['report-page-short.html', '/reports/2026-10-15']]) {
       const page = await hub.request(url);
       assert.equal(page.status, 200, url);
-      assert.equal((await asBefore(hub, page.text, root)).text, await fs.readFile(new URL(name, snapshots), 'utf8'), name);
+      assertSameContent(assert, await fs.readFile(new URL(name, snapshots), 'utf8'), (await asBefore(hub, page.text, root)).text, name);
     }
     assert.ok(spy.reads.includes('report-payload-2026-10-17.json.gz'));
     const index = await readReportsIndex(root);
@@ -310,7 +311,7 @@ test('Status page: reads the reports index and state/status-summary.json, never 
     const page = await hub.request('/status');
     assert.equal(page.status, 200);
     assert.deepEqual(spy.reads, [], 'no payload read');
-    assert.equal(withoutHubCard(normalizeHtml(inlineAssets(page.text), { port: hub.port(), root })), await fs.readFile(new URL('status-page.html', snapshots), 'utf8'));
+    assertSameContent(assert, await fs.readFile(new URL('status-page.html', snapshots), 'utf8'), withoutHubCard(normalizeHtml(inlineAssets(page.text), { port: hub.port(), root })), 'status-page.html');
 
     const json = await hub.request('/status/run.json');
     assert.equal(JSON.parse(json.text).lastRun.matchCount, 4);
@@ -344,7 +345,7 @@ test('Status page snapshot also holds when the summary is built by the hub itsel
   const hub = await startReportHub(root);
   try {
     const page = await hub.request('/status');
-    assert.equal(withoutHubCard(normalizeHtml(inlineAssets(page.text), { port: hub.port(), root })), await fs.readFile(new URL('status-page.html', snapshots), 'utf8'));
+    assertSameContent(assert, await fs.readFile(new URL('status-page.html', snapshots), 'utf8'), withoutHubCard(normalizeHtml(inlineAssets(page.text), { port: hub.port(), root })), 'status-page.html');
     assert.equal((await readStatusSummary(root)).source.date, '2026-10-17');
   } finally {
     await hub.close();
@@ -420,7 +421,7 @@ test('Status reads state/state.json once per change and without its seen map; th
     await fs.writeFile(statePath, JSON.stringify({ ...state, lastSuccessfulRun: '2026-10-17T02:00:00.000Z' }));
     await hub.request('/status');
     assert.equal(stateReads.length, 2, 'a changed file is read again');
-    assert.equal(withoutHubCard(normalizeHtml(inlineAssets(first.text), { port: hub.port(), root })), await fs.readFile(new URL('status-page.html', snapshots), 'utf8'));
+    assertSameContent(assert, await fs.readFile(new URL('status-page.html', snapshots), 'utf8'), withoutHubCard(normalizeHtml(inlineAssets(first.text), { port: hub.port(), root })), 'status-page.html');
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });

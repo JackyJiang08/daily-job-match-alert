@@ -10,7 +10,8 @@ import { renderReportPage } from './report-components.mjs';
 import { warningText } from './warnings.mjs';
 import { formatLocalDateTime, formatLocalDay, formatLocalShort, formatLocalTime, localDate } from './time-format.mjs';
 import { normalizeLocation, sha256 } from './utils.mjs';
-import { companyIsUncertain, displayCompanyName, freshnessLabel, isNewSinceLastPoll, postedAtPrecision, postedText } from './posting-fields.mjs';
+import { freshnessKey } from './report-filters.mjs';
+import { FRESHNESS_LABELS, companyIsUncertain, displayCompanyName, freshnessLabel, isNewSinceLastPoll, postedAtPrecision, postedText } from './posting-fields.mjs';
 import { describeQuota } from './engines/quota.mjs';
 import { LEGACY_LOCATION_GAP, LOCATION_NOT_STATED_LABEL, LOCATION_NOT_STATED_TITLE, LOCATION_UNVERIFIED_GAP, usEvidenceInDescription } from './eligibility.mjs';
 import { describePrescreen, funnelText } from './prescreen-text.mjs';
@@ -125,8 +126,11 @@ function footnote(job, timeZone) {
   }
   if (job.carriedOver) title = `Carried over: deferred by the review budget on an earlier run and reviewed now. ${title}`;
   if (job.postedAtCorrection) title = `${title}. The source's time (${job.postedAtCorrection.from}) was later than the run, so only the date is kept`;
+  // The card shows the posting time beside its Freshness tag and the source on its own line; a date-only time
+  // drops "(date only)" there because the tag says it.
+  const posted = parts.join(' · ');
   if (job.source) parts.push(String(job.source));
-  return { text: parts.join(' · '), title };
+  return { text: parts.join(' · '), title, posted, source: job.source ? String(job.source) : '' };
 }
 
 export function cardView(job, tracks, timeZone = null, decorate = null, review = null) {
@@ -159,7 +163,12 @@ export function cardView(job, tracks, timeZone = null, decorate = null, review =
     description: String(job.description || '').trim(),
     footnote: note.text,
     footnoteTitle: note.title,
+    posted: freshnessLabel(job) === 'date only' ? note.posted.replace(' (date only)', '') : note.posted,
+    source: note.source,
     freshness: freshnessLabel(job),
+    freshnessKey: freshnessKey(freshnessLabel(job)),
+    // Hub marks (data-contacted, data-applied) for the Hide Contacted / Hide Applied filters.
+    flags: extra.flags && typeof extra.flags === 'object' ? extra.flags : {},
     carriedOver: Boolean(job.carriedOver),
     alternates: (Array.isArray(job.alternates) ? job.alternates : []).map(item => ({ url: String(item?.url || ''), label: [item?.source, item?.location].filter(Boolean).join(' · ') || 'alternate listing' })).filter(item => item.url),
     sort: {
@@ -463,12 +472,15 @@ export function buildReportView(matchJobs, meta, options = {}) {
     posted: postingWindowLabel(strict.main, meta),
   };
   const roleTypes = [...new Set(jobs.map(job => job.roleType || 'unknown'))].map(value => ({ value, label: roleLabel(value) }));
+  // The Freshness filter offers the values present in this report, in FRESHNESS_LABELS order.
+  const present = new Set(jobs.map(job => freshnessLabel(job)));
+  const freshness = FRESHNESS_LABELS.filter(label => present.has(label)).map(label => ({ value: freshnessKey(label), label: label.replace(/\b[a-z]/g, letter => letter.toUpperCase()) }));
   return {
     title: REPORT_TITLE,
     dateLabel: readableDate(meta.date),
     matchLabel: matchLabel(jobs.length),
     masthead: { title: readableDate(meta.date), subtitle: mastheadSubtitle(jobs, meta), note: meta.quotaNote || null },
-    toolbar: { roleTypes, tracks, quiet: jobs.length < 5, total: jobs.length },
+    toolbar: { roleTypes, tracks, freshness, quiet: jobs.length < 5, total: jobs.length, marks: options.marks || null },
     authBanner: signedOutBanner(meta.authExpired),
     banner: meta.authExpired ? null : (meta.quota?.banner || null),
     notReviewedBanner: notReviewed.length ? `${notReviewedHeadline(notReviewed.length)}: the scoring engine was unavailable, so they kept only the local triage score. They are not matches; see "${NOT_REVIEWED_TITLE}" at the bottom.` : null,

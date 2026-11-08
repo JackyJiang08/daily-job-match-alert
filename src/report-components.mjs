@@ -20,12 +20,20 @@ function option(value, label, selected = false) {
   return `<option value="${htmlEscape(value)}"${selected ? ' selected' : ''}>${htmlEscape(label)}</option>`;
 }
 
-export function renderToolbar({ roleTypes, tracks, quiet, total }) {
+// The filter bar: search, sort, and the filters (resume track, role type, Freshness, score range, and in the hub
+// Hide Contacted / Hide Applied). The page script keeps their state in the URL query (src/report-filters.mjs).
+export function renderToolbar({ roleTypes, tracks, quiet, total, freshness = [], marks = null }) {
+  const checks = marks
+    ? `<label class="check"><input type="checkbox" id="hide-contacted"> Hide Contacted</label><label class="check"><input type="checkbox" id="hide-applied"> Hide Applied</label>`
+    : '';
   return `<form class="toolbar${quiet ? ' quiet' : ''}" id="toolbar" autocomplete="off">
     <input type="search" id="q" placeholder="Search company or title" aria-label="Search company or title">
     <label class="control"><span>Sort by</span><select id="sort">${option('score', 'Best Score', true)}${option('company', 'Company')}${option('posted', 'Posted Time')}</select></label>
-    <select id="role" aria-label="Role type">${option('', 'All Role Types')}${roleTypes.map(item => option(item.value, item.label)).join('')}</select>
     <label class="control"><span>Resume</span><select id="track">${option('', 'All Resumes')}${tracks.map(track => option(track.id, track.label)).join('')}</select></label>
+    <label class="control"><span>Role Type</span><select id="role" aria-label="Role type">${option('', 'All Role Types')}${roleTypes.map(item => option(item.value, item.label)).join('')}</select></label>
+    <label class="control"><span>Freshness</span><select id="fresh">${option('', 'Any Freshness')}${freshness.map(item => option(item.value, item.label)).join('')}</select></label>
+    <span class="control score-range"><span>Score</span><input type="number" id="score-min" min="0" max="100" step="1" inputmode="numeric" placeholder="0" aria-label="Minimum Score"><span aria-hidden="true">–</span><input type="number" id="score-max" min="0" max="100" step="1" inputmode="numeric" placeholder="100" aria-label="Maximum Score"></span>
+    ${checks}<button type="button" class="btn secondary" id="clear-filters" hidden>Clear Filters</button>
     <span class="count" id="count">${total} shown</span>
   </form>`;
 }
@@ -49,19 +57,38 @@ function renderFacts(label, items, className) {
 
 export function renderScores(card) {
   const parts = card.scores.map(score => `<span class="track${score.best ? ' best' : ''}" data-track="${htmlEscape(score.id)}">${htmlEscape(score.label)} <b>${score.value}</b></span>`);
-  return `<div class="scores">${parts.join('<span class="sep">·</span>')}<span class="recommend">${htmlEscape(card.recommendation)}</span></div>`;
+  return `<div class="scores">${parts.join('<span class="sep">·</span>')}</div>`;
+}
+
+// The score block on the right of the card head: the recommended resume, every track's score, the ring.
+function renderScoreBlock(card) {
+  return `<div class="job-score"><div class="score-text"><span class="recommend">${htmlEscape(card.recommendation)}</span>${renderScores(card)}</div>${renderScoreRing(card.bestScore)}</div>`;
 }
 
 // Card actions are links, or buttons carrying data attributes for a page script to drive.
 function renderAction(action) {
-  const className = htmlEscape(action.className || 'btn secondary small');
+  const className = htmlEscape(action.className || 'btn secondary');
   if (action.button) {
     const data = Object.entries(action.data || {}).map(([key, value]) => ` data-${htmlEscape(key)}="${htmlEscape(value)}"`).join('');
-    return `<button type="button" class="${className}"${data}${action.disabled ? ' disabled' : ''}>${htmlEscape(action.label)}</button>`;
+    const pressed = action.pressed == null ? '' : ` aria-pressed="${action.pressed ? 'true' : 'false'}"`;
+    const title = action.title ? ` title="${htmlEscape(action.title)}"` : '';
+    return `<button type="button" class="${className}"${data}${pressed}${title}${action.disabled ? ' disabled' : ''}>${htmlEscape(action.label)}</button>`;
   }
   return `<a class="${className}" href="${htmlEscape(action.href)}"${action.newTab ? ` ${EXTERNAL_LINK}` : ''}>${htmlEscape(action.label)}</a>`;
 }
 
+// The Freshness tag beside the posting time: "Posted Today", "Date Only", "New Since Last Poll", "Carried Over",
+// "Undated" (the xlsx Freshness column's values in Title Case).
+function freshnessTag(card) {
+  if (!card.freshness) return '';
+  const label = card.freshness.replace(/\b[a-z]/g, letter => letter.toUpperCase());
+  return `<span class="badge fresh" data-badge="freshness">${htmlEscape(label)}</span>`;
+}
+
+// Card layout, top to bottom: company · title (left) with the score and the recommended resume (right);
+// location · role type · posting time with its Freshness tag; badges; the action row in a fixed order (Open
+// Posting, then the hub's letter and Reach Out actions); Gaps / Verify (open); Job Description (folded); the
+// source line and other listings.
 export function renderJobCard(card) {
   const attributes = [
     `data-score="${card.sort.score}"`,
@@ -70,6 +97,8 @@ export function renderJobCard(card) {
     `data-role="${htmlEscape(card.roleType)}"`,
     `data-track="${htmlEscape(card.recommendedTrack)}"`,
     `data-search="${htmlEscape(card.sort.search)}"`,
+    `data-freshness="${htmlEscape(card.freshnessKey || '')}"`,
+    ...Object.entries(card.flags || {}).map(([key, value]) => `data-${htmlEscape(key)}="${htmlEscape(value)}"`),
   ].join(' ');
   const badges = card.badges.length ? `<div class="badges">${card.badges.map(renderBadge).join('')}</div>` : '';
   // Folded by default. The posting's own paragraphs, headings, lists and bold (cleaned markup from
@@ -80,17 +109,23 @@ export function renderJobCard(card) {
     : card.descriptionSrc
       ? `<details class="jd" data-jd-src="${htmlEscape(card.descriptionSrc)}"><summary>Job Description</summary><div class="jd-body"><p>${htmlEscape(card.descriptionPreview)}</p></div></details>`
       : `<details class="jd"><summary>Job Description</summary><div class="jd-body">${card.descriptionHtml ?? `<p>${htmlEscape(card.description)}</p>`}</div></details>`;
+  const posted = card.posted ? `<span class="sep">·</span><span class="meta"${card.footnoteTitle ? ` title="${htmlEscape(card.footnoteTitle)}"` : ''}>${htmlEscape(card.posted)}</span>${freshnessTag(card)}` : freshnessTag(card);
+  const alternates = card.alternates?.length ? `<p class="alternates">Also listed at: ${card.alternates.map(item => `<a ${EXTERNAL_LINK} href="${htmlEscape(item.url)}" title="${htmlEscape(item.label)}">${htmlEscape(new URL(item.url).hostname.replace(/^www\./, ''))}${item.label ? ` (${htmlEscape(item.label)})` : ''}</a>`).join(', ')}</p>` : '';
+  const source = card.source ? `<p class="job-foot">Source: ${htmlEscape(card.source)}</p>` : '';
   return `<article class="job" ${attributes}>
-    ${renderScoreRing(card.bestScore)}
     <div class="job-body">
-      <h2 class="job-title"><a ${EXTERNAL_LINK} href="${htmlEscape(card.url)}">${htmlEscape(card.title)}</a></h2>
-      <p class="job-meta">${htmlEscape(card.company)} · ${htmlEscape(card.location)} · ${htmlEscape(card.roleLabel)}</p>
-      ${renderScores(card)}
+      <div class="job-head">
+        <div class="job-main">
+          <h2 class="job-title"><span class="company">${htmlEscape(card.company)}</span><span class="dot"> · </span><a ${EXTERNAL_LINK} href="${htmlEscape(card.url)}">${htmlEscape(card.title)}</a></h2>
+          <p class="job-meta"><span>${htmlEscape(card.location)}</span><span class="sep">·</span><span>${htmlEscape(card.roleLabel)}</span>${posted}</p>
+        </div>
+        ${renderScoreBlock(card)}
+      </div>
       ${badges}
+      <div class="actions"><a class="apply" ${EXTERNAL_LINK} href="${htmlEscape(card.url)}">Open Posting</a>${(card.actions || []).map(renderAction).join('')}</div>
       ${renderFacts('Gaps / Verify', card.gaps, 'gaps')}
       ${description}
-      ${card.alternates?.length ? `<p class="alternates">Also listed at: ${card.alternates.map(item => `<a ${EXTERNAL_LINK} href="${htmlEscape(item.url)}" title="${htmlEscape(item.label)}">${htmlEscape(new URL(item.url).hostname.replace(/^www\./, ''))}${item.label ? ` (${htmlEscape(item.label)})` : ''}</a>`).join(', ')}</p>` : ''}
-      <div class="actions"><a class="apply" ${EXTERNAL_LINK} href="${htmlEscape(card.url)}">Open Posting</a>${(card.actions || []).map(renderAction).join('')}<span class="meta"${card.footnoteTitle ? ` title="${htmlEscape(card.footnoteTitle)}"` : ''}>${htmlEscape(card.footnote)}</span></div>
+      ${source}${alternates}
     </div>
   </article>`;
 }

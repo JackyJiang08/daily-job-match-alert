@@ -204,7 +204,7 @@ test('Reports reads payloads from disk on every request and normalizes locations
     assert.match(grouped.text, /<a href="\/reports\/2026-09-02"[^>]*title="2026-09-02 \(after today\)"><span>Wed, Sep 2<\/span><span class="n">2 matches<\/span><span class="tag" data-tag="tomorrow">Tomorrow<\/span><\/a>/, 'dates after today are tagged Tomorrow');
     assert.match((await hub.request('GET', '/reports')).text, /<a href="\/reports\/2026-08-27" class="active today"/, 'the default selection is calendar today, not the newest report');
     await fs.rm(sept);
-    assert.match(after.text, /Acme · Boston, MA · Johnston, RI · Columbus, OH · New Grad/);
+    assert.match(after.text, /<span class="company">Acme<\/span>[\s\S]*?<p class="job-meta"><span>Boston, MA · Johnston, RI · Columbus, OH<\/span><span class="sep">·<\/span><span>New Grad<\/span>/);
     assert.doesNotMatch(after.text, /Boston, MA Johnston/);
     assert.equal(await fs.readFile(file, 'utf8'), raw, 'the payload on disk is untouched');
     await fs.writeFile(file, JSON.stringify({ meta: payloadMeta('2026-08-28', { matchCount: 0 }), matches: [], reviewed: [], complete: true }));
@@ -626,9 +626,10 @@ test('a persisted Workday company name is cleaned when rendered in the report an
   const hub = await startHub(root);
   try {
     const report = await hub.request('GET', '/reports/2026-08-27');
-    assert.match(report.text, /<p class="job-meta">Motorola Solutions · Remote - US · New Grad<\/p>/, 'the card shows the cleaned name');
+    assert.match(report.text, /<h2 class="job-title"><span class="company">Motorola Solutions<\/span>/, 'the card shows the cleaned name');
+    assert.match(report.text, /<p class="job-meta"><span>Remote - US<\/span><span class="sep">·<\/span><span>New Grad<\/span>/);
     assert.match(report.text, /data-company="motorola solutions"/);
-    assert.match(report.text, /<span class="meta" title="Date only: the source reports no time of day">Posted Aug 26 \(date only\) · fixture<\/span>/, 'a Workday day is shown as the local calendar day, date only');
+    assert.match(report.text, /<span class="meta" title="Date only: the source reports no time of day">Posted Aug 26<\/span><span class="badge fresh" data-badge="freshness">Date Only<\/span>/, 'a Workday day is shown as the local calendar day, date only');
     assert.doesNotMatch(report.text, /100000 Motorola/);
     const jobId = sha256(workday.url).slice(0, 16);
     const panel = await hub.request('GET', `/letters/new?date=2026-08-27&job=${jobId}`);
@@ -701,7 +702,7 @@ test('the Quota card shows the last limit event, the model in effect, and the de
     assert.match((await hub.request('GET', '/status')).text, /<dt>Policy<\/dt><dd>Ladder claude-fable-5-1 → claude-opus-5-5 · no engine fallback<\/dd>/);
 
     const reports = await hub.request('GET', '/reports');
-    assert.match(reports.text, /\.datelist \.month\{[^}]*font-size:11px;font-weight:700;letter-spacing:\.06em;text-transform:uppercase;color:var\(--ink-2\)\}/, 'month headings: bold, one step darker, same size, no background change or rule');
+    assert.match(reports.text, /\.datelist \.month\{[^}]*font-size:var\(--fs-meta\);font-weight:650;color:var\(--ink-2\)\}/, 'month headings: bold, one step darker, the supporting text size, no background change or rule');
     assert.doesNotMatch(reports.text, /\.datelist \.month\{[^}]*border-bottom/);
   } finally {
     await hub.close();
@@ -1139,7 +1140,7 @@ test('while the automatic pass writes letters, cards say so and manual letters w
   const hub = await startHub(root, { alivePids: [777] });
   try {
     const reports = (await hub.request('GET', '/reports/2026-08-27')).text;
-    assert.match(reports.split('<script>')[0], /<button type="button" class="btn secondary small" data-autoletter="1" data-job="[0-9a-f]{16}" disabled>Letter Generating…<\/button>/);
+    assert.match(reports.split('<script>')[0], /<button type="button" class="btn secondary" data-autoletter="1" data-job="[0-9a-f]{16}" disabled>Letter Generating…<\/button>/);
     assert.match(reports, /data-badge="letter-generating"[^>]*>Letter Generating…<\/span>/);
     assert.doesNotMatch(reports.split('<script>')[0], /data-oneclick/, 'no Generate button while the pass is on it');
     const blocked = await hub.form('/letters/oneclick', { date: '2026-08-27', job: jobId });

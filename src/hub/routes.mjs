@@ -5,7 +5,7 @@ import { reviewBadge } from '../cover-letter/notes.mjs';
 import { buildReportView, reviewReportJobs } from '../report.mjs';
 import { jobDescriptionHtml } from '../jd-html.mjs';
 import { assembleLetter } from '../cover-letter/compose.mjs';
-import { contactedByJob, findCandidates, outreachPanelHtml, resumeDownload, saveFirstName, setContacted, validateOutreachSettings } from './outreach.mjs';
+import { contactedByJob, findCandidates, outreachPanelHtml, resumeDownload, saveFirstName, setApplied, setContacted, validateOutreachSettings } from './outreach.mjs';
 import { OUTREACH_SCRIPT } from './outreach-views.mjs';
 import path from 'node:path';
 import { resolvePayloadFile } from '../payload-store.mjs';
@@ -226,7 +226,7 @@ export function createHubHandler(ctx) {
       }
       // Postings the automatic letters pass is still working through (state/letters-auto.json).
       const autoStatus = await timer.phase('letters', () => autoLettersView(ctx));
-      // Reach Out: the cards show "Contacted Nov 8", so the contacted marks are part of the render key.
+      // Reach Out: the cards show "Contacted Nov 8" and "Applied Nov 8", so those marks are part of the render key.
       const contacted = await contactedByJob(ctx, timeZone);
       const renderKey = [day.key, await timer.phase('letters', () => lettersVersion(selected, autoStatus)), await configVersion(), timeZone, contacted.version].join('#');
       let rendered = ctx.reportCache.getRender(renderKey);
@@ -234,31 +234,39 @@ export function createHubHandler(ctx) {
       if (!rendered) {
         const lettersByJob = await timer.phase('letters', () => ctx.letterStore.lettersByJob().catch(() => new Map()));
         const pending = new Set(autoStatus?.running ? autoStatus.pending : []);
-        // Every card gets Reach Out (the drawer, src/hub/outreach-views.mjs) and, once ticked, "Contacted Nov 8".
+        // Every card gets Reach Out (the drawer, src/hub/outreach-views.mjs) and, once ticked, "Contacted Nov 8",
+        // and Mark as Applied ("Applied Nov 8" once pressed). The action row keeps one order: Open Posting,
+        // Download Letter, Open Letter, Reach Out (Generate Cover Letter stands in for the letter actions).
         const reach = id => ({ button: true, label: 'Reach Out', data: { reach: '1', date: selected, job: id } });
+        const applied = id => {
+          const label = contacted.applied.get(id) || null;
+          return { button: true, className: 'btn secondary mark-applied', label: label || 'Mark as Applied', pressed: Boolean(label), title: label ? 'Marked as applied; press again to clear the mark' : 'Record that you applied (kept in private/outreach/state.json)', data: { 'apply-mark': '1', job: id } };
+        };
         const contactedBadge = id => (contacted.labels.has(id) ? [{ key: 'contacted', label: contacted.labels.get(id), tone: 'note', title: 'Marked as contacted in the Reach Out panel' }] : []);
+        const flags = id => ({ contacted: contacted.labels.has(id) ? '1' : '0', applied: contacted.applied.has(id) ? '1' : '0' });
         const decorate = job => {
           const id = jobIdOf(job);
           const letter = lettersByJob.get(id);
           if (!letter && pending.has(id)) {
-            return { actions: [{ button: true, disabled: true, label: 'Letter Generating…', data: { autoletter: '1', job: id } }, reach(id)], badges: [...contactedBadge(id), { key: 'letter-generating', label: 'Letter Generating…', tone: 'note', title: 'The automatic cover-letter pass after the nightly run is writing this letter' }] };
+            return { flags: flags(id), actions: [{ button: true, disabled: true, label: 'Letter Generating…', data: { autoletter: '1', job: id } }, reach(id), applied(id)], badges: [...contactedBadge(id), { key: 'letter-generating', label: 'Letter Generating…', tone: 'note', title: 'The automatic cover-letter pass after the nightly run is writing this letter' }] };
           }
-          // A saved letter gets just Download PDF (once rendered) and Open Letter. The only badge is
+          // A saved letter gets just Download Letter (once rendered) and Open Letter. The only badge is
           // "Check N details" when the editor flagged something the owner must confirm; how the letter was
           // made (engines, fallbacks, applied fixes) stays in the Open Letter footer.
           // Without a letter the card carries a one-click button that the page script drives (ONECLICK_SCRIPT).
-          const download = letter?.pdf && letter.pdfFileName ? [{ href: `/letters/${letter.date}/${letter.slug}/${encodeURIComponent(letter.pdfFileName)}`, label: 'Download PDF' }] : [];
+          const download = letter?.pdf && letter.pdfFileName ? [{ href: `/letters/${letter.date}/${letter.slug}/${encodeURIComponent(letter.pdfFileName)}`, label: 'Download Letter' }] : [];
           const check = letter ? reviewBadge(letter.editorNotes) : null;
           return {
+            flags: flags(id),
             actions: letter
               // Open Letter opens a new tab, so the report stays where it was for checking the JD.
-              ? [...download, { href: `/letters/${letter.date}/${letter.slug}`, label: 'Open Letter', newTab: true }, reach(id)]
-              : [{ button: true, label: 'Generate Cover Letter', data: { oneclick: '1', date: selected, job: id } }, reach(id)],
+              ? [...download, { href: `/letters/${letter.date}/${letter.slug}`, label: 'Open Letter', newTab: true }, reach(id), applied(id)]
+              : [{ button: true, label: 'Generate Cover Letter', data: { oneclick: '1', date: selected, job: id } }, reach(id), applied(id)],
             badges: [...contactedBadge(id), ...(check ? [check] : [])],
           };
         };
         const lazy = { src: card => (day.shared.has(card.id) ? null : `/reports/${selected}/jd/${card.id}`) };
-        const body = await timer.phase('render', () => renderReportBody(buildReportView(day.matches, { timeZone, ...day.meta }, { embedded: true, decorate, review: day.review, notReviewed: day.notReviewed || [], lazyDescription: lazy })));
+        const body = await timer.phase('render', () => renderReportBody(buildReportView(day.matches, { timeZone, ...day.meta }, { embedded: true, decorate, marks: { contacted: true, applied: true }, review: day.review, notReviewed: day.notReviewed || [], lazyDescription: lazy })));
         rendered = ctx.reportCache.setRender(renderKey, { reportBody: body, missingCount: missingLetterJobs(day.matches, lettersByJob).length, letterCount: [...lettersByJob.values()].filter(letter => letter.date === selected).length });
       }
       reportBody = rendered.reportBody;
@@ -470,6 +478,10 @@ export function createHubHandler(ctx) {
       }
       case '/outreach/name': {
         json(response, 200, await saveFirstName(ctx, { jobId: fields.job, firstName: fields.firstName }));
+        return;
+      }
+      case '/outreach/applied': {
+        json(response, 200, await setApplied(ctx, { jobId: fields.job, applied: fields.applied }));
         return;
       }
       case '/outreach/contacted': {

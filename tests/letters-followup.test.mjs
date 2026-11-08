@@ -179,7 +179,7 @@ test('Generate Missing Letters writes every high match without a letter and with
     assert.equal((await readLettersStatus(root)).mode, 'missing');
     const after = (await hub.request('GET', '/reports/2026-09-15')).text;
     assert.doesNotMatch(after, /id="missing-letters"/, 'nothing left to write');
-    assert.match(cardOf(after, 'Example Co 1'), />Download PDF<\/a><a class="btn secondary small" href="\/letters\/2026-09-15\/[^"]+" target="_blank" rel="noopener noreferrer">Open Letter<\/a>/);
+    assert.match(cardOf(after, 'Example Co 1'), />Download Letter<\/a><a class="btn secondary" href="\/letters\/2026-09-15\/[^"]+" target="_blank" rel="noopener noreferrer">Open Letter<\/a>/);
   } finally {
     release();
     await ctx.missingLetters?.catch(() => {});
@@ -216,7 +216,7 @@ test('editor notes split into needs-review and info; the card shows only "Check 
     const page = (await hub.request('GET', '/reports/2026-09-15')).text.split('<script>')[0];
     const quiet = cardOf(page, 'Example Co 1');
     assert.doesNotMatch(quiet, /class="badges"/, 'no badge at all without needs-review notes');
-    assert.match(quiet, /<div class="actions"><a class="apply"[^>]*>Open Posting<\/a><a class="btn secondary small" href="\/letters\/2026-09-15\/[^"]+" target="_blank" rel="noopener noreferrer">Open Letter<\/a><button type="button" class="btn secondary small" data-reach="1" data-date="2026-09-15" data-job="[a-f0-9]{16}">Reach Out<\/button><span class="meta"/, 'no PDF rendered yet: Open Letter, then Reach Out');
+    assert.match(quiet, /<div class="actions"><a class="apply"[^>]*>Open Posting<\/a><a class="btn secondary" href="\/letters\/2026-09-15\/[^"]+" target="_blank" rel="noopener noreferrer">Open Letter<\/a><button type="button" class="btn secondary" data-reach="1" data-date="2026-09-15" data-job="[a-f0-9]{16}">Reach Out<\/button><button type="button" class="btn secondary mark-applied"[^>]*>Mark as Applied<\/button><\/div>/, 'no PDF rendered yet: Open Letter, then Reach Out');
     assert.doesNotMatch(page, /Letter ready|editor note/);
     assert.match(cardOf(page, 'Example Co 2'), /<span class="badge badge-warn" data-badge="letter-check" title="unverified detail: a retail inventory dashboard\nsalutation says Example Corp, body says Example Labs\nThe 35% figure does not appear in the resume or the playbook">Check 3 details<\/span>/);
     const letters = await ctx.letterStore.listLetters();

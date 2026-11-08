@@ -2,7 +2,7 @@
 // contacts the JD names, the search links (new tabs), search candidates (only when switched on and a key is
 // set), the first-name box, the invitation note (live character count, Copy), the follow-up message (Copy),
 // the recommended resume, and Mark as Contacted. Nothing here requests linkedin.com; the links are opened by
-// the owner.
+// the owner. The script also drives the cards' Mark as Applied buttons.
 import { htmlEscape } from '../utils.mjs';
 import { CANDIDATES_NOTE } from '../outreach/candidates.mjs';
 import { FIRST_NAME_PLACEHOLDER } from '../outreach/messages.mjs';
@@ -130,13 +130,30 @@ export const OUTREACH_SCRIPT = `
     var badges = card.querySelector('.badges');
     var old = card.querySelector('[data-badge="contacted"]');
     if (old) old.remove();
+    card.setAttribute('data-contacted', label ? '1' : '0');
+    document.dispatchEvent(new CustomEvent('report-cards-changed'));
     if (!label) return;
-    if (!badges) { badges = document.createElement('div'); badges.className = 'badges'; card.querySelector('.job-body').insertBefore(badges, card.querySelector('.facts-label') || card.querySelector('.actions')); }
+    if (!badges) { badges = document.createElement('div'); badges.className = 'badges'; card.querySelector('.job-body').insertBefore(badges, card.querySelector('.actions')); }
     var badge = document.createElement('span'); badge.className = 'badge'; badge.setAttribute('data-badge', 'contacted'); badge.textContent = label; badges.appendChild(badge);
+  }
+  // Mark as Applied on a card: toggles the mark (POST /outreach/applied) and updates the button in place.
+  function markApplied(button) {
+    var on = button.getAttribute('aria-pressed') !== 'true';
+    button.disabled = true;
+    post('/outreach/applied', { job: button.getAttribute('data-job'), applied: on ? '1' : '0' }).then(function (result) {
+      button.disabled = false;
+      button.setAttribute('aria-pressed', result.label ? 'true' : 'false');
+      button.textContent = result.label || 'Mark as Applied';
+      var card = button.closest('.job');
+      if (card) card.setAttribute('data-applied', result.label ? '1' : '0');
+      document.dispatchEvent(new CustomEvent('report-cards-changed'));
+    }).catch(function (error) { button.disabled = false; button.title = error.message; });
   }
   document.addEventListener('click', function (event) {
     var reach = event.target.closest && event.target.closest('[data-reach]');
     if (reach) { event.preventDefault(); open(reach); return; }
+    var mark = event.target.closest && event.target.closest('[data-apply-mark]');
+    if (mark) { event.preventDefault(); markApplied(mark); return; }
     if (!drawer.contains(event.target)) return;
     var p = panel();
     if (event.target.closest('[data-reach-close]')) { drawer.hidden = true; return; }

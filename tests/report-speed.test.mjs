@@ -8,6 +8,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
+import { assertSameContent } from './helpers/page-content.mjs';
 import { ASSET_CACHE_CONTROL } from '../src/hub/assets.mjs';
 import { createReportCache } from '../src/hub/report-cache.mjs';
 import { createTimingLog, timingLine } from '../src/hub/report-timing.mjs';
@@ -42,7 +43,7 @@ test('snapshot: the day page, the list page, and a short-JD day are the same HTM
       assert.match(page.text, /<link rel="stylesheet" href="\/assets\/hub-[a-f0-9]{16}\.css">/);
       const before = await asBefore(hub, page.text, root);
       assert.equal(before.lazy.length, lazyCount, `${name}: every JD over 300 characters loads on demand`);
-      assert.equal(before.text, await fs.readFile(new URL(name, snapshots), 'utf8'), name);
+      assertSameContent(assert, await fs.readFile(new URL(name, snapshots), 'utf8'), before.text, name);
     }
   });
 });

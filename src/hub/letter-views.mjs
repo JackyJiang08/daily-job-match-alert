@@ -179,18 +179,18 @@ export const SAMPLE_TRACK_SCRIPT = `
 export function lettersPage({ letters, timeZone = 'America/Chicago' }) {
   const sorted = [...letters].sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.savedAt || '').localeCompare(String(a.savedAt || '')));
   const rows = sorted.length
-    ? `<table class="plain"><tr><th>Date</th><th>Company</th><th>Role</th><th>Track</th><th>Engine</th><th>Pages</th><th>Generated</th><th>Notes</th><th>File</th><th>Actions</th></tr>${sorted.map(letter => `<tr>
-      <td>${htmlEscape(letter.date)}</td>
+    ? `<div class="table-wrap"><table class="plain letters-table"><tr><th>Date</th><th>Company</th><th>Role</th><th>Track</th><th>Engine</th><th>Pages</th><th>Generated</th><th>Notes</th><th>File</th><th>Actions</th></tr>${sorted.map(letter => `<tr>
+      <td class="nowrap">${htmlEscape(letter.date)}</td>
       <td><a href="/letters/${letter.date}/${letter.slug}">${htmlEscape(letter.company)}</a>${looksLikeEntityCode(letter.company) ? ' <span class="badge badge-warn" data-badge="company-suspect" title="The salutation may not name the employer; open the letter and use Rename Company">Check Company Name</span>' : ''}</td>
       <td>${htmlEscape(letter.jobTitle || '')}</td>
       <td>${trackBadge(letter.track) || htmlEscape(letter.trackLabel || '')}</td>
-      <td>${htmlEscape(letter.engine || '')}${letter.model ? ` · ${htmlEscape(letter.model)}` : ''}</td>
+      <td class="nowrap">${htmlEscape(letter.engine || '')}${letter.model ? `<br><span class="mono">${htmlEscape(letter.model)}</span>` : ''}</td>
       <td>${letter.pdf ? `${letter.pdf.pages}${letter.pdf.layout && letter.pdf.layout !== 'letter-1in' ? ' <span class="badge badge-warn" data-badge="layout">Reduced Layout</span>' : ''}` : '—'}</td>
       <td>${readable(letter.createdAt || letter.savedAt, timeZone)}</td>
       <td>${Array.isArray(letter.editorNotes) ? letter.editorNotes.length : 0}</td>
-      <td><span class="mono">${htmlEscape(letter.pdfFileName || '')}</span></td>
-      <td><a class="btn secondary small" href="/letters/${letter.date}/${letter.slug}">Open</a> ${letter.pdfFileName && letter.pdf ? `<a class="btn secondary small" href="/letters/${letter.date}/${letter.slug}/${encodeURIComponent(letter.pdfFileName)}">Download PDF</a>` : ''}</td>
-    </tr>`).join('')}</table>`
+      <td class="file"><span class="mono">${htmlEscape(letter.pdfFileName || '')}</span></td>
+      <td class="actions"><a class="btn secondary small" href="/letters/${letter.date}/${letter.slug}">Open</a> ${letter.pdfFileName && letter.pdf ? `<a class="btn secondary small" href="/letters/${letter.date}/${letter.slug}/${encodeURIComponent(letter.pdfFileName)}">Download PDF</a>` : ''}</td>
+    </tr>`).join('')}</table></div>`
     : '<p class="muted">No cover letters yet. Open a report and use Generate Cover Letter on a job card.</p>';
   return `<h1 class="hub-title">Letters</h1><p class="hub-sub">Letters you generate are kept on this Mac. Reopen one to edit or download it again.</p><article class="card">${rows}</article>`;
 }
@@ -257,7 +257,7 @@ export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, 
       <label class="field"><span>Company Short Name</span><input type="text" id="letter-company" class="control-input" value="${htmlEscape(company)}" required title="Used in &quot;Dear … Recruiting Team,&quot;, the file name, and the body after the first mention. A name typed here is kept on Regenerate; Rename Company &amp; Re-render applies it to the saved letter."></label>
       ${companyHint}
       <div class="row">
-        <button class="btn" id="generate-button" type="button"${readiness.ready ? '' : ' disabled'}>Regenerate</button>
+        <button class="btn${paragraphs.length ? ' secondary' : ''}" id="generate-button" type="button"${readiness.ready ? '' : ' disabled'}>Regenerate</button>
         <button class="btn secondary" id="save-button" type="button"${paragraphs.length ? '' : ' hidden'}>Save &amp; Render PDF</button>
         <button class="btn secondary" id="rename-button" type="button"${existing?.slug ? '' : ' hidden'} title="Replace the salutation and the file name and render the PDF again; the model is not called">Rename Company &amp; Re-render</button>
         <button class="btn secondary" id="codex-button" type="button" hidden>Generate With Codex</button>
@@ -428,7 +428,7 @@ ${letterPlainText.toString()}
 `;
 
 // Drives the one-click buttons on job cards: start a background generation, poll its state, download
-// the PDF when it is ready, and swap the button for Open Letter and Download PDF. One letter at a time:
+// the PDF when it is ready, and swap the button for Download Letter and Open Letter. One letter at a time:
 // every other button is disabled while one is generating, on this page or another.
 export const ONECLICK_SCRIPT = `
 (function () {
@@ -465,13 +465,13 @@ export const ONECLICK_SCRIPT = `
   }
   function markReady(button, result) {
     button.dataset.state = 'ready';
-    var open = document.createElement('a'); open.className = 'btn secondary small'; open.href = result.openUrl; open.target = '_blank'; open.rel = 'noopener noreferrer'; open.textContent = 'Open Letter';
-    var download = document.createElement('a'); download.className = 'btn secondary small'; download.href = result.downloadUrl; download.textContent = 'Download PDF';
+    var open = document.createElement('a'); open.className = 'btn secondary'; open.href = result.openUrl; open.target = '_blank'; open.rel = 'noopener noreferrer'; open.textContent = 'Open Letter';
+    var download = document.createElement('a'); download.className = 'btn secondary'; download.href = result.downloadUrl; download.textContent = 'Download Letter';
     button.replaceWith(download, open);
     buttons = buttons.filter(function (item) { return item !== button; });
     var card = open.closest('.job');
     var badges = card && card.querySelector('.badges');
-    if (card && !badges) { badges = document.createElement('div'); badges.className = 'badges'; card.querySelector('.scores').insertAdjacentElement('afterend', badges); }
+    if (card && !badges) { badges = document.createElement('div'); badges.className = 'badges'; card.querySelector('.job-body').insertBefore(badges, card.querySelector('.actions')); }
     // Only a letter with details to confirm gets a badge: "Check N details", the items on hover.
     if (badges && result.checkBadge && !badges.querySelector('[data-badge="letter-check"]')) { var badge = document.createElement('span'); badge.className = 'badge badge-warn'; badge.setAttribute('data-badge', 'letter-check'); badge.textContent = result.checkBadge.label; badge.title = result.checkBadge.title; badges.appendChild(badge); }
     var anchor = document.createElement('a'); anchor.href = result.downloadUrl; anchor.download = ''; anchor.hidden = true; document.body.appendChild(anchor); anchor.click(); anchor.remove();

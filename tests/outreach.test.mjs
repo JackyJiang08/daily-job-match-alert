@@ -207,7 +207,7 @@ test('the hub: every card offers Reach Out; the panel lists JD contacts, search 
     const hub = await startReportHub(root, { context: { fetchImpl: spy.fetchImpl, letterEngine: engine } });
     try {
       const page = (await hub.request('/reports/2026-10-17')).text;
-      assert.match(page, new RegExp(`<button type="button" class="btn secondary small" data-reach="1" data-date="2026-10-17" data-job="${jobId}">Reach Out</button>`));
+      assert.match(page, new RegExp(`<button type="button" class="btn secondary" data-reach="1" data-date="2026-10-17" data-job="${jobId}">Reach Out</button>`));
       assert.match(page, /<aside class="reach-drawer" id="reach-drawer" hidden aria-label="Reach Out"><\/aside>/);
 
       let panel = (await hub.request(`/outreach/panel?date=2026-10-17&job=${jobId}`)).text;

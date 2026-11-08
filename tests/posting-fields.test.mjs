@@ -103,8 +103,8 @@ test('cards show day-level dates without a time and say so on hover; precise one
   assert.equal(preciseCard.footnoteTitle, 'Posted Sep 18, 2026, 8:15 PM');
   assert.equal(workdayCard.company, 'Motorola Solutions', 'the render layer cleans a persisted Workday name');
   assert.equal(workdayCard.footnote, 'Posted Sep 18 (date only) · fixture', 'a Workday day-level date is shown as the local calendar day');
-  assert.match(renderJobCard(dayCard), /<span class="meta" title="Date only: the source reports no time of day">Posted Sep 18 \(date only\) · fixture<\/span>/);
-  assert.match(renderJobCard(preciseCard), /<span class="meta" title="Posted Sep 18, 2026, 8:15 PM">Posted Sep 18, 8:15 PM · fixture<\/span>/);
+  assert.match(renderJobCard(dayCard), /<span class="meta" title="Date only: the source reports no time of day">Posted Sep 18<\/span><span class="badge fresh" data-badge="freshness">Date Only<\/span>[\s\S]*<p class="job-foot">Source: fixture<\/p>/);
+  assert.match(renderJobCard(preciseCard), /<span class="meta" title="Posted Sep 18, 2026, 8:15 PM">Posted Sep 18, 8:15 PM<\/span><span class="badge fresh" data-badge="freshness">Posted Today<\/span>/);
 });
 
 test('company validation: a list or feed name is trusted unless empty, legal-only, or shorter than two characters; ATS and URL names face the strict rules', () => {

@@ -107,7 +107,7 @@ test('the hub: no Why It Matches, the lazy JD loads the cleaned markup, Open Let
     assert.equal(jd.headers['content-type'], 'text/html; charset=utf-8');
     assert.ok(jd.text.startsWith(CLEAN));
     assert.doesNotMatch(jd.text, /script|onclick|style=/);
-    assert.match(page, /<a class="btn secondary small" href="\/letters\/2026-10-17\/ExampleCorp1" target="_blank" rel="noopener noreferrer">Open Letter<\/a>/);
+    assert.match(page, /<a class="btn secondary" href="\/letters\/2026-10-17\/ExampleCorp1" target="_blank" rel="noopener noreferrer">Open Letter<\/a>/);
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });

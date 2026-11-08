@@ -110,7 +110,7 @@ disabled; do not expand them unless a task says so.
   logs "[hub] GET … (index · payload · review · letters · render · sidebar) size, gzip, cache" and keeps 20
   for the Status Hub card. tests/fixtures/snapshots/*.html were rendered by the pre-change code;
   tests/report-speed.test.mjs inlines the assets (tests/helpers/report-hub.mjs inlineAssets), strips
-  JD_LOADER_SCRIPT, and expands the JD sections to compare byte for byte. Status's Sources card reads that
+  JD_LOADER_SCRIPT, and expands the JD sections to compare content (see UI redesign). Status's Sources card reads that
   registry plus the source catalog (src/collectors/catalog.mjs) and the
   latest payload's per-source counts. POSTs require a loopback Host/Origin;
   uploads are .pdf ≤ 5 MB; path params are pattern-checked. Never render
@@ -239,7 +239,7 @@ disabled; do not expand them unless a task says so.
   warning and queues the rest. mode 'missing' = POST /letters/missing (the
   report's "Generate Missing Letters" button): every high match of that date
   without a letter, trusted company, no cap, works with autoGenerate off.
-  Cards with a letter: Download PDF + Open Letter only; the one badge is
+  Cards with a letter: Download Letter + Open Letter only; the one badge is
   "Check N details" (src/cover-letter/notes.mjs classifyEditorNotes:
   needs-review = unverified detail, salutation mismatch, unsupported number,
   still too long; everything else is info, shown in the Open Letter footer). Off when the
@@ -292,8 +292,7 @@ disabled; do not expand them unless a task says so.
   section.jobs#jobs-date-only (sorted/filtered by the page script). Carried over / Not reviewed untouched; match
   count, xlsx, letters unchanged. Since 2026-11-08 the header has no window line: Run Details row "Strict 24-Hour
   Window" = strictWindowDetail "On|Off · Main List (N) · <non-empty groups (N)>" (absent for payloads without
-  meta.strictWindow) and row "Posting Window" = "Main List: " + postingWindowLabel(main list only). Don't edit
-  REPORT_SCRIPT text casually: it is embedded in every page and the hub snapshot tests compare whole pages.
+  meta.strictWindow) and row "Posting Window" = "Main List: " + postingWindowLabel(main list only).
 - Dates: parsePostingDate (JSON-LD datePosted, Workday startDate, search page_age): bare date → noon UTC
   calendar date; midnight → date; zoneless clock time → ZONELESS_TIME_ZONES (jobright.ai = UTC, verified
   2026-10-11 against its "2 hours ago") else date only. postingDay reads stored noon/midnight-UTC values as
@@ -558,6 +557,35 @@ disabled; do not expand them unless a task says so.
   managed "<stamp>-" prefix stripped), POST /outreach/{messages,name,contacted,candidates}, POST
   /settings/outreach. Cards: Reach Out button (data-reach) on every match + "Contacted Nov 8" badge; the render
   cache key includes contactedByJob().version. Drawer + OUTREACH_SCRIPT in src/hub/outreach-views.mjs.
+
+## UI redesign (2026-11-08)
+- Design rules (src/report-theme.mjs, shared by the Desktop report and the hub): three type levels --fs-title 18 /
+  --fs-body 14 / --fs-meta 12 (--fs-page aliases title; no other font sizes anywhere), spacing only --space-1..6,
+  --control-height 32. Buttons: .btn (primary, filled) and .btn.secondary (outlined), one size; .small is kept as a
+  class but no longer changes anything; .apply = primary. --ink-3 #5b6472 light / #9aa3b1 dark (≥ 4.5:1 on bg, surface
+  and the tag background). Card action styles are scoped to `.job .actions` (td.actions in tables is unrelated).
+- Card (renderJobCard): .job-head = left "Company · Title" (h2.job-title > span.company + link) and p.job-meta
+  (location · role · span.meta posted text + span.badge.fresh Freshness tag), right .job-score (recommend, .scores,
+  ring); badges; .actions fixed order Open Posting, Download Letter, Open Letter, Reach Out (Generate Cover Letter in
+  place of the letter actions), then Mark as Applied (hub); Gaps / Verify; details.jd; p.job-foot "Source: …";
+  alternates. cardView adds posted (footnote minus source; "(date only)" dropped when the tag says Date Only),
+  source, freshnessKey, flags (hub data-contacted / data-applied). footnote/footnoteTitle unchanged (xlsx etc.).
+- Filter bar (renderToolbar): search, Sort by, Resume, Role Type, Freshness (values present, FRESHNESS_LABELS order),
+  Score min–max, hub-only Hide Contacted / Hide Applied (toolbar.marks), Clear Filters, count. src/report-filters.mjs
+  (readFilters / writeFilters / cardPasses / filtersActive) is injected into REPORT_SCRIPT via toString; state lives
+  in the URL query (q, sort, resume, role, freshness, min, max, hideContacted=1, hideApplied=1; defaults omitted,
+  other params kept, history.replaceState in try/catch). Events: 'report-cards-changed' re-applies (drawer contacted,
+  Mark as Applied), 'report-filters' is dispatched after each apply.
+- Mark as Applied: POST /outreach/applied {job, applied} → setApplied → private/outreach/state.json appliedAt;
+  appliedLabel "Applied Nov 8"; contactedByJob returns { labels, applied, version } (render key); button
+  .btn.secondary.mark-applied[data-apply-mark][aria-pressed], driven by OUTREACH_SCRIPT.
+- Hub mobile (≤ 760px): nav is one scrolling row (brand and mini status hidden), dates are a horizontal chip strip,
+  report-head buttons scroll in one row, kv/conn lists stack; filter bar is a two-column grid (select labels
+  visually hidden); Task Assignments stack per stage (≤ 640px). Wide tables scroll inside .card / .table-wrap;
+  .file is position:relative so its hidden input cannot widen the page.
+- Snapshots: tests/fixtures/snapshots/*.html stay the pre-redesign pages; tests compare CONTENT, not bytes
+  (tests/helpers/page-content.mjs assertSameContent: words, links/actions, form fields and data-* must match;
+  REDESIGN_ALLOWANCES lists the intended additions and "pdf" from Download PDF → Download Letter).
 
 ## Scoring engines (src/engines/)
 - One interface per engine: verifyAuth(), reviewBatch(prompt, schema,

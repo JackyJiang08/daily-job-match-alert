@@ -150,11 +150,11 @@ export function subscriptionsAndModels(view, { timeZone, connectionRow, refresh,
 }
 
 export const MODEL_SETTINGS_STYLES = `
-.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:0 0 var(--space-4)}
-.tabs a{padding:8px 14px;text-decoration:none;color:var(--ink-2);border-bottom:2px solid transparent;margin-bottom:-1px;font-weight:600}
+.tabs{display:flex;gap:var(--space-1);overflow-x:auto;border-bottom:1px solid var(--line);margin:0 0 var(--space-4)}
+.tabs a{flex:0 0 auto;padding:var(--space-2) var(--space-3);white-space:nowrap;text-decoration:none;color:var(--ink-2);border-bottom:2px solid transparent;margin-bottom:-1px;font-weight:600}
 .tabs a.active{color:var(--accent);border-bottom-color:var(--accent)}
 .section-title{font-size:var(--fs-title);margin:var(--space-2) 0 var(--space-2);display:flex;align-items:baseline;gap:var(--space-3);flex-wrap:wrap}
-.section-note{font-size:var(--fs-meta);font-weight:400;color:var(--ink-3)}
+.section-note{font-size:var(--fs-meta);font-weight:400;color:var(--ink-2)}
 .pair-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-3);align-items:start}
 .sub-card,.model-card{margin:0;padding:var(--space-3)}
 .sub-card{display:grid;grid-template-columns:minmax(0,0.9fr) minmax(0,1.3fr);gap:var(--space-3)}
@@ -163,9 +163,9 @@ export const MODEL_SETTINGS_STYLES = `
 .nowrap{white-space:nowrap}
 .sub-head{display:flex;justify-content:space-between;align-items:center}
 .sub-head h3,.model-card h3{margin:0}
-.plan-name{margin:2px 0 0;font-size:26px;font-weight:700;line-height:1.2}
+.plan-name{margin:2px 0 0;font-size:var(--fs-title);font-weight:700;line-height:1.2}
 .plan-name .badge{vertical-align:middle;font-size:var(--fs-meta)}
-.plan-meta{margin:0 0 var(--space-1);font-size:var(--fs-meta);color:var(--ink-3)}
+.plan-meta{margin:0 0 var(--space-1);font-size:var(--fs-meta);color:var(--ink-2)}
 .plan-change{margin:0 0 var(--space-1);font-weight:600;color:var(--warn-ink)}
 .sub-kv{margin-top:var(--space-1)}
 .sub-usage{margin:0;padding-left:0;list-style:none}
@@ -193,13 +193,22 @@ export const MODEL_SETTINGS_STYLES = `
 .tag.head{background:var(--line)}
 .tag.off{background:var(--line);color:var(--ink-3)}
 .tag.off .mono{text-decoration:line-through}
-.tag-x{border:0;background:none;color:var(--ink-3);cursor:pointer;font-size:14px;line-height:1;padding:0 2px}
+.tag-x{border:0;background:none;color:var(--ink-2);cursor:pointer;font-size:var(--fs-body);line-height:1;padding:0 2px}
 .chain-edit .arrow{color:var(--ink-3)}
 .chain-add{width:6.5em;min-height:26px !important;font-size:var(--fs-meta) !important}
 .check.small{font-size:var(--fs-meta);font-weight:400}
 .stage-off{opacity:.65}
 @media (max-width:1000px){.pair-grid{grid-template-columns:1fr}}
-@media (max-width:640px){.sub-card{grid-template-columns:1fr}}
+@media (max-width:640px){
+  .sub-card{grid-template-columns:1fr}
+  /* Task Assignments: one stacked block per stage instead of a table wider than the phone. */
+  table.assignments,table.assignments tbody{display:block}
+  table.assignments tr:first-child{display:none}
+  table.assignments tr{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-2);padding:var(--space-3) 0;border-bottom:1px solid var(--line)}
+  table.assignments td{display:block;border:0;padding:0;min-width:0}
+  table.assignments td:first-child,table.assignments td:last-child{grid-column:1/-1}
+  table.assignments select.control-input{width:100%;max-width:100%}
+}
 `;
 
 export const MODEL_SETTINGS_SCRIPT = `

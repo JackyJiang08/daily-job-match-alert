@@ -26,7 +26,7 @@ test('HTML output escapes remote content, links the posting, and keeps the JD fo
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.match(html, /data-search="a &quot;quoted&quot; co &lt;script&gt;alert\(1\)&lt;\/script&gt;"/);
   assert.match(html, /<a class="apply" target="_blank" rel="noopener noreferrer" href="https:\/\/example\.com\/jobs\/1">Open Posting<\/a>/);
-  assert.match(html, /<h2 class="job-title"><a target="_blank" rel="noopener noreferrer" href="https:\/\/example\.com\/jobs\/1">/);
+  assert.match(html, /<h2 class="job-title"><span class="company">A &quot;quoted&quot; co<\/span><span class="dot"> · <\/span><a target="_blank" rel="noopener noreferrer" href="https:\/\/example\.com\/jobs\/1">/);
   assert.equal((html.match(/<a /g) || []).length, (html.match(/<a (?:class="apply" )?target="_blank" rel="noopener noreferrer" href=/g) || []).length, 'every link opens in a new tab');
   assert.match(html, /<details class="jd"><summary>Job Description<\/summary>/);
   assert.doesNotMatch(html, /Full Captured JD/);
@@ -108,7 +108,7 @@ test('card locations are normalized at render time so historical payloads read c
   assert.equal(cardView({ ...job, location: '3 locations Boston, MA Remote' }, tracks).location, 'Boston, MA · Remote');
   assert.equal(cardView({ ...job, location: '' }, tracks).location, 'Location not stated');
   const html = buildHtml([{ ...job, location: 'Boston, MA Johnston, RI' }], meta);
-  assert.match(html, /Acme, Inc\. · Boston, MA · Johnston, RI · New Grad/);
+  assert.match(html, /<span class="company">Acme, Inc\.<\/span>[\s\S]*?<p class="job-meta"><span>Boston, MA · Johnston, RI<\/span><span class="sep">·<\/span><span>New Grad<\/span>/);
 });
 
 test('the empty state uses the same layout and hides the run status behind the same block', () => {
@@ -124,28 +124,30 @@ test('cards carry the ring score, compact track scores, the recommendation, and 
   const tracks = [{ id: 'data', label: 'Data' }, { id: 'llm', label: 'LLM' }, { id: 'agent', label: 'AI Agent' }];
   const threeTrack = { ...job, scores: { data: 74, llm: 87, agent: 85 }, bestScore: 87, recommendedTrack: 'llm', recommendedResume: 'LLM', reasons: ['one', 'two', 'three', 'four'], gaps: ['a', 'b', 'c'] };
   const html = buildHtml([threeTrack], { ...meta, resumeTracks: tracks });
-  assert.match(html, /<article class="job" data-score="87" data-company="acme, inc\." data-posted="\d+" data-role="new_grad" data-track="llm" data-search="acme, inc\. data &amp; ai analyst">/);
+  assert.match(html, /<article class="job" data-score="87" data-company="acme, inc\." data-posted="\d+" data-role="new_grad" data-track="llm" data-search="acme, inc\. data &amp; ai analyst" data-freshness="posted-today">/);
   assert.match(html, /<div class="ring" style="--score:87" role="img" aria-label="Best score 87"><b>87<\/b><\/div>/);
-  assert.match(html, /<h2 class="job-title"><a target="_blank" rel="noopener noreferrer" href="https:\/\/example\.com\/jobs\/1">Data &amp; AI Analyst<\/a><\/h2>/);
-  assert.match(html, /<p class="job-meta">Acme, Inc\. · Remote · New Grad<\/p>/);
-  assert.match(html, /<div class="scores"><span class="track" data-track="data">Data <b>74<\/b><\/span><span class="sep">·<\/span><span class="track best" data-track="llm">LLM <b>87<\/b><\/span><span class="sep">·<\/span><span class="track" data-track="agent">AI Agent <b>85<\/b><\/span><span class="recommend">Apply with LLM Resume<\/span><\/div>/);
+  assert.match(html, /<h2 class="job-title"><span class="company">Acme, Inc\.<\/span><span class="dot"> · <\/span><a target="_blank" rel="noopener noreferrer" href="https:\/\/example\.com\/jobs\/1">Data &amp; AI Analyst<\/a><\/h2>/);
+  assert.match(html, /<p class="job-meta"><span>Remote<\/span><span class="sep">·<\/span><span>New Grad<\/span><span class="sep">·<\/span><span class="meta"[^>]*>Posted Aug 27, 5:00 AM<\/span><span class="badge fresh" data-badge="freshness">Posted Today<\/span><\/p>/);
+  assert.match(html, /<div class="scores"><span class="track" data-track="data">Data <b>74<\/b><\/span><span class="sep">·<\/span><span class="track best" data-track="llm">LLM <b>87<\/b><\/span><span class="sep">·<\/span><span class="track" data-track="agent">AI Agent <b>85<\/b><\/span><\/div>/);
+  assert.match(html, /<div class="job-score"><div class="score-text"><span class="recommend">Apply with LLM Resume<\/span><div class="scores">[\s\S]*?<\/div><\/div><div class="ring"/);
   // Why It Matches stays in the payload for cover letters and is not shown; Gaps / Verify shows every item.
   assert.doesNotMatch(html, /Why It Matches|class="facts reasons"|<li>one<\/li>/);
   assert.match(html, /<div class="facts-label">Gaps \/ Verify<\/div><ul class="facts gaps"><li>a<\/li><li>b<\/li><li>c<\/li><\/ul>/);
   assert.doesNotMatch(html, /<details class="more">/);
-  assert.match(html, /<span class="meta" title="Posted Aug 27, 2026, 5:00 AM">Posted Aug 27, 5:00 AM · fixture<\/span>/, 'a JSON-LD datePosted with a clock time is precise and shows the local time');
+  assert.match(html, /<span class="meta" title="Posted Aug 27, 2026, 5:00 AM">Posted Aug 27, 5:00 AM<\/span>/, 'a JSON-LD datePosted with a clock time is precise and shows the local time');
   const dayOnly = buildHtml([{ ...job, postedAt: '2026-08-27T00:00:00.000Z' }], { ...meta, timeZone: 'America/Chicago' });
-  assert.match(dayOnly, /<span class="meta" title="Date only: the source reports no time of day">Posted Aug 27 \(date only\) · fixture<\/span>/, 'a bare-date datePosted (stored as UTC midnight by older versions) shows the day it names, marked date only');
+  assert.match(dayOnly, /<span class="meta" title="Date only: the source reports no time of day">Posted Aug 27<\/span><span class="badge fresh" data-badge="freshness">Date Only<\/span>/, 'a bare-date datePosted (stored as UTC midnight by older versions) shows the day it names, marked date only');
   const found = buildHtml([{ ...job, postedAt: null, discoveredAt: '2026-09-13T01:30:00Z' }], { ...meta, timeZone: 'America/Chicago' });
-  assert.match(found, /<span class="meta" title="The source reports no posting date; the day shown is when this pipeline first found it">Posted Unknown \(found Sep 12\) · fixture<\/span>/);
+  assert.match(found, /<span class="meta" title="The source reports no posting date; the day shown is when this pipeline first found it">Posted Unknown \(found Sep 12\)<\/span><span class="badge fresh" data-badge="freshness">Undated<\/span>/);
   assert.doesNotMatch(found, /Discovered|Found Sep/);
   assert.doesNotMatch(html, /Match level:|Use LLM|Apply with LLM resume/);
 
   const multi = buildHtml([{ ...job, location: 'Boston, MA · Johnston, RI · Columbus, OH' }], meta);
-  assert.match(multi, /<p class="job-meta">Acme, Inc\. · Boston, MA · Johnston, RI · Columbus, OH · New Grad<\/p>/);
+  assert.match(multi, /<p class="job-meta"><span>Boston, MA · Johnston, RI · Columbus, OH<\/span><span class="sep">·<\/span><span>New Grad<\/span>/);
 
   const single = buildHtml([{ ...job, scores: { data: 82 } }], { ...meta, resumeTracks: [{ id: 'data', label: 'Data' }] });
-  assert.match(single, /<div class="scores"><span class="track best" data-track="data">Data <b>82<\/b><\/span><span class="recommend">Apply with Data Resume<\/span><\/div>/);
+  assert.match(single, /<div class="scores"><span class="track best" data-track="data">Data <b>82<\/b><\/span><\/div>/);
+  assert.match(single, /<span class="recommend">Apply with Data Resume<\/span>/);
 
   const legacy = buildHtml([{ ...job, scores: undefined, dataScore: 82, aiScore: 74 }], meta);
   assert.match(legacy, /<span class="track best" data-track="data">Data <b>82<\/b><\/span><span class="sep">·<\/span><span class="track" data-track="ai">AI <b>74<\/b><\/span>/);

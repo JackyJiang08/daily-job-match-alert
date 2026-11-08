@@ -1,6 +1,6 @@
 // The Reach Out panel's state, per posting (by job id, so a posting keeps it across report dates):
 // private/outreach/state.json (gitignored with the rest of private/). Written atomically.
-//   { version: 1, updatedAt, jobs: { <jobId>: { firstName, contactedAt, messages: { connectionNote,
+//   { version: 1, updatedAt, jobs: { <jobId>: { firstName, contactedAt, appliedAt, messages: { connectionNote,
 //     followUpMessage, limit, source: 'letter' | 'panel', generatedAt }, candidates: { at, provider, status,
 //     results: [{ name, headline, url }] } } } }
 import fs from 'node:fs/promises';
@@ -45,4 +45,9 @@ export async function saveOutreachMessages(root, jobId, messages, { io = fs, now
 // "Contacted Nov 8", or null.
 export function contactedLabel(entry, timeZone) {
   return entry?.contactedAt ? `Contacted ${formatLocalDay(entry.contactedAt, timeZone)}` : null;
+}
+
+// "Applied Nov 8" (the card's Mark as Applied button once pressed), or null.
+export function appliedLabel(entry, timeZone) {
+  return entry?.appliedAt ? `Applied ${formatLocalDay(entry.appliedAt, timeZone)}` : null;
 }

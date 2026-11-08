@@ -123,7 +123,8 @@ test('an undated posting shows "Unknown (found Sep 26)" on the card and in the w
   assert.equal(card.footnote, 'Posted Unknown (found Sep 26) · fixture');
   assert.equal(card.footnoteTitle, 'The source reports no posting date; the day shown is when this pipeline first found it');
   const html = buildHtml([{ ...undated, discoveredAt: '2026-09-26T15:00:00Z' }], { date: '2026-09-26', lookbackHours: 24, timeZone: ZONE, resumeTracks: [{ id: 'data', label: 'Data' }] });
-  assert.match(html, /Posted Unknown \(found Sep 26\) · fixture/);
+  assert.match(html, /<span class="meta" title="[^"]*">Posted Unknown \(found Sep 26\)<\/span><span class="badge fresh" data-badge="freshness">Undated<\/span>/);
+  assert.match(html, /<p class="job-foot">Source: fixture<\/p>/);
 
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'xlsx-undated-'));
   try {
