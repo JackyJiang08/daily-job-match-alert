@@ -10,11 +10,11 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { availabilityConflicts, availabilityText, letterRulesSettings, mentionsMasters, normalizeAvailability, postingTermConflict, timelineRuleV2 } from '../src/cover-letter/availability.mjs';
-import { autoFix, filterEditorIssues, guardEditorRewrite, postingCasing, runChecks, sharedRun, SCORING_EVIDENCE_NOTE } from '../src/cover-letter/checks.mjs';
+import { autoFix, fixClosing, filterEditorIssues, guardEditorRewrite, postingCasing, runChecks, sharedRun, SCORING_EVIDENCE_NOTE } from '../src/cover-letter/checks.mjs';
 import { numberWhitelist, numbersOutside, repeatedMetrics, resumeExperiences } from '../src/cover-letter/evidence.mjs';
 import { graduationTerms } from '../src/cover-letter/compose.mjs';
 import { LETTER_SCHEMA_V2, buildCondensePromptV2, closingRule, buildCoverLetterPromptV2, buildReviewPromptV2, condenseTarget, coreGaps, letterRulesV2, openingRule, renderPlaybook, v2Context } from '../src/cover-letter/rules-v2.mjs';
-import { recentLetterStats } from '../src/cover-letter/recent.mjs';
+import { BATCH_HOURS, CLOSING_LIMIT, THANK_YOU_SENTENCES, batchAvoid, openingShape, pickClosing, recentLetterStats } from '../src/cover-letter/recent.mjs';
 import { classifyEditorNotes, reviewBadge } from '../src/cover-letter/notes.mjs';
 import { renderLetterPdfV2 } from '../src/cover-letter/pdf.mjs';
 import { selectAutoLetters } from '../src/auto-letters.mjs';
@@ -139,7 +139,9 @@ test('opening style: "limit-writing-to" allows the opening under 30 percent of t
 test('the automatic checks pass a clean letter and name every rule', () => {
   const result = runChecks(LETTER, context());
   assert.deepEqual(result.failures, []);
-  assert.deepEqual(Object.keys(result.results).sort(), ['availability', 'banned-phrases', 'candid', 'graduation-once', 'jd-echo', 'masters', 'metric-repeat', 'numbers', 'one-page', 'opening', 'principle-openers', 'scenario', 'scoring-evidence', 'symbols', 'title-separators']);
+  assert.deepEqual(Object.keys(result.results).sort(), ['availability', 'banned-phrases', 'candid', 'closing', 'graduation-once', 'jd-echo', 'masters', 'metric-repeat', 'numbers', 'one-page', 'opening', 'opening-variety', 'principle-openers', 'scenario', 'scoring-evidence', 'symbols', 'title-separators']);
+  assert.equal(result.results.closing, null, 'no assigned thank-you sentence');
+  assert.equal(result.results['opening-variety'], null, 'no letters earlier tonight');
   assert.equal(result.results['one-page'], null, 'no page count before rendering');
 });
 
@@ -271,7 +273,7 @@ test('7-day repetition: overused openings, closings, and experiences go into the
   const rules = letterRulesV2(v2Context({ job: job(), graduation: GRAD, availability: AVAILABILITY, recent: busy }));
   assert.match(rules, /Recent letters overuse these openings; do not begin with them: "Hello there\."/);
   assert.match(rules, /Recent letters overuse these closing sentences; do not use them: "Thanks\."/);
-  assert.equal(closingRule(['Thank you for your consideration.']), 'The closing paragraph is exactly two sentences: a thank-you (vary it, for example "Thank you for reading my application." or "I appreciate your time and consideration."; never "Thank you for considering my application."), then a forward-looking sentence that points at the specific team or at a timeframe the AVAILABILITY rule allows.', 'an overused closing is not offered as an example');
+  assert.match(closingRule(['Thank you for your consideration.']), /^The closing paragraph is exactly two sentences: a thank-you \(vary it, for example "Thank you for reading my application\.", "I appreciate your time and consideration\.", or "Thank you for taking the time to review my application\."; never "Thank you for considering my application\."\)/);
   assert.match(closingRule([]), /for example "Thank you for your consideration\.", "Thank you for reading my application\.", or "I appreciate your time and consideration\."/);
   assert.match(rules, /Recent letters lean on Example Corp \(100% of the last 7 days' letters\)\. When another experience on the RESUME is equally relevant to a responsibility, prefer it/);
 });
@@ -295,6 +297,76 @@ test('the v2 prompts carry the review\'s edits and the playbook\'s availability;
   assert.match(review, /flag any work term, season, or start date earlier than June 2027/);
   assert.doesNotMatch(review, /Do NOT remove or rewrite those details/);
   assert.equal(renderPlaybook('a {{AVAILABILITY}} b', { availability: 'X' }), 'a X b');
+});
+
+test('closing rotation: at least five thank-you sentences, none assigned above 30 percent of the last 7 days or twice in one night', () => {
+  assert.ok(THANK_YOU_SENTENCES.length >= 5);
+  assert.equal(new Set(THANK_YOU_SENTENCES.map(text => text.toLowerCase())).size, THANK_YOU_SENTENCES.length);
+  assert.equal(CLOSING_LIMIT, 0.3);
+  // Three weeks of nightly batches of 6 letters, every letter taking the sentence it is assigned.
+  const letters = [];
+  const start = Date.parse('2026-11-01T23:00:00Z');
+  for (let night = 0; night < 21; night += 1) {
+    for (let index = 0; index < 6; index += 1) {
+      const now = new Date(start + night * 86_400_000 + index * 600_000);
+      const tonight = batchAvoid(letters, { now });
+      const { sentence } = pickClosing({ recent: letters, batch: tonight, now });
+      assert.ok(!tonight.closings.some(entry => entry.sentence === sentence), `night ${night}, letter ${index}: not used earlier tonight`);
+      letters.push({ jobId: `job${night}x${index}`, createdAt: now.toISOString(), paragraphs: ['Opening.', `${sentence} I would welcome a conversation.`] });
+      if (night >= 2) {
+        const window = letters.filter(letter => Date.parse(letter.createdAt) > now.getTime() - 7 * 86_400_000);
+        for (const text of THANK_YOU_SENTENCES) {
+          const share = window.filter(letter => letter.paragraphs[1].startsWith(text)).length / window.length;
+          assert.ok(share <= CLOSING_LIMIT, `"${text}" is at ${share} on night ${night}`);
+        }
+      }
+    }
+  }
+  // A sentence the old letters overuse (81 percent) is not assigned until it falls to 30 percent.
+  const now = new Date(NOW);
+  const old = Array.from({ length: 10 }, (_, index) => ({ createdAt: '2026-11-05T12:00:00Z', paragraphs: ['Hi.', `${index < 8 ? 'Thank you for your consideration.' : 'Thank you for reading my application.'} Bye.`] }));
+  const pick = pickClosing({ recent: old, batch: { closings: [] }, now });
+  assert.notEqual(pick.sentence, 'Thank you for your consideration.');
+  assert.notEqual(pick.sentence, 'Thank you for reading my application.', 'used 20 percent and least used come first');
+  assert.equal(pick.shares.find(entry => entry.text === 'Thank you for your consideration.').share, 0.8);
+});
+
+test('tonight\'s letters: each later prompt lists the earlier openings and closings, and the checks catch a repeated construction or thank-you', () => {
+  assert.equal(BATCH_HOURS, 12);
+  const now = new Date(NOW);
+  const letters = [
+    { jobId: 'a1', jobTitle: 'Data Analyst Intern', company: 'Initech', createdAt: '2026-11-08T17:00:00Z', paragraphs: ['The Data Analyst Intern role at Initech in Austin asks for SQL. More.', 'Work.', 'I appreciate your time and consideration. I hope to join the analytics team in June 2027.'] },
+    { jobId: 'a2', jobTitle: 'Analyst', company: 'Old Co', createdAt: '2026-11-07T12:00:00Z', paragraphs: ['Yesterday morning opening. More.', 'Work.', 'Thank you for reading my application. Bye.'] },
+    { jobId: 'self', jobTitle: 'Data Analyst Intern', company: 'Example Corp', createdAt: '2026-11-08T17:30:00Z', paragraphs: ['A letter for this very posting. More.', 'Work.', 'Thanks. Bye.'] },
+  ];
+  const tonight = batchAvoid(letters, { now, jobId: 'self' });
+  assert.deepEqual(tonight.openings.map(entry => entry.text), ['The Data Analyst Intern role at Initech in Austin asks for SQL.'], 'older than 12 hours and the posting itself are left out');
+  assert.equal(tonight.openings[0].shape, 'the * role at *');
+  assert.equal(tonight.closings[0].sentence, 'I appreciate your time and consideration.');
+  const closing = pickClosing({ recent: letters, batch: tonight, now }).sentence;
+  assert.notEqual(closing, 'I appreciate your time and consideration.');
+  const rules = letterRulesV2(v2Context({ job: job(), graduation: GRAD, availability: AVAILABILITY, batch: tonight, closing }));
+  assert.match(rules, /Letters written earlier tonight open with these sentences: "The Data Analyst Intern role at Initech in Austin asks for SQL\."\. Your first sentence must use a different construction from every one of them/);
+  assert.match(rules, /Letters written earlier tonight close with these paragraphs; write a forward-looking sentence with a different construction and different wording from each: "I appreciate your time and consideration\. I hope to join the analytics team in June 2027\."/);
+  assert.match(rules, new RegExp(`a thank-you \\(exactly this sentence, word for word: "${closing.replace(/[.]/g, '\\.')}"`));
+  assert.doesNotMatch(letterRulesV2(v2Context({ job: job(), graduation: GRAD, availability: AVAILABILITY })), /earlier tonight/, 'no batch, no list');
+
+  // Same construction with other role and company words: the opening-variety check fails; another construction passes.
+  const same = ['The Data Analyst Intern role at Example Corp in Remote calls for clean tables. More.', ...LETTER.slice(1)];
+  assert.equal(openingShape(same, { title: 'Data Analyst Intern', company: 'Example Corp' }), 'the * role at *');
+  const checked = runChecks(same, context({ batch: tonight, closing: 'Thank you for your consideration.' }));
+  assert.equal(checked.results['opening-variety'], false);
+  assert.match(checked.notes.join('\n'), /check failed \(opening-variety\): the first sentence has the same construction \("the \* role at \*"\) as tonight's Initech letter/);
+  assert.equal(runChecks(LETTER, context({ batch: tonight, closing: 'Thank you for your consideration.' })).results['opening-variety'], true);
+
+  // The assigned thank-you replaces another thank-you sentence; a closing without one fails the closing check.
+  const fixed = autoFix(LETTER, { closing: 'I am grateful for your time and attention.' });
+  assert.equal(fixed.paragraphs.at(-1), 'I am grateful for your time and attention. I would welcome the chance to support the analytics team from June 2027.');
+  assert.match(fixed.info.join('\n'), /auto-fix: the closing starts with this letter's thank-you sentence "I am grateful for your time and attention\." \(it said "Thank you for your consideration\."\)/);
+  assert.deepEqual(fixClosing(LETTER, 'Thank you for your consideration.').fixed, false, 'already the assigned sentence');
+  const noThanks = [...LETTER.slice(0, -1), 'I look forward to hearing from you. I would welcome the chance to talk.'];
+  assert.equal(fixClosing(noThanks, 'Thank you for your consideration.').fixed, false);
+  assert.equal(runChecks(noThanks, context({ closing: 'Thank you for your consideration.' })).results.closing, false);
 });
 
 // --------------------------------------------------------------------------------------- hub (fake engines)
@@ -348,7 +420,8 @@ async function hubFor(root, { draft = () => ({ paragraphs: LETTER, shortName: 'E
       res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, text: inlineAssets(Buffer.concat(chunks).toString('utf8')) }));
     });
     req.on('error', reject);
-    if (body) req.write(new URLSearchParams(body).toString());
+    // Arrays (the paragraphs) go as repeated fields, as the letter page's form sends them.
+    if (body) req.write(new URLSearchParams(Object.entries(body).flatMap(([key, value]) => (Array.isArray(value) ? value.map(item => [key, item]) : [[key, value]]))).toString());
     req.end();
   });
   return { ctx, prompts, request, close: () => new Promise(resolve => server.close(resolve)) };
@@ -361,7 +434,8 @@ test('v2 in the hub: the v2 prompts, the checks on the saved letter, the posting
     const id = jobIdOf(job());
     const draft = JSON.parse((await hub.request('POST', '/letters/generate', { date: '2026-11-08', job: id, company: 'Example Corp' })).text);
     assert.equal(draft.rulesVersion, 'v2');
-    assert.deepEqual(draft.rules, { version: 'v2', candidParagraphIndex: -1, candidGaps: [], openingForbidden: false });
+    assert.deepEqual(draft.rules, { version: 'v2', candidParagraphIndex: -1, candidGaps: [], openingForbidden: false, closingSentence: 'Thank you for your consideration.' }, 'the first letter gets the first thank-you sentence');
+    assert.match(hub.prompts[0].prompt, /a thank-you \(exactly this sentence, word for word: "Thank you for your consideration\."/);
     assert.match(hub.prompts[0].prompt, /AVAILABILITY: Enrolled through May 2027/);
     assert.equal(hub.prompts[0].schema.required.includes('candidParagraphIndex'), true);
     assert.equal(hub.prompts[1].kind, 'editor');
@@ -370,6 +444,8 @@ test('v2 in the hub: the v2 prompts, the checks on the saved letter, the posting
     assert.equal(saved.record.rulesVersion, 'v2');
     assert.equal(saved.record.checks.numbers, true);
     assert.equal(saved.record.checks['one-page'], true);
+    assert.equal(saved.record.checks.closing, true);
+    assert.equal(saved.record.closingSentence, 'Thank you for your consideration.');
     // v1 reads the playbook backup when there is one.
     await fs.writeFile(path.join(root, 'private', 'cover-letter', 'playbook-v1.md'), '# Old playbook v1');
     const config = JSON.parse(await fs.readFile(path.join(root, 'config.json'), 'utf8'));
@@ -378,6 +454,31 @@ test('v2 in the hub: the v2 prompts, the checks on the saved letter, the posting
     const v1Prompt = hub.prompts.filter(item => item.kind === 'draft').at(-1).prompt;
     assert.match(v1Prompt, /# Old playbook v1/);
     assert.doesNotMatch(v1Prompt, /AVAILABILITY:/);
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('in the hub, a letter saved earlier tonight is passed to the next letter\'s prompt, and the next one gets another thank-you sentence', async () => {
+  const second = job({ url: 'https://example.com/jobs/second', title: 'Data Science Intern' });
+  const root = await project({ matches: [job(), second] });
+  const hub = await hubFor(root);
+  try {
+    const first = JSON.parse((await hub.request('POST', '/letters/generate', { date: '2026-11-08', job: jobIdOf(job()), company: 'Example Corp' })).text);
+    const saved = await hub.request('POST', '/letters/save', { date: '2026-11-08', job: jobIdOf(job()), track: 'data', company: first.company, paragraph: first.paragraphs, engine: 'codex', model: 'gpt-5.6-sol', editorNotes: JSON.stringify(first.editorNotes), rules: JSON.stringify(first.rules) });
+    assert.equal(saved.status, 200);
+    const next = JSON.parse((await hub.request('POST', '/letters/generate', { date: '2026-11-08', job: jobIdOf(second), company: 'Example Corp' })).text);
+    const prompt = hub.prompts.filter(item => item.kind === 'draft').at(-1).prompt;
+    assert.match(prompt, /Letters written earlier tonight open with these sentences: "Please consider my application for the Data Analyst Intern role with Example Corp, a remote position\."/);
+    assert.match(prompt, /close with these paragraphs; .*"Thank you for your consideration\. I would welcome the chance to support the analytics team from June 2027\."/);
+    assert.equal(first.rules.closingSentence, 'Thank you for your consideration.');
+    assert.equal(next.rules.closingSentence, 'Thank you for reading my application.');
+    assert.match(next.paragraphs.at(-1), /^Thank you for reading my application\. /);
+    assert.match(next.notesNeedReview.join('\n'), /check failed \(opening-variety\)/, 'the fake draft repeats the first letter\'s opening');
+    // Regenerating the first posting does not list its own letter.
+    await hub.request('POST', '/letters/generate', { date: '2026-11-08', job: jobIdOf(job()), company: 'Example Corp' });
+    assert.doesNotMatch(hub.prompts.filter(item => item.kind === 'draft').at(-1).prompt, /Letters written earlier tonight/);
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });
@@ -503,7 +604,15 @@ test('the A/B script writes new letters next to the old ones with a summary tabl
     assert.match(summary, /\| Posting \| Version \| Track \| Needs-Review \| Unverified \| Words \| Pages \| Opening \|/);
     assert.match(summary, /\| Example Corp · Data Analyst Intern \| old \(v1\) \| data \| 1 \| 1 \| \d+ \| 2 \| (?:pass|FAIL) \|/);
     assert.match(summary, /Totals: needs-review 1 \(old\) → \d+ \(new\)/);
-    assert.ok(hub.prompts.filter(item => item.kind === 'draft').length === 2);
+    const drafts = hub.prompts.filter(item => item.kind === 'draft');
+    assert.ok(drafts.length === 2);
+    // The A/B letters are not saved, so the second is told the first one's opening and closing directly.
+    assert.doesNotMatch(drafts[0].prompt, /Letters written earlier tonight/);
+    assert.match(drafts[1].prompt, /Letters written earlier tonight open with these sentences: "Please consider my application for the Data Analyst Intern role with Example Corp, a remote position\."/);
+    assert.match(drafts[1].prompt, /Letters written earlier tonight close with these paragraphs; write a forward-looking sentence with a different construction and different wording from each: "Thank you for your consideration\. I would welcome/);
+    assert.match(drafts[1].prompt, /exactly this sentence, word for word: "Thank you for reading my application\."/, 'the second letter gets the next thank-you sentence');
+    assert.match(result.rows[1].new.paragraphs.at(-1), /^Thank you for reading my application\. /, 'the assigned sentence replaced the draft\'s thank-you');
+    assert.equal(result.rows[1].new.checks['opening-variety'], false, 'the fake drafts share one opening, which the check catches');
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });

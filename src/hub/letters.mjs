@@ -28,7 +28,7 @@ import { renderLetterPdf as renderPdfDefault } from '../cover-letter/pdf.mjs';
 import { sanitizeCompany } from '../cover-letter/compose.mjs';
 import { inferShortNameFromPosting, shortNameWithoutModel } from '../cover-letter/short-name.mjs';
 import { availabilityText, letterRulesSettings } from '../cover-letter/availability.mjs';
-import { recentLetterStats } from '../cover-letter/recent.mjs';
+import { THANK_YOU_SENTENCES, batchAvoid, pickClosing, recentLetterStats } from '../cover-letter/recent.mjs';
 import { resumeExperiences } from '../cover-letter/evidence.mjs';
 import { V2_MAX_WORDS, condenseTarget, renderPlaybook, v2Context } from '../cover-letter/rules-v2.mjs';
 import { autoFix, withoutCheckNotes, wordCount as bodyWords } from '../cover-letter/checks.mjs';
@@ -268,19 +268,26 @@ export function letterTrackFor(job, enabledTracks = []) {
   return { id: recommended || enabledTracks[0]?.id || null, ruled: false };
 }
 
-// Everything the v2 rules need besides the posting and the resume: the 7-day letter statistics, the other
-// resumes (for the scoring-evidence check), the settings.
-export async function v2RulesInputs(ctx, config, { job, trackId, resumeText, settings, withRecent = true }) {
+// Everything the v2 rules need besides the posting and the resume: the 7-day letter statistics, tonight's
+// earlier letters (their openings and closings to avoid) and the thank-you sentence assigned to this letter, the
+// other resumes (for the scoring-evidence check), the settings. extraLetters: letters not in the store yet (the
+// A/B script's), counted as written now. closing: keep an already assigned thank-you sentence.
+export const BATCH_PROMPT_LIMIT = 10;
+export async function v2RulesInputs(ctx, config, { job, jobId = null, trackId, resumeText, settings, withRecent = true, withBatch = withRecent, extraLetters = [], closing = undefined }) {
   const graduation = graduationTerms(config.preferences?.graduationDate);
-  const letters = withRecent ? await ctx.letterStore.listLetters().catch(() => []) : [];
+  const letters = withRecent || withBatch ? [...await ctx.letterStore.listLetters().catch(() => []), ...extraLetters] : [];
   const recent = withRecent ? recentLetterStats(letters, { now: ctx.now(), experiences: resumeExperiences(resumeText) }) : null;
+  const id = jobId || (job ? jobIdOf(job) : null);
+  const tonight = withBatch ? batchAvoid(letters, { now: ctx.now(), jobId: id }) : { openings: [], closings: [] };
+  const batch = { ...tonight, openings: tonight.openings.slice(-BATCH_PROMPT_LIMIT), closings: tonight.closings.slice(-BATCH_PROMPT_LIMIT) };
+  const assigned = closing !== undefined ? closing : withRecent ? pickClosing({ recent: letters, batch: tonight, now: ctx.now() }).sentence : null;
   const otherResumes = [];
   for (const track of enabledResumeTracks(config)) {
     if (track.id === trackId) continue;
     const text = await ctx.io.readFile(track.profile, 'utf8').catch(() => '');
     if (text) otherResumes.push(text);
   }
-  const context = v2Context({ job, graduation, availability: settings.availability, openingStyle: settings.openingStyle, recent, outreachLimit: connectionNoteLimit(config) });
+  const context = v2Context({ job, graduation, availability: settings.availability, openingStyle: settings.openingStyle, recent, batch, closing: assigned, outreachLimit: connectionNoteLimit(config) });
   return { version: 'v2', context, openingStyle: settings.openingStyle, otherResumes, graduationDate: config.preferences?.graduationDate || null, recent };
 }
 
@@ -289,7 +296,7 @@ export async function v2RulesInputs(ctx, config, { job, trackId, resumeText, set
 // `company` is the panel's Company Short Name; it fixes the short name only when the owner typed it
 // (`companyEdited`). Otherwise the alias table, then the model's validated shortName, then the cleaned
 // company name decide (src/cover-letter/short-name.mjs).
-export async function generateLetter(ctx, { date, jobId, trackId, company, companyEdited = false, engine: engineChoice = null, strict = false, rulesVersion = null, saveOutreach = true }) {
+export async function generateLetter(ctx, { date, jobId, trackId, company, companyEdited = false, engine: engineChoice = null, strict = false, rulesVersion = null, saveOutreach = true, extraLetters = [] }) {
   const config = await ctx.loadConfig();
   const settings = letterRulesSettings(config);
   const version = rulesVersion || settings.rulesVersion;
@@ -300,7 +307,7 @@ export async function generateLetter(ctx, { date, jobId, trackId, company, compa
   const chosenTrack = trackId || ruledTrack?.id || job.recommendedTrack || tracks[0]?.id;
   const { track, text } = await resumeTextFor(ctx, config, chosenTrack);
   const { playbook, samples } = await ctx.letterStore.loadMaterial({ rulesVersion: version });
-  const rules = version === 'v2' ? await v2RulesInputs(ctx, config, { job, trackId: track.id, resumeText: text, settings }) : null;
+  const rules = version === 'v2' ? await v2RulesInputs(ctx, config, { job, jobId: id, trackId: track.id, resumeText: text, settings, extraLetters }) : null;
   const graduation = graduationTerms(config.preferences?.graduationDate);
   const review = config.coverLetter?.editorReview !== false;
   const engineId = engineChoice ? (normalizeEngineId(engineChoice) || null) : null;
@@ -343,7 +350,7 @@ export async function generateLetter(ctx, { date, jobId, trackId, company, compa
     track,
     tracks,
     rulesVersion: version,
-    rules: version === 'v2' ? { version: 'v2', candidParagraphIndex: result.candidParagraphIndex, candidGaps: result.candidGaps || [], openingForbidden: result.openingForbidden === true } : { version: 'v1' },
+    rules: version === 'v2' ? { version: 'v2', candidParagraphIndex: result.candidParagraphIndex, candidGaps: result.candidGaps || [], openingForbidden: result.openingForbidden === true, closingSentence: result.closingSentence || null } : { version: 'v1' },
     job: { title: job.title, company: letterCompanyFor(job).name, location: job.location, roleType: job.roleType },
   };
 }
@@ -368,13 +375,15 @@ export async function oneClickLetter(ctx, { date, jobId, engine = null }) {
 // before the first render; a PDF over one page is condensed (to 0.85 of its words, at most 480) and then to 450
 // words; there is no B5 fallback. The checks then run on the final body with the page count, replacing the
 // earlier check notes. Returns { paragraphs, pdf, editorNotes, checks, letter }.
-export async function finishLetterV2(ctx, config, { job, trackId, profile, company, paragraphs, now, timeZone, pdfPath, engine = null, rules = {}, editorNotes = [] }) {
+export async function finishLetterV2(ctx, config, { job, trackId, profile, company, paragraphs, now, timeZone, pdfPath, engine = null, rules = {}, editorNotes = [], extraLetters = [] }) {
   const settings = letterRulesSettings(config);
   const { text: resumeText } = await resumeTextFor(ctx, config, trackId);
   const { playbook } = await ctx.letterStore.loadMaterial({ rulesVersion: 'v2' });
   const plan = await letterStagePlan(ctx, config, 'letterDraft', engine === 'codex' ? 'codex' : null);
   const condenseEngine = letterEngineFor(ctx, config, plan.entries[0] || {});
-  const condense = (current, pages, target) => condenseCoverLetterV2({ engine: condenseEngine, paragraphs: current, pages, target, io: ctx.io });
+  const closing = THANK_YOU_SENTENCES.find(sentence => sentence === rules.closingSentence) || null;
+  // A condensed body keeps the letter's assigned thank-you sentence; the body as saved (the owner's edits) is not changed.
+  const condense = (current, pages, target) => condenseCoverLetterV2({ engine: condenseEngine, paragraphs: current, pages, target, closing, io: ctx.io });
   const fixed = autoFix(paragraphs);
   let body = fixed.paragraphs;
   const notes = [];
@@ -390,9 +399,9 @@ export async function finishLetterV2(ctx, config, { job, trackId, profile, compa
   const render = ctx.renderPdfV2 || ctx.renderPdf || renderLetterPdfV2;
   const pdf = await render(letter, pdfPath, { chromeCommand: ctx.chromeCommand ?? (config.hub?.chromeCommand || null), io: ctx.io, steps, notes, condensed: condensedFirst });
   const final = Array.isArray(pdf.paragraphs) && pdf.paragraphs.length ? pdf.paragraphs : body;
-  const inputs = { job, resumeText, playbook, rules: await v2RulesInputs(ctx, config, { job, trackId, resumeText, settings, withRecent: false }) };
+  const inputs = { job, resumeText, playbook, rules: await v2RulesInputs(ctx, config, { job, trackId, resumeText, settings, withRecent: false, withBatch: true, extraLetters, closing }) };
   inputs.rules.context.opening = { ...inputs.rules.context.opening, forbidden: rules.openingForbidden === true || settings.openingStyle === 'ban-writing-to' };
-  const checks = checkLetter(final, inputs, { candidParagraphIndex: Number.isInteger(rules.candidParagraphIndex) ? rules.candidParagraphIndex : -1, candidGaps: rules.candidGaps || [], pages: pdf.pages });
+  const checks = checkLetter(final, inputs, { candidParagraphIndex: Number.isInteger(rules.candidParagraphIndex) ? rules.candidParagraphIndex : -1, candidGaps: rules.candidGaps || [], pages: pdf.pages, company });
   return {
     paragraphs: final,
     pdf: { ...pdf, condensed: pdf.condensed === true || condensedFirst },
@@ -434,7 +443,7 @@ export async function saveLetter(ctx, { date, jobId, trackId, company, paragraph
     const finished = await finishLetterV2(ctx, config, { job, trackId: track.id, profile, company: companyName, paragraphs: body, now, timeZone, pdfPath, engine, rules, editorNotes: saved.record.editorNotes || [] });
     Object.assign(saved.record, {
       paragraphs: finished.paragraphs, wordCount: bodyWords(finished.paragraphs), editorNotes: finished.editorNotes, checks: finished.checks,
-      rulesVersion: 'v2', candidParagraphIndex: Number.isInteger(rules.candidParagraphIndex) ? rules.candidParagraphIndex : -1, candidGaps: rules.candidGaps || [], openingForbidden: rules.openingForbidden === true,
+      rulesVersion: 'v2', candidParagraphIndex: Number.isInteger(rules.candidParagraphIndex) ? rules.candidParagraphIndex : -1, candidGaps: rules.candidGaps || [], openingForbidden: rules.openingForbidden === true, closingSentence: THANK_YOU_SENTENCES.find(sentence => sentence === rules.closingSentence) || null,
       pdf: { pages: finished.pdf.pages, layout: finished.pdf.layout, renderer: finished.pdf.renderer, note: finished.pdf.note, condensed: finished.pdf.condensed === true },
     });
     delete saved.record.reviewClearedAt;
@@ -533,7 +542,8 @@ export async function updateSalutations(ctx, { date }) {
     const next = salutationUpdateFor(letter, job, aliases);
     const fileName = ctx.letterStore.fileNameFor(profile, next.name);
     if (!next.name || (next.name === letter.company && fileName === letter.pdfFileName)) { outcome.unchanged += 1; continue; }
-    const slug = sanitizeCompany(next.name);
+    // A letter with a job ID keeps (or moves to) its job ID folder; only one without stays keyed by company.
+    const slug = letter.jobId && /^[A-Za-z0-9]{1,80}$/.test(letter.jobId) ? letter.jobId : sanitizeCompany(next.name);
     const holder = taken.get(slug);
     if (slug !== letter.slug && holder && holder !== (letter.jobId || letter.slug)) { outcome.skipped.push({ company: letter.company, reason: `another letter of this date is already saved as ${next.name}` }); continue; }
     const renamed = await renameLetter(ctx, { date, slug: letter.slug, company: next.name, shortNameSource: next.source, meta: { salutationUpdatedAt: ctx.now().toISOString() } });

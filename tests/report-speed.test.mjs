@@ -208,7 +208,7 @@ test('render cache: a repeat load is a hit with no payload read, letter scan, re
     assert.equal((await readReportsIndex(root)).dates['2026-10-17'].letterCount, 2);
 
     // 3. Rename & Re-render.
-    await hub.ctx.letterStore.renameLetter('2026-10-17', 'ExampleCorp2', { company: 'Example Corporation Two', markdown: 'Dear Example Corporation Two,', pdfFileName: null, meta: {} });
+    await hub.ctx.letterStore.renameLetter('2026-10-17', (await import('../src/hub/letters.mjs')).jobIdOf(selectedMatches()[1]), { company: 'Example Corporation Two', markdown: 'Dear Example Corporation Two,', pdfFileName: null, meta: {} });
     assert.equal((await load()).record.cache, 'miss');
     assert.equal(hub.ctx.reportCache.stats().invalidations[0].reason, 'letters');
 

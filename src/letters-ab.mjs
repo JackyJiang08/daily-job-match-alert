@@ -52,14 +52,17 @@ export async function runLettersAb({ ctx, config, jobs, outDir, rulesVersion = '
   const timeZone = config.timeZone || 'America/Chicago';
   const experiences = await allExperiences(ctx, config);
   const rows = [];
+  // The new letters are not saved, so each later one is told the earlier ones' openings and closings directly.
+  const written = [];
   for (const item of jobs) {
     const { job } = await findLetterJob(ctx, item.date, item.jobId);
     const label = item.label || `${letterCompanyFor(job).name} · ${job.title}`;
     const directory = path.join(outDir, slugOf(label));
     await fs.mkdir(directory, { recursive: true });
     log(`${label}: drafting with the ${rulesVersion} rules`);
-    const draft = await generateLetter(ctx, { date: item.date, jobId: item.jobId, trackId: null, company: letterCompanyFor(job).name, rulesVersion, saveOutreach: false });
-    const finished = await finishLetterV2(ctx, config, { job, trackId: draft.track.id, profile, company: draft.company, paragraphs: draft.paragraphs, now: ctx.now(), timeZone, pdfPath: path.join(directory, 'new.pdf'), engine: draft.engine, rules: draft.rules, editorNotes: draft.editorNotes });
+    const draft = await generateLetter(ctx, { date: item.date, jobId: item.jobId, trackId: null, company: letterCompanyFor(job).name, rulesVersion, saveOutreach: false, extraLetters: written });
+    const finished = await finishLetterV2(ctx, config, { job, trackId: draft.track.id, profile, company: draft.company, paragraphs: draft.paragraphs, now: ctx.now(), timeZone, pdfPath: path.join(directory, 'new.pdf'), engine: draft.engine, rules: draft.rules, editorNotes: draft.editorNotes, extraLetters: written });
+    written.push({ jobId: item.jobId, jobTitle: job.title, company: draft.company, paragraphs: finished.paragraphs, createdAt: ctx.now().toISOString() });
     await fs.writeFile(path.join(directory, 'new.md'), finished.letter.markdown);
     const old = item.old || {};
     const oldTrack = old.track || job.recommendedTrack || draft.track.id;

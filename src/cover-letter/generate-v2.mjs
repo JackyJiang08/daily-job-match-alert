@@ -2,7 +2,7 @@
 // the v2 editor (issues must quote the draft; unverified details are rewritten, and a rewrite that adds a number
 // outside the sources or new scenario wording keeps the draft's paragraph), automatic fixes, and the checks of
 // src/cover-letter/checks.mjs. Same return shape as generateCoverLetter (generate.mjs) plus rulesVersion,
-// candidParagraphIndex, candidGaps, and checks.
+// candidParagraphIndex, candidGaps, checks, and closingSentence (the thank-you sentence assigned to the letter).
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -81,7 +81,7 @@ export function checkLetter(paragraphs, inputs, extra = {}) {
   return runChecks(paragraphs, {
     job: inputs.job, resumeText: inputs.resumeText, playbook: inputs.playbook, graduation: context.graduation, graduationDate: inputs.rules.graduationDate || null,
     availability: context.availability, mastersAllowed: context.mastersAllowed, opening: context.opening, openingStyle: inputs.rules.openingStyle,
-    coreGaps: context.gaps, otherResumes: inputs.rules.otherResumes || [], ...extra,
+    coreGaps: context.gaps, otherResumes: inputs.rules.otherResumes || [], batch: context.batch || null, closing: context.closing || null, ...extra,
   });
 }
 
@@ -132,9 +132,10 @@ export async function generateCoverLetterV2({ engine, reviewEngines = null, inpu
         issues = [...(edited.revisionIssues || []), ...recheck.issues.filter(issue => !['bullet', 'dash'].includes(issue.kind)), ...issues.filter(issue => issue.kind === 'short-name')];
       }
     }
-    const fixed = autoFix(paragraphs);
+    const closing = context.closing || null;
+    const fixed = autoFix(paragraphs, { closing });
     paragraphs = fixed.paragraphs;
-    const checks = checkLetter(paragraphs, rulesInputs, { candidParagraphIndex, candidGaps });
+    const checks = checkLetter(paragraphs, rulesInputs, { candidParagraphIndex, candidGaps, company });
     const words = validateParagraphs(paragraphs).wordCount;
     const outreach = outreachFrom(response.output, { limit: inputs.outreachLimit });
     return {
@@ -144,19 +145,19 @@ export async function generateCoverLetterV2({ engine, reviewEngines = null, inpu
       reviewed, editorNotes: [...editorNotes, ...fixed.info, ...checks.notes], revisionAdopted,
       reviewEngine: reviewEngineId, reviewModel, reviewEffort,
       samplesUsed: samples.map(sample => ({ name: sample.originalName || sample.file, track: sample.track || null })),
-      rulesVersion: 'v2', candidParagraphIndex, candidGaps, checks: checks.results,
+      rulesVersion: 'v2', candidParagraphIndex, candidGaps, checks: checks.results, closingSentence: closing,
       openingForbidden: context.opening.forbidden,
     };
   });
 }
 
 // v2 condensing: to a word target (condenseTarget), validated, with the automatic fixes applied again.
-export async function condenseCoverLetterV2({ engine, paragraphs, pages = null, target, io = fs, tempRoot = os.tmpdir() }) {
+export async function condenseCoverLetterV2({ engine, paragraphs, pages = null, target, closing = null, io = fs, tempRoot = os.tmpdir() }) {
   return withTempDirectory(io, tempRoot, async tempDirectory => {
     const response = await engine.generateText(buildCondensePromptV2({ paragraphs, pages, target }), { schema: BODY_SCHEMA, tempDirectory });
     const condensed = validateParagraphs(paragraphsFrom(response.output));
     if (!condensed.ok || condensed.paragraphs.length === 0) return null;
-    return autoFix(condensed.paragraphs).paragraphs;
+    return autoFix(condensed.paragraphs, { closing }).paragraphs;
   });
 }
 

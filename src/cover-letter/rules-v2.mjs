@@ -4,13 +4,15 @@
 // sentence and states availability from config.coverLetter.availability; middle paragraphs only for
 // responsibilities the resume evidences, in plain words; a candid paragraph for the core gaps (at most three,
 // each with a learning or bridging plan), reported back as candidParagraphIndex / candidGaps; scenario
-// discipline; numbers in prose; overused openings, closings, and experiences of the last 7 days to avoid; an
+// discipline; numbers in prose; overused openings, closings, and experiences of the last 7 days to avoid; the
+// opening sentences and closing paragraphs of tonight's earlier letters to avoid, and an assigned thank-you
+// sentence that rotates (recent.mjs pickClosing); an
 // editor that quotes the draft and rewrites unsupported details without adding facts; a condensing pass with
 // a word target.
 import { MAX_WORDS, MISSING_SKILL, companyNamingRule, missingRequirements, postingBlock } from './compose.mjs';
 import { availabilityText, mastersAllowed, timelineRuleV2, WRITING_TO_LIMIT } from './availability.mjs';
 import { OUTREACH_PROPERTIES, outreachRules, DEFAULT_CONNECTION_NOTE_LIMIT } from '../outreach/messages.mjs';
-import { percent } from './recent.mjs';
+import { THANK_YOU_SENTENCES, percent } from './recent.mjs';
 
 export const V2_MAX_WORDS = 560;
 export const V2_SECOND_CONDENSE_WORDS = 450;
@@ -73,18 +75,30 @@ export function candidRuleV2(gaps) {
   return `These core items from GAPS have no evidence on the selected resume: ${gaps.join('; ')}. Include ONE candid paragraph, placed before the closing, that opens with "I should be straightforward about" (or an equivalent phrase). Name at most the ${MAX_CANDID_GAPS} most important of these items and give each one concrete sentence on how you would learn it or which existing work bridges to it. Leave the minor items out, and keep the paragraph factual and brief rather than a list of shortcomings. Return its position in paragraphs (0-based) as candidParagraphIndex and the items it names as candidGaps (at most ${MAX_CANDID_GAPS}).`;
 }
 
-// The thank-you examples the closing rule offers, without any the last 7 days overuse.
-const THANKS = ['Thank you for your consideration.', 'Thank you for reading my application.', 'I appreciate your time and consideration.'];
-export function closingRule(avoidClosings = []) {
+// The closing rule. With an assigned thank-you sentence (pickClosing) the paragraph starts with it word for word;
+// without one, the examples exclude any the last 7 days overuse. The forward-looking sentence must differ from
+// the closing paragraphs of tonight's earlier letters.
+export function closingRule(avoidClosings = [], { sentence = null, batch = [] } = {}) {
   const avoid = new Set(avoidClosings.map(text => String(text).toLowerCase().trim()));
-  const examples = THANKS.filter(text => !avoid.has(text.toLowerCase()));
-  const thanks = examples.length ? `vary it, for example ${examples.map(text => `"${text}"`).join(examples.length > 2 ? ', ' : ' or ').replace(/, ("[^"]+")$/, ', or $1')}` : 'in your own words';
-  return `The closing paragraph is exactly two sentences: a thank-you (${thanks}; never "Thank you for considering my application."), then a forward-looking sentence that points at the specific team or at a timeframe the AVAILABILITY rule allows.`;
+  const examples = THANK_YOU_SENTENCES.filter(text => !avoid.has(text.toLowerCase()));
+  const thanks = sentence
+    ? `exactly this sentence, word for word: "${sentence}"`
+    : `vary it, for example ${examples.length ? examples.slice(0, 3).map(text => `"${text}"`).join(', ').replace(/, ("[^"]+")$/, ', or $1') : 'in your own words'}`;
+  const tonight = batch.length ? ` Letters written earlier tonight close with these paragraphs; write a forward-looking sentence with a different construction and different wording from each: ${quoteList(batch.map(entry => entry.text))}.` : '';
+  return `The closing paragraph is exactly two sentences: a thank-you (${thanks}; never "Thank you for considering my application."), then a forward-looking sentence that points at the specific team or at a timeframe the AVAILABILITY rule allows.${tonight}`;
+}
+
+// Tonight's earlier first sentences: the next letter's first sentence takes another construction, not only other
+// role and company words.
+export function batchOpeningRule(batch = []) {
+  if (!batch.length) return null;
+  return `Letters written earlier tonight open with these sentences: ${quoteList(batch.map(entry => entry.text))}. Your first sentence must use a different construction from every one of them (a different first word and sentence pattern, not only a different role or company name).`;
 }
 
 // options: roleType, graduation, availability, inIllinois, gaps (core gaps), shortName, naming, outreachLimit,
-// opening (openingRule()), avoid { openings, closings, experiences }.
-export function letterRulesV2({ roleType = 'unknown', graduation, availability, inIllinois = false, gaps = [], shortName = null, naming = true, outreachLimit = null, opening = openingRule(), avoid = {} } = {}) {
+// opening (openingRule()), avoid { openings, closings, experiences }, batch (recent.mjs batchAvoid), closing
+// (the assigned thank-you sentence).
+export function letterRulesV2({ roleType = 'unknown', graduation, availability, inIllinois = false, gaps = [], shortName = null, naming = true, outreachLimit = null, opening = openingRule(), avoid = {}, batch = null, closing = null } = {}) {
   const timeline = timelineRuleV2(roleType, graduation, availability);
   const avoidOpenings = (avoid.openings || []).map(entry => entry.text);
   const avoidClosings = (avoid.closings || []).map(entry => entry.text);
@@ -100,11 +114,12 @@ export function letterRulesV2({ roleType = 'unknown', graduation, availability, 
     `Body length: 460 to ${V2_MAX_WORDS} words in total (header and sign-off are added separately). Plain prose paragraphs only; no bullet points, no lists, no headings.`,
     'Never use an em dash, an en dash, or a spaced hyphen (" - ") as punctuation; use commas, periods, or colons. Write numbers in prose: "8.2 percent", "at least 85 percent", "a factor of 4,073", "Kendall tau 0.956"; never %, ≥, ≤, ×, τ, ρ, or "K+". Professional, human, first-person voice; specific and direct; no slang or chatty phrasing; avoid "I am writing to express my interest".',
     opening.text,
+    batchOpeningRule(batch?.openings || []),
     `Vary the phrasing between letters: do not reuse one fixed set of opening, transition, and closing phrases in every letter; take phrasing cues from the SAMPLE LETTERS instead.${avoidOpenings.length ? ` Recent letters overuse these openings; do not begin with them: ${quoteList(avoidOpenings)}.` : ''}${avoidClosings.length ? ` Recent letters overuse these closing sentences; do not use them: ${quoteList(avoidClosings)}.` : ''}`,
     `Paragraph 1 (four sentences at most) must contain, in this order: the role title and location, writing the posting's title without " - " separators (use a comma or drop the segment); ONE sentence joining degree, school, GPA and the timeline (${timeline})${inIllinois ? '; because the role is in Illinois, add that you are in state' : ''}, never two sentences that both state graduation; the availability the AVAILABILITY rule allows; and, as its last sentence, one specific judgment about this company or this role that a reader could disagree with, drawn from what the posting asks for: not praise, not a quotation, and not a list of the posting's own teams, domains, or duties.`,
     'Before writing, list to yourself the 3 to 4 core responsibilities of the JOB POSTING; do not output that list. For each, decide whether the RESUME holds direct evidence. Write one middle paragraph per responsibility that has direct evidence (3 to 4 paragraphs; if fewer than 3 qualify, write 3 by giving the strongest evidence two facets): the first sentence names the responsibility in your own plain words, never a phrase of six or more words copied from the posting; the next one or two sentences give evidence from the RESUME or the PLAYBOOK evidence library that carries a number; the last sentence is either a concrete principle under 20 words or the result itself; never begin it with "I work from", "I work by", or "I believe".',
     candidRuleV2(gaps),
-    closingRule(avoidClosings),
+    closingRule(avoidClosings, { sentence: closing, batch: batch?.closings || [] }),
     'Evidence discipline: every number must match the RESUME or the PLAYBOOK evidence library word for word; never mix numbers from two different projects in one claim; follow every repeated-metric rule the PLAYBOOK states; each metric value appears at most once in the letter; do not invent metrics, employers, dates, or credentials.',
     'Scenario discipline: describe your own work only with details the RESUME or PLAYBOOK states. You may name the employer\'s teams, products, and domain when describing what they need, but never claim your work "translates directly" to it, and never add descriptors to resume facts.',
     `AVAILABILITY: ${availabilityText({ roleType, availability, graduation })}`,
@@ -116,7 +131,7 @@ export function letterRulesV2({ roleType = 'unknown', graduation, availability, 
 }
 
 // Everything the v2 prompts share for one letter.
-export function v2Context({ job, graduation, availability, openingStyle = 'limit-writing-to', recent = null, shortName = null, outreachLimit = DEFAULT_CONNECTION_NOTE_LIMIT }) {
+export function v2Context({ job, graduation, availability, openingStyle = 'limit-writing-to', recent = null, batch = null, closing = null, shortName = null, outreachLimit = DEFAULT_CONNECTION_NOTE_LIMIT }) {
   const opening = openingRule({ openingStyle, writingToShare: recent?.writingToShare || 0 });
   return {
     roleType: job.roleType || 'unknown',
@@ -125,6 +140,8 @@ export function v2Context({ job, graduation, availability, openingStyle = 'limit
     gaps: coreGaps(job),
     shortName, outreachLimit, opening,
     avoid: { openings: recent?.overusedOpenings || [], closings: recent?.overusedClosings || [], experiences: recent?.overusedExperiences || [] },
+    batch: batch || { openings: [], closings: [] },
+    closing,
     mastersAllowed: mastersAllowed(job.roleType || 'unknown', availability),
   };
 }

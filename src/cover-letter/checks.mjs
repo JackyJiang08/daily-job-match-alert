@@ -2,21 +2,23 @@
 // pass/fail result; a failure becomes a needs-review editor note "check failed (<id>): …", which keeps the
 // "Check N details" badge on the card until the owner marks the details checked. A few things are fixed in
 // place before rendering and noted as info ("auto-fix: …"): symbols that stand for words ("8.2%" → "8.2
-// percent", "≥85" → "at least 85", "500K+" → "more than 500,000"), and title separators (" - " → ", ").
+// percent", "≥85" → "at least 85", "500K+" → "more than 500,000"), title separators (" - " → ", "), and a
+// thank-you sentence other than the one assigned to the letter (recent.mjs pickClosing).
 // Nothing here calls a model.
 import { availabilityConflicts, mentionsMasters } from './availability.mjs';
 import { experiencesIn, numberWhitelist, numbersOutside, repeatedMetrics, resumeExperiences } from './evidence.mjs';
 import { MAX_CANDID_GAPS } from './rules-v2.mjs';
+import { closingKey, closingOf, openingShape } from './recent.mjs';
 
 export const CHECK_IDS = [
   'opening', 'banned-phrases', 'principle-openers', 'symbols', 'title-separators', 'graduation-once', 'availability', 'masters',
-  'numbers', 'metric-repeat', 'scenario', 'jd-echo', 'candid', 'scoring-evidence', 'one-page',
+  'numbers', 'metric-repeat', 'scenario', 'jd-echo', 'candid', 'scoring-evidence', 'one-page', 'opening-variety', 'closing',
 ];
 export const CHECK_LABELS = {
   'opening': 'Opening', 'banned-phrases': 'Banned Phrases', 'principle-openers': 'Principle Openers', 'symbols': 'Symbols',
   'title-separators': 'Title Separators', 'graduation-once': 'Graduation Once', 'availability': 'Availability', 'masters': "Master's Mention",
   'numbers': 'Number Whitelist', 'metric-repeat': 'Metric Once', 'scenario': 'Scenario', 'jd-echo': 'JD Echo', 'candid': 'Candid Paragraph',
-  'scoring-evidence': 'Scoring Evidence', 'one-page': 'One Page',
+  'scoring-evidence': 'Scoring Evidence', 'one-page': 'One Page', 'opening-variety': 'Opening Variety', 'closing': 'Closing Rotation',
 };
 export const SCORING_EVIDENCE_NOTE = 'scoring evidence not on selected resume';
 const BANNED_PHRASES = ['Thank you for considering my application', 'translates directly', 'translate directly'];
@@ -150,11 +152,26 @@ export function guardEditorRewrite({ draft, revised, whitelist, job, resumeText 
 }
 
 // Fixes applied before rendering: { paragraphs, info: [notes] }.
-export function autoFix(paragraphs) {
+const THANKS = /\b(?:thank|thanks|appreciate|grateful)\b/i;
+
+// The closing paragraph starts with the assigned thank-you sentence: a different thank-you sentence there is
+// replaced; a closing that does not start with a thank-you is left for the closing check.
+export function fixClosing(paragraphs, sentence) {
+  const list = [...(paragraphs || [])];
+  if (!sentence || !list.length) return { paragraphs: list, fixed: false };
+  const last = String(list.at(-1) || '');
+  const current = sentences(last)[0] || '';
+  if (!current || closingKey(current) === closingKey(sentence) || !THANKS.test(current)) return { paragraphs: list, fixed: false };
+  list[list.length - 1] = `${sentence}${last.slice(last.indexOf(current) + current.length)}`.replace(/\s+/g, ' ').trim();
+  return { paragraphs: list, fixed: true, from: current };
+}
+
+// options: closing (the assigned thank-you sentence).
+export function autoFix(paragraphs, { closing = null } = {}) {
   const info = [];
   const symbols = new Set();
   let separators = false;
-  const out = (paragraphs || []).map(paragraph => {
+  const fixedParagraphs = (paragraphs || []).map(paragraph => {
     const a = fixSymbols(paragraph);
     a.fixed.forEach(kind => symbols.add(kind));
     const b = fixSeparators(a.text);
@@ -163,11 +180,14 @@ export function autoFix(paragraphs) {
   });
   if (symbols.size) info.push(`auto-fix: wrote ${[...symbols].join(', ')} out in words`);
   if (separators) info.push('auto-fix: rewrote " - " separators as commas');
-  return { paragraphs: out, info };
+  const thanks = fixClosing(fixedParagraphs, closing);
+  if (thanks.fixed) info.push(`auto-fix: the closing starts with this letter's thank-you sentence "${closing}" (it said "${thanks.from}")`);
+  return { paragraphs: thanks.paragraphs, info };
 }
 
 // The checks. context: { job, resumeText, playbook, graduation, availability, mastersAllowed, opening
-// ({ forbidden }), openingStyle, candidParagraphIndex, candidGaps, coreGaps, otherResumes: [text], pages }.
+// ({ forbidden }), openingStyle, candidParagraphIndex, candidGaps, coreGaps, otherResumes: [text], pages,
+// company (the short name), batch (recent.mjs batchAvoid), closing (the assigned thank-you sentence) }.
 // Returns { results: { id: true|false|null }, failures: [{ id, message }], notes: ['check failed (id): …'] }.
 export function runChecks(paragraphs, context) {
   const body = (paragraphs || []).join('\n');
@@ -220,6 +240,15 @@ export function runChecks(paragraphs, context) {
   check('scoring-evidence', !cited.length, `${SCORING_EVIDENCE_NOTE} (${cited.join(', ')})`);
   if (context.pages != null) check('one-page', context.pages <= 1, `the PDF runs to ${context.pages} pages`);
   else results['one-page'] = null;
+  // Tonight's letters: the first sentence's construction (posting words masked) differs from each earlier one.
+  const batchOpenings = context.batch?.openings || [];
+  if (batchOpenings.length) {
+    const shape = openingShape(paragraphs, { title: job.title || '', company: [job.company, context.company].filter(Boolean).join(' ') });
+    const twin = batchOpenings.find(entry => entry.shape && entry.shape === shape);
+    check('opening-variety', !twin, `the first sentence has the same construction ("${shape}") as tonight's ${twin?.company || 'earlier'} letter`);
+  } else results['opening-variety'] = null;
+  if (context.closing) check('closing', closingOf(paragraphs).key === closingKey(context.closing), `the closing paragraph does not start with this letter's thank-you sentence "${context.closing}"`);
+  else results.closing = null;
 
   return { results, failures, notes: failures.map(failure => `check failed (${failure.id}): ${failure.message}`) };
 }

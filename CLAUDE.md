@@ -619,8 +619,25 @@ disabled; do not expand them unless a task says so.
   (> 60%) go into the next v2 prompt; Status "Letter Variety" card shows the rates (stripped by the Status snapshot
   helper). A/B: scripts/letters-ab.mjs + src/letters-ab.mjs (real engines, saves nothing to the store or outreach
   state; private/review/ab-jobs.json, output private/review/ab-<date>/).
-- Known (not fixed): the letter store's saveLetter overwrites another posting's letter saved under the same company
-  slug on the same date (two postings from one company on 2026-11-08).
+- Tonight's batch + closing rotation (2026-11-09, recent.mjs): batchAvoid (letters created in the last BATCH_HOURS 12,
+  other postings only; the A/B script passes its unsaved letters as extraLetters) → v2Context batch: the prompt
+  lists their first sentences (batchOpeningRule: another construction) and closing paragraphs (closingRule: another
+  forward-looking sentence), the last BATCH_PROMPT_LIMIT 10. pickClosing assigns one of THANK_YOU_SENTENCES (6) per
+  letter: not used tonight, share ≤ CLOSING_LIMIT 0.3 of the last 7 days, least used first; closingRule demands it
+  word for word, autoFix({ closing }) replaces another thank-you sentence (draft/editor output and condensed bodies,
+  never the body the owner saves), record.closingSentence (rules.closingSentence, only a listed sentence accepted).
+  Checks 'opening-variety' (openingShape: first 5 words with title/company words masked, equal to a batch shape)
+  and 'closing' (last paragraph does not start with the assigned sentence) are needs-review.
+- Letters by job ID (2026-11-09, store.mjs): saveLetter writes private/cover-letters/<date>/<jobId>/ (meta.jobId;
+  no job ID → company folder as before); record.companySlug keeps the company slug, `slug` in listLetters/URLs is
+  the folder name. adoptLegacy moves an old company folder holding the same job's letter (with its PDF) into the job
+  ID folder on the next save; renameLetter keeps a job ID folder (moves an old one in); a re-save under another
+  company name deletes the old-name PDF. updateSalutations keys collisions by job ID. Old company-folder URLs keep
+  working until the letter is saved again. Audit: npm run letters:audit (scripts/letters-audit.mjs,
+  src/letters-audit.mjs, read only; --out writes the Markdown): postings without a letter whose same-date company
+  folder holds another job's letter, evidence confirmed (Reach Out texts from a letter) / likely (that date's
+  automatic pass shortfall covers them) / possible / unproven. Real data 2026-11-09: 100 listed (80 likely, 15
+  possible, 5 unproven), shortfall 95 letters across 25 passes 10-08..11-06; not regenerated.
 
 ## Scoring engines (src/engines/)
 - One interface per engine: verifyAuth(), reviewBatch(prompt, schema,
@@ -703,6 +720,6 @@ disabled; do not expand them unless a task says so.
   pass): 51 of 571 saved letters would change; 36 differ from the first pass.
 - Personal details (name, phone, email, signature, playbook, sample letters)
   live ONLY under private/cover-letter/; generated letters under
-  private/cover-letters/<date>/<Company>/. Never put a real person's data in
+  private/cover-letters/<date>/<jobId>/ (older ones <date>/<Company>/). Never put a real person's data in
   code, config.example.json, docs, or fixtures: use "Jane Doe" placeholders.
-  Downloads go through /letters/<date>/<Company>/<file> with a file whitelist.
+  Downloads go through /letters/<date>/<folder>/<file> with a file whitelist.

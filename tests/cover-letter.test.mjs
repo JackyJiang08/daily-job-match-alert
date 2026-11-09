@@ -333,20 +333,21 @@ test('the private store keeps material and letters under private/ and only serve
     assert.equal(profileJson.samples.length, 9);
 
     const saved = await store.saveLetter({ date: '2026-09-15', company: 'Acme, Inc.', markdown: '# Jane Doe\n', meta: { jobId: 'abc123abc123abc1', company: 'Acme, Inc.', pdfFileName: 'JaneDoe_Cover_Letter_AcmeInc.pdf' } });
-    assert.equal(saved.slug, 'AcmeInc');
-    assert.equal(saved.directory, path.join(root, 'private', 'cover-letters', '2026-09-15', 'AcmeInc'));
+    assert.equal(saved.slug, 'abc123abc123abc1', 'the folder is named after the job ID');
+    assert.equal(saved.record.companySlug, 'AcmeInc');
+    assert.equal(saved.directory, path.join(root, 'private', 'cover-letters', '2026-09-15', 'abc123abc123abc1'));
     await fs.writeFile(path.join(saved.directory, 'JaneDoe_Cover_Letter_AcmeInc.pdf'), '%PDF-1.4');
-    assert.equal(await store.resolveDownload('2026-09-15', 'AcmeInc', 'letter.md'), path.join(saved.directory, 'letter.md'));
-    assert.equal(await store.resolveDownload('2026-09-15', 'AcmeInc', 'JaneDoe_Cover_Letter_AcmeInc.pdf'), path.join(saved.directory, 'JaneDoe_Cover_Letter_AcmeInc.pdf'));
-    assert.equal(await store.resolveDownload('2026-09-15', 'AcmeInc', 'letter.json'), null, 'metadata is not downloadable');
-    assert.equal(await store.resolveDownload('2026-09-15', 'AcmeInc', 'other.pdf'), null);
-    await assert.rejects(store.resolveDownload('2026-09-15', 'AcmeInc', '../letter.md'), /Invalid file name/);
+    assert.equal(await store.resolveDownload('2026-09-15', 'abc123abc123abc1', 'letter.md'), path.join(saved.directory, 'letter.md'));
+    assert.equal(await store.resolveDownload('2026-09-15', 'abc123abc123abc1', 'JaneDoe_Cover_Letter_AcmeInc.pdf'), path.join(saved.directory, 'JaneDoe_Cover_Letter_AcmeInc.pdf'));
+    assert.equal(await store.resolveDownload('2026-09-15', 'abc123abc123abc1', 'letter.json'), null, 'metadata is not downloadable');
+    assert.equal(await store.resolveDownload('2026-09-15', 'abc123abc123abc1', 'other.pdf'), null);
+    await assert.rejects(store.resolveDownload('2026-09-15', 'abc123abc123abc1', '../letter.md'), /Invalid file name/);
     await assert.rejects(store.resolveDownload('2026-9-15', 'AcmeInc', 'letter.md'), /Invalid date/);
     assert.equal(await store.resolveDownload('2026-09-15', '../x', 'letter.md'), null, 'the company segment is sanitized to a slug before lookup');
     await assert.rejects(store.resolveDownload('2026-09-15', '---', 'letter.md'), /Company name/);
     const list = await store.listLetters();
     assert.equal(list.length, 1);
-    assert.equal(list[0].slug, 'AcmeInc');
+    assert.equal(list[0].slug, 'abc123abc123abc1');
     assert.equal((await store.lettersByJob()).get('abc123abc123abc1').company, 'Acme, Inc.');
   } finally {
     await fs.rm(root, { recursive: true, force: true });
@@ -562,10 +563,10 @@ test('generate → edit → save renders a PDF, records the letter, marks the ca
     const saved = await hub.form('/letters/save', { date: '2026-09-15', job: jobId, track: 'llm', company: draft.company, paragraph: edited, engine: draft.engine, model: draft.model, issues: JSON.stringify(draft.issues), editorNotes: JSON.stringify(draft.editorNotes), samplesUsed: JSON.stringify(draft.samplesUsed) });
     assert.equal(saved.status, 200);
     const result = JSON.parse(saved.text);
-    assert.equal(result.slug, 'Acme');
-    assert.equal(result.downloadUrl, '/letters/2026-09-15/Acme/JaneDoe_Cover_Letter_Acme.pdf');
+    assert.equal(result.slug, jobId, 'the folder is named after the job ID');
+    assert.equal(result.downloadUrl, `/letters/2026-09-15/${jobId}/JaneDoe_Cover_Letter_Acme.pdf`);
     assert.deepEqual([result.pdf.renderer, result.pdf.pages, result.pdf.layout], ['pdfkit', 1, 'letter-1in']);
-    const record = JSON.parse(await fs.readFile(path.join(root, 'private', 'cover-letters', '2026-09-15', 'Acme', 'letter.json'), 'utf8'));
+    const record = JSON.parse(await fs.readFile(path.join(root, 'private', 'cover-letters', '2026-09-15', jobId, 'letter.json'), 'utf8'));
     assert.equal(record.paragraphs[1], 'I edited this paragraph by hand before rendering.');
     assert.deepEqual(record.editorNotes, ['Paragraph 1 lacks the GPA']);
     assert.deepEqual(record.samplesUsed, [{ name: 'sample.txt', track: null }]);
@@ -573,7 +574,7 @@ test('generate → edit → save renders a PDF, records the letter, marks the ca
     assert.equal(typeof record.wordCount, 'number');
     assert.equal(record.track, 'llm');
     assert.equal(record.jobId, jobId);
-    const markdown = await fs.readFile(path.join(root, 'private', 'cover-letters', '2026-09-15', 'Acme', 'letter.md'), 'utf8');
+    const markdown = await fs.readFile(path.join(root, 'private', 'cover-letters', '2026-09-15', jobId, 'letter.md'), 'utf8');
     assert.match(markdown, /^# Jane Doe\n555-0100 · jane\.doe@example\.com\n\nSeptember 15, 2026\n\nDear Acme Recruiting Team,\n/);
     assert.match(markdown, /\nSincerely,\nJane Doe\n$/, 'sign-off and name on consecutive lines, as in the samples');
 
@@ -583,12 +584,12 @@ test('generate → edit → save renders a PDF, records the letter, marks the ca
     assert.equal(pdf.headers['content-disposition'], 'attachment; filename="JaneDoe_Cover_Letter_Acme.pdf"');
     assert.equal(pdf.buffer.slice(0, 5).toString('latin1'), '%PDF-');
     assert.equal(countPdfPages(pdf.buffer), 1);
-    assert.equal((await hub.request('GET', '/letters/2026-09-15/Acme/letter.md')).status, 200);
-    assert.equal((await hub.request('GET', '/letters/2026-09-15/Acme/letter.json')).status, 404, 'metadata is not served');
-    assert.equal((await hub.request('GET', '/letters/2026-09-15/Acme/..%2Fprofile.json')).status, 400, 'a traversal-looking file name is refused outright');
+    assert.equal((await hub.request('GET', `/letters/2026-09-15/${jobId}/letter.md`)).status, 200);
+    assert.equal((await hub.request('GET', `/letters/2026-09-15/${jobId}/letter.json`)).status, 404, 'metadata is not served');
+    assert.equal((await hub.request('GET', `/letters/2026-09-15/${jobId}/..%2Fprofile.json`)).status, 400, 'a traversal-looking file name is refused outright');
     assert.equal((await hub.request('GET', '/letters/2026-09-15/Nope/letter.md')).status, 404);
-    assert.equal((await hub.request('GET', '/letters/2026-09-15/Acme')).status, 200);
-    const reopened = (await hub.request('GET', '/letters/2026-09-15/Acme')).text;
+    assert.equal((await hub.request('GET', `/letters/2026-09-15/${jobId}`)).status, 200);
+    const reopened = (await hub.request('GET', `/letters/2026-09-15/${jobId}`)).text;
     assert.match(reopened, /I edited this paragraph by hand before rendering\./);
     assert.match(reopened, /<details class="notes" id="editor-notes" open hidden><summary>Check Before Sending<\/summary><ul class="issues" id="editor-notes-list"><\/ul><p class="row">[\s\S]*?<\/p><\/details>/, 'a rule fix the editor applied needs no check');
     assert.match(reopened, /<ul class="letter-foot foot-notes" id="letter-info-notes"><li>Paragraph 1 lacks the GPA<\/li><\/ul>/, 'it is an info note in the footer');
@@ -612,15 +613,15 @@ test('generate → edit → save renders a PDF, records the letter, marks the ca
     const list = await hub.request('GET', '/letters');
     assert.match(list.text, /<tr><th>Date<\/th><th>Company<\/th><th>Role<\/th><th>Track<\/th><th>Engine<\/th><th>Pages<\/th><th>Generated<\/th><th>Notes<\/th><th>File<\/th><th>Actions<\/th><\/tr>/);
     assert.match(list.text, /<td class="file"><span class="mono">JaneDoe_Cover_Letter_Acme\.pdf<\/span><\/td>/, 'the current file name is shown');
-    assert.match(list.text, /<td class="nowrap">2026-09-15<\/td>\s*<td><a href="\/letters\/2026-09-15\/Acme">Acme<\/a><\/td>\s*<td>Data Analyst<\/td>\s*<td><span class="badge" data-track-badge="llm">LLM<\/span><\/td>\s*<td class="nowrap">claude<br><span class="mono">claude-fable-5<\/span><\/td>\s*<td>1<\/td>\s*<td>Sep 15, 2026, 10:00 AM<\/td>\s*<td>1<\/td>/, 'generation time and editor-note count columns');
+    assert.match(list.text, /<td class="nowrap">2026-09-15<\/td>\s*<td><a href="\/letters\/2026-09-15\/[0-9a-f]{16}">Acme<\/a><\/td>\s*<td>Data Analyst<\/td>\s*<td><span class="badge" data-track-badge="llm">LLM<\/span><\/td>\s*<td class="nowrap">claude<br><span class="mono">claude-fable-5<\/span><\/td>\s*<td>1<\/td>\s*<td>Sep 15, 2026, 10:00 AM<\/td>\s*<td>1<\/td>/, 'generation time and editor-note count columns');
     assert.match(list.text, /Letters you generate are kept on this Mac\. Reopen one to edit or download it again\./);
     assert.doesNotMatch(list.text, /private\/cover-letters/);
-    assert.match(list.text, /href="\/letters\/2026-09-15\/Acme\/JaneDoe_Cover_Letter_Acme\.pdf">Download PDF<\/a>/);
+    assert.match(list.text, /href="\/letters\/2026-09-15\/[0-9a-f]{16}\/JaneDoe_Cover_Letter_Acme\.pdf">Download PDF<\/a>/);
     const report = await hub.request('GET', '/reports/2026-09-15');
     assert.doesNotMatch(report.text.split('<script>')[0], /data-badge="letter-/, 'no status badge: the only letter badge is "Check N details"');
-    assert.match(report.text, /<div class="actions"><a class="apply"[^>]*>Open Posting<\/a><a class="btn secondary" href="\/letters\/2026-09-15\/Acme\/JaneDoe_Cover_Letter_Acme\.pdf">Download Letter<\/a><a class="btn secondary" href="\/letters\/2026-09-15\/Acme" target="_blank" rel="noopener noreferrer">Open Letter<\/a><button type="button" class="btn secondary" data-reach="1" data-date="2026-09-15" data-job="[a-f0-9]{16}">Reach Out<\/button><button type="button" class="btn secondary mark-applied" data-apply-mark="1" data-job="[a-f0-9]{16}" aria-pressed="false"[^>]*>Mark as Applied<\/button><\/div>/, 'a saved letter gives the card its two letter buttons, then Reach Out');
+    assert.match(report.text, /<div class="actions"><a class="apply"[^>]*>Open Posting<\/a><a class="btn secondary" href="\/letters\/2026-09-15\/[0-9a-f]{16}\/JaneDoe_Cover_Letter_Acme\.pdf">Download Letter<\/a><a class="btn secondary" href="\/letters\/2026-09-15\/[0-9a-f]{16}" target="_blank" rel="noopener noreferrer">Open Letter<\/a><button type="button" class="btn secondary" data-reach="1" data-date="2026-09-15" data-job="[a-f0-9]{16}">Reach Out<\/button><button type="button" class="btn secondary mark-applied" data-apply-mark="1" data-job="[a-f0-9]{16}" aria-pressed="false"[^>]*>Mark as Applied<\/button><\/div>/, 'a saved letter gives the card its two letter buttons, then Reach Out');
     assert.doesNotMatch(report.text.split('<script>')[0], /Generate Cover Letter/, 'no one-click button once a letter exists (the page script mentions the label)');
-    assert.match(list.text, /<a class="btn secondary small" href="\/letters\/2026-09-15\/Acme">Open<\/a> <a class="btn secondary small" href="\/letters\/2026-09-15\/Acme\/JaneDoe_Cover_Letter_Acme\.pdf">Download PDF<\/a>/, 'the Letters row has the same two actions');
+    assert.match(list.text, /<a class="btn secondary small" href="\/letters\/2026-09-15\/[0-9a-f]{16}">Open<\/a> <a class="btn secondary small" href="\/letters\/2026-09-15\/[0-9a-f]{16}\/JaneDoe_Cover_Letter_Acme\.pdf">Download PDF<\/a>/, 'the Letters row has the same two actions');
 
     const evil = await hub.form('/letters/generate', { date: '2026-09-15', job: jobId }, { origin: 'http://evil.example' });
     assert.equal(evil.status, 403);
@@ -679,8 +680,8 @@ test('one click on a card generates in the background: generating → ready with
     assert.equal(ready.state, 'ready');
     assert.equal(ready.busy, false);
     assert.equal(calls, 2, 'draft plus editor pass');
-    assert.equal(ready.result.downloadUrl, '/letters/2026-09-15/Acme/JaneDoe_Cover_Letter_Acme.pdf');
-    assert.equal(ready.result.openUrl, '/letters/2026-09-15/Acme');
+    assert.equal(ready.result.downloadUrl, `/letters/2026-09-15/${jobId}/JaneDoe_Cover_Letter_Acme.pdf`);
+    assert.equal(ready.result.openUrl, `/letters/2026-09-15/${jobId}`);
     assert.equal(ready.result.track.id, 'data', 'the recommended track');
     assert.equal(ready.result.company, 'Acme');
     assert.equal(ready.result.pdf.pages, 1);
@@ -691,9 +692,9 @@ test('one click on a card generates in the background: generating → ready with
     assert.equal(pdf.headers['content-disposition'], 'attachment; filename="JaneDoe_Cover_Letter_Acme.pdf"', 'the browser downloads it under the templated name');
     assert.equal(pdf.buffer.slice(0, 5).toString('latin1'), '%PDF-');
     const report = await hub.request('GET', '/reports/2026-09-15');
-    assert.match(report.text, /<a class="btn secondary" href="\/letters\/2026-09-15\/Acme\/JaneDoe_Cover_Letter_Acme\.pdf">Download Letter<\/a><a class="btn secondary" href="\/letters\/2026-09-15\/Acme" target="_blank" rel="noopener noreferrer">Open Letter<\/a>/);
+    assert.match(report.text, /<a class="btn secondary" href="\/letters\/2026-09-15\/[0-9a-f]{16}\/JaneDoe_Cover_Letter_Acme\.pdf">Download Letter<\/a><a class="btn secondary" href="\/letters\/2026-09-15\/[0-9a-f]{16}" target="_blank" rel="noopener noreferrer">Open Letter<\/a>/);
     assert.doesNotMatch(report.text.split('<script>')[0], /data-oneclick/);
-    const opened = await hub.request('GET', '/letters/2026-09-15/Acme');
+    const opened = await hub.request('GET', `/letters/2026-09-15/${jobId}`);
     assert.match(opened.text, /<article class="card" id="letter-editor" data-state="editing">/);
     assert.match(opened.text, /<textarea class="para" name="paragraph" data-index="0">Paragraph 1 /);
     assert.match(opened.text, /id="generate-button" type="button">Regenerate<\/button>/);
@@ -785,7 +786,7 @@ test('a quota refusal reaches the panel and the card as a plain sentence with a 
     const ready = await hub.ctx.letterJobs.settle();
     assert.equal(ready.state, 'ready');
     assert.equal(ready.result.engine, 'codex');
-    const panel = await hub.request('GET', '/letters/2026-09-15/Acme');
+    const panel = await hub.request('GET', `/letters/2026-09-15/${jobId}`);
     assert.equal(panel.status, 200, 'the one-click letter was saved under the fixture company slug');
     assert.match(panel.text, /<button class="btn secondary" id="codex-button" type="button" hidden>Generate With Codex<\/button>/);
     assert.match(panel.text, /Generate With Codex/);
@@ -846,34 +847,35 @@ test('an uncertain company blocks one-click generation and Save & Render, sends 
     assert.equal((await hub.form('/letters/save', { date: '2026-09-15', job: vagueId, track: 'data', company: 'LLC', paragraph: fiveParagraphs(100), engine: 'claude', model: 'x' })).status, 400);
     const typedBrand = await hub.form('/letters/save', { date: '2026-09-15', job: vagueId, track: 'data', company: '3M', paragraph: fiveParagraphs(100), engine: 'claude', model: 'x' });
     assert.equal(typedBrand.status, 200, 'a name the owner typed is trusted like a list name');
-    assert.equal(JSON.parse(typedBrand.text).slug, '3M');
+    assert.equal(JSON.parse(typedBrand.text).slug, vagueId);
+    assert.equal(JSON.parse(typedBrand.text).record.companySlug, '3M');
 
     // A confirmed name goes through, is used in the salutation and the file name, and can be renamed later.
     const drafted = JSON.parse((await hub.form('/letters/generate', { date: '2026-09-15', job: vagueId, track: 'data', company: 'Guidehouse' })).text);
     assert.equal(drafted.company, 'Guidehouse');
     const saved = JSON.parse((await hub.form('/letters/save', { date: '2026-09-15', job: vagueId, track: 'data', company: 'Guidehouse', paragraph: drafted.paragraphs, engine: drafted.engine, model: drafted.model })).text);
-    assert.equal(saved.downloadUrl, '/letters/2026-09-15/Guidehouse/MollyDoe_Cover_Letter_Guidehouse.pdf', 'prefix from the signature, company cleaned');
-    assert.match(await fs.readFile(path.join(root, 'private', 'cover-letters', '2026-09-15', 'Guidehouse', 'letter.md'), 'utf8'), /\nDear Guidehouse Recruiting Team,\n/);
+    assert.equal(saved.downloadUrl, `/letters/2026-09-15/${vagueId}/MollyDoe_Cover_Letter_Guidehouse.pdf`, 'prefix from the signature, company cleaned');
+    assert.match(await fs.readFile(path.join(root, 'private', 'cover-letters', '2026-09-15', vagueId, 'letter.md'), 'utf8'), /\nDear Guidehouse Recruiting Team,\n/);
     const callsBefore = engineCalls;
-    const renamed = await hub.form('/letters/rename', { date: '2026-09-15', slug: 'Guidehouse', company: 'Guidehouse Federal' });
+    const renamed = await hub.form('/letters/rename', { date: '2026-09-15', slug: vagueId, company: 'Guidehouse Federal' });
     assert.equal(renamed.status, 200);
     const result = JSON.parse(renamed.text);
     assert.equal(engineCalls, callsBefore, 'renaming never calls the model');
-    assert.equal(result.slug, 'GuidehouseFederal');
+    assert.equal(result.slug, vagueId, 'a rename keeps the job ID folder');
+    assert.equal(result.record.companySlug, 'GuidehouseFederal');
     assert.equal(result.pdfFileName, 'MollyDoe_Cover_Letter_GuidehouseFederal.pdf');
-    assert.equal(result.downloadUrl, '/letters/2026-09-15/GuidehouseFederal/MollyDoe_Cover_Letter_GuidehouseFederal.pdf');
+    assert.equal(result.downloadUrl, `/letters/2026-09-15/${vagueId}/MollyDoe_Cover_Letter_GuidehouseFederal.pdf`);
     assert.equal(result.record.company, 'Guidehouse Federal');
     assert.equal(result.record.renamedFrom, 'Guidehouse');
     assert.equal(result.record.pdf.pages, 1);
-    await assert.rejects(fs.access(path.join(root, 'private', 'cover-letters', '2026-09-15', 'Guidehouse')), 'the old directory is gone');
-    const files = await fs.readdir(path.join(root, 'private', 'cover-letters', '2026-09-15', 'GuidehouseFederal'));
+    const files = await fs.readdir(path.join(root, 'private', 'cover-letters', '2026-09-15', vagueId));
     assert.deepEqual(files.sort(), ['MollyDoe_Cover_Letter_GuidehouseFederal.pdf', 'letter.json', 'letter.md'], 'no stale PDF remains');
-    assert.match(await fs.readFile(path.join(root, 'private', 'cover-letters', '2026-09-15', 'GuidehouseFederal', 'letter.md'), 'utf8'), /\nDear Guidehouse Federal Recruiting Team,\n/);
+    assert.match(await fs.readFile(path.join(root, 'private', 'cover-letters', '2026-09-15', vagueId, 'letter.md'), 'utf8'), /\nDear Guidehouse Federal Recruiting Team,\n/);
     assert.equal((await hub.request('GET', result.downloadUrl)).status, 200);
-    assert.equal((await hub.request('GET', '/letters/2026-09-15/Guidehouse')).status, 404);
-    assert.equal((await hub.form('/letters/rename', { date: '2026-09-15', slug: 'GuidehouseFederal', company: 'LLC' })).status, 400, 'a renamed company must be valid too');
-    const opened = await hub.request('GET', '/letters/2026-09-15/GuidehouseFederal');
-    assert.match(opened.text, /data-slug="GuidehouseFederal"/);
+    assert.equal((await hub.request('GET', '/letters/2026-09-15/Guidehouse')).status, 404, 'no company folder is written');
+    assert.equal((await hub.form('/letters/rename', { date: '2026-09-15', slug: vagueId, company: 'LLC' })).status, 400, 'a renamed company must be valid too');
+    const opened = await hub.request('GET', `/letters/2026-09-15/${vagueId}`);
+    assert.match(opened.text, new RegExp(`data-slug="${vagueId}"`));
     assert.match(opened.text, /<button class="btn secondary" id="rename-button" type="button" title="[^"]*">Rename Company &amp; Re-render<\/button>/);
 
     // The Letters page flags a stored letter whose salutation is not a usable name and shows every file name.
@@ -883,14 +885,14 @@ test('an uncertain company blocks one-click generation and Save & Render, sends 
     await fs.writeFile(path.join(badDirectory, 'letter.md'), '# x');
     const list = await hub.request('GET', '/letters');
     assert.match(list.text, /<a href="\/letters\/2026-09-15\/US101">US101<\/a> <span class="badge badge-warn" data-badge="company-suspect"[^>]*>Check Company Name<\/span>/);
-    assert.match(list.text, /<a href="\/letters\/2026-09-15\/GuidehouseFederal">Guidehouse Federal<\/a><\/td>/, 'a valid name carries no badge');
+    assert.match(list.text, new RegExp(`<a href="/letters/2026-09-15/${vagueId}">Guidehouse Federal</a></td>`), 'a valid name carries no badge');
     assert.match(list.text, /<td class="file"><span class="mono">MollyDoe_Cover_Letter_GuidehouseFederal\.pdf<\/span><\/td>/);
 
     // Changing the prefix under Settings changes the next file name.
     await hub.upload('/settings/cover-letter', { ...PROFILE, signatureName: 'Mary (Molly) Doe', fileNamePrefix: 'MDoe' }, []);
-    const again = await hub.form('/letters/rename', { date: '2026-09-15', slug: 'GuidehouseFederal', company: 'Guidehouse Federal' });
+    const again = await hub.form('/letters/rename', { date: '2026-09-15', slug: vagueId, company: 'Guidehouse Federal' });
     assert.equal(JSON.parse(again.text).pdfFileName, 'MDoe_Cover_Letter_GuidehouseFederal.pdf');
-    assert.deepEqual((await fs.readdir(path.join(root, 'private', 'cover-letters', '2026-09-15', 'GuidehouseFederal'))).filter(name => name.endsWith('.pdf')), ['MDoe_Cover_Letter_GuidehouseFederal.pdf'], 'the old PDF is removed when the prefix changes');
+    assert.deepEqual((await fs.readdir(path.join(root, 'private', 'cover-letters', '2026-09-15', vagueId))).filter(name => name.endsWith('.pdf')), ['MDoe_Cover_Letter_GuidehouseFederal.pdf'], 'the old PDF is removed when the prefix changes');
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });
@@ -1195,11 +1197,11 @@ test('short names: Settings keeps the alias table, the panel shows the short nam
     assert.equal(aliased.shortNameSource, 'alias');
     assert.match((await hub.request('GET', `/letters/new?date=2026-09-15&job=${acmeId}`)).text, /id="letter-company" class="control-input" value="ACME"/, 'the panel starts from the alias');
     const saved = JSON.parse((await hub.form('/letters/save', { date: '2026-09-15', job: pwcId, track: 'data', company: aliased.company, paragraph: aliased.paragraphs, engine: 'claude', model: 'x', shortNameSource: aliased.shortNameSource })).text);
-    assert.equal(saved.downloadUrl, '/letters/2026-09-15/PwCAdvisory/JaneDoe_Cover_Letter_PwCAdvisory.pdf');
-    const record = JSON.parse(await fs.readFile(path.join(root, 'private', 'cover-letters', '2026-09-15', 'PwCAdvisory', 'letter.json'), 'utf8'));
+    assert.equal(saved.downloadUrl, `/letters/2026-09-15/${pwcId}/JaneDoe_Cover_Letter_PwCAdvisory.pdf`);
+    const record = JSON.parse(await fs.readFile(path.join(root, 'private', 'cover-letters', '2026-09-15', pwcId, 'letter.json'), 'utf8'));
     assert.equal(record.fullName, 'PricewaterhouseCoopers (PwC)');
     assert.equal(record.shortNameSource, 'alias');
-    assert.match(await fs.readFile(path.join(root, 'private', 'cover-letters', '2026-09-15', 'PwCAdvisory', 'letter.md'), 'utf8'), /\nDear PwC Advisory Recruiting Team,\n/);
+    assert.match(await fs.readFile(path.join(root, 'private', 'cover-letters', '2026-09-15', pwcId, 'letter.md'), 'utf8'), /\nDear PwC Advisory Recruiting Team,\n/);
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });
@@ -1232,8 +1234,8 @@ test('Update Salutations rewrites the salutation and the file name of the date\'
       assert.equal(saved.status, 200, company);
     }
     // One the owner renamed by hand stays as the owner named it.
-    assert.equal((await hub.form('/letters/rename', { date: '2026-09-15', slug: 'InitechHoldings', company: 'Initech Holdings Group' })).status, 200);
-    for (const file of ['AcmeInc', 'DowJonesCompanyInc', 'TheProcterGambleCompany']) {
+    assert.equal((await hub.form('/letters/rename', { date: '2026-09-15', slug: idOf('https://example.com/jobs/renamed'), company: 'Initech Holdings Group' })).status, 200);
+    for (const file of ['https://example.com/jobs/1', 'https://example.com/jobs/dj', 'https://example.com/jobs/pg'].map(idOf)) {
       const legacy = JSON.parse(await fs.readFile(dir(file, 'letter.json'), 'utf8'));
       delete legacy.shortNameSource;
       delete legacy.fullName;
@@ -1245,20 +1247,22 @@ test('Update Salutations rewrites the salutation and the file name of the date\'
     const updated = await hub.form('/letters/update-salutations', { date: '2026-09-15' });
     assert.equal(updated.status, 303);
     const notice = decodeURIComponent(updated.headers.location);
-    assert.match(notice, /notice=Updated 3 salutation\(s\); Acme, Inc\. → Acme, Dow Jones & Company, Inc\. → Dow Jones, The Procter & Gamble Company → P&G; 1 already used the short name\. No engine was called; the letter bodies are unchanged\./);
+    assert.match(notice, /notice=Updated 3 salutation\(s\); .+; 1 already used the short name\. No engine was called; the letter bodies are unchanged\./);
+    for (const change of ['Acme, Inc. → Acme', 'Dow Jones & Company, Inc. → Dow Jones', 'The Procter & Gamble Company → P&G']) assert.ok(notice.includes(change), change);
     assert.equal(engineCalls, 0, 'no engine call, no quota');
-    for (const [slug, short, file, full] of [['Acme', 'Acme', 'JaneDoe_Cover_Letter_Acme.pdf', 'Acme, Inc.'], ['DowJones', 'Dow Jones', 'JaneDoe_Cover_Letter_DowJones.pdf', 'Dow Jones & Company, Inc.'], ['PG', 'P&G', 'JaneDoe_Cover_Letter_PG.pdf', 'The Procter & Gamble Company']]) {
+    for (const [slug, short, file, full, companySlug] of [[idOf('https://example.com/jobs/1'), 'Acme', 'JaneDoe_Cover_Letter_Acme.pdf', 'Acme, Inc.', 'Acme'], [idOf('https://example.com/jobs/dj'), 'Dow Jones', 'JaneDoe_Cover_Letter_DowJones.pdf', 'Dow Jones & Company, Inc.', 'DowJones'], [idOf('https://example.com/jobs/pg'), 'P&G', 'JaneDoe_Cover_Letter_PG.pdf', 'The Procter & Gamble Company', 'PG']]) {
       assert.deepEqual((await fs.readdir(dir(slug))).sort(), [file, 'letter.json', 'letter.md'], `${short}: only the new PDF`);
       const markdown = await fs.readFile(dir(slug, 'letter.md'), 'utf8');
       assert.match(markdown, new RegExp(`\\nDear ${short.replace('&', '\\&')} Recruiting Team,\\n\\nI am writing to apply for the Data Analyst position at ${full.replace(/[.&]/g, '\\$&')}\\.\\n`), `${short}: the salutation changed, the full name in the body did not`);
       const record = JSON.parse(await fs.readFile(dir(slug, 'letter.json'), 'utf8'));
       assert.deepEqual(record.paragraphs, body(full));
       assert.equal(record.pdfFileName, file);
+      assert.equal(record.companySlug, companySlug);
       assert.equal(record.pdf.pages, 1, 'the PDF was rendered again');
       assert.ok((await fs.stat(dir(slug, file))).size > 500);
     }
-    for (const gone of ['AcmeInc', 'DowJonesCompanyInc', 'TheProcterGambleCompany']) await assert.rejects(fs.access(dir(gone)), `${gone} moved`);
-    assert.equal(JSON.parse(await fs.readFile(dir('InitechHoldingsGroup', 'letter.json'), 'utf8')).company, 'Initech Holdings Group', 'the owner\'s rename stays');
+    assert.equal((await fs.readdir(dir())).length, 4, 'each letter stays in its job ID folder');
+    assert.equal(JSON.parse(await fs.readFile(dir(idOf('https://example.com/jobs/renamed'), 'letter.json'), 'utf8')).company, 'Initech Holdings Group', 'the owner\'s rename stays');
     // Running it again changes nothing.
     assert.match(decodeURIComponent((await hub.form('/letters/update-salutations', { date: '2026-09-15' })).headers.location), /notice=Updated 0 salutation\(s\); 4 already used the short name/);
     assert.equal(engineCalls, 0);
@@ -1268,7 +1272,7 @@ test('Update Salutations rewrites the salutation and the file name of the date\'
   }
 });
 
-test('Update Salutations never moves a letter over another posting\'s letter with the same short name', async () => {
+test('Update Salutations gives two postings of one company the same short name and keeps both letters', async () => {
   const root = await prepareProject();
   const payloadPath = path.join(root, 'state', 'report-payload-2026-09-15.json');
   const payload = JSON.parse(await fs.readFile(payloadPath, 'utf8'));
@@ -1282,9 +1286,19 @@ test('Update Salutations never moves a letter over another posting\'s letter wit
     await hub.form('/letters/save', { date: '2026-09-15', job: sha256('https://example.com/jobs/1').slice(0, 16), track: 'data', company: 'Acme, Inc.', paragraph: fiveParagraphs(100), engine: 'claude', model: 'x' });
     await hub.form('/letters/save', { date: '2026-09-15', job: sha256(second.url).slice(0, 16), track: 'data', company: 'Acme', paragraph: fiveParagraphs(100), engine: 'claude', model: 'x' });
     const outcome = decodeURIComponent((await hub.form('/letters/update-salutations', { date: '2026-09-15' })).headers.location);
-    assert.match(outcome, /Updated 0 salutation\(s\); 1 already used the short name; skipped Acme, Inc\. \(another letter of this date is already saved as Acme\)/);
+    assert.match(outcome, /Updated 1 salutation\(s\); Acme, Inc\. → Acme; 1 already used the short name\./);
+    const ids = [sha256('https://example.com/jobs/1').slice(0, 16), sha256(second.url).slice(0, 16)];
     const letters = await fs.readdir(path.join(root, 'private', 'cover-letters', '2026-09-15'));
-    assert.deepEqual(letters.sort(), ['Acme', 'AcmeInc'], 'both letters are still there');
+    assert.deepEqual(letters.sort(), [...ids].sort(), 'both letters are still there');
+    for (const id of ids) assert.equal(JSON.parse(await fs.readFile(path.join(root, 'private', 'cover-letters', '2026-09-15', id, 'letter.json'), 'utf8')).pdfFileName, 'JaneDoe_Cover_Letter_Acme.pdf');
+    // Each card downloads its own letter: same file name, its own job ID folder.
+    const report = (await hub.request('GET', '/reports/2026-09-15')).text;
+    for (const id of ids) {
+      assert.ok(report.includes(`href="/letters/2026-09-15/${id}/JaneDoe_Cover_Letter_Acme.pdf">Download Letter</a>`), `card ${id}`);
+      const download = await hub.request('GET', `/letters/2026-09-15/${id}/JaneDoe_Cover_Letter_Acme.pdf`);
+      assert.equal(download.status, 200);
+      assert.match(download.headers['content-disposition'], /filename="JaneDoe_Cover_Letter_Acme\.pdf"/);
+    }
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });

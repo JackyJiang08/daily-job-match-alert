@@ -37,7 +37,8 @@
     "test": "node --test tests/*.test.mjs",
     "demo": "node src/index.mjs --config tests/fixtures/config.demo.json --now 2026-08-27T12:00:00Z",
     "chaos": "bash scripts/chaos-check.sh",
-    "fixture:envelope": "node scripts/record-envelope-fixture.mjs"
+    "fixture:envelope": "node scripts/record-envelope-fixture.mjs",
+    "letters:audit": "node scripts/letters-audit.mjs"
   },
   "engines": {
     "node": ">=20"

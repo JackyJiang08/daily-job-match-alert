@@ -3,7 +3,8 @@
 //   private/cover-letter/playbook.<ext>      the owner's writing rules and evidence library
 //   private/cover-letter/playbook-v1.md      the playbook before the v2 edits, read by the v1 rules (optional)
 //   private/cover-letter/samples/<file>.txt  extracted text of up to ten style samples (+ original PDF)
-//   private/cover-letters/<date>/<Company>/  letter.json, letter.md, <fileName>.pdf per generated letter
+//   private/cover-letters/<date>/<jobId>/    letter.json, letter.md, <fileName>.pdf per generated letter (letters
+//                                            saved before 2026-11-09 sit under <date>/<Company>/ until saved again)
 // Nothing in this module carries personal data; every value comes from the owner's uploads.
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -197,33 +198,66 @@ export function createLetterStore({ root, io = fs, now = () => new Date(), extra
     return { directory: path.join(lettersDirectory, date, slug), slug };
   }
 
+  // A letter's folder is named after its posting's job ID, so two postings of one company on one date keep two
+  // letters (2026-11-09; before, both used the company's folder and the second save replaced the first). The
+  // folder name is the letter's key in the hub's URLs; the PDF keeps the company's file name.
+  function jobKey(jobId) {
+    const key = String(jobId || '');
+    return COMPANY_PATTERN.test(key) ? key : null;
+  }
+
+  // A letter saved under a company folder before 2026-11-09 moves to its job ID folder (with its PDF) the next
+  // time it is saved; company folders that hold other postings' letters are left alone.
+  async function adoptLegacy(date, key) {
+    const target = letterDirectory(date, key);
+    if (await readJson(path.join(target.directory, 'letter.json'), null)) return;
+    let names = [];
+    try { names = await io.readdir(path.join(lettersDirectory, date)); } catch { return; }
+    let legacy = null;
+    for (const name of names.filter(item => COMPANY_PATTERN.test(item) && item !== key)) {
+      const record = await readJson(path.join(lettersDirectory, date, name, 'letter.json'), null);
+      if (record?.jobId === key && (!legacy || String(record.savedAt || '') > String(legacy.savedAt || ''))) legacy = { name, savedAt: record.savedAt };
+    }
+    if (!legacy) return;
+    await io.rm(target.directory, { recursive: true, force: true });
+    await io.rename(path.join(lettersDirectory, date, legacy.name), target.directory);
+  }
+
   async function saveLetter({ date, company, meta, markdown }) {
-    const { directory, slug } = letterDirectory(date, company);
+    const key = jobKey(meta?.jobId);
+    const companySlug = letterDirectory(date, company).slug;
+    if (key) await adoptLegacy(date, key);
+    const { directory, slug } = letterDirectory(date, key || company);
     await io.mkdir(directory, { recursive: true });
-    const record = { ...meta, date, companySlug: slug, savedAt: now().toISOString() };
+    // A new save under another company name leaves no PDF of the old name behind.
+    const previous = await readJson(path.join(directory, 'letter.json'), null);
+    if (previous?.pdfFileName && meta?.pdfFileName && previous.pdfFileName !== meta.pdfFileName && FILE_PATTERN.test(previous.pdfFileName)) await io.rm(path.join(directory, previous.pdfFileName), { force: true }).catch(() => {});
+    const record = { ...meta, date, companySlug, savedAt: now().toISOString() };
     await writeJson(path.join(directory, 'letter.json'), record);
     await io.writeFile(path.join(directory, 'letter.md'), markdown, { mode: 0o600 });
     return { directory, slug, record };
   }
 
-  // Renames a saved letter's company: the salutation line in the Markdown, the directory (company slug),
-  // and the PDF file name. Files are moved, not copied, so nothing of the old name remains.
+  // Renames a saved letter's company: the salutation line in the Markdown and the PDF file name. A letter in its
+  // job ID folder stays there; one still in a company folder moves to its job ID folder (or, without a job ID,
+  // to the new company folder). Files are moved, not copied, so nothing of the old name remains.
   async function renameLetter(date, slug, { company, markdown, pdfFileName, meta }) {
     const from = letterDirectory(date, slug);
-    const to = letterDirectory(date, company);
     const existing = await readJson(path.join(from.directory, 'letter.json'), null);
     if (!existing) throw new LetterInputError('Letter not found');
+    const companySlug = letterDirectory(date, company).slug;
+    const to = letterDirectory(date, jobKey(existing.jobId) || company);
     if (to.slug !== from.slug) {
       // Never over another posting's letter saved under the new name on the same date.
       const occupant = await readJson(path.join(to.directory, 'letter.json'), null);
-      if (occupant && occupant.jobId && occupant.jobId !== existing.jobId) throw new LetterInputError(`Another letter of ${date} is already saved as ${company}; rename that one first`);
+      if (occupant && occupant.jobId !== existing.jobId) throw new LetterInputError(`Another letter of ${date} is already saved as ${company}; rename that one first`);
       await io.mkdir(path.dirname(to.directory), { recursive: true });
       await io.rm(to.directory, { recursive: true, force: true });
       await io.rename(from.directory, to.directory);
     }
     const stalePdf = existing.pdfFileName && existing.pdfFileName !== pdfFileName ? path.join(to.directory, existing.pdfFileName) : null;
     if (stalePdf) await io.rm(stalePdf, { force: true }).catch(() => {});
-    const record = { ...existing, ...meta, company, companySlug: to.slug, pdfFileName, savedAt: now().toISOString() };
+    const record = { ...existing, ...meta, company, companySlug, pdfFileName, savedAt: now().toISOString() };
     await writeJson(path.join(to.directory, 'letter.json'), record);
     await io.writeFile(path.join(to.directory, 'letter.md'), markdown, { mode: 0o600 });
     return { directory: to.directory, slug: to.slug, record };
