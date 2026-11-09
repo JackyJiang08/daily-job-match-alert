@@ -1,6 +1,7 @@
 // Private cover-letter material and generated letters, all under private/ (gitignored):
 //   private/cover-letter/profile.json        name, phone, email, signature, company aliases, playbook + sample metadata
 //   private/cover-letter/playbook.<ext>      the owner's writing rules and evidence library
+//   private/cover-letter/playbook-v1.md      the playbook before the v2 edits, read by the v1 rules (optional)
 //   private/cover-letter/samples/<file>.txt  extracted text of up to ten style samples (+ original PDF)
 //   private/cover-letters/<date>/<Company>/  letter.json, letter.md, <fileName>.pdf per generated letter
 // Nothing in this module carries personal data; every value comes from the owner's uploads.
@@ -11,6 +12,7 @@ import { writeJsonAtomic } from '../json-file.mjs';
 import { parseAliasText } from './short-name.mjs';
 
 export const MAX_SAMPLES = 10;
+export const V1_PLAYBOOK = 'playbook-v1.md';
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const COMPANY_PATTERN = /^[A-Za-z0-9]{1,80}$/;
@@ -171,9 +173,13 @@ export function createLetterStore({ root, io = fs, now = () => new Date(), extra
     await writeJson(profilePath, profile);
   }
 
-  async function loadMaterial() {
+  // The v1 rules read the playbook as it was before the v2 edits (private/cover-letter/playbook-v1.md, the backup
+  // kept when the v2 edits were applied) when that file exists, so letters stay on the old rules until the owner
+  // switches config.coverLetter.rulesVersion to "v2".
+  async function loadMaterial({ rulesVersion = 'v2' } = {}) {
     const profile = await readProfile();
-    const playbook = profile.playbook?.file ? await io.readFile(path.join(materialDirectory, profile.playbook.file), 'utf8') : '';
+    const v1 = rulesVersion === 'v1' ? await io.readFile(path.join(materialDirectory, V1_PLAYBOOK), 'utf8').catch(() => null) : null;
+    const playbook = v1 ?? (profile.playbook?.file ? await io.readFile(path.join(materialDirectory, profile.playbook.file), 'utf8') : '');
     const samples = [];
     for (const sample of profile.samples || []) {
       const text = await io.readFile(path.join(materialDirectory, 'samples', sample.file), 'utf8').catch(() => '');

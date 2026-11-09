@@ -587,6 +587,41 @@ disabled; do not expand them unless a task says so.
   (tests/helpers/page-content.mjs assertSameContent: words, links/actions, form fields and data-* must match;
   REDESIGN_ALLOWANCES lists the intended additions and "pdf" from Download PDF → Download Letter).
 
+## Letter rules v2 (2026-11-08, from private/review/cover-letter-review-response.md)
+- config.coverLetter.rulesVersion "v1" (DEFAULT, unchanged behavior; v1 reads private/cover-letter/playbook-v1.md, the
+  pre-edit backup, when present) | "v2"; openingStyle "limit-writing-to" (an "I am writing to" opening allowed while
+  the last 7 days use it ≤ 30%) | "ban-writing-to"; availability { fullTimeFrom "June 2027", springTerm false,
+  mentionMasters { internship true, newGrad false } } (src/cover-letter/availability.mjs letterRulesSettings;
+  Settings → Cover Letters "Letter Rules", POST /settings/letter-rules). The hub playbook (private/cover-letter/
+  playbook.md, edited per review part B; backup playbook.backup-2026-11-08.md, diff private/review/playbook-v2.diff)
+  carries {{AVAILABILITY}}, filled per letter (renderPlaybook). Never hard-code availability or master's plans.
+- v2 prompts: src/cover-letter/rules-v2.mjs (letterRulesV2, buildCoverLetterPromptV2 / buildReviewPromptV2 /
+  buildCondensePromptV2, LETTER_SCHEMA_V2 adds candidParagraphIndex + candidGaps ≤ 3, REVIEW_SCHEMA_V2 adds
+  candidParagraphIndex; coreGaps = "No …"/skill-not-found gaps minus eligibility/schedule items; closingRule drops
+  overused thank-yous). v2 flow src/cover-letter/generate-v2.mjs: editor issues filtered (filterEditorIssues: quote
+  not in draft, case-only name mismatch), rewrite guard (guardEditorRewrite: a revised paragraph adding numbers
+  outside resume+playbook+JD or scenario phrases keeps the draft paragraph, note "check failed (editor-rewrite)"),
+  postingCasing for the short name, autoFix (%, ≥, ≤, τ, ρ, K+ in words; " - " → ", "), runChecks.
+- Checks (src/cover-letter/checks.mjs, CHECK_IDS): opening, banned-phrases, principle-openers, symbols,
+  title-separators, graduation-once, availability, masters, numbers (evidence.mjs whitelist by value), metric-repeat,
+  scenario, jd-echo (≥ 6 shared words), candid, scoring-evidence (matchReasons naming an experience only another
+  resume has; resumeExperiences parses employer "X | Role | Place" lines and project headings), one-page. A failure
+  is the editor note "check failed (<id>): …" (needs-review, notes.mjs), a fix "auto-fix: …" (info). reviewBadge
+  honors letter.reviewClearedAt (POST /letters/clear-review, letter page "Mark Details Checked").
+- v2 save (finishLetterV2 in src/hub/letters.mjs): > 560 words → condense before render; renderLetterPdfV2 = Letter
+  1in only (no B5), condense min(480, 0.85×words) then 450; re-run checks with pages; record keeps rulesVersion,
+  candidParagraphIndex, candidGaps, openingForbidden, checks. v2 track rule letterTrackFor: business analyst /
+  customer support / operations / product / project / consulting titles → DA_TRACK_ID 'data'; letter page offers
+  "Regenerate With DA Resume" when a scoring-evidence note exists. Term conflict (postingTermConflict: title, or a
+  description sentence about the term/start, not graduation or applications) → selectAutoLetters skips
+  (skipped.termConflict), card badge "Term Conflict", manual letters allowed.
+- src/cover-letter/recent.mjs recentLetterStats (7 days): overused (> 15%) openings/closings and experiences
+  (> 60%) go into the next v2 prompt; Status "Letter Variety" card shows the rates (stripped by the Status snapshot
+  helper). A/B: scripts/letters-ab.mjs + src/letters-ab.mjs (real engines, saves nothing to the store or outreach
+  state; private/review/ab-jobs.json, output private/review/ab-<date>/).
+- Known (not fixed): the letter store's saveLetter overwrites another posting's letter saved under the same company
+  slug on the same date (two postings from one company on 2026-11-08).
+
 ## Scoring engines (src/engines/)
 - One interface per engine: verifyAuth(), reviewBatch(prompt, schema,
   { tempDirectory }), describeModel(), modelMatches(actual),

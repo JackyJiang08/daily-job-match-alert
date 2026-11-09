@@ -7,6 +7,8 @@ import { roleLabel } from '../report.mjs';
 import { htmlEscape } from '../utils.mjs';
 import { looksLikeEntityCode } from '../posting-fields.mjs';
 import { aliasText } from '../cover-letter/short-name.mjs';
+import { SCORING_EVIDENCE_NOTE } from '../cover-letter/checks.mjs';
+import { DA_TRACK_ID } from './letters.mjs';
 import { LETTER_CLOSING, letterPlainText, salutationFor } from '../cover-letter/plain-text.mjs';
 
 export const TRACK_LABELS = { data: 'Data', llm: 'LLM', agent: 'AI Agent' };
@@ -99,6 +101,23 @@ function sampleRows(samples, timeZone) {
       <td class="meta">${readable(sample.uploadedAt, timeZone)}</td>
       <td class="actions"><button class="btn secondary small" type="submit" name="file" value="${htmlEscape(sample.file)}" formaction="/settings/cover-letter/remove-sample" formnovalidate>Remove</button></td>
     </tr>`).join('')}</table></div>`;
+}
+
+// Settings → Cover Letters "Letter Rules": which rule set writes letters (v1, the rules before 2026-11-08, or v2),
+// the opening style, and the availability window the v2 prompts and checks use.
+export function letterRulesSettingsCard(rules = {}) {
+  const availability = rules.availability || {};
+  const option = (value, label, current) => `<option value="${htmlEscape(value)}"${value === current ? ' selected' : ''}>${htmlEscape(label)}</option>`;
+  const check = (name, on, label) => `<label class="check"><input type="checkbox" name="${name}"${on ? ' checked' : ''}> ${label}</label>`;
+  return `<article class="card" id="letter-rules"><h2>Letter Rules</h2>
+    <form method="post" action="/settings/letter-rules">
+      <label class="field"><span>Rules Version (v2: availability, candid paragraph for core gaps, number and scenario checks, no B5 fallback)</span><select name="rulesVersion" class="control-input">${option('v1', 'v1 (Before November 8, 2026)', rules.rulesVersion)}${option('v2', 'v2', rules.rulesVersion)}</select></label>
+      <label class="field"><span>Opening Style</span><select name="openingStyle" class="control-input">${option('limit-writing-to', 'Limit "I am writing to" (at most 30 percent of the last 7 days)', rules.openingStyle)}${option('ban-writing-to', 'Ban "I am writing to"', rules.openingStyle)}</select></label>
+      <label class="field"><span>Available Full Time From (Month and Year)</span><input type="text" name="fullTimeFrom" class="control-input" value="${htmlEscape(availability.fullTimeFrom || '')}" placeholder="June 2027" required></label>
+      <div class="field">${check('springTerm', availability.springTerm, 'A Spring Term Is Possible')}${check('mastersInternship', availability.mentionMasters?.internship !== false, "Mention the Master's Plan in Internship Letters")}${check('mastersNewGrad', availability.mentionMasters?.newGrad === true, "Mention the Master's Plan in New Grad Letters")}</div>
+      <button class="btn" type="submit">Save</button>
+      <p class="form-foot">Without a spring term, no letter names a term or start date before the full-time date, and v2 skips the automatic letter for a posting whose term starts earlier (its card shows Term Conflict; you can still generate one).</p>
+    </form></article>`;
 }
 
 // Settings → Cover Letters: whether letters are written automatically after each run, and how many.
@@ -232,6 +251,10 @@ export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, 
   // Editor notes split in two: what the owner must check before sending (shown open), and how the letter
   // was made (engines, fallbacks, applied fixes), which only goes in the footer.
   const levels = classifyEditorNotes(record?.editorNotes || []);
+  // "Regenerate With DA Resume": offered when the scorer's reasons cite experience only the DA resume carries.
+  const hasDa = tracks.some(track => track.id === DA_TRACK_ID);
+  const daOffer = hasDa && (record?.track || selectedTrack) !== DA_TRACK_ID && levels.needsReview.some(note => note.includes(SCORING_EVIDENCE_NOTE));
+  const savedRules = record?.rulesVersion === 'v2' ? { version: 'v2', candidParagraphIndex: record.candidParagraphIndex ?? -1, candidGaps: record.candidGaps || [], openingForbidden: record.openingForbidden === true } : null;
   const notes = levels.needsReview.map(note => `<li>${htmlEscape(note)}</li>`).join('');
   const infoNotes = levels.info.map(note => `<li>${htmlEscape(note)}</li>`).join('');
   const download = record?.pdfFileName && record.pdf
@@ -245,7 +268,7 @@ export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, 
   return `<h1 class="hub-title">Cover Letter</h1>
   ${copyRow}
   ${notReady}
-  <article class="card letter-head" id="letter-panel" data-date="${htmlEscape(date)}" data-job="${htmlEscape(jobId)}" data-ready="${readiness.ready ? 'yes' : 'no'}" data-slug="${htmlEscape(existing?.slug || '')}" data-company-uncertain="${companyUncertain ? 'yes' : 'no'}">
+  <article class="card letter-head" id="letter-panel" data-date="${htmlEscape(date)}" data-job="${htmlEscape(jobId)}" data-ready="${readiness.ready ? 'yes' : 'no'}" data-slug="${htmlEscape(existing?.slug || '')}" data-company-uncertain="${companyUncertain ? 'yes' : 'no'}" data-da-track="${hasDa ? DA_TRACK_ID : ''}" data-rules="${htmlEscape(JSON.stringify(savedRules))}">
     <dl class="kv">
       <dt>Role</dt><dd>${htmlEscape(job.title || '')}</dd>
       <dt>Company</dt><dd>${htmlEscape(job.company || 'Company not resolved')}</dd>
@@ -261,6 +284,7 @@ export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, 
         <button class="btn secondary" id="save-button" type="button"${paragraphs.length ? '' : ' hidden'}>Save &amp; Render PDF</button>
         <button class="btn secondary" id="rename-button" type="button"${existing?.slug ? '' : ' hidden'} title="Replace the salutation and the file name and render the PDF again; the model is not called">Rename Company &amp; Re-render</button>
         <button class="btn secondary" id="codex-button" type="button" hidden>Generate With Codex</button>
+        <button class="btn secondary" id="da-button" type="button"${daOffer ? '' : ' hidden'} title="The scorer's reasons cite experience that is only on the DA resume">Regenerate With DA Resume</button>
         ${download}
       </div>
       <p class="letter-status" id="letter-status"></p>
@@ -273,7 +297,7 @@ export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, 
     <p class="muted" id="letter-empty"${paragraphs.length ? ' hidden' : ''}>No draft yet. Regenerate writes one with the selected track and company name.</p>
     <div id="paragraphs">${paragraphEditor(paragraphs)}</div>
     <ul class="issues" id="letter-issues">${issues}</ul>
-    <details class="notes" id="editor-notes" open${notes ? '' : ' hidden'}><summary>Check Before Sending</summary><ul class="issues" id="editor-notes-list">${notes}</ul></details>
+    <details class="notes" id="editor-notes" open${notes ? '' : ' hidden'}><summary>Check Before Sending</summary><ul class="issues" id="editor-notes-list">${notes}</ul><p class="row"><button class="btn secondary" id="clear-review" type="button"${existing?.slug && !record?.reviewClearedAt ? '' : ' hidden'}>Mark Details Checked</button><span class="letter-status" id="review-status">${record?.reviewClearedAt ? 'Details marked as checked.' : ''}</span></p></details>
     <p class="letter-foot" id="letter-foot">${htmlEscape(footLine(record, engineLabel))}</p>
     <ul class="letter-foot foot-notes" id="letter-info-notes"${infoNotes ? '' : ' hidden'}>${infoNotes}</ul>
   </article>`;
@@ -299,7 +323,15 @@ ${letterPlainText.toString()}
   var notesBox = document.getElementById('editor-notes');
   var emptyHint = document.getElementById('letter-empty');
   var notesList = document.getElementById('editor-notes-list');
-  var state = { engine: null, model: null, issues: [], editorNotes: [], samplesUsed: [], pages: null, shortNameSource: null };
+  var state = { engine: null, model: null, issues: [], editorNotes: [], samplesUsed: [], pages: null, shortNameSource: null, rules: null };
+  try { state.rules = JSON.parse(panel.dataset.rules || 'null'); } catch (e) { state.rules = null; }
+  var daButton = document.getElementById('da-button');
+  function offerDa(notes) {
+    if (!daButton) return;
+    var daTrack = panel.dataset.daTrack;
+    var cites = (notes || []).some(function (note) { return note.indexOf(${JSON.stringify(SCORING_EVIDENCE_NOTE)}) >= 0; });
+    daButton.hidden = !(daTrack && cites && document.getElementById('letter-track').value !== daTrack);
+  }
   // A short name the owner typed (or confirmed for an uncertain company) is sent as fixed; otherwise the
   // alias table and the model choose it, and the field shows what they chose.
   var companyInput = document.getElementById('letter-company');
@@ -338,6 +370,10 @@ ${letterPlainText.toString()}
     if (result.company) { companyInput.value = result.company; companyBase = result.company; companyTyped = result.shortNameSource === 'owner'; }
     state.shortNameSource = result.shortNameSource || null;
     state.engine = result.engine; state.model = result.model; state.issues = result.issues || []; state.editorNotes = result.editorNotes || []; state.samplesUsed = result.samplesUsed || []; state.pages = null;
+    state.rules = result.rules && result.rules.version === 'v2' ? result.rules : null;
+    if (result.track && result.track.id) document.getElementById('letter-track').value = result.track.id;
+    offerDa(result.notesNeedReview);
+    var clear = document.getElementById('clear-review'); if (clear) clear.hidden = true;
     showCounts(result.paragraphs, null);
     showFoot(result);
     editor.dataset.state = 'editing'; if (emptyHint) emptyHint.hidden = true; save.hidden = false; download.hidden = true; generate.textContent = 'Regenerate';
@@ -409,13 +445,29 @@ ${letterPlainText.toString()}
       .then(function () { rename.disabled = false; });
   });
   if (codexButton) codexButton.addEventListener('click', function () { runGenerate('codex'); });
+  if (daButton) daButton.addEventListener('click', function () { document.getElementById('letter-track').value = panel.dataset.daTrack; daButton.hidden = true; runGenerate(null); });
+  var clearButton = document.getElementById('clear-review');
+  if (clearButton) clearButton.addEventListener('click', function () {
+    if (!panel.dataset.slug) return;
+    clearButton.disabled = true;
+    post('/letters/clear-review', { date: panel.dataset.date, slug: panel.dataset.slug })
+      .then(function () { clearButton.hidden = true; document.getElementById('review-status').textContent = 'Details marked as checked.'; })
+      .catch(function (error) { say(error.message, true); })
+      .then(function () { clearButton.disabled = false; });
+  });
   save.addEventListener('click', function () {
     save.disabled = true; say('Rendering PDF…');
-    post('/letters/save', { date: panel.dataset.date, job: panel.dataset.job, track: document.getElementById('letter-track').value, company: document.getElementById('letter-company').value, paragraph: paragraphs(), engine: state.engine || '', model: state.model || '', issues: JSON.stringify(state.issues), editorNotes: JSON.stringify(state.editorNotes), samplesUsed: JSON.stringify(state.samplesUsed), shortNameSource: companyTyped ? 'owner' : (state.shortNameSource || '') })
+    post('/letters/save', { date: panel.dataset.date, job: panel.dataset.job, track: document.getElementById('letter-track').value, company: document.getElementById('letter-company').value, paragraph: paragraphs(), engine: state.engine || '', model: state.model || '', issues: JSON.stringify(state.issues), editorNotes: JSON.stringify(state.editorNotes), samplesUsed: JSON.stringify(state.samplesUsed), shortNameSource: companyTyped ? 'owner' : (state.shortNameSource || ''), rules: state.rules ? JSON.stringify(state.rules) : '' })
       .then(function (result) {
         download.href = result.downloadUrl; download.hidden = false;
         panel.dataset.slug = result.slug; var renameButton = document.getElementById('rename-button'); if (renameButton) renameButton.hidden = false;
-        if (result.pdf.condensed && result.paragraphs) fill(result.paragraphs);
+        if (result.paragraphs && (result.pdf.condensed || state.rules)) fill(result.paragraphs);
+        if (result.notesNeedReview) {
+          notesList.innerHTML = ''; result.notesNeedReview.forEach(function (note) { var item = document.createElement('li'); item.textContent = note; notesList.appendChild(item); });
+          notesBox.hidden = !result.notesNeedReview.length;
+          var clearAfter = document.getElementById('clear-review'); if (clearAfter) clearAfter.hidden = !result.notesNeedReview.length;
+          offerDa(result.notesNeedReview);
+        }
         state.pages = result.pdf.pages;
         showCounts(result.paragraphs || paragraphs(), result.pdf.pages);
         var note = result.pdf.note ? ' ' + result.pdf.note + '.' : '';

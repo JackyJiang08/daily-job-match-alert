@@ -246,7 +246,7 @@ export function runDetailsView(jobs, meta, tracks, notReviewedCount = 0, window 
     rows.push({
       term: 'Automatic Cover Letters',
       detail: `${Number(auto.generated || 0)} generated · ${Number(auto.failed || 0)} failed${auto.engines?.length ? ` · ${auto.engines.join('; ')}` : ''}${auto.usage?.calls ? ` · ${describeTotals(auto.usage)}` : ''}`,
-      items: [auto.stopReason, auto.skipped?.existing ? `${auto.skipped.existing} already had a letter` : null, auto.skipped?.uncertain ? `${auto.skipped.uncertain} skipped: company name uncertain` : null, auto.skipped?.overLimit ? `${auto.skipped.overLimit} over the per-run limit` : null].filter(Boolean),
+      items: [auto.stopReason, auto.skipped?.existing ? `${auto.skipped.existing} already had a letter` : null, auto.skipped?.uncertain ? `${auto.skipped.uncertain} skipped: company name uncertain` : null, auto.skipped?.overLimit ? `${auto.skipped.overLimit} over the per-run limit` : null, auto.skipped?.termConflict ? `${auto.skipped.termConflict} skipped: term starts before the availability date` : null].filter(Boolean),
     });
   }
   if (meta.networkOutage) rows.push({ term: 'Network', detail: meta.networkOutage.detail || meta.networkOutage.message });

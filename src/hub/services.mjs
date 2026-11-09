@@ -2,6 +2,8 @@
 // writes only config.json (through config-file.mjs, under the run lock) and the hub's own private
 // directory (uploaded PDFs, hub-state.json, run logs). Every filesystem call goes through ctx.io so
 // tests can point the hub at a temporary project.
+import { recentLetterStats } from '../cover-letter/recent.mjs';
+import { OPENING_STYLES, RULES_VERSIONS, letterRulesSettings, normalizeAvailability, parseMonthYear } from '../cover-letter/availability.mjs';
 import { LETTER_STAGES, validateLetterAssignment } from '../engines/assignments.mjs';
 import { autoLetterSettings, autoLetterSummary, lettersLockPath, readLettersStatus } from '../auto-letters.mjs';
 import { DEFAULT_CATALOG, ENGINE_PROVIDER, PROVIDER_ENGINE, canonicalModelId, defaultModelId, findModel, normalizeCatalog, providerModels, validateLadder } from '../engines/catalog.mjs';
@@ -639,6 +641,7 @@ async function statusViewFrom(ctx, config, { now, entries, latest }) {
     errors,
     sources: await sourcesView(ctx, config, latest),
     autoLetters: { ...(await autoLettersView(ctx)), settings: autoLetterSettings(config) },
+    letterVariety: await letterVarietyView(ctx, config),
     quota: { ...quotaView(ctx, config, latest, state), notices: (await readQuotaNotices(quotaNoticesPath(ctx.root), ctx.io).catch(() => [])).slice(-5).reverse(), plans, modelAvailability: await modelAvailabilityView(ctx, plans.claude || state.observedPlans?.claude?.type || null), usage: usageWindow(await readUsage(usagePath(ctx.root), ctx.io).catch(() => ({ entries: [] })), { now: ctx.now(), timeZone: config.timeZone, days: 7 }) },
     claudeAuth: claudeAuthView(ctx, latest),
     planChange: await planChangeView(ctx, config, latest, plans),
@@ -800,6 +803,7 @@ export async function readSettings(ctx) {
     editorReview: config.coverLetter?.editorReview !== false,
     autoLetters: autoLetterSettings(config),
     outreach: { connectionNoteLimit: connectionNoteLimit(config), searchCandidates: config.outreach?.searchCandidates === true },
+    letterRules: letterRulesSettings(config),
     prescreen: prescreenOverview(config, await readStateView(ctx)),
     hubPort: Number(config.hub?.port || 4747),
   };
@@ -1178,6 +1182,14 @@ export async function saveAssignments(ctx, form) {
 
 // The latest automatic pass: running (the letters lock is held by a live process) or finished, with the
 // postings still pending while it runs.
+// Status "Letter Variety": how often the last 7 days' letters share an opening (first six words) and a closing
+// sentence, and the share of "I am writing to" openings against the opening style's limit.
+export async function letterVarietyView(ctx, config) {
+  const letters = await ctx.letterStore.listLetters().catch(() => []);
+  const stats = recentLetterStats(letters, { now: ctx.now() });
+  return { ...stats, openingStyle: letterRulesSettings(config).openingStyle, rulesVersion: letterRulesSettings(config).rulesVersion };
+}
+
 export async function autoLettersView(ctx) {
   const status = await readLettersStatus(ctx.root, ctx.io);
   if (!status) return null;
@@ -1217,6 +1229,28 @@ export async function saveOutreachSettings(ctx, settings) {
     return true;
   }, { fs: ctx.io, pidAlive: ctx.pidAlive });
   return settings;
+}
+
+// Settings > Cover Letters "Letter Rules": config.coverLetter.rulesVersion, openingStyle, and availability.
+export function validateLetterRules(form, graduationDate = null) {
+  const on = value => value === 'on' || value === 'true' || value === true;
+  const rulesVersion = String(form.rulesVersion || '');
+  if (!RULES_VERSIONS.includes(rulesVersion)) throw new HubInputError(`Rules version must be ${RULES_VERSIONS.join(' or ')}`);
+  const openingStyle = String(form.openingStyle || '');
+  if (!OPENING_STYLES.includes(openingStyle)) throw new HubInputError(`Opening style must be ${OPENING_STYLES.join(' or ')}`);
+  const from = parseMonthYear(form.fullTimeFrom);
+  if (!from) throw new HubInputError('Full-time availability must be a month and year, such as June 2027');
+  const availability = normalizeAvailability({ fullTimeFrom: from.label, springTerm: on(form.springTerm), mentionMasters: { internship: on(form.mastersInternship), newGrad: on(form.mastersNewGrad) } }, graduationDate);
+  return { rulesVersion, openingStyle, availability };
+}
+
+export async function saveLetterRules(ctx, values) {
+  await updateConfigFile(ctx.configPath, config => {
+    config.coverLetter = config.coverLetter && typeof config.coverLetter === 'object' ? config.coverLetter : {};
+    Object.assign(config.coverLetter, values);
+    return true;
+  }, { fs: ctx.io, pidAlive: ctx.pidAlive });
+  return values;
 }
 
 export async function saveAutoLetters(ctx, form) {

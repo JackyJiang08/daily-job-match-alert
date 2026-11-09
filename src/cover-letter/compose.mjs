@@ -46,7 +46,7 @@ export const REVIEW_SCHEMA = {
 const BULLET_LINE = /^\s*(?:[-*•‣◦▪]|\d+[.)])\s+/;
 const DASH_PUNCTUATION = /\s*[–—]\s*|\s+--\s+/g;
 const ILLINOIS = /\bIL\b|\bIllinois\b/i;
-const MISSING_SKILL = /skill not found in resume:\s*(.+)$|not (?:found|present) in (?:the )?resume/i;
+export const MISSING_SKILL = /skill not found in resume:\s*(.+)$|not (?:found|present) in (?:the )?resume/i;
 
 export function wordCount(paragraphs) {
   return paragraphs.join(' ').split(/\s+/).filter(Boolean).length;
@@ -115,7 +115,7 @@ export function letterRules({ roleType = 'unknown', graduation = graduationTerms
   ].filter(Boolean).map((rule, index) => `${index + 1}. ${rule}`).join('\n');
 }
 
-function postingBlock(job) {
+export function postingBlock(job) {
   return {
     title: job.title || '',
     company: job.company || '',

@@ -27,6 +27,14 @@ import { isAcceptableCompanyName, isTrustedSourceName, resolveCompanyName } from
 import { renderLetterPdf as renderPdfDefault } from '../cover-letter/pdf.mjs';
 import { sanitizeCompany } from '../cover-letter/compose.mjs';
 import { inferShortNameFromPosting, shortNameWithoutModel } from '../cover-letter/short-name.mjs';
+import { availabilityText, letterRulesSettings } from '../cover-letter/availability.mjs';
+import { recentLetterStats } from '../cover-letter/recent.mjs';
+import { resumeExperiences } from '../cover-letter/evidence.mjs';
+import { V2_MAX_WORDS, condenseTarget, renderPlaybook, v2Context } from '../cover-letter/rules-v2.mjs';
+import { autoFix, withoutCheckNotes, wordCount as bodyWords } from '../cover-letter/checks.mjs';
+import { checkLetter, condenseCoverLetterV2, generateCoverLetterV2 } from '../cover-letter/generate-v2.mjs';
+import { renderLetterPdfV2 } from '../cover-letter/pdf.mjs';
+import { roleFamilyOf } from '../role-families.mjs';
 
 export function jobIdOf(job) {
   return job.semanticId || sha256(job.url || '').slice(0, 16);
@@ -246,19 +254,53 @@ async function withQuotaPolicy(ctx, config, engineChoice, attempt) {
   }
 }
 
+// v2 track rule (from the playbook's decision rule): business analyst, customer support, operations, product,
+// project, and consulting roles take the DA (data) resume even when the title says AI. Without a data track the
+// recommendation stands.
+export const DA_TRACK_ID = 'data';
+const DA_ROLE = /\b(?:business\s+analyst|customer\s+(?:support|success|service|experience)|operations?|product|project|program\s+manager|consult(?:ant|ants|ing)?|strateg(?:y|ist))\b/i;
+
+export function letterTrackFor(job, enabledTracks = []) {
+  const recommended = job?.recommendedTrack || null;
+  const title = String(job?.title || '');
+  const daRole = DA_ROLE.test(title) || ['product', 'consulting'].includes(roleFamilyOf(title));
+  if (daRole && enabledTracks.some(track => track.id === DA_TRACK_ID)) return { id: DA_TRACK_ID, ruled: recommended !== DA_TRACK_ID };
+  return { id: recommended || enabledTracks[0]?.id || null, ruled: false };
+}
+
+// Everything the v2 rules need besides the posting and the resume: the 7-day letter statistics, the other
+// resumes (for the scoring-evidence check), the settings.
+export async function v2RulesInputs(ctx, config, { job, trackId, resumeText, settings, withRecent = true }) {
+  const graduation = graduationTerms(config.preferences?.graduationDate);
+  const letters = withRecent ? await ctx.letterStore.listLetters().catch(() => []) : [];
+  const recent = withRecent ? recentLetterStats(letters, { now: ctx.now(), experiences: resumeExperiences(resumeText) }) : null;
+  const otherResumes = [];
+  for (const track of enabledResumeTracks(config)) {
+    if (track.id === trackId) continue;
+    const text = await ctx.io.readFile(track.profile, 'utf8').catch(() => '');
+    if (text) otherResumes.push(text);
+  }
+  const context = v2Context({ job, graduation, availability: settings.availability, openingStyle: settings.openingStyle, recent, outreachLimit: connectionNoteLimit(config) });
+  return { version: 'v2', context, openingStyle: settings.openingStyle, otherResumes, graduationDate: config.preferences?.graduationDate || null, recent };
+}
+
 // strict (automatic letters): a draft that does not parse into a valid letter counts as a failure of that
 // chain step, so the next step is tried; the manual panel keeps such a draft for editing.
 // `company` is the panel's Company Short Name; it fixes the short name only when the owner typed it
 // (`companyEdited`). Otherwise the alias table, then the model's validated shortName, then the cleaned
 // company name decide (src/cover-letter/short-name.mjs).
-export async function generateLetter(ctx, { date, jobId, trackId, company, companyEdited = false, engine: engineChoice = null, strict = false }) {
+export async function generateLetter(ctx, { date, jobId, trackId, company, companyEdited = false, engine: engineChoice = null, strict = false, rulesVersion = null, saveOutreach = true }) {
   const config = await ctx.loadConfig();
+  const settings = letterRulesSettings(config);
+  const version = rulesVersion || settings.rulesVersion;
   const readiness = await ctx.letterStore.readiness();
   if (!readiness.ready) throw new HubInputError(`Cover-letter material is incomplete (${readiness.missing.join(', ')}); upload it under Settings first`);
   const { job, id, tracks } = await findLetterJob(ctx, date, jobId);
-  const chosenTrack = trackId || job.recommendedTrack || tracks[0]?.id;
+  const ruledTrack = version === 'v2' && !trackId ? letterTrackFor(job, enabledResumeTracks(config)) : null;
+  const chosenTrack = trackId || ruledTrack?.id || job.recommendedTrack || tracks[0]?.id;
   const { track, text } = await resumeTextFor(ctx, config, chosenTrack);
-  const { playbook, samples } = await ctx.letterStore.loadMaterial();
+  const { playbook, samples } = await ctx.letterStore.loadMaterial({ rulesVersion: version });
+  const rules = version === 'v2' ? await v2RulesInputs(ctx, config, { job, trackId: track.id, resumeText: text, settings }) : null;
   const graduation = graduationTerms(config.preferences?.graduationDate);
   const review = config.coverLetter?.editorReview !== false;
   const engineId = engineChoice ? (normalizeEngineId(engineChoice) || null) : null;
@@ -275,15 +317,19 @@ export async function generateLetter(ctx, { date, jobId, trackId, company, compa
   // wrote the draft, including a ladder step it moved to.
   const reviewEngines = editorPlan && editorPlan.entries.some(entry => entry.engine) ? editorPlan.entries.map(entry => letterEngineFor(ctx, config, entry)) : null;
   const generated = await withStageChain(ctx, config, draftPlan, async engine => {
-    const result = await generateCoverLetter({ engine, reviewEngines, inputs: { playbook, samples, track, resumeText: text, job, graduation, naming: { chainName, aliases, fixed }, outreachLimit: connectionNoteLimit(config) }, review, io: ctx.io });
+    const inputs = { playbook, samples, track, resumeText: text, job, graduation, naming: { chainName, aliases, fixed }, outreachLimit: connectionNoteLimit(config), rules };
+    const result = rules
+      ? await generateCoverLetterV2({ engine, reviewEngines, inputs, review, io: ctx.io })
+      : await generateCoverLetter({ engine, reviewEngines, inputs, review, io: ctx.io });
     if (strict && (!result.ok || !result.paragraphs?.length)) throw new Error(`the draft from ${engine.model || engine.id} did not parse into a letter (${(result.issues || []).map(issue => issue.message || issue.kind || issue).slice(0, 2).join('; ') || 'no paragraphs'})`);
     return result;
   });
   // The Reach Out texts written in the same call go to the panel's state (private/outreach/state.json).
-  if (generated.result.outreach?.connectionNote || generated.result.outreach?.followUpMessage) {
+  if (saveOutreach && (generated.result.outreach?.connectionNote || generated.result.outreach?.followUpMessage)) {
     await saveOutreachMessages(ctx.root, id, generated.result.outreach, { io: ctx.io, now: ctx.now(), source: 'letter' }).catch(() => {});
   }
-  const leading = [...draftPlan.notes, ...(editorPlan?.notes || []), ...generated.chainNotes, ...(generated.downgradeNote ? [generated.downgradeNote] : [])];
+  const leading = [...draftPlan.notes, ...(editorPlan?.notes || []), ...generated.chainNotes, ...(generated.downgradeNote ? [generated.downgradeNote] : []),
+    ...(ruledTrack?.ruled ? [`Track: used the ${track.label} resume for a ${job.title ? `"${job.title}"` : 'business-facing'} role (the scorer recommended ${job.recommendedTrack || 'another track'})`] : [])];
   const result = { ...generated.result, editorNotes: [...leading, ...(generated.result.editorNotes || [])], ...(generated.downgradeNote ? { downgradeNote: generated.downgradeNote } : {}) };
   const levels = classifyEditorNotes(result.editorNotes);
   return {
@@ -296,6 +342,8 @@ export async function generateLetter(ctx, { date, jobId, trackId, company, compa
     shortNameSource: result.shortName?.source || null,
     track,
     tracks,
+    rulesVersion: version,
+    rules: version === 'v2' ? { version: 'v2', candidParagraphIndex: result.candidParagraphIndex, candidGaps: result.candidGaps || [], openingForbidden: result.openingForbidden === true } : { version: 'v1' },
     job: { title: job.title, company: letterCompanyFor(job).name, location: job.location, roleType: job.roleType },
   };
 }
@@ -310,13 +358,51 @@ export async function oneClickLetter(ctx, { date, jobId, engine = null }) {
   const saved = await saveLetter(ctx, {
     date, jobId, trackId: draft.track.id, company: draft.company, paragraphs: draft.paragraphs,
     engine: draft.engine, model: draft.model, effort: draft.effort, reviewEngine: draft.reviewEngine, reviewModel: draft.reviewModel, reviewEffort: draft.reviewEffort,
-    issues: draft.issues || [], editorNotes: draft.editorNotes || [], samplesUsed: draft.samplesUsed || [], shortNameSource: draft.shortNameSource || null,
+    issues: draft.issues || [], editorNotes: draft.editorNotes || [], samplesUsed: draft.samplesUsed || [], shortNameSource: draft.shortNameSource || null, rules: draft.rules,
   });
-  return { downloadUrl: saved.downloadUrl, openUrl: `/letters/${date}/${saved.slug}`, pdf: saved.pdf, company: draft.company, track: draft.track, wordCount: saved.wordCount, engine: draft.engine, model: draft.model, downgradeNote: draft.downgradeNote || null, checkBadge: reviewBadge(draft.editorNotes || []) };
+  return { downloadUrl: saved.downloadUrl, openUrl: `/letters/${date}/${saved.slug}`, pdf: saved.pdf, company: draft.company, track: draft.track, wordCount: saved.wordCount, engine: draft.engine, model: draft.model, downgradeNote: draft.downgradeNote || null, checkBadge: reviewBadge(saved.record.editorNotes || draft.editorNotes || []) };
 }
 
 // Persists edited paragraphs, renders the PDF, and records everything needed to reopen or re-download.
-export async function saveLetter(ctx, { date, jobId, trackId, company, paragraphs, engine, model, effort = null, reviewEngine = null, reviewModel = null, reviewEffort = null, source = 'manual', issues = [], editorNotes = [], samplesUsed = [], shortNameSource = null }) {
+// v2 (config.coverLetter.rulesVersion "v2"): the body gets the automatic fixes; over V2_MAX_WORDS it is condensed
+// before the first render; a PDF over one page is condensed (to 0.85 of its words, at most 480) and then to 450
+// words; there is no B5 fallback. The checks then run on the final body with the page count, replacing the
+// earlier check notes. Returns { paragraphs, pdf, editorNotes, checks, letter }.
+export async function finishLetterV2(ctx, config, { job, trackId, profile, company, paragraphs, now, timeZone, pdfPath, engine = null, rules = {}, editorNotes = [] }) {
+  const settings = letterRulesSettings(config);
+  const { text: resumeText } = await resumeTextFor(ctx, config, trackId);
+  const { playbook } = await ctx.letterStore.loadMaterial({ rulesVersion: 'v2' });
+  const plan = await letterStagePlan(ctx, config, 'letterDraft', engine === 'codex' ? 'codex' : null);
+  const condenseEngine = letterEngineFor(ctx, config, plan.entries[0] || {});
+  const condense = (current, pages, target) => condenseCoverLetterV2({ engine: condenseEngine, paragraphs: current, pages, target, io: ctx.io });
+  const fixed = autoFix(paragraphs);
+  let body = fixed.paragraphs;
+  const notes = [];
+  let condensedFirst = false;
+  const words = bodyWords(body);
+  if (words > V2_MAX_WORDS) {
+    const shorter = await condense(body, null, condenseTarget(words, 1)).catch(() => null);
+    if (shorter?.length) { body = shorter; condensedFirst = true; notes.push(`Condensed to ${bodyWords(shorter)} words before rendering (the body had ${words})`); }
+  }
+  const second = (current, pages) => condense(current, pages, condenseTarget(bodyWords(current), 2));
+  const steps = condensedFirst ? [second] : [(current, pages) => condense(current, pages, condenseTarget(bodyWords(current), 1)), second];
+  const letter = assembleLetter({ profile, company, paragraphs: body, now, timeZone });
+  const render = ctx.renderPdfV2 || ctx.renderPdf || renderLetterPdfV2;
+  const pdf = await render(letter, pdfPath, { chromeCommand: ctx.chromeCommand ?? (config.hub?.chromeCommand || null), io: ctx.io, steps, notes, condensed: condensedFirst });
+  const final = Array.isArray(pdf.paragraphs) && pdf.paragraphs.length ? pdf.paragraphs : body;
+  const inputs = { job, resumeText, playbook, rules: await v2RulesInputs(ctx, config, { job, trackId, resumeText, settings, withRecent: false }) };
+  inputs.rules.context.opening = { ...inputs.rules.context.opening, forbidden: rules.openingForbidden === true || settings.openingStyle === 'ban-writing-to' };
+  const checks = checkLetter(final, inputs, { candidParagraphIndex: Number.isInteger(rules.candidParagraphIndex) ? rules.candidParagraphIndex : -1, candidGaps: rules.candidGaps || [], pages: pdf.pages });
+  return {
+    paragraphs: final,
+    pdf: { ...pdf, condensed: pdf.condensed === true || condensedFirst },
+    editorNotes: [...withoutCheckNotes(editorNotes), ...fixed.info, ...checks.notes],
+    checks: checks.results,
+    letter: assembleLetter({ profile, company, paragraphs: final, now, timeZone }),
+  };
+}
+
+export async function saveLetter(ctx, { date, jobId, trackId, company, paragraphs, engine, model, effort = null, reviewEngine = null, reviewModel = null, reviewEffort = null, source = 'manual', issues = [], editorNotes = [], samplesUsed = [], shortNameSource = null, rules = null }) {
   const config = await ctx.loadConfig();
   const { profile } = await ctx.letterStore.readiness();
   if (!String(profile.name || '').trim()) throw new HubInputError('Add your name under Settings before downloading a letter');
@@ -344,6 +430,23 @@ export async function saveLetter(ctx, { date, jobId, trackId, company, paragraph
     throw error;
   }
   const pdfPath = path.join(saved.directory, pdfFileName);
+  if (rules?.version === 'v2') {
+    const finished = await finishLetterV2(ctx, config, { job, trackId: track.id, profile, company: companyName, paragraphs: body, now, timeZone, pdfPath, engine, rules, editorNotes: saved.record.editorNotes || [] });
+    Object.assign(saved.record, {
+      paragraphs: finished.paragraphs, wordCount: bodyWords(finished.paragraphs), editorNotes: finished.editorNotes, checks: finished.checks,
+      rulesVersion: 'v2', candidParagraphIndex: Number.isInteger(rules.candidParagraphIndex) ? rules.candidParagraphIndex : -1, candidGaps: rules.candidGaps || [], openingForbidden: rules.openingForbidden === true,
+      pdf: { pages: finished.pdf.pages, layout: finished.pdf.layout, renderer: finished.pdf.renderer, note: finished.pdf.note, condensed: finished.pdf.condensed === true },
+    });
+    delete saved.record.reviewClearedAt;
+    await ctx.letterStore.saveLetter({ date, company: companyName, markdown: finished.letter.markdown, meta: saved.record });
+    return {
+      record: saved.record, slug: saved.slug,
+      downloadUrl: `/letters/${date}/${saved.slug}/${encodeURIComponent(pdfFileName)}`,
+      markdownUrl: `/letters/${date}/${saved.slug}/letter.md`,
+      pdf: saved.record.pdf, paragraphs: finished.paragraphs, wordCount: saved.record.wordCount,
+      notesNeedReview: classifyEditorNotes(finished.editorNotes).needsReview,
+    };
+  }
   // A first render past one page asks the same engine for a 15 percent trim before smaller layouts are tried.
   const condensePlan = await letterStagePlan(ctx, config, 'letterDraft', engine === 'codex' ? 'codex' : null);
   const letterEngine = letterEngineFor(ctx, config, condensePlan.entries[0] || {});
@@ -364,6 +467,16 @@ export async function saveLetter(ctx, { date, jobId, trackId, company, paragraph
     paragraphs: finalParagraphs,
     wordCount: saved.record.wordCount,
   };
+}
+
+// "Mark Details Checked" on the letter page: the owner has looked at every needs-review note, so the card loses its
+// "Check N details" badge (the notes stay on the letter). A new save of the letter starts over.
+export async function clearLetterReview(ctx, { date, slug }) {
+  const existing = await ctx.letterStore.loadLetter(date, slug);
+  if (!existing) throw new HubInputError('Letter not found');
+  const record = { ...existing.record, reviewClearedAt: ctx.now().toISOString() };
+  await ctx.letterStore.saveLetter({ date, company: existing.record.company || slug, markdown: existing.markdown, meta: record });
+  return { reviewClearedAt: record.reviewClearedAt };
 }
 
 // Rename Company & Re-render: a new salutation and file name for a saved letter, rendered again from the
@@ -438,11 +551,14 @@ export async function generateOutreachMessages(ctx, { date, jobId }) {
   const config = await ctx.loadConfig();
   const { job, id, tracks } = await findLetterJob(ctx, date, jobId);
   const { text } = await resumeTextFor(ctx, config, job.recommendedTrack || tracks[0]?.id);
-  const material = await ctx.letterStore.loadMaterial().catch(() => ({ playbook: '' }));
+  const settings = letterRulesSettings(config);
+  const material = await ctx.letterStore.loadMaterial({ rulesVersion: settings.rulesVersion }).catch(() => ({ playbook: '' }));
   const readiness = await ctx.letterStore.readiness().catch(() => ({ profile: {} }));
   const company = initialShortName(job, readiness.profile?.companyAliases || []).name || letterCompanyFor(job).name;
   const limit = connectionNoteLimit(config);
-  const prompt = buildOutreachPrompt({ resumeText: text, playbook: material.playbook || '', job, company, graduation: graduationTerms(config.preferences?.graduationDate), limit });
+  const graduation = graduationTerms(config.preferences?.graduationDate);
+  const playbook = renderPlaybook(material.playbook || '', { availability: availabilityText({ roleType: job.roleType || 'unknown', availability: settings.availability, graduation }) });
+  const prompt = buildOutreachPrompt({ resumeText: text, playbook, job, company, graduation, limit });
   const plan = await letterStagePlan(ctx, config, 'letterDraft');
   const generated = await withStageChain(ctx, config, plan, async engine => {
     const tempDirectory = await ctx.io.mkdtemp(path.join(os.tmpdir(), 'daily-job-match-alert-outreach-'));

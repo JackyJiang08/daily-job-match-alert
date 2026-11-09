@@ -25,5 +25,6 @@ export async function addStatusFixture(root, { writePayload, fixturePayload, sel
 export function withoutHubCard(html) {
   return String(html)
     .replace(/<article class="card" id="hub-card">[\s\S]*?<\/article>/, '<!-- hub card -->')
+    .replace(/<article class="card" id="letter-variety">[\s\S]*?<\/article>/, '')
     .replace(/\n\s*<dt>Backup<\/dt><dd id="backup-line">[\s\S]*?<\/dd>/, '');
 }

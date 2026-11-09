@@ -173,4 +173,34 @@ export async function renderLetterPdf(letter, outputPath, options = {}) {
   return { ...last, note: notes.join('; ') };
 }
 
+// The v2 rules (config.coverLetter.rulesVersion "v2"): Letter with 1 inch margins only, no B5 fallbacks (their
+// text area is smaller than Letter's). `steps` are the condensing passes still available, in order (the caller
+// already ran the first one when the body was over the word limit before rendering): each is
+// async (paragraphs, pages) => paragraphs | null and runs only while the PDF is longer than one page. A PDF that
+// stays longer is kept and reported (the letter gets a needs-review note from the one-page check).
+export async function renderLetterPdfV2(letter, outputPath, options = {}) {
+  const io = options.io || fs;
+  const spawnImpl = options.spawn || spawn;
+  const tempRoot = options.tempRoot || os.tmpdir();
+  const strictChrome = options.strictChrome === true;
+  const chrome = options.chromeCommand === false ? null : await findChrome(options.chromeCommand || null, io);
+  await io.mkdir(path.dirname(outputPath), { recursive: true });
+  const layout = LAYOUTS[0];
+  const notes = [...(options.notes || [])];
+  let current = letter;
+  let condensed = options.condensed === true;
+  let { pages, renderer } = await renderOnce(current, layout, outputPath, { chrome, io, spawnImpl, tempRoot, strictChrome });
+  for (const step of options.steps || []) {
+    if (pages <= 1) break;
+    const shorter = await step(current.paragraphs, pages).catch(() => null);
+    if (!Array.isArray(shorter) || !shorter.length) continue;
+    current = { ...current, paragraphs: shorter };
+    condensed = true;
+    notes.push(`Condensed to ${shorter.join(' ').split(/\s+/).filter(Boolean).length} words after a render ran to ${pages} pages`);
+    ({ pages, renderer } = await renderOnce(current, layout, outputPath, { chrome, io, spawnImpl, tempRoot, strictChrome }));
+  }
+  if (pages > 1) notes.push(`the letter still runs to ${pages} pages, trim the body`);
+  return { path: outputPath, pages, layout: layout.id, renderer, paragraphs: current.paragraphs, condensed, note: notes.length ? notes.join('; ') : null };
+}
+
 export { LAYOUTS as PDF_LAYOUTS };

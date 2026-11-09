@@ -80,7 +80,7 @@ test('settings default to on with no limit; selection takes this run\'s new matc
   const newMatchUrls = matches.filter(item => item.url !== job(2).url).map(item => item.url);
   const result = selectAutoLetters({ matches, newMatchUrls, lettersByJob, max: 2, jobIdOf, companyFor: letterCompanyFor });
   assert.deepEqual(result.picked.map(item => [item.company, item.bestScore]), [['Example Co 9', 79], ['Example Co 3', 73]], 'best scores first, earlier days\' matches left out');
-  assert.deepEqual(result.skipped, { existing: 1, uncertain: 1, overLimit: 1 });
+  assert.deepEqual(result.skipped, { existing: 1, uncertain: 1, overLimit: 1, termConflict: 0 });
 });
 
 test('a pass writes the letters on the draft and editor assignments (engine, model, effort), records them, counts usage, and reports back', async () => {

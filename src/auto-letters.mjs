@@ -28,6 +28,7 @@ import { stageAssignments } from './engines/assignments.mjs';
 import { readUsage, summarizeUsage, usagePath } from './engines/usage.mjs';
 import { canonicalUrl } from './utils.mjs';
 import { isLetterCandidate } from './review-status.mjs';
+import { letterRulesSettings, postingTermConflict } from './cover-letter/availability.mjs';
 
 export const DEFAULT_AUTO_LETTERS = { enabled: true, maxPerRun: 0 };
 export const MAX_LETTERS_PER_RUN = 500;
@@ -105,17 +106,20 @@ export async function pruneLettersBacklog(root, { readPayload, jobIdOf, io = fs 
 
 // This run's new model-reviewed high matches, best score first; postings with a letter, or with an uncertain
 // company, are skipped and counted; the rest are capped at max.
-export function selectAutoLetters({ matches = [], newMatchUrls = null, lettersByJob = new Map(), max = DEFAULT_AUTO_LETTERS.maxPerRun, jobIdOf, companyFor, date = null }) {
+// termConflict (v2 rules): job => { term, source } | null; a posting whose own term starts before the owner is
+// available is skipped (counted as termConflict) and keeps its "Term Conflict" card tag for a manual letter.
+export function selectAutoLetters({ matches = [], newMatchUrls = null, lettersByJob = new Map(), max = DEFAULT_AUTO_LETTERS.maxPerRun, jobIdOf, companyFor, date = null, termConflict = null }) {
   const fresh = new Set((newMatchUrls || []).map(url => canonicalUrl(url) || url));
   const candidates = matches.filter(job => isLetterCandidate(job) && (!newMatchUrls || fresh.has(canonicalUrl(job.url) || job.url)))
     .sort((a, b) => (Number(b.bestScore) || 0) - (Number(a.bestScore) || 0));
   const picked = [];
-  const skipped = { existing: 0, uncertain: 0, overLimit: 0 };
+  const skipped = { existing: 0, uncertain: 0, overLimit: 0, termConflict: 0 };
   for (const job of candidates) {
     const id = jobIdOf(job);
     if (lettersByJob.has(id)) { skipped.existing += 1; continue; }
     const company = companyFor(job);
     if (company.uncertain || job.companyUncertain === true) { skipped.uncertain += 1; continue; }
+    if (typeof termConflict === 'function' && termConflict(job)) { skipped.termConflict += 1; continue; }
     if (max > 0 && picked.length >= max) { skipped.overLimit += 1; continue; }
     picked.push({ date, jobId: id, company: company.name, title: job.title || '', bestScore: Number(job.bestScore) || 0 });
   }
@@ -159,7 +163,9 @@ export async function runAutoLetters({ config, date, newMatchUrls = null, ctx, l
       if (!(source?.matches || []).some(job => jobIdOf(job) === item.jobId && isLetterCandidate(job))) continue;
       backlog.push(item);
     }
-    const selection = selectAutoLetters({ matches: payload?.matches || [], newMatchUrls: missing ? null : newMatchUrls, lettersByJob, max: missing ? 0 : settings.maxPerRun, jobIdOf, companyFor: letterCompanyFor, date });
+    const rules = letterRulesSettings(config);
+    const termConflict = rules.rulesVersion === 'v2' ? job => postingTermConflict(job, { availability: rules.availability, graduationDate: config.preferences?.graduationDate }) : null;
+    const selection = selectAutoLetters({ matches: payload?.matches || [], newMatchUrls: missing ? null : newMatchUrls, lettersByJob, max: missing ? 0 : settings.maxPerRun, jobIdOf, companyFor: letterCompanyFor, date, termConflict });
     // Nightly: the queue first, best score first, then tonight's picks, all under one cap.
     const queued = missing ? [] : [...backlog].sort((a, b) => (Number(b.bestScore) || 0) - (Number(a.bestScore) || 0));
     const seen = new Set(queued.map(itemKey));
@@ -181,7 +187,7 @@ export async function runAutoLetters({ config, date, newMatchUrls = null, ctx, l
         const saved = await saveLetter(ctx, {
           date: item.date, jobId: item.jobId, trackId: draft.track.id, company: draft.company, paragraphs: draft.paragraphs,
           engine: draft.engine, model: draft.model, effort: draft.effort, reviewEngine: draft.reviewEngine, reviewModel: draft.reviewModel, reviewEffort: draft.reviewEffort,
-          source: 'auto', issues: draft.issues || [], editorNotes: draft.editorNotes || [], samplesUsed: draft.samplesUsed || [], shortNameSource: draft.shortNameSource || null,
+          source: 'auto', issues: draft.issues || [], editorNotes: draft.editorNotes || [], samplesUsed: draft.samplesUsed || [], shortNameSource: draft.shortNameSource || null, rules: draft.rules,
         });
         status.generated.push({ date: item.date, jobId: item.jobId, company: draft.company, slug: saved.slug, engine: draft.engine, model: draft.model, effort: draft.effort || null, reviewEngine: draft.reviewEngine || null, reviewModel: draft.reviewModel || null, reviewEffort: draft.reviewEffort || null, editorNotes: (draft.editorNotes || []).length });
       } catch (error) {

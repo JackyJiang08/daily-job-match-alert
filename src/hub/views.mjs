@@ -2,6 +2,7 @@
 // tokens as the Desktop report (report-components.mjs / report-theme.mjs), so both look alike in light
 // and dark mode. Every timestamp is shown in config.timeZone; resume text is never rendered here.
 import { assetPath } from './assets.mjs';
+import { percent } from '../cover-letter/recent.mjs';
 import { formatBytes, phasesText } from './report-timing.mjs';
 import { REPORT_SCRIPT, REPORT_STYLES } from '../report-theme.mjs';
 import { formatCount, formatDateLabel, formatElapsed, formatLocalDateTime, formatLocalDay, formatLocalShort, formatRelativeTime } from '../time-format.mjs';
@@ -10,7 +11,7 @@ import { USAGE_PURPOSES, describeTotals, formatTokens } from '../engines/usage.m
 import { htmlEscape } from '../utils.mjs';
 import { DEFAULT_SCHEDULE, scheduleClock } from '../schedule.mjs';
 import { describePrescreen, funnelText, recallText } from '../prescreen-text.mjs';
-import { LETTER_STYLES, autoLettersSettingsCard, coverLetterSettingsSection } from './letter-views.mjs';
+import { LETTER_STYLES, autoLettersSettingsCard, coverLetterSettingsSection, letterRulesSettingsCard } from './letter-views.mjs';
 import { OUTREACH_STYLES, outreachSettingsCard } from './outreach-views.mjs';
 import { MODEL_SETTINGS_STYLES, assignmentsForm, settingsTabs, subscriptionsAndModels } from './model-settings-views.mjs';
 
@@ -519,13 +520,26 @@ function usageRows(usage) {
 }
 
 // The automatic cover-letter pass after the latest run: running or finished, counts, engines, and usage.
+// The last 7 days' repetition: the most shared opening and closing, and "I am writing to" against its limit.
+function letterVarietyCard(variety) {
+  if (!variety) return '';
+  const quote = entry => (entry ? ` · "${htmlEscape(entry.text)}"` : '');
+  const rows = variety.total
+    ? `<dt>Letters</dt><dd>${variety.total} in the last ${variety.days} days (rules ${htmlEscape(variety.rulesVersion)})</dd>
+      <dt>Opening Repetition</dt><dd id="opening-repetition">${percent(variety.topOpening?.share)}${quote(variety.topOpening)}</dd>
+      <dt>Closing Repetition</dt><dd id="closing-repetition">${percent(variety.topClosing?.share)}${quote(variety.topClosing)}</dd>
+      <dt>"I Am Writing To" Openings</dt><dd>${percent(variety.writingToShare)} (${variety.openingStyle === 'ban-writing-to' ? 'banned' : 'limit 30%'})</dd>`
+    : '<dt>Letters</dt><dd>None in the last 7 days</dd>';
+  return `<article class="card" id="letter-variety"><h2>Letter Variety</h2><dl class="kv">${rows}</dl><p class="form-foot">Openings and closing sentences used by more than 15 percent of these letters are passed to the next letter to avoid (v2 rules).</p></article>`;
+}
+
 function autoLettersCard(auto, timeZone) {
   if (!auto) return '';
   const settings = auto.settings || {};
   const config = `${settings.enabled === false ? 'Off' : Number(settings.maxPerRun || 0) > 0 ? `On · up to ${Number(settings.maxPerRun)} per run` : 'On · every new high match'} <a href="/settings?tab=letters#auto-letters">Settings</a>`;
   if (!auto.date) return `<article class="card" id="auto-letters-card"><h2>Automatic Cover Letters</h2><dl class="kv"><dt>Setting</dt><dd>${config}</dd><dt>Last Pass</dt><dd><span class="muted">None yet</span></dd></dl></article>`;
   const state = auto.running ? `<span class="badge badge-good" data-badge="letters-running">Running</span> ${Number(auto.done)} of ${Number(auto.planned)} done` : auto.state === 'stopped' ? '<span class="badge badge-warn" data-badge="letters-stopped">Stopped</span>' : auto.state === 'interrupted' ? '<span class="badge badge-warn" data-badge="letters-interrupted">Interrupted</span>' : '<span class="badge badge-muted" data-badge="letters-done">Done</span>';
-  const skipped = auto.skipped ? [auto.skipped.existing ? `${auto.skipped.existing} already had a letter` : '', auto.skipped.uncertain ? `${auto.skipped.uncertain} with an uncertain company` : '', auto.skipped.overLimit ? `${auto.skipped.overLimit} over the per-run limit` : ''].filter(Boolean).join(' · ') : '';
+  const skipped = auto.skipped ? [auto.skipped.existing ? `${auto.skipped.existing} already had a letter` : '', auto.skipped.uncertain ? `${auto.skipped.uncertain} with an uncertain company` : '', auto.skipped.overLimit ? `${auto.skipped.overLimit} over the per-run limit` : '', auto.skipped.termConflict ? `${auto.skipped.termConflict} with a term conflict` : ''].filter(Boolean).join(' · ') : '';
   const usage = auto.usage?.calls ? describeTotals(auto.usage) : '—';
   return `<article class="card" id="auto-letters-card"><h2>Automatic Cover Letters</h2><dl class="kv">
     <dt>Setting</dt><dd>${config}</dd>
@@ -645,6 +659,7 @@ export function statusPage({ status, timeZone }) {
   </article>
   ${quotaCard(status.quota, timeZone)}
   ${autoLettersCard(status.autoLetters, timeZone)}
+  ${letterVarietyCard(status.letterVariety)}
   ${sourcesCard(status.sources || [], timeZone)}
   <article class="card"><h2>Warnings</h2><p class="muted">Last 7 report dates.</p>${status.days.length ? status.days.map(dayRow).join('') : '<p class="muted">No reports yet.</p>'}</article>
   <article class="card"><h2>Error Reports</h2>${errors}</article>
@@ -768,7 +783,7 @@ function tagEditor(name, tags, { label, hint, placeholder }) {
 export function settingsPage({ settings, connections = null, timeZone, coverLetter = null, modelView = null, tab = 'models' }) {
   const active = ['models', 'pipeline', 'letters'].includes(tab) ? tab : 'models';
   const head = `<h1 class="hub-title">Settings</h1>${settingsTabs(active)}`;
-  if (active === 'letters') return `${head}${autoLettersSettingsCard(settings.autoLetters)}${outreachSettingsCard(settings.outreach)}${coverLetter ? coverLetterSettingsSection({ ...coverLetter, timeZone }) : '<p class="muted">Cover-letter material is not available.</p>'}`;
+  if (active === 'letters') return `${head}${letterRulesSettingsCard(settings.letterRules)}${autoLettersSettingsCard(settings.autoLetters)}${outreachSettingsCard(settings.outreach)}${coverLetter ? coverLetterSettingsSection({ ...coverLetter, timeZone }) : '<p class="muted">Cover-letter material is not available.</p>'}`;
   if (active === 'pipeline') {
     const levels = ['high', 'medium', 'low'].map(level => `<label class="check"><input type="checkbox" name="acceptedMatchLevels" value="${level}"${settings.acceptedMatchLevels.includes(level) ? ' checked' : ''}> ${level.charAt(0).toUpperCase()}${level.slice(1)}</label>`).join('');
     return `${head}

@@ -20,6 +20,10 @@ const INFO = [
 
 export function noteLevel(note) {
   const text = String(note || '');
+  // The v2 checks (src/cover-letter/checks.mjs) mark their own notes: a failed check needs review, an
+  // automatic fix is info.
+  if (/^\s*check failed\b/i.test(text)) return 'needs-review';
+  if (/^\s*auto-fix\b/i.test(text)) return 'info';
   if (INFO.some(pattern => pattern.test(text)) && !/^\s*unverified detail\b/i.test(text)) return 'info';
   return NEEDS_REVIEW.some(pattern => pattern.test(text)) ? 'needs-review' : 'info';
 }
@@ -35,9 +39,10 @@ export function classifyEditorNotes(notes) {
   return out;
 }
 
-// The card badge: "Check N details" with the items on hover, or null when nothing needs review.
-export function reviewBadge(notes) {
+// The card badge: "Check N details" with the items on hover, or null when nothing needs review or the owner has
+// marked the details checked (letter.reviewClearedAt, the letter page's "Mark Details Checked").
+export function reviewBadge(notes, { cleared = false } = {}) {
   const { needsReview } = classifyEditorNotes(notes);
-  if (!needsReview.length) return null;
+  if (!needsReview.length || cleared) return null;
   return { key: 'letter-check', label: `Check ${needsReview.length} detail${needsReview.length === 1 ? '' : 's'}`, tone: 'warn', title: needsReview.join('\n') };
 }
