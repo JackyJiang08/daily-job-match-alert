@@ -1,0 +1,15 @@
+[
+  { "file": "icims-meta-only.html", "host": "careers-example.icims.com", "expect": "page_body", "container": "iCIMS" },
+  { "file": "taleo-form.html", "host": "example.taleo.net", "expect": "page_body", "container": "Taleo" },
+  { "file": "successfactors-jobdescription.html", "host": "career4.successfactors.com", "expect": "page_body", "container": "SuccessFactors" },
+  { "file": "paylocity-job-preview.html", "host": "recruiting.paylocity.com", "expect": "page_body", "container": "Paylocity" },
+  { "file": "smartrecruiters-truncated-jsonld.html", "host": "jobs.smartrecruiters.com", "expect": "page_body", "container": "SmartRecruiters" },
+  { "file": "density-fallback.html", "host": "jobs.example-corp.com", "expect": "page_body", "container": null, "method": "density" },
+  { "file": "lever-posting-page.html", "host": "jobs.lever.co", "expect": "page_body", "container": null },
+  { "file": "workable-preloaded-state.html", "host": "apply.workable.com", "expect": "embedded_json" },
+  { "file": "nextdata-shell.html", "host": "careers.example-spa.com", "expect": "embedded_json" },
+  { "file": "oraclecloud-shell.html", "host": "example.fa.oraclecloud.com", "expect": "incomplete" },
+  { "file": "ultipro-shell.html", "host": "recruiting2.ultipro.com", "expect": "incomplete" },
+  { "file": "spa-meta-only.html", "host": "careers.example-spa.com", "expect": "incomplete" },
+  { "file": "greenhouse-closed.html", "host": "job-boards.greenhouse.io", "expect": "incomplete" }
+]

@@ -161,6 +161,9 @@ export function cardView(job, tracks, timeZone = null, decorate = null, review =
     reasons: (job.reasons || []).map(String),
     gaps: displayGaps(job, review),
     description: String(job.description || '').trim(),
+    // False when the posting's Job Description is a page summary or cut (jd-extract.mjs): the card shows a link
+    // to the posting page instead of the fragment. Payloads from before the flag count as complete.
+    descriptionComplete: job.descriptionComplete !== false,
     footnote: note.text,
     footnoteTitle: note.title,
     posted: freshnessLabel(job) === 'date only' ? note.posted.replace(' (date only)', '') : note.posted,
@@ -248,6 +251,9 @@ export function runDetailsView(jobs, meta, tracks, notReviewedCount = 0, window 
       detail: `${Number(auto.generated || 0)} generated · ${Number(auto.failed || 0)} failed${auto.engines?.length ? ` · ${auto.engines.join('; ')}` : ''}${auto.usage?.calls ? ` · ${describeTotals(auto.usage)}` : ''}`,
       items: [auto.stopReason, auto.skipped?.existing ? `${auto.skipped.existing} already had a letter` : null, auto.skipped?.uncertain ? `${auto.skipped.uncertain} skipped: company name uncertain` : null, auto.skipped?.overLimit ? `${auto.skipped.overLimit} over the per-run limit` : null, auto.skipped?.termConflict ? `${auto.skipped.termConflict} skipped: term starts before the availability date` : null].filter(Boolean),
     });
+  }
+  if (meta.incompleteDescriptions?.count) {
+    rows.push({ term: 'Incomplete Job Descriptions', detail: `${meta.incompleteDescriptions.count} posting(s): their cards link to the posting page`, items: (meta.incompleteDescriptions.hosts || []).map(item => `${item.host}: ${item.count}`) });
   }
   if (meta.networkOutage) rows.push({ term: 'Network', detail: meta.networkOutage.detail || meta.networkOutage.message });
   if (meta.authExpired) rows.push({ term: 'Claude Login', detail: `${meta.authExpired.message}${meta.authExpired.takenOverBy ? ` (${meta.authExpired.takenOverBy} reviewed the postings)` : meta.authExpired.deferred ? ` (${meta.authExpired.deferred} deferred)` : ''}` });
@@ -385,6 +391,7 @@ export function runDetailsView(jobs, meta, tracks, notReviewedCount = 0, window 
 export const LAZY_DESCRIPTION_CHARACTERS = 300;
 
 function lazyDescription(card, { limit = LAZY_DESCRIPTION_CHARACTERS, src }) {
+  if (card.descriptionComplete === false) return;
   const characters = Array.from(card.description || '');
   if (characters.length <= limit) return;
   const url = typeof src === 'function' ? src(card) : null;
@@ -450,7 +457,7 @@ export function buildReportView(matchJobs, meta, options = {}) {
   // its preview as text and loads the markup when opened.
   [...kept.map(item => item.job), ...notReviewed].forEach((job, index) => {
     const card = index < allCards.length ? allCards[index] : notReviewedCards[index - allCards.length];
-    if (card.description && !card.descriptionSrc) card.descriptionHtml = jobDescriptionHtml(job);
+    if (card.description && !card.descriptionSrc && card.descriptionComplete !== false) card.descriptionHtml = jobDescriptionHtml(job);
   });
   // The main list holds this run's window; postings the review budget carried from an earlier run are
   // a separate group under it. With the strict 24-hour window on, postings that may be older than 24 hours

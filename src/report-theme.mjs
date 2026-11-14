@@ -165,6 +165,8 @@ details.jd .jd-body{margin:var(--space-2) 0 0;padding:var(--space-3);max-height:
 .jd-body li{margin:0 0 2px}
 .jd-body strong,.jd-body b{color:var(--ink);font-weight:650}
 .jd-body a{color:var(--accent)}
+.jd-missing{margin:var(--space-3) 0 0;padding-top:var(--space-2);border-top:1px solid var(--line);font-size:var(--fs-meta);color:var(--ink-2)}
+.jd-missing a{color:var(--accent)}
 .jd-body>:first-child{margin-top:0}
 .jd-body>:last-child{margin-bottom:0}
 .job-foot{margin:var(--space-2) 0 0;font-size:var(--fs-meta);color:var(--ink-2);overflow-wrap:anywhere}

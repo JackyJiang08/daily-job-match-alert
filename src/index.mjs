@@ -16,6 +16,7 @@ import { HACKER_NEWS_SOURCE, REMOTEOK_SOURCE, githubLists } from './collectors/c
 import { GREENHOUSE_API_HOST, applyConfigBoards, applySeedBoards, causeTallyText, collectAtsBoards, createRunClock, discoverBoards, readRegistry, repointGreenhouseEuBoards, readSnapshots, registerBoards, registryPath, snapshotPath, undoOutageFailures, withinWindow, writeRegistry, writeSnapshots } from './collectors/ats-boards.mjs';
 import { SEARCH_DISCOVERY_SOURCE, SEARCH_PROVIDERS, SEARCH_SOURCE_KIND, collectSearchDiscovery, readSearchKey, searchSettings, searchUsagePath } from './collectors/search-discovery.mjs';
 import { enrichJob, enrichmentWarningMessage } from './enrich.mjs';
+import { DEFAULT_MINIMUM_DESCRIPTION_CHARACTERS, incompleteDescriptionSummary, withDescriptionStatus } from './jd-extract.mjs';
 import { evaluateJob, isEligible } from './match.mjs';
 import { annotateEligibility, summarizeExclusions } from './eligibility.mjs';
 import { applySubscriptionMatching, isSemanticCandidate, localFallbackJob, summarizeScoringModel } from './subscription-match.mjs';
@@ -1090,6 +1091,7 @@ async function runPipeline(config, clock, options = {}) {
       ...(entry.freshnessBasis && !isNewSinceLastPoll(job) ? { freshnessBasis: entry.freshnessBasis, sourceFreshnessBasis: job.freshnessBasis || null } : {}),
     };
   });
+  const minimumDescriptionCharacters = Number(config.minimumDescriptionCharacters) > 0 ? Number(config.minimumDescriptionCharacters) : DEFAULT_MINIMUM_DESCRIPTION_CHARACTERS;
   const enrichedCandidates = config.network.fetchDescriptions === false ? stamped : await mapLimit(
     stamped,
     Number(config.network.concurrency || 3),
@@ -1097,7 +1099,7 @@ async function runPipeline(config, clock, options = {}) {
       // A posting whose description came straight from a board or feed API needs no page fetch.
       if (job.enrichment === 'ats_api' || job.enrichment === 'source_api') return job;
       try {
-        return await enrichJob(job, config.network);
+        return await enrichJob(job, { ...config.network, minimumDescriptionCharacters }, options.fetchImpl);
       } catch (error) {
         return { ...job, enrichment: 'failed', enrichmentError: errorSummary(error) };
       }
@@ -1116,10 +1118,10 @@ async function runPipeline(config, clock, options = {}) {
     for (const item of deduped.dropped.filter(entry => !entry.search)) console.warn(`Dropped ${item.url} (${item.source}): same final URL as ${item.duplicateOf}`);
   }
   const enriched = deduped.jobs.map(job => {
-    if (job.enrichment !== 'failed') return job;
+    if (job.enrichment !== 'failed') return withDescriptionStatus(job, { minimum: minimumDescriptionCharacters });
     const status = markJobSeen(state, job, now.toISOString());
     warnings.push(createWarning('enrichment', job.source || 'job posting', enrichmentWarningMessage(job, status)));
-    return { ...job, enrichmentAttempts: status.attempts, enrichmentTerminal: status.completed };
+    return withDescriptionStatus({ ...job, enrichmentAttempts: status.attempts, enrichmentTerminal: status.completed }, { minimum: minimumDescriptionCharacters });
   });
   // A posting date later than the run is a misread time zone: it is cut to a date-only value on the run's
   // day (Run Details counts and lists them).
@@ -1273,6 +1275,11 @@ async function runPipeline(config, clock, options = {}) {
   // The company name is settled last: list name → board label → the scorer's employerName → cleaned
   // ATS entity → URL; nothing valid leaves the job marked uncertain for the card and the letter panel.
   evaluated = evaluated.map(job => finalizeCompany(job));
+  // Postings whose Job Description is a page summary or otherwise cut, among those that get a card (this run's
+  // matches and the postings no model reviewed): scored as usual, their cards link to the posting page instead
+  // of showing the fragment, and the run notes them once (one info line, Run Details row).
+  const incompleteDescriptions = incompleteDescriptionSummary(evaluated.filter(job => isEligible(job, config) || isNotReviewed(job)), { minimum: minimumDescriptionCharacters });
+  if (incompleteDescriptions.count) warnings.push(createWarning('enrichment', 'job descriptions', incompleteDescriptions.message, 'info'));
 
   // Fold this run into whatever the day already holds; the report is rendered from the merged whole.
   let previous = null;
@@ -1321,6 +1328,8 @@ async function runPipeline(config, clock, options = {}) {
     // Run Details "Reviewed": this run's postings and the catch-up lane, apart.
     catchUp: { ...reviewSplit(evaluated, budget), limit: budget.catchUp.limit, waiting: budget.catchUp.waiting, expired: budget.catchUp.expired, maxAgeHours: budget.catchUp.maxAgeHours },
     quotaNote: quotaNote(quota, quotaDeferred.length - authDeferredCount),
+    // Run Details and the stats: postings whose Job Description was only a page summary or cut (jd-extract.mjs).
+    incompleteDescriptions: { count: incompleteDescriptions.count, hosts: incompleteDescriptions.hosts },
     prefilter: { titleExcluded: prefiltered.titleExcluded, locationExcludedCount: prefiltered.locationExcluded.length, titleExcludedCount: prefiltered.titleExcluded.length, bySource: prefiltered.bySource },
     earlyCareerCount: locallyEvaluated.filter(job => job.earlyCareer).length,
     // Run Details "Candidates by role family": what reached the prescreen, the review, and the matches.

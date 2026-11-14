@@ -6,6 +6,8 @@ import { REPORT_SCRIPT, REPORT_STYLES } from './report-theme.mjs';
 
 // Every link out of the report opens a new tab so the shortlist itself is never navigated away.
 export const EXTERNAL_LINK = 'target="_blank" rel="noopener noreferrer"';
+// The one line a card shows in place of a Job Description the pipeline could not read in full (jd-extract.mjs).
+export const INCOMPLETE_DESCRIPTION_LABEL = 'Full Description On The Posting Page';
 
 export function renderMasthead(view) {
   const title = view.masthead?.title ?? view.title;
@@ -105,7 +107,9 @@ export function renderJobCard(card) {
   // src/jd-html.mjs), or plain text split at its line breaks. The hub embeds only the first characters of a
   // long JD as text and loads the markup when the section is opened (data-jd-src, REPORTS_SCRIPT); the
   // Desktop file always carries the whole JD.
-  const description = !card.description ? ''
+  const description = card.descriptionComplete === false
+    ? `<p class="jd-missing">${INCOMPLETE_DESCRIPTION_LABEL} · <a ${EXTERNAL_LINK} href="${htmlEscape(card.url)}">Open Posting</a></p>`
+    : !card.description ? ''
     : card.descriptionSrc
       ? `<details class="jd" data-jd-src="${htmlEscape(card.descriptionSrc)}"><summary>Job Description</summary><div class="jd-body"><p>${htmlEscape(card.descriptionPreview)}</p></div></details>`
       : `<details class="jd"><summary>Job Description</summary><div class="jd-body">${card.descriptionHtml ?? `<p>${htmlEscape(card.description)}</p>`}</div></details>`;

@@ -538,6 +538,42 @@ disabled; do not expand them unless a task says so.
   signature} come from data-letter (route: assembleLetter at record.createdAt), company/paragraphs from the page.
   There were no per-paragraph copy buttons to remove.
 
+## Job Description completeness (2026-11-14)
+- Cause fixed: enrich.mjs's generic page branch fell back to <meta name="description"> / og:description (a
+  search-engine summary ending in "…", descriptionHtml undefined) when a page had no JSON-LD; some JSON-LD
+  descriptions are cut summaries too.
+- src/jd-extract.mjs: extractJobBody(html, { minimum }) → { html, text, ats, method 'container'|'density' }:
+  CONTAINER_RULES in order (iCIMS, Taleo rows, SuccessFactors, Oracle HCM, Jobvite, BambooHR, Workable data-ui
+  sections, Paylocity, ADP, UKG, SmartRecruiters .job-sections, [itemprop=description], job-description class/id,
+  posting/job details|content|body, main, article; outermost matches, joined), first rule whose text is complete
+  wins; else the densest block (text ≥ minimum, links ≤ MAXIMUM_LINK_SHARE 0.3, tightened to the largest child
+  holding 80% or when the siblings are navigation/crumbs). script/style/nav/header/footer/aside stripped first;
+  form only before the density pass (Taleo renders inside one). extractEmbeddedDescription: longest complete
+  "*description*"/job_description string field with markup or newlines in non-JSON-LD scripts. isCompleteText:
+  ≥ minimum (config.minimumDescriptionCharacters, default 200) and not ending in … / "...". descriptionStatus /
+  withDescriptionStatus (pipeline, for API-fed and failed postings), incompleteDescriptionSummary (info warning
+  "N posting(s) have an incomplete Job Description …: host (k), …", 8 hosts; failed fetches excluded).
+- enrich.mjs: fromPublicApis(url) = Greenhouse, SmartRecruiters, Lever (leverApiUrl → api.lever.co/v0/postings/
+  {company}/{id}, leverEnrichment, enrichment 'lever_api'), Ashby (ashbyApiUrl → board API, matched by id,
+  'ashby_api'), Workday CXS; tried for the original URL, then for finalUrl after the page fetch (before the ok
+  check), each entry once (`tried`), failures fall through. pickDescription order: complete JSON-LD → page body →
+  embedded JSON → complete list text → longest partial of JSON-LD/list → meta (never complete). Plain-text picks
+  with newlines go through textToParagraphs before cleanDescriptionHtml. Still incomplete after a redirect → one
+  more fetch of finalUrl by its own address, better answer kept. Fields: descriptionSource, descriptionComplete,
+  descriptionContainer (ats label). enrichment labels: json_ld_jobposting (JSON-LD present), html_page (body or
+  embedded JSON gave the text), html_metadata (meta or nothing). network.minimumDescriptionCharacters is passed
+  by index.mjs ({ ...config.network, minimumDescriptionCharacters }), with options.fetchImpl.
+- index.mjs: enriched postings get withDescriptionStatus; the summary counts this run's postings that get a card
+  (isEligible or isNotReviewed, after finalizeCompany); meta.incompleteDescriptions { count, hosts } → Run
+  Details "Incomplete Job Descriptions". Scoring is unchanged (incomplete postings are scored as before).
+- Report: cardView.descriptionComplete (job.descriptionComplete !== false; old payloads count as complete and
+  render as before); lazyDescription skips incomplete cards; renderJobCard shows <p class="jd-missing">
+  INCOMPLETE_DESCRIPTION_LABEL "Full Description On The Posting Page" · Open Posting</p> instead of details.jd.
+  Display cuts audited: only the hub's 300-character preview (full JD via the route), description text capped
+  at 50,000 at collection, .jd-body scrolls (max-height) and never clips.
+- Tests: tests/jd-complete.test.mjs + tests/fixtures/pages/ (synthetic pages per host shape, manifest.json with
+  expected outcomes; no network). History untouched: stored payloads are not re-fetched or edited.
+
 ## Reach Out (2026-11-08)
 - HARD: never request, fetch, or log in to linkedin.com; never send messages. src/outreach/links.mjs builds the
   URLs only (LinkedIn people search ?keywords=encodeURIComponent(…), Google ?q=…) and assertNotLinkedIn guards
