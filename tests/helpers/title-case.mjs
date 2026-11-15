@@ -3,6 +3,8 @@
 // stay lower case after the first word; proper nouns and abbreviations (PwC, JD, LinkedIn, iCloud) pass as
 // they are because only a word that starts lower case with no capital in it is flagged.
 const MINOR_WORDS = new Set(['a', 'an', 'the', 'and', 'but', 'or', 'nor', 'for', 'so', 'yet', 'as', 'at', 'by', 'in', 'of', 'on', 'to', 'via', 'per', 'vs', 'vs.']);
+// Spellings the owner asked for as they are ("Download CoverLetter", 2026-11-15).
+export const ALLOWED_WORDS = new Set(['CoverLetter']);
 
 const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'", nbsp: ' ', middot: '·', rarr: '→', hellip: '…' };
 
@@ -23,6 +25,7 @@ export function titleCaseViolations(text) {
   let first = true;
   for (const raw of words) {
     const word = raw.replace(/^[("'“‘[]+/, '');
+    if (ALLOWED_WORDS.has(word.replace(/[)"'”’\].,:;!?…]+$/, ''))) { first = false; continue; }
     if (!/^[a-z]/.test(word)) { if (/[A-Za-z0-9]/.test(word)) first = false; continue; }
     const bare = word.replace(/[)"'”’\].,:;!?…]+$/, '').toLowerCase();
     if (!first && MINOR_WORDS.has(bare)) continue;

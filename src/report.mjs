@@ -8,7 +8,7 @@ import path from 'node:path';
 import { jobScores, reportTracks, trackScore } from './resume-tracks.mjs';
 import { renderReportPage } from './report-components.mjs';
 import { warningText } from './warnings.mjs';
-import { formatLocalDateTime, formatLocalDay, formatLocalShort, formatLocalTime, localDate } from './time-format.mjs';
+import { formatDateLabel, formatLocalDateTime, formatLocalDay, formatLocalShort, formatLocalTime, localDate } from './time-format.mjs';
 import { normalizeLocation, sha256 } from './utils.mjs';
 import { freshnessKey } from './report-filters.mjs';
 import { FRESHNESS_LABELS, companyIsUncertain, displayCompanyName, freshnessLabel, isNewSinceLastPoll, postedAtPrecision, postedText } from './posting-fields.mjs';
@@ -19,12 +19,11 @@ import { roleFamilyCountsText } from './role-families.mjs';
 import { seenDropMessage } from './state-integrity.mjs';
 import { NOT_REVIEWED_TITLE, isNotReviewed, notReviewedHeadline, splitReportJobs } from './review-status.mjs';
 import { CLAUDE_SIGNED_OUT } from './engines/engine-errors.mjs';
-import { DATE_ONLY_GROUP_TITLE, STRICT_WINDOW_LABEL, splitStrictWindow, strictWindowDetail } from './strict-window.mjs';
 import { jobDescriptionHtml } from './jd-html.mjs';
 
 export const REPORT_TITLE = 'Daily Job Match Alert';
 export const WARNINGS_FILE_NAME = 'warnings.txt';
-export const CARRIED_OVER_TITLE = 'Carried Over From Yesterday';
+export const CARRIED_OVER_TITLE = 'From Yesterday';
 export const MAIN_LIST_TITLE = 'Main List';
 
 const ROLE_LABELS = { internship: 'Internship', new_grad: 'New Grad', entry_level: 'Entry Level', unknown: 'Unknown Role Type' };
@@ -126,21 +125,25 @@ function footnote(job, timeZone) {
   }
   if (job.carriedOver) title = `Carried over: deferred by the review budget on an earlier run and reviewed now. ${title}`;
   if (job.postedAtCorrection) title = `${title}. The source's time (${job.postedAtCorrection.from}) was later than the run, so only the date is kept`;
-  // The card shows the posting time beside its Freshness tag and the source on its own line; a date-only time
-  // drops "(date only)" there because the tag says it.
-  const posted = parts.join(' · ');
+  // The card shows the posting time alone ("Posted Nov 14, 3:12 PM", "Posted Nov 14") and the source on its own
+  // line; "(date only)" stays in the hover title and the xlsx.
+  const posted = parts.join(' · ').replace(' (date only)', '');
   if (job.source) parts.push(String(job.source));
   return { text: parts.join(' · '), title, posted, source: job.source ? String(job.source) : '' };
 }
 
+// decorate(job) may return { actions, badges, flags, check }: check = { label, title, href } is the "Check N Details"
+// link at the end of the posting line (the letter's needs-review notes; src/cover-letter/notes.mjs reviewBadge).
 export function cardView(job, tracks, timeZone = null, decorate = null, review = null) {
   const scores = tracks.map(track => ({ id: track.id, label: track.label, value: trackScore(job, track.id), best: track.id === job.recommendedTrack }));
   if (!scores.some(score => score.best) && scores.length) {
     const top = scores.reduce((best, score) => (score.value > best.value ? score : best), scores[0]);
     top.best = true;
   }
+  // The highest score stands out on the card; a tie marks every holder.
+  const highest = scores.reduce((max, score) => Math.max(max, Number(score.value) || 0), 0);
+  for (const score of scores) score.top = (Number(score.value) || 0) === highest;
   const recommendedTrack = job.recommendedTrack || scores.find(score => score.best)?.id || '';
-  const recommendedLabel = job.recommendedResume || scores.find(score => score.best)?.label || '';
   const company = displayCompanyName(job) || 'Company not resolved';
   const extra = typeof decorate === 'function' ? decorate(job) || {} : {};
   const note = footnote(job, timeZone);
@@ -156,7 +159,7 @@ export function cardView(job, tracks, timeZone = null, decorate = null, review =
     bestScore: Number(job.bestScore) || 0,
     scores,
     recommendedTrack,
-    recommendation: recommendedLabel ? `Apply with ${recommendedLabel} Resume` : 'No Resume Recommended',
+    check: extra.check && extra.check.href ? { label: String(extra.check.label), title: extra.check.title ? String(extra.check.title) : '', href: String(extra.check.href) } : null,
     badges: [...jobBadges(job, review), ...(Array.isArray(extra.badges) ? extra.badges : [])],
     reasons: (job.reasons || []).map(String),
     gaps: displayGaps(job, review),
@@ -166,11 +169,11 @@ export function cardView(job, tracks, timeZone = null, decorate = null, review =
     descriptionComplete: job.descriptionComplete !== false,
     footnote: note.text,
     footnoteTitle: note.title,
-    posted: freshnessLabel(job) === 'date only' ? note.posted.replace(' (date only)', '') : note.posted,
+    posted: note.posted,
     source: note.source,
     freshness: freshnessLabel(job),
     freshnessKey: freshnessKey(freshnessLabel(job)),
-    // Hub marks (data-contacted, data-applied) for the Hide Contacted / Hide Applied filters.
+    // Hub marks (data-contacted) for the Hide Contacted filter.
     flags: extra.flags && typeof extra.flags === 'object' ? extra.flags : {},
     carriedOver: Boolean(job.carriedOver),
     alternates: (Array.isArray(job.alternates) ? job.alternates : []).map(item => ({ url: String(item?.url || ''), label: [item?.source, item?.location].filter(Boolean).join(' · ') || 'alternate listing' })).filter(item => item.url),
@@ -224,14 +227,12 @@ function sourcesSummary(stats) {
 }
 
 // Everything that used to sit in the page header or the warnings panel, folded into one list.
-// `window` (from buildReportView): the strict 24-hour window and group counts, and the main list's posting
-// window; the page header used to carry both.
+// `window` (from buildReportView): the posting window of the main list.
 export function runDetailsView(jobs, meta, tracks, notReviewedCount = 0, window = null) {
   const rows = [];
   const exclusions = meta.eligibilityExclusions || null;
   const warnings = meta.warnings || [];
   rows.push({ term: 'Report Date', detail: `${readableDate(meta.date)}${meta.runDate && meta.runDate !== meta.date ? ` (run on ${readableDate(meta.runDate)})` : ''}` });
-  if (window?.strict) rows.push({ term: STRICT_WINDOW_LABEL, detail: window.strict });
   if (window?.posted) rows.push({ term: 'Posting Window', detail: `${MAIN_LIST_TITLE}: ${window.posted}` });
   if (meta.lookbackHours != null) rows.push({ term: 'Lookback Window', detail: `${meta.lookbackHours} hours` });
   rows.push({ term: 'Resume Tracks', detail: tracks.map(track => track.label).join(', ') });
@@ -459,43 +460,32 @@ export function buildReportView(matchJobs, meta, options = {}) {
     const card = index < allCards.length ? allCards[index] : notReviewedCards[index - allCards.length];
     if (card.description && !card.descriptionSrc && card.descriptionComplete !== false) card.descriptionHtml = jobDescriptionHtml(job);
   });
-  // The main list holds this run's window; postings the review budget carried from an earlier run are
-  // a separate group under it. With the strict 24-hour window on, postings that may be older than 24 hours
-  // (a date-only posting from before the run's day, no date) leave the main list for a folded group.
-  const strict = splitStrictWindow(kept.filter(item => !item.job.carriedOver).map(item => item.job), meta);
-  const dateOnlyJobs = new Set(strict.dateOnly);
-  const cards = allCards.filter((card, index) => !card.carriedOver && !dateOnlyJobs.has(kept[index].job));
-  const dateOnlyCards = allCards.filter((card, index) => dateOnlyJobs.has(kept[index].job));
+  // The main list holds every reviewed match of the day in the current sort order, date-only and undated
+  // postings included (the collection-time freshness rules decide what gets in; the report no longer splits
+  // a date-only group, 2026-11-15); postings the review budget carried from an earlier run are a separate
+  // group under it. Run Details names the posting window of the main list alone.
+  const cards = allCards.filter(card => !card.carriedOver);
   const carriedCards = allCards.filter(card => card.carriedOver);
-  // Run Details: the strict window and the group counts (payloads from before the setting record no mode and
-  // get no line), and the posting window of the main list alone.
-  const window = {
-    strict: meta.strictWindow ? strictWindowDetail({ enabled: strict.enabled, groups: [
-      { title: MAIN_LIST_TITLE, count: cards.length },
-      ...(strict.enabled ? [{ title: DATE_ONLY_GROUP_TITLE, count: dateOnlyCards.length }] : []),
-      { title: CARRIED_OVER_TITLE, count: carriedCards.length },
-      { title: NOT_REVIEWED_TITLE, count: notReviewedCards.length },
-    ] }) : null,
-    posted: postingWindowLabel(strict.main, meta),
-  };
+  const window = { posted: postingWindowLabel(kept.filter(item => !item.job.carriedOver).map(item => item.job), meta) };
   const roleTypes = [...new Set(jobs.map(job => job.roleType || 'unknown'))].map(value => ({ value, label: roleLabel(value) }));
-  // The Freshness filter offers the values present in this report, in FRESHNESS_LABELS order.
+  // The Freshness filter offers the values present in this report, in FRESHNESS_LABELS order; "date only" is
+  // not a filter value (those postings sit in the main list like the rest).
   const present = new Set(jobs.map(job => freshnessLabel(job)));
-  const freshness = FRESHNESS_LABELS.filter(label => present.has(label)).map(label => ({ value: freshnessKey(label), label: label.replace(/\b[a-z]/g, letter => letter.toUpperCase()) }));
+  const freshness = FRESHNESS_LABELS.filter(label => label !== 'date only' && present.has(label)).map(label => ({ value: freshnessKey(label), label: label.replace(/\b[a-z]/g, letter => letter.toUpperCase()) }));
   return {
     title: REPORT_TITLE,
     dateLabel: readableDate(meta.date),
     matchLabel: matchLabel(jobs.length),
-    masthead: { title: readableDate(meta.date), subtitle: mastheadSubtitle(jobs, meta), note: meta.quotaNote || null },
-    toolbar: { roleTypes, tracks, freshness, quiet: jobs.length < 5, total: jobs.length, marks: options.marks || null },
+    // The one top row: "Sat, Nov 14 · 42 Jobs" and the controls; the hub fills the "⋯" menu slot.
+    toolbar: { roleTypes, tracks, freshness, total: jobs.length, marks: options.marks || null, title: formatDateLabel(meta.date), menuSlot: options.embedded === true },
+    quotaNote: meta.quotaNote || null,
     authBanner: signedOutBanner(meta.authExpired),
     banner: meta.authExpired ? null : (meta.quota?.banner || null),
     notReviewedBanner: notReviewed.length ? `${notReviewedHeadline(notReviewed.length)}: the scoring engine was unavailable, so they kept only the local triage score. They are not matches; see "${NOT_REVIEWED_TITLE}" at the bottom.` : null,
     networkBanner: meta.networkOutage ? meta.networkOutage.detail || meta.networkOutage.message : null,
     integrityBanner: meta.integrity?.seenDrop ? seenDropMessage(meta.integrity.seenDrop, meta.timeZone) : null,
     cards,
-    dateOnly: strict.enabled && dateOnlyCards.length ? { title: DATE_ONLY_GROUP_TITLE, note: 'Strict 24-hour window: the source gives only a date before the run\'s day (such as "Posted Yesterday"), or no date at all, so these postings may be older than 24 hours. They were reviewed like the rest.', cards: dateOnlyCards } : null,
-    carried: carriedCards.length ? { title: CARRIED_OVER_TITLE, note: 'Deferred by the review budget on an earlier run and reviewed now; each card says when it was first found.', cards: carriedCards } : null,
+    carried: carriedCards.length ? { title: CARRIED_OVER_TITLE, cards: carriedCards } : null,
     notReviewed: notReviewedCards.length ? { title: NOT_REVIEWED_TITLE, note: 'Local triage scores only: no model reviewed these postings, so none of them counts as a match and no cover letter is written for them automatically. Verify the fit yourself.', cards: notReviewedCards } : null,
     emptyMessage: 'No new postings cleared the configured threshold for this date.',
     runDetails: runDetailsView(jobs, meta, tracks, notReviewed.length, window),

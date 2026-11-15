@@ -1,6 +1,6 @@
 // Automatic checks of a v2 letter body (2026-11-08, part D of the outside review). Each check has an id and a
 // pass/fail result; a failure becomes a needs-review editor note "check failed (<id>): …", which keeps the
-// "Check N details" badge on the card until the owner marks the details checked. A few things are fixed in
+// "Check N Details" link on the card until the owner marks the details checked. A few things are fixed in
 // place before rendering and noted as info ("auto-fix: …"): symbols that stand for words ("8.2%" → "8.2
 // percent", "≥85" → "at least 85", "500K+" → "more than 500,000"), title separators (" - " → ", "), and a
 // thank-you sentence other than the one assigned to the letter (recent.mjs pickClosing).

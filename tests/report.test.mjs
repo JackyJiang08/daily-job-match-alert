@@ -16,9 +16,11 @@ const job = {
 };
 const meta = { date: '2026-08-27', lookbackHours: 24 };
 
+// The one top row's title: "Thu, Aug 27 · 1 Job".
 function header(html) {
-  return html.match(/<header class="masthead">([\s\S]*?)<\/header>/)[1];
+  return html.match(/<div class="bar-title">([\s\S]*?)<\/div>/)[1];
 }
+const JD_SUMMARY = /<details class="jd"><summary><span>Job Description<\/span><button type="button" class="jd-copy" aria-label="Copy Job Description" title="Copy Job Description"><svg [^>]*>[\s\S]*?<\/svg><\/button><\/summary>/;
 
 test('HTML output escapes remote content, links the posting, and keeps the JD folded', () => {
   const html = buildHtml([{ ...job, title: '<script>alert(1)</script>', company: 'A "quoted" co' }], meta);
@@ -28,21 +30,23 @@ test('HTML output escapes remote content, links the posting, and keeps the JD fo
   assert.match(html, /<a class="apply" target="_blank" rel="noopener noreferrer" href="https:\/\/example\.com\/jobs\/1">Open Posting<\/a>/);
   assert.match(html, /<h2 class="job-title"><span class="company">A &quot;quoted&quot; co<\/span><span class="dot"> · <\/span><a target="_blank" rel="noopener noreferrer" href="https:\/\/example\.com\/jobs\/1">/);
   assert.equal((html.match(/<a /g) || []).length, (html.match(/<a (?:class="apply" )?target="_blank" rel="noopener noreferrer" href=/g) || []).length, 'every link opens in a new tab');
-  assert.match(html, /<details class="jd"><summary>Job Description<\/summary>/);
+  assert.match(html, JD_SUMMARY, 'the fold carries the copy icon in its summary');
   assert.doesNotMatch(html, /Full Captured JD/);
   assert.doesNotMatch(html, /Pipeline warnings/);
   assert.doesNotMatch(html, /<link |src="http|https:\/\/cdn/);
 });
 
-test('the masthead is two lines: the report date as the title, then the match count', () => {
+test('the top row is one line: the short date and the job count on the left, no masthead above it', () => {
   assert.equal(readableDate('2026-09-11'), 'September 11, 2026');
   assert.equal(readableDate('not-a-date'), 'not-a-date');
   const nine = buildHtml(Array.from({ length: 9 }, (_, index) => ({ ...job, url: `https://example.com/jobs/${index}` })), { ...meta, date: '2026-09-11' });
-  assert.equal(header(nine), '<h1>September 11, 2026</h1><p class="sub">9 Matches</p>');
+  assert.equal(header(nine), '<span class="bar-date">Fri, Sep 11</span><span class="sep">·</span><span class="count" id="count">9 Jobs</span>');
   assert.match(nine, /<title>Daily Job Match Alert — September 11, 2026<\/title>/);
-  assert.equal(header(buildHtml([job], meta)), '<h1>August 27, 2026</h1><p class="sub">1 Match</p>');
-  assert.equal(header(buildHtml([], meta)), '<h1>August 27, 2026</h1><p class="sub">No Matches</p>');
-  assert.doesNotMatch(nine, /linear-gradient/);
+  assert.equal(header(buildHtml([job], meta)), '<span class="bar-date">Thu, Aug 27</span><span class="sep">·</span><span class="count" id="count">1 Job</span>');
+  assert.equal(header(buildHtml([], meta)), '<span class="bar-date">Thu, Aug 27</span><span class="sep">·</span><span class="count" id="count">0 Jobs</span>');
+  assert.doesNotMatch(nine, /<header class="masthead"|<h1[ >]|Matches · Ran|linear-gradient/);
+  assert.match(nine, /<div class="bar-sentinel" id="bar-sentinel" aria-hidden="true"><\/div><form class="toolbar" id="toolbar" autocomplete="off">\s*<div class="bar-title">/, 'the bar is the first thing on the page, after its sticky sentinel');
+  assert.match(nine, /IntersectionObserver[\s\S]*classList\.toggle\('stuck'/, 'the script marks the bar once it is stuck');
   assert.doesNotMatch(header(nine), /scored by|Resume tracks|excluded/);
 });
 
@@ -83,11 +87,11 @@ test('run metadata lives only in the collapsed Run details block, including the 
   assert.doesNotMatch(outside, /claude-fable-5|Lookback|Daily update|excluded|Toronto/);
 });
 
-test('the masthead names the run time in the configured zone, and the embedded view is titled by date', () => {
+test('the run time stays out of the top row (Run Details has it); mastheadSubtitle is kept for the Status summary', () => {
   const ran = { ...meta, timeZone: 'America/Chicago', completedAt: '2026-09-13T01:00:00Z', trigger: 'scheduled', runsToday: 1, lastUpdatedAt: '2026-09-13T01:00:00Z' };
   const html = buildHtml([job], { ...ran, date: '2026-09-13' });
-  // A folder from before 2026-11 (the evening run wrote the next day's report) keeps the run's date.
-  assert.equal(header(html), '<h1>September 13, 2026</h1><p class="sub">1 Match · Ran Sep 12, 8:00 PM</p>');
+  assert.equal(header(html), '<span class="bar-date">Sun, Sep 13</span><span class="sep">·</span><span class="count" id="count">1 Job</span>');
+  // A folder from before 2026-11 (the evening run wrote the next day's report) keeps the run's date in the summary line.
   assert.equal(mastheadSubtitle([job], { ...ran, date: '2026-09-13' }), '1 Match · Ran Sep 12, 8:00 PM');
   // A run on the report's own day shows the time alone.
   assert.equal(mastheadSubtitle([job], { ...ran, date: '2026-09-12' }), '1 Match · Ran 8:00 PM');
@@ -96,8 +100,9 @@ test('the masthead names the run time in the configured zone, and the embedded v
   assert.match(buildHtml([job], { ...ran, engine: 'codex', scoringModel: 'gpt-5.6-sol' }), /<dt>Engine<\/dt><dd>codex<\/dd>/);
   assert.doesNotMatch(html, /\bUTC\b/);
   const embedded = buildReportView([job], { ...ran, date: '2026-09-13' }, { embedded: true });
-  assert.deepEqual(embedded.masthead, { title: 'September 13, 2026', subtitle: '1 Match · Ran Sep 12, 8:00 PM', note: null }, 'no quota event, no quota line');
-  assert.equal(buildReportView([job], meta).masthead.subtitle, '1 Match', 'no run time when the payload has none');
+  assert.equal(embedded.masthead, undefined, 'no masthead view any more');
+  assert.deepEqual({ title: embedded.toolbar.title, total: embedded.toolbar.total, menuSlot: embedded.toolbar.menuSlot, quotaNote: embedded.quotaNote }, { title: 'Sun, Sep 13', total: 1, menuSlot: true, quotaNote: null }, 'the hub view gets the menu slot; no quota event, no quota line');
+  assert.equal(buildReportView([job], meta).toolbar.menuSlot, false, 'the Desktop file has no menu slot');
   // Older payloads without completedAt fall back to lastUpdatedAt.
   assert.equal(mastheadSubtitle([], { date: '2026-08-27', timeZone: 'America/Chicago', lastUpdatedAt: '2026-08-27T13:30:00Z' }), 'No Matches · Ran 8:30 AM');
 });
@@ -114,31 +119,41 @@ test('card locations are normalized at render time so historical payloads read c
 test('the empty state uses the same layout and hides the run status behind the same block', () => {
   const html = buildHtml([], { ...meta, scoringModel: 'local_only', warnings: [] });
   assert.match(html, /<div class="empty">No new postings cleared the configured threshold for this date\.<\/div>/);
-  assert.match(html, /<form class="toolbar quiet" id="toolbar"/);
+  assert.match(html, /<form class="toolbar" id="toolbar"/, 'the bar is the same with no jobs');
   assert.match(html, /<details class="run" id="run-details">/);
   assert.match(html, /<dt>Status<\/dt><dd>No pipeline warnings<\/dd>/);
   assert.doesNotMatch(html, /id="jobs"/);
 });
 
-test('cards carry the ring score, compact track scores, the recommendation, and sortable data attributes', () => {
+test('cards carry the 60px ring, one score line per track with the top one marked, no recommendation text, and sortable data attributes', () => {
   const tracks = [{ id: 'data', label: 'Data' }, { id: 'llm', label: 'LLM' }, { id: 'agent', label: 'AI Agent' }];
   const threeTrack = { ...job, scores: { data: 74, llm: 87, agent: 85 }, bestScore: 87, recommendedTrack: 'llm', recommendedResume: 'LLM', reasons: ['one', 'two', 'three', 'four'], gaps: ['a', 'b', 'c'] };
   const html = buildHtml([threeTrack], { ...meta, resumeTracks: tracks });
   assert.match(html, /<article class="job" data-score="87" data-company="acme, inc\." data-posted="\d+" data-role="new_grad" data-track="llm" data-search="acme, inc\. data &amp; ai analyst" data-freshness="posted-today">/);
   assert.match(html, /<div class="ring" style="--score:87" role="img" aria-label="Best score 87"><b>87<\/b><\/div>/);
   assert.match(html, /<h2 class="job-title"><span class="company">Acme, Inc\.<\/span><span class="dot"> · <\/span><a target="_blank" rel="noopener noreferrer" href="https:\/\/example\.com\/jobs\/1">Data &amp; AI Analyst<\/a><\/h2>/);
-  assert.match(html, /<p class="job-meta"><span>Remote<\/span><span class="sep">·<\/span><span>New Grad<\/span><span class="sep">·<\/span><span class="meta"[^>]*>Posted Aug 27, 5:00 AM<\/span><span class="badge fresh" data-badge="freshness">Posted Today<\/span><\/p>/);
-  assert.match(html, /<div class="scores"><span class="track" data-track="data">Data <b>74<\/b><\/span><span class="sep">·<\/span><span class="track best" data-track="llm">LLM <b>87<\/b><\/span><span class="sep">·<\/span><span class="track" data-track="agent">AI Agent <b>85<\/b><\/span><\/div>/);
-  assert.match(html, /<div class="job-score"><div class="score-text"><span class="recommend">Apply with LLM Resume<\/span><div class="scores">[\s\S]*?<\/div><\/div><div class="ring"/);
+  assert.match(html, /<p class="job-meta"><span>Remote<\/span><span class="sep">·<\/span><span>New Grad<\/span><span class="sep">·<\/span><span class="meta"[^>]*>Posted Aug 27, 5:00 AM<\/span><\/p>/, 'the posting time alone: no Freshness tag');
+  assert.doesNotMatch(html, /badge fresh|data-badge="freshness"/);
+  assert.match(html, /<div class="scores"><span class="track" data-track="data">Data <b>74<\/b><\/span><span class="track top" data-track="llm">LLM <b>87<\/b><\/span><span class="track" data-track="agent">AI Agent <b>85<\/b><\/span><\/div>/, 'one line per track, the highest marked');
+  assert.match(html, /<div class="job-score"><div class="scores">[\s\S]*?<\/div><div class="ring"/, 'scores then the ring; no recommendation line');
+  assert.doesNotMatch(html, /class="recommend"|Apply with|No Resume Recommended/);
+  assert.match(html, /\.ring\{[^}]*width:60px;height:60px/);
+  assert.match(html, /\.ring b\{[^}]*font-size:var\(--fs-title\)/);
+  assert.match(html, /\.scores\{[^}]*flex-direction:column;align-items:flex-end[^}]*font-variant-numeric:tabular-nums/);
+  assert.match(html, /\.scores \.track\.top\{color:var\(--ink\);font-weight:600\}/);
+  // A tie marks every holder.
+  const tied = buildHtml([{ ...threeTrack, scores: { data: 87, llm: 87, agent: 85 } }], { ...meta, resumeTracks: tracks });
+  assert.match(tied, /<span class="track top" data-track="data">Data <b>87<\/b><\/span><span class="track top" data-track="llm">LLM <b>87<\/b><\/span><span class="track" data-track="agent">AI Agent <b>85<\/b><\/span>/);
   // Why It Matches stays in the payload for cover letters and is not shown; Gaps / Verify shows every item.
   assert.doesNotMatch(html, /Why It Matches|class="facts reasons"|<li>one<\/li>/);
   assert.match(html, /<div class="facts-label">Gaps \/ Verify<\/div><ul class="facts gaps"><li>a<\/li><li>b<\/li><li>c<\/li><\/ul>/);
   assert.doesNotMatch(html, /<details class="more">/);
   assert.match(html, /<span class="meta" title="Posted Aug 27, 2026, 5:00 AM">Posted Aug 27, 5:00 AM<\/span>/, 'a JSON-LD datePosted with a clock time is precise and shows the local time');
   const dayOnly = buildHtml([{ ...job, postedAt: '2026-08-27T00:00:00.000Z' }], { ...meta, timeZone: 'America/Chicago' });
-  assert.match(dayOnly, /<span class="meta" title="Date only: the source reports no time of day">Posted Aug 27<\/span><span class="badge fresh" data-badge="freshness">Date Only<\/span>/, 'a bare-date datePosted (stored as UTC midnight by older versions) shows the day it names, marked date only');
+  assert.match(dayOnly, /<span class="meta" title="Date only: the source reports no time of day">Posted Aug 27<\/span><\/p>/, 'a bare-date datePosted (stored as UTC midnight by older versions) shows the day it names; "date only" stays in the hover title');
+  assert.doesNotMatch(dayOnly, /Date Only|\(date only\)</);
   const found = buildHtml([{ ...job, postedAt: null, discoveredAt: '2026-09-13T01:30:00Z' }], { ...meta, timeZone: 'America/Chicago' });
-  assert.match(found, /<span class="meta" title="The source reports no posting date; the day shown is when this pipeline first found it">Posted Unknown \(found Sep 12\)<\/span><span class="badge fresh" data-badge="freshness">Undated<\/span>/);
+  assert.match(found, /<span class="meta" title="The source reports no posting date; the day shown is when this pipeline first found it">Posted Unknown \(found Sep 12\)<\/span><\/p>/);
   assert.doesNotMatch(found, /Discovered|Found Sep/);
   assert.doesNotMatch(html, /Match level:|Use LLM|Apply with LLM resume/);
 
@@ -146,30 +161,33 @@ test('cards carry the ring score, compact track scores, the recommendation, and 
   assert.match(multi, /<p class="job-meta"><span>Boston, MA · Johnston, RI · Columbus, OH<\/span><span class="sep">·<\/span><span>New Grad<\/span>/);
 
   const single = buildHtml([{ ...job, scores: { data: 82 } }], { ...meta, resumeTracks: [{ id: 'data', label: 'Data' }] });
-  assert.match(single, /<div class="scores"><span class="track best" data-track="data">Data <b>82<\/b><\/span><\/div>/);
-  assert.match(single, /<span class="recommend">Apply with Data Resume<\/span>/);
+  assert.match(single, /<div class="scores"><span class="track top" data-track="data">Data <b>82<\/b><\/span><\/div>/);
 
   const legacy = buildHtml([{ ...job, scores: undefined, dataScore: 82, aiScore: 74 }], meta);
-  assert.match(legacy, /<span class="track best" data-track="data">Data <b>82<\/b><\/span><span class="sep">·<\/span><span class="track" data-track="ai">AI <b>74<\/b><\/span>/);
+  assert.match(legacy, /<span class="track top" data-track="data">Data <b>82<\/b><\/span><span class="track" data-track="ai">AI <b>74<\/b><\/span>/);
 });
 
-test('the toolbar offers sort, role and resume filters, and search, and turns quiet below five matches', () => {
+test('the top row offers search, sort, Track and Role Type; Freshness, the score range and Clear Filters sit in the Filters popover', () => {
   const tracks = [{ id: 'data', label: 'Data' }, { id: 'llm', label: 'LLM' }];
   const many = Array.from({ length: 5 }, (_, index) => ({ ...job, url: `https://example.com/jobs/${index}`, roleType: index % 2 ? 'internship' : 'new_grad' }));
   const html = buildHtml(many, { ...meta, resumeTracks: tracks });
   assert.match(html, /<form class="toolbar" id="toolbar" autocomplete="off">/);
   assert.match(html, /<input type="search" id="q" placeholder="Search company or title"/);
-  assert.match(html, /<label class="control"><span>Sort by<\/span><select id="sort"><option value="score" selected>Best Score<\/option><option value="company">Company<\/option><option value="posted">Posted Time<\/option><\/select><\/label>/);
-  assert.match(html, /<select id="role" aria-label="Role type"><option value="">All Role Types<\/option><option value="new_grad">New Grad<\/option><option value="internship">Internship<\/option><\/select>/);
-  assert.match(html, /<label class="control"><span>Resume<\/span><select id="track"><option value="">All Resumes<\/option><option value="data">Data<\/option><option value="llm">LLM<\/option><\/select><\/label>/);
-  assert.doesNotMatch(html, /Sort: |Data resume<\/option>|All role types|All resumes/);
-  assert.match(html, /<span class="count" id="count">5 shown<\/span>/);
+  assert.match(html, /<select id="sort" class="control" aria-label="Sort by"><option value="score" selected>Best Score<\/option><option value="company">Company<\/option><option value="posted">Posted Time<\/option><\/select>/);
+  assert.match(html, /<select id="role" class="control" aria-label="Role type"><option value="">All Role Types<\/option><option value="new_grad">New Grad<\/option><option value="internship">Internship<\/option><\/select>/);
+  assert.match(html, /<select id="track" class="control" aria-label="Track"><option value="">All Tracks<\/option><option value="data">Data<\/option><option value="llm">LLM<\/option><\/select>/);
+  assert.doesNotMatch(html, /Sort: |Data resume<\/option>|All role types|All resumes|All Resumes|<span>Resume<\/span>|<span>Sort by<\/span>/);
+  assert.match(html, /<details class="menu" id="filters-menu"><summary class="btn secondary" id="filters-button">Filters<\/summary><div class="menu-list">\s*<label class="control"><span>Freshness<\/span><select id="fresh">[\s\S]*?<span class="control score-range">[\s\S]*?<button type="button" class="btn secondary" id="clear-filters" hidden>Clear Filters<\/button>\s*<\/div><\/details>/);
+  assert.doesNotMatch(html, /<!--menu-->/, 'the Desktop file has no hub menu slot');
+  assert.match(html, /<span class="count" id="count">5 Jobs<\/span>/);
+  assert.match(html, /@media \(min-width:1100px\)\{\.toolbar\{flex-wrap:nowrap\}\}/, 'one line from 1100px');
   assert.match(html, /<div class="empty" id="no-results" hidden>/);
   assert.match(html, /<script>[\s\S]*querySelectorAll\('section\.jobs'\)[\s\S]*localeCompare[\s\S]*<\/script>/);
   assert.doesNotMatch(html, /<script src=/);
 
   const few = buildHtml(many.slice(0, 4), { ...meta, resumeTracks: tracks });
-  assert.match(few, /<form class="toolbar quiet" id="toolbar"/);
+  assert.match(few, /<form class="toolbar" id="toolbar"/, 'no quiet mode: the bar is the page header');
+  assert.doesNotMatch(few, /toolbar quiet/);
 });
 
 test('semantic markers render as badges instead of text prefixes', () => {

@@ -67,7 +67,7 @@ test('the JD section embeds the first 300 characters (code points) as text and t
     assert.ok(emoji.endsWith('😀'));
     assert.equal(Array.from(emoji).length, 300);
     // The short JD is embedded as before.
-    assert.match(page.text, /<details class="jd"><summary>Job Description<\/summary><div class="jd-body"><p>Short JD: under three hundred characters, kept whole\. &lt;i&gt;tags&lt;\/i&gt; &amp; &quot;quotes&quot;\.<\/p><\/div><\/details>/);
+    assert.match(page.text, /<details class="jd"><summary><span>Job Description<\/span><button type="button" class="jd-copy"[^>]*>[\s\S]*?<\/button><\/summary><div class="jd-body"><p>Short JD: under three hundred characters, kept whole\. &lt;i&gt;tags&lt;\/i&gt; &amp; &quot;quotes&quot;\.<\/p><\/div><\/details>/);
     // Unknown posting, unknown date, bad id.
     assert.equal((await hub.request('/reports/2026-10-17/jd/0000000000000000')).status, 404);
     assert.equal((await hub.request('/reports/2026-10-01/jd/0000000000000000')).status, 404);
@@ -82,7 +82,7 @@ test('the JD section embeds the first 300 characters (code points) as text and t
 test('the Desktop report keeps the whole JD inline', async () => {
   const { buildHtml } = await import('../src/report.mjs');
   const html = buildHtml(selectedMatches(), fixturePayload('2026-10-17', selectedMatches()).meta);
-  assert.doesNotMatch(html, /data-jd-src/);
+  assert.doesNotMatch(html.split('<script>')[0], /data-jd-src/, 'the page script names the attribute; no card carries it');
   assert.ok(html.includes(htmlEscape(selectedMatches()[0].description.trim())));
 });
 
@@ -108,7 +108,7 @@ test('reports index: built once from the payloads when missing, then the list pa
     const list = await hub.request('/reports/2026-10-16');
     assert.equal(list.status, 200);
     assert.deepEqual(reads, [], 'list, counts, and sidebar come from the index; the cached day needs no read');
-    assert.match(list.text, /<a href="\/reports\/2026-10-17" class="today" title="2026-10-17 \(today\)"><span>Sat, Oct 17<\/span><span class="n">4 matches<\/span>/);
+    assert.match(list.text, /<a href="\/reports\/2026-10-17" class="today" title="2026-10-17 \(today\)"><span>Sat, Oct 17<\/span><span class="n" title="4 matches">4<\/span>/);
   });
 });
 
@@ -204,7 +204,7 @@ test('render cache: a repeat load is a hit with no payload read, letter scan, re
     await hub.ctx.letterStore.saveLetter({ date: '2026-10-17', company: 'Example Corp 2', markdown: 'Dear Example Corp 2,', meta: { jobId: hub.ctx.reportCache && (await import('../src/hub/letters.mjs')).jobIdOf(selectedMatches()[1]), company: 'Example Corp 2', editorNotes: [] } });
     const lettered = await load();
     assert.equal(lettered.record.cache, 'miss');
-    assert.equal((lettered.page.text.match(/>Open Letter</g) || []).length, 2, 'the new letter shows on its card');
+    assert.equal((lettered.page.text.match(/>Open CoverLetter</g) || []).length, 2, 'the new letter shows on its card');
     assert.equal((await readReportsIndex(root)).dates['2026-10-17'].letterCount, 2);
 
     // 3. Rename & Re-render.

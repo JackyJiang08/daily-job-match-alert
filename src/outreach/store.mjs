@@ -47,7 +47,3 @@ export function contactedLabel(entry, timeZone) {
   return entry?.contactedAt ? `Contacted ${formatLocalDay(entry.contactedAt, timeZone)}` : null;
 }
 
-// "Applied Nov 8" (the card's Mark as Applied button once pressed), or null.
-export function appliedLabel(entry, timeZone) {
-  return entry?.appliedAt ? `Applied ${formatLocalDay(entry.appliedAt, timeZone)}` : null;
-}

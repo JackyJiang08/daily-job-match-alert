@@ -1,11 +1,13 @@
 // The report filter bar's state and rules, shared by the page script (REPORT_SCRIPT injects these functions
 // through toString) and the tests. The state lives in the URL query, so a refresh or a shared link opens the
-// same view: ?q=&sort=&resume=&role=&freshness=&min=&max=&hideContacted=1&hideApplied=1. Defaults are left
-// out of the URL, and any other parameter is kept as it was.
+// same view: ?q=&sort=&resume=&role=&freshness=&min=&max=&hideContacted=1. Defaults are left out of the URL,
+// and any other parameter is kept as it was. (Hide Applied and the applied mark left the page on 2026-11-15;
+// an old hideApplied parameter is ignored and dropped.)
 
-export const DEFAULT_FILTERS = { q: '', sort: 'score', resume: '', role: '', freshness: '', min: '', max: '', hideContacted: false, hideApplied: false };
+export const DEFAULT_FILTERS = { q: '', sort: 'score', resume: '', role: '', freshness: '', min: '', max: '', hideContacted: false };
 
-// "date only" → "date-only": the value cards carry in data-freshness and the Freshness select uses.
+// "new since last poll" → "new-since-last-poll": the value cards carry in data-freshness and the Freshness
+// select uses.
 export function freshnessKey(label) {
   return String(label || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
@@ -28,7 +30,6 @@ export function readFilters(search) {
     min: score(params.get('min')),
     max: score(params.get('max')),
     hideContacted: params.get('hideContacted') === '1',
-    hideApplied: params.get('hideApplied') === '1',
   };
 }
 
@@ -45,12 +46,11 @@ export function writeFilters(state, search) {
   if (state.min !== '' && state.min != null) params.set('min', String(state.min));
   if (state.max !== '' && state.max != null) params.set('max', String(state.max));
   if (state.hideContacted) params.set('hideContacted', '1');
-  if (state.hideApplied) params.set('hideApplied', '1');
   var text = params.toString();
   return text ? '?' + text : '';
 }
 
-// Whether a card (its data attributes: score, role, track, search, freshness, contacted, applied) passes.
+// Whether a card (its data attributes: score, role, track, search, freshness, contacted) passes.
 export function cardPasses(card, state) {
   var term = String(state.q || '').trim().toLowerCase();
   var score = parseFloat(card.score);
@@ -60,11 +60,10 @@ export function cardPasses(card, state) {
   if (state.min !== '' && state.min != null && !(score >= Number(state.min))) return false;
   if (state.max !== '' && state.max != null && !(score <= Number(state.max))) return false;
   if (state.hideContacted && card.contacted === '1') return false;
-  if (state.hideApplied && card.applied === '1') return false;
   if (term && String(card.search || '').indexOf(term) < 0) return false;
   return true;
 }
 
 export function filtersActive(state) {
-  return Boolean(String(state.q || '').trim() || state.resume || state.role || state.freshness || state.min !== '' || state.max !== '' || state.hideContacted || state.hideApplied);
+  return Boolean(String(state.q || '').trim() || state.resume || state.role || state.freshness || state.min !== '' || state.max !== '' || state.hideContacted);
 }

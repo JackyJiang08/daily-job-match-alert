@@ -152,12 +152,16 @@ test('Reports lists dates newest first with counts, titles the report by date, a
     assert.match(list.text, /<title>Report 2026-08-27 — Daily Job Match Alert Hub<\/title>/);
     assert.match(list.text, /<p class="brand">Job Match Hub<\/p>/);
     assert.match(list.text, /<div class="datetools"><a class="today-link" href="\/reports\/2026-08-27" id="today-link" title="Today's report \(2026-08-27\)">Today<\/a><label><input type="checkbox" id="only-matches"> Only Days With Matches<\/label><\/div>/);
-    assert.match(list.text, /<ul class="datelist" id="datelist"><li class="month" data-month="2026-08" data-current="1">August 2026<\/li><li data-month="2026-08"><a href="\/reports\/2026-08-27" class="active today" title="2026-08-27 \(today\)"><span>Thu, Aug 27<\/span><span class="n">1 match<\/span><span class="tag" data-tag="today">Today<\/span><\/a><\/li><li data-month="2026-08" data-empty="1"><a href="\/reports\/2026-08-26" class="quiet" title="2026-08-26"><span>Wed, Aug 26<\/span><span class="n">0 matches<\/span><\/a><\/li><\/ul>/);
+    assert.match(list.text, /<ul class="datelist" id="datelist"><li data-month="2026-08"><a href="\/reports\/2026-08-27" class="active today" title="2026-08-27 \(today\)"><span>Thu, Aug 27<\/span><span class="n" title="1 match">1<\/span><span class="tag" data-tag="today">Today<\/span><\/a><\/li><li data-month="2026-08" data-empty="1"><a href="\/reports\/2026-08-26" class="quiet" title="2026-08-26"><span>Wed, Aug 26<\/span><span class="n" title="0 matches">0<\/span><\/a><\/li><\/ul>/, 'the current month: no heading, counts as bare numbers');
+    assert.doesNotMatch(list.text, /id="history"/, 'no earlier month, no History fold');
     assert.match(list.text, /localStorage\.getItem\(key\)/, 'the toggle remembers itself');
     assert.doesNotMatch(list.text, /<h1 class="hub-title">Reports<\/h1>/, 'no page heading above the report');
-    assert.match(list.text, /<header class="masthead"><h1>August 27, 2026<\/h1><p class="sub">1 Match · Ran Aug 26, 8:00 PM<\/p><\/header>/);
-    assert.equal((list.text.match(/<h1/g) || []).length, 1, 'a single h1 on the page');
-    assert.match(list.text, /<a class="btn secondary small" href="\/desktop\/2026-08-27" target="_blank" rel="noopener noreferrer" title="[^"]*output\/2026-08-27\/Daily Job Match Alert - 2026-08-27\.html">Open Desktop Copy<\/a><a class="btn secondary small" href="\/desktop\/2026-08-27\/xlsx"[^>]*>Download XLSX<\/a>/);
+    assert.match(list.text, /<div class="bar-title"><span class="bar-date">Thu, Aug 27<\/span><span class="sep">·<\/span><span class="count" id="count">1 Job<\/span><\/div>/, 'the one top row');
+    assert.doesNotMatch(list.text, /<header class="masthead"|<h1[ >]|Matches · Ran|class="report-head"/, 'no masthead, no page heading, no button row above the report');
+    assert.match(list.text, /<details class="menu overflow" id="more-menu"><summary class="btn secondary" aria-label="More Actions" title="More Actions">⋯<\/summary><div class="menu-list">(?:<form class="inline"[\s\S]*?<\/form>)*<a class="btn secondary small" href="\/desktop\/2026-08-27" target="_blank" rel="noopener noreferrer" title="[^"]*output\/2026-08-27\/Daily Job Match Alert - 2026-08-27\.html">Open Desktop Copy<\/a><a class="btn secondary small" href="\/desktop\/2026-08-27\/xlsx"[^>]*>Download XLSX<\/a><\/div><\/details>\s*<\/form>/, 'the secondary actions sit in the ⋯ menu at the end of the bar');
+    assert.doesNotMatch(list.text, /<!--menu-->/);
+    assert.doesNotMatch(list.text, /\.hub-nav\{[^}]*position:sticky/, 'the hub navigation scrolls with the page');
+    assert.match(list.text, /\.toolbar\{position:sticky;top:0/, 'the top row is what stays');
     assert.doesNotMatch(list.text, /file:\/\//);
     assert.doesNotMatch(list.text, /Desktop copy:/);
     assert.match(list.text, /<article class="job"/);
@@ -168,7 +172,7 @@ test('Reports lists dates newest first with counts, titles the report by date, a
     assert.match(list.text, /<a href="\/reports" class="active">Reports<\/a>/);
     const day = await hub.request('GET', '/reports/2026-08-26');
     assert.equal(day.status, 200);
-    assert.match(day.text, /<h1>August 26, 2026<\/h1><p class="sub">No Matches · Ran Aug 25, 8:00 PM<\/p>/);
+    assert.match(day.text, /<span class="bar-date">Wed, Aug 26<\/span><span class="sep">·<\/span><span class="count" id="count">0 Jobs<\/span>/);
     assert.match(day.text, /No new postings cleared the configured threshold/);
     assert.match(day.text, /<a href="\/reports\/2026-08-26" class="active quiet"/);
     assert.equal((await hub.request('GET', '/reports/2026-01-01')).status, 404);
@@ -192,23 +196,23 @@ test('Reports reads payloads from disk on every request and normalizes locations
     const raw = JSON.stringify({ meta: payloadMeta('2026-08-28', { matchCount: 1, trigger: 'manual' }), matches: [job({ location: 'Boston, MA Johnston, RI Columbus, OH', title: 'Multi Site Analyst' })], reviewed: [], complete: true });
     await fs.writeFile(file, raw);
     const listed = await hub.request('GET', '/reports');
-    assert.match(listed.text, /<a href="\/reports\/2026-08-28"[^>]*><span>Fri, Aug 28<\/span><span class="n">1 match<\/span><span class="tag" data-tag="tomorrow">Tomorrow<\/span><\/a>/, 'the new payload is visible on the very next request');
+    assert.match(listed.text, /<a href="\/reports\/2026-08-28"[^>]*><span>Fri, Aug 28<\/span><span class="n" title="1 match">1<\/span><span class="tag" data-tag="tomorrow">Tomorrow<\/span><\/a>/, 'the new payload is visible on the very next request');
     assert.match(listed.text, /<a href="\/reports\/2026-08-27" class="active today"/, 'calendar today stays selected by default');
     const after = await hub.request('GET', '/reports/2026-08-28');
     assert.match(after.text, /<a href="\/reports\/2026-08-28" class="active"[^>]*><span>Fri, Aug 28<\/span>/);
     const sept = path.join(root, 'state', 'report-payload-2026-09-02.json');
     await fs.writeFile(sept, JSON.stringify({ meta: payloadMeta('2026-09-02', { matchCount: 2 }), matches: [job(), job({ url: 'https://example.com/jobs/9' })], reviewed: [], complete: true }));
     const grouped = await hub.request('GET', '/reports/2026-08-27');
-    assert.match(grouped.text, /<li class="month" data-month="2026-09"><button type="button" class="month-toggle" aria-expanded="true">September 2026<\/button><\/li><li data-month="2026-09"><a href="\/reports\/2026-09-02"[^>]*><span>Wed, Sep 2<\/span><span class="n">2 matches<\/span><span class="tag" data-tag="tomorrow">Tomorrow<\/span><\/a><\/li><li class="month" data-month="2026-08" data-current="1">August 2026<\/li>/, 'months are grouped newest first');
+    assert.match(grouped.text, /<ul class="datelist" id="datelist"><li data-month="2026-09"><a href="\/reports\/2026-09-02"[^>]*><span>Wed, Sep 2<\/span><span class="n" title="2 matches">2<\/span><span class="tag" data-tag="tomorrow">Tomorrow<\/span><\/a><\/li>[\s\S]*?<li data-month="2026-08"><a href="\/reports\/2026-08-27"/, 'a later month stays in the open list, newest first');
     assert.match(grouped.text, /<a class="today-link" href="\/reports\/2026-08-27" id="today-link" title="Today's report \(2026-08-27\)">Today<\/a>/, 'Today keeps pointing at the calendar day even when newer reports exist');
-    assert.match(grouped.text, /<a href="\/reports\/2026-09-02"[^>]*title="2026-09-02 \(after today\)"><span>Wed, Sep 2<\/span><span class="n">2 matches<\/span><span class="tag" data-tag="tomorrow">Tomorrow<\/span><\/a>/, 'dates after today are tagged Tomorrow');
+    assert.match(grouped.text, /<a href="\/reports\/2026-09-02"[^>]*title="2026-09-02 \(after today\)"><span>Wed, Sep 2<\/span><span class="n" title="2 matches">2<\/span><span class="tag" data-tag="tomorrow">Tomorrow<\/span><\/a>/, 'dates after today are tagged Tomorrow');
     assert.match((await hub.request('GET', '/reports')).text, /<a href="\/reports\/2026-08-27" class="active today"/, 'the default selection is calendar today, not the newest report');
     await fs.rm(sept);
     assert.match(after.text, /<span class="company">Acme<\/span>[\s\S]*?<p class="job-meta"><span>Boston, MA · Johnston, RI · Columbus, OH<\/span><span class="sep">·<\/span><span>New Grad<\/span>/);
     assert.doesNotMatch(after.text, /Boston, MA Johnston/);
     assert.equal(await fs.readFile(file, 'utf8'), raw, 'the payload on disk is untouched');
     await fs.writeFile(file, JSON.stringify({ meta: payloadMeta('2026-08-28', { matchCount: 0 }), matches: [], reviewed: [], complete: true }));
-    assert.match((await hub.request('GET', '/reports/2026-08-28')).text, /No Matches/, 'a rewritten payload is re-read, never served from memory');
+    assert.match((await hub.request('GET', '/reports/2026-08-28')).text, /<span class="count" id="count">0 Jobs<\/span>/, 'a rewritten payload is re-read, never served from memory');
     await fs.rm(file);
     assert.equal((await hub.request('GET', '/reports/2026-08-28')).status, 404);
   } finally {
@@ -222,17 +226,17 @@ test('without a report for today the list opens the newest one and the shortcut 
   const hub = await startHub(root, { now: '2026-08-30T12:00:00Z' });
   try {
     const page = await hub.request('GET', '/reports');
-    assert.match(page.text, /<a href="\/reports\/2026-08-27" class="active"[^>]*title="2026-08-27"><span>Thu, Aug 27<\/span><span class="n">1 match<\/span><\/a>/, 'newest report selected, no Today tag');
+    assert.match(page.text, /<a href="\/reports\/2026-08-27" class="active"[^>]*title="2026-08-27"><span>Thu, Aug 27<\/span><span class="n" title="1 match">1<\/span><\/a>/, 'newest report selected, no Today tag');
     assert.match(page.text, /<a class="today-link" href="\/reports\/2026-08-27" id="today-link" title="No report for today; newest report \(2026-08-27\)">Latest<\/a>/);
     assert.doesNotMatch(page.text, /data-tag="today"|data-tag="tomorrow"/);
-    assert.match(page.text, /<h1>August 27, 2026<\/h1>/);
+    assert.match(page.text, /<span class="bar-date">Thu, Aug 27<\/span>/);
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });
   }
 });
 
-test('earlier months start collapsed with a toggle, the current and later months stay open, and the selected date opens its month', async () => {
+test('only the current month is open; earlier months sit under a History fold at the bottom, grouped by month, which opens for a selected date in it', async () => {
   const root = await prepareProject();
   await fs.writeFile(path.join(root, 'state', 'report-payload-2026-07-15.json'), JSON.stringify({ meta: payloadMeta('2026-07-15', { matchCount: 2 }), matches: [job(), job({ url: 'https://example.com/jobs/2' })], reviewed: [], complete: true }));
   await fs.writeFile(path.join(root, 'state', 'report-payload-2026-09-02.json'), JSON.stringify({ meta: payloadMeta('2026-09-02', { matchCount: 1 }), matches: [job()], reviewed: [], complete: true }));
@@ -240,13 +244,15 @@ test('earlier months start collapsed with a toggle, the current and later months
   try {
     const list = await hub.request('GET', '/reports');
     assert.match(list.text, /<div class="datetools"><a class="today-link" href="\/reports\/2026-08-27" id="today-link"[^>]*>Today<\/a><label><input type="checkbox" id="only-matches"> Only Days With Matches<\/label><\/div>/, 'the shortcut and the toggle share one row');
-    assert.match(list.text, /<li class="month" data-month="2026-09"><button type="button" class="month-toggle" aria-expanded="true">September 2026<\/button><\/li><li data-month="2026-09"><a href="\/reports\/2026-09-02"/, 'a later month (the tomorrow report) starts open');
-    assert.match(list.text, /<li class="month" data-month="2026-08" data-current="1">August 2026<\/li><li data-month="2026-08"><a href="\/reports\/2026-08-27" class="active today"/, 'the current month has no toggle');
-    assert.match(list.text, /<li class="month" data-month="2026-07" data-collapsed="1"><button type="button" class="month-toggle" aria-expanded="false">July 2026<\/button><\/li><li data-month="2026-07" hidden><a href="\/reports\/2026-07-15"/, 'an earlier month starts collapsed with its days hidden');
-    assert.match(list.text, /hub\.reports\.months/, 'the page script remembers month state in localStorage');
+    assert.match(list.text, /<ul class="datelist" id="datelist"><li data-month="2026-09"><a href="\/reports\/2026-09-02"[^>]*><span>Wed, Sep 2<\/span>[\s\S]*?<li data-month="2026-08"><a href="\/reports\/2026-08-27" class="active today"/, 'the current month and a later one (the tomorrow report) are in the open list, with no month heading');
+    assert.match(list.text, /<\/ul><details class="history" id="history"><summary>History <span class="group-count">\(1\)<\/span><\/summary><ul class="datelist" id="datelist-history"><li class="month" data-month="2026-07">July 2026<\/li><li data-month="2026-07"><a href="\/reports\/2026-07-15"/, 'an earlier month sits under History, closed, grouped by month');
+    assert.doesNotMatch(list.text, /<li data-month="2026-07"[^>]*hidden|month-toggle|hub\.reports\.months/);
+    assert.match(list.text, /hub\.reports\.history/, 'the page script remembers the fold in localStorage');
+    assert.match(list.text, /\.datelist\{display:grid;grid-template-columns:minmax\(0,1fr\) max-content max-content/, 'one three-column grid for every row');
+    assert.match(list.text, /\.datelist a\{display:grid;grid-template-columns:subgrid;grid-column:1\/-1/);
     const july = await hub.request('GET', '/reports/2026-07-15');
-    assert.match(july.text, /<li class="month" data-month="2026-07"><button type="button" class="month-toggle" aria-expanded="true">July 2026<\/button><\/li><li data-month="2026-07"><a href="\/reports\/2026-07-15" class="active"/, 'the month holding the selected date opens');
-    assert.match(july.text, /<li class="month" data-month="2026-08" data-current="1">August 2026<\/li><li data-month="2026-08"><a href="\/reports\/2026-08-27" class="today"/);
+    assert.match(july.text, /<details class="history" id="history" open data-selected="1"><summary>History <span class="group-count">\(1\)<\/span><\/summary><ul class="datelist" id="datelist-history"><li class="month" data-month="2026-07">July 2026<\/li><li data-month="2026-07"><a href="\/reports\/2026-07-15" class="active"/, 'the fold opens for a selected date in it');
+    assert.match(july.text, /<ul class="datelist" id="datelist">[\s\S]*?<li data-month="2026-08"><a href="\/reports\/2026-08-27" class="today"/);
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });
@@ -629,7 +635,7 @@ test('a persisted Workday company name is cleaned when rendered in the report an
     assert.match(report.text, /<h2 class="job-title"><span class="company">Motorola Solutions<\/span>/, 'the card shows the cleaned name');
     assert.match(report.text, /<p class="job-meta"><span>Remote - US<\/span><span class="sep">·<\/span><span>New Grad<\/span>/);
     assert.match(report.text, /data-company="motorola solutions"/);
-    assert.match(report.text, /<span class="meta" title="Date only: the source reports no time of day">Posted Aug 26<\/span><span class="badge fresh" data-badge="freshness">Date Only<\/span>/, 'a Workday day is shown as the local calendar day, date only');
+    assert.match(report.text, /<span class="meta" title="Date only: the source reports no time of day">Posted Aug 26<\/span><\/p>/, 'a Workday day is shown as the local calendar day; "date only" only in the hover title');
     assert.doesNotMatch(report.text, /100000 Motorola/);
     const jobId = sha256(workday.url).slice(0, 16);
     const panel = await hub.request('GET', `/letters/new?date=2026-08-27&job=${jobId}`);
@@ -1163,9 +1169,9 @@ test('while the automatic pass writes letters, cards say so and manual letters w
     }));
     await hub.ctx.letterStore.saveLetter({ date: '2026-08-27', company: 'Acme', markdown: '# Letter', meta: { jobId, company: 'Acme', source: 'auto', engine: 'codex', model: 'gpt-5.6-sol', effort: 'medium', editorNotes: ['unverified detail: the 40% figure', 'Tighten the close'], paragraphs: ['x'] } });
     const after = (await hub.request('GET', '/reports/2026-08-27')).text;
-    assert.match(after, /<span class="badge badge-warn" data-badge="letter-check" title="unverified detail: the 40% figure">Check 1 detail<\/span>/, 'only the needs-review note counts; the wording fix stays in the letter footer');
+    assert.match(after, /<p class="job-meta">[^\n]*?<a class="badge badge-warn job-check" data-badge="letter-check" href="\/letters\/2026-08-27\/[A-Za-z0-9]+" title="unverified detail: the 40% figure">Check 1 Detail<\/a><\/p>/, 'only the needs-review note counts, as a link at the end of the posting line; the wording fix stays in the letter footer');
     assert.doesNotMatch(after.split('<script>')[0], /Letter ready|data-badge="letter-notes"/);
-    assert.match(after.split('<script>')[0], />Open Letter<\/a>/);
+    assert.match(after.split('<script>')[0], />Open CoverLetter<\/a>/);
     const done = (await hub.request('GET', '/status')).text;
     assert.match(done, /data-badge="letters-done">Done<\/span>/);
     assert.match(done, /<dd id="auto-letters-counts">1 generated · 0 failed<\/dd>[\s\S]*?<dt>Engines<\/dt><dd>codex · gpt-5\.6-sol \(medium\)<\/dd>[\s\S]*?<dt>Usage<\/dt><dd>900 in · 300 out \(2 calls\)<\/dd>/);
@@ -1199,17 +1205,15 @@ test('Settings > Pipeline has "Include carried-over postings" (default on); only
     await hub.form('/settings', { pipelinePresent: '1', includeCarriedOver: 'on', minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' });
     assert.equal((await readConfig(root)).semanticMatching.includeCarriedOver, true);
     assert.equal(validateSettings({ minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' }).includeCarriedOver, null);
-    // "Strict 24-Hour Window" sits beside it, on by default.
-    assert.match(page.text, /<input type="checkbox" name="strict24HourWindow" checked> Strict 24-Hour Window<\/label>/, 'on by default');
+    // The Strict 24-Hour Window switch is gone (2026-11-15); a value left in config.json is ignored and kept as it is.
+    assert.doesNotMatch(page.text, /strict24HourWindow|Strict 24-Hour Window/);
+    assert.match(page.text, /appear under "From Yesterday"/);
+    const config = await readConfig(root);
+    config.semanticMatching.strict24HourWindow = false;
+    await fs.writeFile(path.join(root, 'config.json'), JSON.stringify(config));
     await hub.form('/settings', { pipelinePresent: '1', includeCarriedOver: 'on', strict24HourWindow: 'on', minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' });
-    assert.equal((await readConfig(root)).semanticMatching.strict24HourWindow, true);
-    assert.match((await hub.request('GET', '/settings?tab=pipeline')).text, /<input type="checkbox" name="strict24HourWindow" checked> Strict 24-Hour Window<\/label>/);
-    await hub.form('/settings', { minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' });
-    assert.equal((await readConfig(root)).semanticMatching.strict24HourWindow, true, 'a form without the Pipeline marker leaves it alone');
-    // Unchecked on the Pipeline form turns it off, and the box stays unchecked.
-    await hub.form('/settings', { pipelinePresent: '1', includeCarriedOver: 'on', minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' });
-    assert.equal((await readConfig(root)).semanticMatching.strict24HourWindow, false);
-    assert.match((await hub.request('GET', '/settings?tab=pipeline')).text, /<input type="checkbox" name="strict24HourWindow"> Strict 24-Hour Window<\/label>/);
+    assert.equal((await readConfig(root)).semanticMatching.strict24HourWindow, false, 'the form no longer writes it');
+    assert.equal(validateSettings({ pipelinePresent: '1', strict24HourWindow: 'on', minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747' }).strict24HourWindow, undefined);
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });

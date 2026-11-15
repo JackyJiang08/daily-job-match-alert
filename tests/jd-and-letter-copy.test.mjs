@@ -78,8 +78,10 @@ test('plain text and older payloads show as paragraphs at their own line breaks;
   assert.equal(jobDescriptionHtml({ description: 'x', descriptionHtml: MALICIOUS }), CLEAN);
   const meta = fixturePayload('2026-11-08', []).meta;
   const html = buildHtml([fixtureJob(1, { descriptionHtml: MALICIOUS }), fixtureJob(2, { url: 'https://jobs.example.com/2', description: 'Line one.\n\nLine two.' })], meta);
-  assert.ok(html.includes(`<details class="jd"><summary>Job Description</summary><div class="jd-body">${CLEAN}</div></details>`), 'folded by default, markup inside');
-  assert.ok(html.includes('<details class="jd"><summary>Job Description</summary><div class="jd-body"><p>Line one.</p><p>Line two.</p></div></details>'));
+  const summary = '<summary><span>Job Description</span><button type="button" class="jd-copy" aria-label="Copy Job Description" title="Copy Job Description">';
+  const body = inner => new RegExp(`<details class="jd">${summary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}<svg [^>]*>[\\s\\S]*?</svg></button></summary><div class="jd-body">${inner.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}</div></details>`);
+  assert.match(html, body(CLEAN), 'folded by default, markup inside, the copy icon in the summary');
+  assert.match(html, body('<p>Line one.</p><p>Line two.</p>'));
   assert.doesNotMatch(html, /steal\(\)|evil\.example|Why It Matches|facts reasons/);
   assert.match(html, /<div class="facts-label">Gaps \/ Verify<\/div><ul class="facts gaps"><li>JD skill not found in resume: dbt<\/li><\/ul>/, 'Gaps / Verify is open');
 });
@@ -93,7 +95,7 @@ test('the slim payload keeps descriptionHtml only for postings that went to the 
   assert.equal(slim.reviewed[1].descriptionHtml, undefined);
 });
 
-test('the hub: no Why It Matches, the lazy JD loads the cleaned markup, Open Letter opens a new tab', async () => {
+test('the hub: no Why It Matches, the lazy JD loads the cleaned markup, Open CoverLetter opens a new tab', async () => {
   const root = await prepareReportProject();
   const long = fixtureJob(1, { descriptionHtml: `${MALICIOUS}<p>${'More detail. '.repeat(40)}</p>` });
   await writePayload(root, fixturePayload('2026-10-17', [long]));
@@ -101,13 +103,13 @@ test('the hub: no Why It Matches, the lazy JD loads the cleaned markup, Open Let
   try {
     const page = (await hub.request('/reports/2026-10-17')).text;
     assert.doesNotMatch(page, /Why It Matches|class="facts reasons"/);
-    const src = /<details class="jd" data-jd-src="([^"]+)"><summary>Job Description<\/summary><div class="jd-body"><p>/.exec(page)?.[1];
+    const src = /<details class="jd" data-jd-src="([^"]+)"><summary><span>Job Description<\/span><button type="button" class="jd-copy"[^>]*>[\s\S]*?<\/button><\/summary><div class="jd-body"><p>/.exec(page)?.[1];
     assert.ok(src, 'a long JD loads on demand');
     const jd = await hub.request(src);
     assert.equal(jd.headers['content-type'], 'text/html; charset=utf-8');
     assert.ok(jd.text.startsWith(CLEAN));
     assert.doesNotMatch(jd.text, /script|onclick|style=/);
-    assert.match(page, /<a class="btn secondary" href="\/letters\/2026-10-17\/ExampleCorp1" target="_blank" rel="noopener noreferrer">Open Letter<\/a>/);
+    assert.match(page, /<a class="btn secondary" href="\/letters\/2026-10-17\/ExampleCorp1" target="_blank" rel="noopener noreferrer">Open CoverLetter<\/a>/);
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });

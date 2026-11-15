@@ -32,11 +32,11 @@ Record the date and commit next to each item when it passes.
 
 - [ ] **The demo HTML opens correctly in a browser**
   Open `tests/fixtures/demo-output/2026-08-27/Daily Job Match Alert - 2026-08-27.html`.
-  Expected: a two-line header (`Daily Job Match Alert`, then `August 27, 2026 · N match(es)`),
-  no banner; the toolbar sorts, filters by role type and recommended resume, and searches
-  company or title (it is rendered in its quiet style because the demo has fewer than five
-  matches); each card shows the score ring, `company · location · role type`, one line of
-  per-track scores with an `Apply with <label> Resume` tag, and the folded JD; **Run Details**
+  Expected: one top row (`Thu, Aug 27 · N Jobs`, then search, sort, Track, Role Type and the
+  Filters popover; it stays at the top while scrolling), no banner; each card shows
+  `company · title` with one score line per track (the highest marked) and the 60px ring,
+  `location · role type · Posted …`, Gaps / Verify, the folded JD with its copy icon, then
+  Open Posting; **Run Details**
   at the bottom is collapsed and lists the tracks, scoring model, and status; switching the
   OS to dark mode restyles the page without a reload.
 

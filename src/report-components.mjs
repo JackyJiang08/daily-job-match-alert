@@ -8,35 +8,36 @@ import { REPORT_SCRIPT, REPORT_STYLES } from './report-theme.mjs';
 export const EXTERNAL_LINK = 'target="_blank" rel="noopener noreferrer"';
 // The one line a card shows in place of a Job Description the pipeline could not read in full (jd-extract.mjs).
 export const INCOMPLETE_DESCRIPTION_LABEL = 'Full Description On The Posting Page';
+// The card's copy control beside "Job Description" (an icon alone; the name is its label).
+export const COPY_DESCRIPTION_LABEL = 'Copy Job Description';
+// The hub's "⋯" menu is filled by the hub page (reportsPage replaces this marker), so the cached report body
+// never carries request-specific controls.
+export const MENU_SLOT = '<!--menu-->';
 
-export function renderMasthead(view) {
-  const title = view.masthead?.title ?? view.title;
-  const subtitle = view.masthead?.subtitle ?? `${view.dateLabel} · ${view.matchLabel}`;
-  // A quota limit that touched the run gets one line under the subtitle: how many postings it held back and
-  // which engine or model took over.
-  const note = view.masthead?.note ? `<p class="sub quota-note" data-quota-note>${htmlEscape(view.masthead.note)}</p>` : '';
-  return `<header class="masthead"><h1>${htmlEscape(title)}</h1><p class="sub">${htmlEscape(subtitle)}</p>${note}</header>`;
-}
+const COPY_ICON = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>';
 
 function option(value, label, selected = false) {
   return `<option value="${htmlEscape(value)}"${selected ? ' selected' : ''}>${htmlEscape(label)}</option>`;
 }
 
-// The filter bar: search, sort, and the filters (resume track, role type, Freshness, score range, and in the hub
-// Hide Contacted / Hide Applied). The page script keeps their state in the URL query (src/report-filters.mjs).
-export function renderToolbar({ roleTypes, tracks, quiet, total, freshness = [], marks = null }) {
-  const checks = marks
-    ? `<label class="check"><input type="checkbox" id="hide-contacted"> Hide Contacted</label><label class="check"><input type="checkbox" id="hide-applied"> Hide Applied</label>`
-    : '';
-  return `<form class="toolbar${quiet ? ' quiet' : ''}" id="toolbar" autocomplete="off">
+// The one top row (2026-11-15), sticky while the list scrolls: the date and the count on the left; search,
+// sort, Track and Role Type on the right; Freshness, the score range, Hide Contacted (hub) and Clear Filters
+// in the "Filters" popover; the hub's secondary actions in a "⋯" menu that the hub page fills in. The page
+// script keeps the filter state in the URL query (src/report-filters.mjs).
+export function renderToolbar({ roleTypes, tracks, total, freshness = [], marks = null, title = '', menuSlot = false }) {
+  const contacted = marks ? `<label class="check"><input type="checkbox" id="hide-contacted"> Hide Contacted</label>` : '';
+  const count = `${total} ${total === 1 ? 'Job' : 'Jobs'}`;
+  return `<div class="bar-sentinel" id="bar-sentinel" aria-hidden="true"></div><form class="toolbar" id="toolbar" autocomplete="off">
+    <div class="bar-title">${title ? `<span class="bar-date">${htmlEscape(title)}</span><span class="sep">·</span>` : ''}<span class="count" id="count">${count}</span></div>
     <input type="search" id="q" placeholder="Search company or title" aria-label="Search company or title">
-    <label class="control"><span>Sort by</span><select id="sort">${option('score', 'Best Score', true)}${option('company', 'Company')}${option('posted', 'Posted Time')}</select></label>
-    <label class="control"><span>Resume</span><select id="track">${option('', 'All Resumes')}${tracks.map(track => option(track.id, track.label)).join('')}</select></label>
-    <label class="control"><span>Role Type</span><select id="role" aria-label="Role type">${option('', 'All Role Types')}${roleTypes.map(item => option(item.value, item.label)).join('')}</select></label>
-    <label class="control"><span>Freshness</span><select id="fresh">${option('', 'Any Freshness')}${freshness.map(item => option(item.value, item.label)).join('')}</select></label>
-    <span class="control score-range"><span>Score</span><input type="number" id="score-min" min="0" max="100" step="1" inputmode="numeric" placeholder="0" aria-label="Minimum Score"><span aria-hidden="true">–</span><input type="number" id="score-max" min="0" max="100" step="1" inputmode="numeric" placeholder="100" aria-label="Maximum Score"></span>
-    ${checks}<button type="button" class="btn secondary" id="clear-filters" hidden>Clear Filters</button>
-    <span class="count" id="count">${total} shown</span>
+    <select id="sort" class="control" aria-label="Sort by">${option('score', 'Best Score', true)}${option('company', 'Company')}${option('posted', 'Posted Time')}</select>
+    <select id="track" class="control" aria-label="Track">${option('', 'All Tracks')}${tracks.map(track => option(track.id, track.label)).join('')}</select>
+    <select id="role" class="control" aria-label="Role type">${option('', 'All Role Types')}${roleTypes.map(item => option(item.value, item.label)).join('')}</select>
+    <details class="menu" id="filters-menu"><summary class="btn secondary" id="filters-button">Filters</summary><div class="menu-list">
+      <label class="control"><span>Freshness</span><select id="fresh">${option('', 'Any Freshness')}${freshness.map(item => option(item.value, item.label)).join('')}</select></label>
+      <span class="control score-range"><span>Score</span><input type="number" id="score-min" min="0" max="100" step="1" inputmode="numeric" placeholder="0" aria-label="Minimum Score"><span aria-hidden="true">–</span><input type="number" id="score-max" min="0" max="100" step="1" inputmode="numeric" placeholder="100" aria-label="Maximum Score"></span>
+      ${contacted}<button type="button" class="btn secondary" id="clear-filters" hidden>Clear Filters</button>
+    </div></details>${menuSlot ? MENU_SLOT : ''}
   </form>`;
 }
 
@@ -57,14 +58,15 @@ function renderFacts(label, items, className) {
   return `<div class="facts-label">${htmlEscape(label)}</div><ul class="facts ${className}">${items.map(item => `<li>${htmlEscape(item)}</li>`).join('')}</ul>`;
 }
 
+// One line per track, "Data 82", right-aligned; the highest score (every one of them when tied) stands out.
 export function renderScores(card) {
-  const parts = card.scores.map(score => `<span class="track${score.best ? ' best' : ''}" data-track="${htmlEscape(score.id)}">${htmlEscape(score.label)} <b>${score.value}</b></span>`);
-  return `<div class="scores">${parts.join('<span class="sep">·</span>')}</div>`;
+  const parts = card.scores.map(score => `<span class="track${score.top ? ' top' : ''}" data-track="${htmlEscape(score.id)}">${htmlEscape(score.label)} <b>${score.value}</b></span>`);
+  return `<div class="scores">${parts.join('')}</div>`;
 }
 
-// The score block on the right of the card head: the recommended resume, every track's score, the ring.
+// The score block on the right of the card head: every track's score, then the ring.
 function renderScoreBlock(card) {
-  return `<div class="job-score"><div class="score-text"><span class="recommend">${htmlEscape(card.recommendation)}</span>${renderScores(card)}</div>${renderScoreRing(card.bestScore)}</div>`;
+  return `<div class="job-score">${renderScores(card)}${renderScoreRing(card.bestScore)}</div>`;
 }
 
 // Card actions are links, or buttons carrying data attributes for a page script to drive.
@@ -79,18 +81,32 @@ function renderAction(action) {
   return `<a class="${className}" href="${htmlEscape(action.href)}"${action.newTab ? ` ${EXTERNAL_LINK}` : ''}>${htmlEscape(action.label)}</a>`;
 }
 
-// The Freshness tag beside the posting time: "Posted Today", "Date Only", "New Since Last Poll", "Carried Over",
-// "Undated" (the xlsx Freshness column's values in Title Case).
-function freshnessTag(card) {
-  if (!card.freshness) return '';
-  const label = card.freshness.replace(/\b[a-z]/g, letter => letter.toUpperCase());
-  return `<span class="badge fresh" data-badge="freshness">${htmlEscape(label)}</span>`;
+// "Check N Details" at the right end of the posting line: only when the letter's editor left something the
+// owner must confirm; it opens the letter page.
+function renderCheck(check) {
+  if (!check) return '';
+  const title = check.title ? ` title="${htmlEscape(check.title)}"` : '';
+  return `<a class="badge badge-warn job-check" data-badge="letter-check" href="${htmlEscape(check.href)}"${title}>${htmlEscape(check.label)}</a>`;
 }
 
-// Card layout, top to bottom: company · title (left) with the score and the recommended resume (right);
-// location · role type · posting time with its Freshness tag; badges; the action row in a fixed order (Open
-// Posting, then the hub's letter and Reach Out actions); Gaps / Verify (open); Job Description (folded); the
-// source line and other listings.
+// The folded Job Description with its copy icon in the summary (the page script copies the whole JD as
+// markup and plain text; the click never opens or closes the fold).
+function renderDescription(card) {
+  if (card.descriptionComplete === false) return `<p class="jd-missing">${INCOMPLETE_DESCRIPTION_LABEL} · <a ${EXTERNAL_LINK} href="${htmlEscape(card.url)}">Open Posting</a></p>`;
+  if (!card.description) return '';
+  const summary = `<summary><span>Job Description</span><button type="button" class="jd-copy" aria-label="${COPY_DESCRIPTION_LABEL}" title="${COPY_DESCRIPTION_LABEL}">${COPY_ICON}</button></summary>`;
+  // The posting's own paragraphs, headings, lists and bold (cleaned markup from src/jd-html.mjs), or plain
+  // text split at its line breaks. The hub embeds only the first characters of a long JD as text and loads the
+  // markup when the section is opened (data-jd-src, REPORTS_SCRIPT); the Desktop file always carries the whole JD.
+  return card.descriptionSrc
+    ? `<details class="jd" data-jd-src="${htmlEscape(card.descriptionSrc)}">${summary}<div class="jd-body"><p>${htmlEscape(card.descriptionPreview)}</p></div></details>`
+    : `<details class="jd">${summary}<div class="jd-body">${card.descriptionHtml ?? `<p>${htmlEscape(card.description)}</p>`}</div></details>`;
+}
+
+// Card layout, top to bottom (2026-11-15): company · title (left) with the scores and the ring (right);
+// location · role type · posting time, with "Check N Details" at the right end; badges and Gaps / Verify when
+// there are any; the Job Description (folded, copy icon); the action row (Open Posting, then the hub's letter
+// and Message to Recruiters actions); the source line and other listings.
 export function renderJobCard(card) {
   const attributes = [
     `data-score="${card.sort.score}"`,
@@ -103,17 +119,7 @@ export function renderJobCard(card) {
     ...Object.entries(card.flags || {}).map(([key, value]) => `data-${htmlEscape(key)}="${htmlEscape(value)}"`),
   ].join(' ');
   const badges = card.badges.length ? `<div class="badges">${card.badges.map(renderBadge).join('')}</div>` : '';
-  // Folded by default. The posting's own paragraphs, headings, lists and bold (cleaned markup from
-  // src/jd-html.mjs), or plain text split at its line breaks. The hub embeds only the first characters of a
-  // long JD as text and loads the markup when the section is opened (data-jd-src, REPORTS_SCRIPT); the
-  // Desktop file always carries the whole JD.
-  const description = card.descriptionComplete === false
-    ? `<p class="jd-missing">${INCOMPLETE_DESCRIPTION_LABEL} · <a ${EXTERNAL_LINK} href="${htmlEscape(card.url)}">Open Posting</a></p>`
-    : !card.description ? ''
-    : card.descriptionSrc
-      ? `<details class="jd" data-jd-src="${htmlEscape(card.descriptionSrc)}"><summary>Job Description</summary><div class="jd-body"><p>${htmlEscape(card.descriptionPreview)}</p></div></details>`
-      : `<details class="jd"><summary>Job Description</summary><div class="jd-body">${card.descriptionHtml ?? `<p>${htmlEscape(card.description)}</p>`}</div></details>`;
-  const posted = card.posted ? `<span class="sep">·</span><span class="meta"${card.footnoteTitle ? ` title="${htmlEscape(card.footnoteTitle)}"` : ''}>${htmlEscape(card.posted)}</span>${freshnessTag(card)}` : freshnessTag(card);
+  const posted = card.posted ? `<span class="sep">·</span><span class="meta"${card.footnoteTitle ? ` title="${htmlEscape(card.footnoteTitle)}"` : ''}>${htmlEscape(card.posted)}</span>` : '';
   const alternates = card.alternates?.length ? `<p class="alternates">Also listed at: ${card.alternates.map(item => `<a ${EXTERNAL_LINK} href="${htmlEscape(item.url)}" title="${htmlEscape(item.label)}">${htmlEscape(new URL(item.url).hostname.replace(/^www\./, ''))}${item.label ? ` (${htmlEscape(item.label)})` : ''}</a>`).join(', ')}</p>` : '';
   const source = card.source ? `<p class="job-foot">Source: ${htmlEscape(card.source)}</p>` : '';
   return `<article class="job" ${attributes}>
@@ -121,14 +127,14 @@ export function renderJobCard(card) {
       <div class="job-head">
         <div class="job-main">
           <h2 class="job-title"><span class="company">${htmlEscape(card.company)}</span><span class="dot"> · </span><a ${EXTERNAL_LINK} href="${htmlEscape(card.url)}">${htmlEscape(card.title)}</a></h2>
-          <p class="job-meta"><span>${htmlEscape(card.location)}</span><span class="sep">·</span><span>${htmlEscape(card.roleLabel)}</span>${posted}</p>
+          <p class="job-meta"><span>${htmlEscape(card.location)}</span><span class="sep">·</span><span>${htmlEscape(card.roleLabel)}</span>${posted}${renderCheck(card.check)}</p>
         </div>
         ${renderScoreBlock(card)}
       </div>
       ${badges}
-      <div class="actions"><a class="apply" ${EXTERNAL_LINK} href="${htmlEscape(card.url)}">Open Posting</a>${(card.actions || []).map(renderAction).join('')}</div>
       ${renderFacts('Gaps / Verify', card.gaps, 'gaps')}
-      ${description}
+      ${renderDescription(card)}
+      <div class="actions"><a class="apply" ${EXTERNAL_LINK} href="${htmlEscape(card.url)}">Open Posting</a>${(card.actions || []).map(renderAction).join('')}</div>
       ${source}${alternates}
     </div>
   </article>`;
@@ -153,20 +159,14 @@ export function renderEmptyState(message) {
 // Everything between <main> and </main>: the hub embeds this inside its own shell.
 export function renderReportBody(view) {
   const carried = view.carried?.cards?.length ? view.carried : null;
-  const dateOnly = view.dateOnly?.cards?.length ? view.dateOnly : null;
   // A group with no postings is not shown at all, the main list included when other groups hold matches.
   const main = view.cards.length ? `<section class="jobs" id="jobs">${view.cards.map(renderJobCard).join('\n')}</section>` : '';
-  // Strict 24-hour window: postings that may be older than 24 hours, folded under the main list. They are
-  // reviewed matches, so the section stays a section.jobs the page script sorts, filters, and counts.
-  const dateOnlyGroup = dateOnly
-    ? `<details class="run" id="date-only"><summary>${htmlEscape(dateOnly.title)} <span class="group-count">(${dateOnly.cards.length})</span></summary><p class="group-note">${htmlEscape(dateOnly.note)}</p><section class="jobs date-only" id="jobs-date-only">${dateOnly.cards.map(renderJobCard).join('\n')}</section></details>`
-    : '';
   // Postings the review budget carried from an earlier run: their own group under the main list.
   const carriedGroup = carried
-    ? `<h2 class="group-title" id="carried-over">${htmlEscape(carried.title)} <span class="group-count">(${carried.cards.length})</span></h2>${carried.note ? `<p class="group-note">${htmlEscape(carried.note)}</p>` : ''}<section class="jobs carried" id="jobs-carried">${carried.cards.map(renderJobCard).join('\n')}</section>`
+    ? `<h2 class="group-title" id="carried-over">${htmlEscape(carried.title)} <span class="group-count">(${carried.cards.length})</span></h2><section class="jobs carried" id="jobs-carried">${carried.cards.map(renderJobCard).join('\n')}</section>`
     : '';
-  const list = view.cards.length || carried || dateOnly
-    ? `${main}${dateOnlyGroup}${carriedGroup}<div class="empty" id="no-results" hidden>No matches for the current filters.</div>`
+  const list = view.cards.length || carried
+    ? `${main}${carriedGroup}<div class="empty" id="no-results" hidden>No matches for the current filters.</div>`
     : renderEmptyState(view.emptyMessage);
   // Postings no model reviewed: folded at the bottom, outside the match list (a div, not section.jobs, so the
   // page script's sort, filter, and count leave them out).
@@ -176,10 +176,12 @@ export function renderReportBody(view) {
     : '';
   // The signed-out and not-reviewed lines stand out (the stylesheet is shared with older pages, so inline).
   const alert = 'style="background:var(--bad-bg);color:var(--bad-ink);font-weight:650"';
-  return `${renderMasthead(view)}
-${view.integrityBanner ? `<div class="banner" data-banner="integrity">${htmlEscape(view.integrityBanner)}</div>` : ''}${view.networkBanner ? `<div class="banner" data-banner="network">${htmlEscape(view.networkBanner)}</div>` : ''}${view.notReviewedBanner ? `<div class="banner" data-banner="not-reviewed" ${alert}>${htmlEscape(view.notReviewedBanner)}</div>` : ''}
+  // A quota limit that touched the run gets one line under the bar: how many postings it held back and which
+  // engine or model took over.
+  const quotaNote = view.quotaNote ? `<p class="quota-note" data-quota-note>${htmlEscape(view.quotaNote)}</p>` : '';
+  return `${renderToolbar(view.toolbar)}
+${quotaNote}${view.integrityBanner ? `<div class="banner" data-banner="integrity">${htmlEscape(view.integrityBanner)}</div>` : ''}${view.networkBanner ? `<div class="banner" data-banner="network">${htmlEscape(view.networkBanner)}</div>` : ''}${view.notReviewedBanner ? `<div class="banner" data-banner="not-reviewed" ${alert}>${htmlEscape(view.notReviewedBanner)}</div>` : ''}
 ${view.authBanner ? `<div class="banner" data-banner="auth" ${alert}>${htmlEscape(view.authBanner)}</div>` : ''}${view.banner ? `<div class="banner" data-banner="quota">${htmlEscape(view.banner)}</div>` : ''}
-${renderToolbar(view.toolbar)}
 ${list}${notReviewedGroup}
 ${renderRunDetails(view.runDetails)}
 <footer class="foot">${htmlEscape(view.footer)}</footer>`;

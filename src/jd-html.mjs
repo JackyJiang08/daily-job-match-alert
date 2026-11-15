@@ -134,3 +134,30 @@ export function jobDescriptionHtml(job) {
   const html = job?.descriptionHtml ? sanitizeJobHtml(job.descriptionHtml) : '';
   return html || textToParagraphs(job?.description || '');
 }
+
+// The plain-text form of a Job Description's cleaned markup, for the card's copy button (text/plain beside
+// text/html): headings and paragraphs on their own lines with a blank line between blocks, list items as
+// "• " lines, <br> a line break, bold and emphasis as their words, links as their text, entities decoded.
+// Self-contained (no module helpers): the page script injects it through toString and runs it in the browser.
+export function descriptionPlainText(html) {
+  var text = String(html || '')
+    .replace(/\r?\n/g, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '• ')
+    .replace(/<\/li>/gi, '\n')
+    .replace(/<\/(?:ul|ol)>/gi, '\n')
+    .replace(/<(?:ul|ol)[^>]*>/gi, '')
+    .replace(/<\/(?:p|h[1-6]|div)>/gi, '\n\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&(#?\w+);/g, function (all, name) {
+      var table = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', middot: '·', hellip: '…', rarr: '→', mdash: '—', ndash: '–' };
+      if (table[name] != null) return table[name];
+      if (name.charAt(0) === '#') { var code = name.charAt(1) === 'x' || name.charAt(1) === 'X' ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10); return isNaN(code) ? all : String.fromCodePoint(code); }
+      return all;
+    });
+  return text
+    .split('\n').map(function (line) { return line.replace(/[ \t ]+/g, ' ').trim(); }).join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/(\n• [^\n]*)\n\n(?=• )/g, '$1\n')
+    .trim();
+}

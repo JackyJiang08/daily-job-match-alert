@@ -19,7 +19,6 @@
     "maxReviewedPerRun": 60,
     "catchUpBudget": 40,
     "includeCarriedOver": true,
-    "strict24HourWindow": true,
     "quotaPolicy": {
       "fiveHourLimit": { "retryIntervalMs": 600000, "maxWaitMs": 5400000 },
       "modelLadder": ["claude-fable-5-1", "claude-opus-5-5"],
@@ -52,7 +51,7 @@
     "availability": { "fullTimeFrom": "June 2027", "springTerm": false, "mentionMasters": { "internship": true, "newGrad": false } }
   },
   "outreach": {
-    "note": "Reach Out panel: the LinkedIn invitation note is held to connectionNoteLimit characters (100 to 300). searchCandidates (default off) runs one search per posting with the search discovery provider and key in private/search.json, under its monthly cap. Nothing requests linkedin.com and nothing is sent.",
+    "note": "Message to Recruiters panel: the LinkedIn invitation note is held to connectionNoteLimit characters (100 to 300). searchCandidates (default off) runs one search per posting with the search discovery provider and key in private/search.json, under its monthly cap. Nothing requests linkedin.com and nothing is sent.",
     "connectionNoteLimit": 200,
     "searchCandidates": false
   },

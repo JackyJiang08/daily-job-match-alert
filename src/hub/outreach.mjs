@@ -7,7 +7,7 @@ import { CANDIDATES_NOTE, candidateSearchStatus, searchCandidates } from '../out
 import { extractJdContacts } from '../outreach/contacts.mjs';
 import { outreachLinks } from '../outreach/links.mjs';
 import { connectionNoteLimit } from '../outreach/messages.mjs';
-import { appliedLabel, contactedLabel, readOutreach, updateOutreach } from '../outreach/store.mjs';
+import { contactedLabel, readOutreach, updateOutreach } from '../outreach/store.mjs';
 import { findLetterJob, initialShortName, letterCompanyFor } from './letters.mjs';
 import { HubInputError } from './services.mjs';
 import { outreachPanel } from './outreach-views.mjs';
@@ -97,18 +97,6 @@ export async function setContacted(ctx, { jobId, contacted }) {
   return { contactedAt: entry.contactedAt || null, label: contactedLabel(entry, config.timeZone || 'America/Chicago') };
 }
 
-// Mark as Applied (a card button): the date it was pressed, cleared when pressed again. Nothing is sent
-// anywhere; it is the owner's own note, kept in private/outreach/state.json.
-export async function setApplied(ctx, { jobId, applied }) {
-  const config = await ctx.loadConfig();
-  const on = applied === true || applied === '1' || applied === 'true' || applied === 'on';
-  const entry = await updateOutreach(ctx.root, validJobId(jobId), item => {
-    if (on) item.appliedAt = item.appliedAt || ctx.now().toISOString();
-    else delete item.appliedAt;
-  }, { io: ctx.io, now: ctx.now() });
-  return { appliedAt: entry.appliedAt || null, label: appliedLabel(entry, config.timeZone || 'America/Chicago') };
-}
-
 // One candidate search per posting; the result (or why there is none) is kept and shown from then on.
 export async function findCandidates(ctx, { date, jobId }) {
   const config = await ctx.loadConfig();
@@ -123,20 +111,17 @@ export async function findCandidates(ctx, { date, jobId }) {
   return { ...record, cached: false, note: CANDIDATES_NOTE };
 }
 
-// For the cards: job id → "Contacted Nov 8" (labels) and → "Applied Nov 8" (applied), and a signature of both
-// maps for the render cache key.
+// For the cards: job id → "Contacted Nov 8" (labels) and a signature of the map for the render cache key. (The
+// Mark as Applied button and its filter left the page on 2026-11-15; an appliedAt already on disk is kept and
+// neither read nor written here.)
 export async function contactedByJob(ctx, timeZone) {
   const state = await readOutreach(ctx.root, ctx.io);
   const labels = new Map();
-  const applied = new Map();
   for (const [id, entry] of Object.entries(state.jobs)) {
     const label = contactedLabel(entry, timeZone);
     if (label) labels.set(id, label);
-    const mark = appliedLabel(entry, timeZone);
-    if (mark) applied.set(id, mark);
   }
-  const signature = map => [...map].map(([id, label]) => `${id}:${label}`).sort().join(',');
-  return { labels, applied, version: `${signature(labels)}|${signature(applied)}` };
+  return { labels, version: [...labels].map(([id, label]) => `${id}:${label}`).sort().join(',') };
 }
 
 // Settings > Cover Letters "Reach Out": the invitation-note limit and the optional candidate search.

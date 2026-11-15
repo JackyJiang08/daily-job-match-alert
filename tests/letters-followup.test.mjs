@@ -1,6 +1,6 @@
 // Follow-up fixes around automatic cover letters and the report's notices: letters for every new high
 // match (no cap by default) with a carry-over queue after an interruption, Generate Missing Letters on a
-// report, two-button cards with a single "Check N details" badge, editor notes split into needs-review and
+// report, two-button cards with a single "Check N Details" link, editor notes split into needs-review and
 // info, the US-location flag cleared by evidence in the description, the quota banner only when the run
 // lost something, and weekly limits held by the CLI's reset time, the owner's weekly reset, or 24 hours.
 // Every engine is a fake; nothing calls a CLI.
@@ -179,7 +179,7 @@ test('Generate Missing Letters writes every high match without a letter and with
     assert.equal((await readLettersStatus(root)).mode, 'missing');
     const after = (await hub.request('GET', '/reports/2026-09-15')).text;
     assert.doesNotMatch(after, /id="missing-letters"/, 'nothing left to write');
-    assert.match(cardOf(after, 'Example Co 1'), />Download Letter<\/a><a class="btn secondary" href="\/letters\/2026-09-15\/[^"]+" target="_blank" rel="noopener noreferrer">Open Letter<\/a>/);
+    assert.match(cardOf(after, 'Example Co 1'), />Download CoverLetter<\/a><a class="btn secondary" href="\/letters\/2026-09-15\/[^"]+" target="_blank" rel="noopener noreferrer">Open CoverLetter<\/a>/);
   } finally {
     release();
     await ctx.missingLetters?.catch(() => {});
@@ -188,7 +188,7 @@ test('Generate Missing Letters writes every high match without a letter and with
   }
 });
 
-test('editor notes split into needs-review and info; the card shows only "Check N details", and only when something needs review', async () => {
+test('editor notes split into needs-review and info; the card shows only "Check N Details", and only when something needs review', async () => {
   const notes = [
     'Cover Letter Draft: Codex is not connected; used claude-opus-5-5 from the fallback chain',
     'Editor: gpt-5.6-sol failed (timeout); reviewed with claude-opus-5-5',
@@ -202,9 +202,9 @@ test('editor notes split into needs-review and info; the card shows only "Check 
   const levels = classifyEditorNotes(notes);
   assert.deepEqual(levels.needsReview, [notes[2], notes[3], notes[5]]);
   assert.deepEqual(levels.info, [notes[0], notes[1], notes[4], notes[6], notes[7]]);
-  assert.deepEqual(reviewBadge(notes), { key: 'letter-check', label: 'Check 3 details', tone: 'warn', title: [notes[2], notes[3], notes[5]].join('\n') });
+  assert.deepEqual(reviewBadge(notes), { key: 'letter-check', label: 'Check 3 Details', tone: 'warn', title: [notes[2], notes[3], notes[5]].join('\n') });
   assert.equal(reviewBadge([notes[0], notes[4]]), null, 'info only: no badge');
-  assert.equal(reviewBadge(['unverified detail: a churn study']).label, 'Check 1 detail');
+  assert.equal(reviewBadge(['unverified detail: a churn study']).label, 'Check 1 Detail');
 
   const matches = [job(1), job(2)];
   const root = await prepareProject(matches);
@@ -216,9 +216,9 @@ test('editor notes split into needs-review and info; the card shows only "Check 
     const page = (await hub.request('GET', '/reports/2026-09-15')).text.split('<script>')[0];
     const quiet = cardOf(page, 'Example Co 1');
     assert.doesNotMatch(quiet, /class="badges"/, 'no badge at all without needs-review notes');
-    assert.match(quiet, /<div class="actions"><a class="apply"[^>]*>Open Posting<\/a><a class="btn secondary" href="\/letters\/2026-09-15\/[^"]+" target="_blank" rel="noopener noreferrer">Open Letter<\/a><button type="button" class="btn secondary" data-reach="1" data-date="2026-09-15" data-job="[a-f0-9]{16}">Reach Out<\/button><button type="button" class="btn secondary mark-applied"[^>]*>Mark as Applied<\/button><\/div>/, 'no PDF rendered yet: Open Letter, then Reach Out');
+    assert.match(quiet, /<div class="actions"><a class="apply"[^>]*>Open Posting<\/a><a class="btn secondary" href="\/letters\/2026-09-15\/[^"]+" target="_blank" rel="noopener noreferrer">Open CoverLetter<\/a><button type="button" class="btn secondary" data-reach="1" data-date="2026-09-15" data-job="[a-f0-9]{16}">Message to Recruiters<\/button><\/div>/, 'no PDF rendered yet: Open CoverLetter, then Message to Recruiters');
     assert.doesNotMatch(page, /Letter ready|editor note/);
-    assert.match(cardOf(page, 'Example Co 2'), /<span class="badge badge-warn" data-badge="letter-check" title="unverified detail: a retail inventory dashboard\nsalutation says Example Corp, body says Example Labs\nThe 35% figure does not appear in the resume or the playbook">Check 3 details<\/span>/);
+    assert.match(cardOf(page, 'Example Co 2'), /<p class="job-meta">[^\n]*?<a class="badge badge-warn job-check" data-badge="letter-check" href="\/letters\/2026-09-15\/[^"]+" title="unverified detail: a retail inventory dashboard\nsalutation says Example Corp, body says Example Labs\nThe 35% figure does not appear in the resume or the playbook">Check 3 Details<\/a><\/p>/, 'the link sits at the end of the posting line');
     const letters = await ctx.letterStore.listLetters();
     const opened = (await hub.request('GET', `/letters/2026-09-15/${letters.find(item => item.company === 'Example Co 2').slug}`)).text;
     assert.match(opened, /<details class="notes" id="editor-notes" open><summary>Check Before Sending<\/summary><ul class="issues" id="editor-notes-list"><li>unverified detail: a retail inventory dashboard<\/li><li>salutation says Example Corp, body says Example Labs<\/li><li>The 35% figure does not appear in the resume or the playbook<\/li><\/ul><p class="row"><button class="btn secondary" id="clear-review" type="button">Mark Details Checked<\/button>[\s\S]*?<\/p><\/details>/);

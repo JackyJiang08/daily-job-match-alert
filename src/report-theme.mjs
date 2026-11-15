@@ -3,6 +3,7 @@
 // network access. The tokens are the contract a later local hub can reuse: change them here and every
 // component in report-components.mjs follows.
 import { cardPasses, filtersActive, readFilters, writeFilters } from './report-filters.mjs';
+import { descriptionPlainText } from './jd-html.mjs';
 
 export const REPORT_TOKENS = `
   color-scheme: light dark;
@@ -20,6 +21,7 @@ export const REPORT_TOKENS = `
   --accent-soft: rgba(15, 118, 110, 0.10);
   --bg: #f6f7f9;
   --surface: #ffffff;
+  --surface-glass: rgba(255, 255, 255, 0.82);
   --ink: #1c2430;
   --ink-2: #4b5563;
   --ink-3: #5b6472;
@@ -53,6 +55,7 @@ export const REPORT_TOKENS_DARK = `
   --accent-soft: rgba(45, 212, 191, 0.14);
   --bg: #0f1318;
   --surface: #171c23;
+  --surface-glass: rgba(23, 28, 35, 0.82);
   --ink: #e6e9ee;
   --ink-2: #b4bcc8;
   --ink-3: #9aa3b1;
@@ -90,36 +93,49 @@ a{color:inherit}
 .btn:focus-visible,.apply:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .btn[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
 
-.masthead{border-bottom:1px solid var(--line);padding-bottom:var(--space-3);margin-bottom:var(--space-4)}
-.masthead h1{margin:0;font-size:var(--fs-title);font-weight:700;letter-spacing:-0.01em;line-height:1.3}
-.masthead .sub{margin:var(--space-1) 0 0;font-size:var(--fs-body);color:var(--ink-2)}
-.masthead .quota-note{color:var(--warn-ink);font-weight:600}
-
 .banner{margin:0 0 var(--space-4);padding:var(--space-3) var(--space-4);border-radius:var(--radius);background:var(--warn-bg);color:var(--warn-ink);font-size:var(--fs-body)}
-/* The filter bar: one compact row of controls (wrapping when narrow) that stays at the top while scrolling. */
-.toolbar{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2) var(--space-3);margin:0 0 var(--space-4);padding:var(--space-2) var(--space-3);background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
+.quota-note{margin:0 0 var(--space-3);font-size:var(--fs-body);color:var(--warn-ink);font-weight:600}
+/* The one top row: the date and the count, then the search, sort, Track and Role Type controls, the Filters
+   popover and the hub's "⋯" menu. It stays at the top while the list scrolls (a rule and a blur once it is
+   stuck); at 1100px and wider it never wraps. */
+.bar-sentinel{height:0}
+.toolbar{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2);margin:0 0 var(--space-4);padding:var(--space-2) 0;background:var(--bg);border-bottom:1px solid transparent}
+.toolbar.stuck{background:var(--surface-glass);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);border-bottom-color:var(--line)}
+.bar-title{display:inline-flex;align-items:baseline;gap:var(--space-2);margin-right:auto;font-size:var(--fs-title);font-weight:700;letter-spacing:-0.01em;line-height:1.3;white-space:nowrap}
+.bar-title .sep{color:var(--ink-3);font-weight:400}
+.bar-title .count{font-size:var(--fs-body);font-weight:400;color:var(--ink-2);font-variant-numeric:tabular-nums}
 /* One control style for every text input and select, in the report toolbar and in the hub forms. */
 .control-input,.toolbar input:not([type=checkbox]),.toolbar select{font:inherit;font-size:var(--fs-body);line-height:1.3;color:var(--ink);background:var(--surface);border:1px solid var(--line-2);border-radius:var(--radius-sm);padding:var(--space-1) var(--space-2);min-height:var(--control-height);box-sizing:border-box}
 select.control-input,.toolbar select{appearance:none;-webkit-appearance:none;background-image:var(--chevron);background-repeat:no-repeat;background-position:right var(--space-2) center;padding-right:28px;cursor:pointer}
 select.control-input:focus,.control-input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
-.toolbar input[type=search]{flex:1 1 220px;min-width:160px}
+.toolbar input[type=search]{flex:1 1 120px;min-width:56px;max-width:320px}
 .toolbar select{flex:0 0 auto;max-width:100%}
 .toolbar .control{display:inline-flex;align-items:center;gap:var(--space-2);font-size:var(--fs-meta);color:var(--ink-2);white-space:nowrap}
 .toolbar .score-range input{width:64px;text-align:center;font-variant-numeric:tabular-nums}
-.toolbar .check{display:inline-flex;align-items:center;gap:var(--space-1);font-size:var(--fs-meta);color:var(--ink-2);white-space:nowrap;cursor:pointer}
+.toolbar .check{display:inline-flex;align-items:center;gap:var(--space-1);font-size:var(--fs-body);color:var(--ink-2);white-space:nowrap;cursor:pointer}
 .toolbar input:focus,.toolbar select:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
-.toolbar .count{margin-left:auto;font-size:var(--fs-meta);color:var(--ink-2);font-variant-numeric:tabular-nums;white-space:nowrap}
-.toolbar.quiet{position:static;gap:var(--space-2);margin-bottom:var(--space-3);padding:0;background:transparent;border:0;box-shadow:none}
-.toolbar.quiet .count{display:none}
+/* Popovers: a details element whose summary is a secondary button; the list drops under it, right-aligned. */
+.menu{position:relative;flex:0 0 auto}
+.menu>summary{list-style:none}
+.menu>summary::-webkit-details-marker{display:none}
+.menu>summary.active{border-color:var(--accent);color:var(--accent)}
+.menu .menu-list{position:absolute;right:0;top:calc(100% + var(--space-1));z-index:6;display:flex;flex-direction:column;align-items:stretch;gap:var(--space-2);min-width:240px;padding:var(--space-3);background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 8px 24px rgba(16,24,40,.12)}
+.menu .menu-list .control{justify-content:space-between}
+.menu .menu-list .control>span:first-child{flex:0 0 auto}
+.menu .menu-list .inline,.menu .menu-list form{display:block;width:100%}
+.menu .menu-list .btn{display:flex;width:100%}
+.menu.overflow>summary{min-width:var(--control-height);padding:0 var(--space-2);font-size:var(--fs-title);line-height:1}
+@media (min-width:1100px){.toolbar{flex-wrap:nowrap}}
+@media (min-width:1100px) and (max-width:1279px){.toolbar{gap:6px}.bar-title{gap:6px}}
 
 .jobs{display:flex;flex-direction:column;gap:var(--space-3);margin:0;padding:0;list-style:none}
 .job{padding:var(--space-4);background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
 .job[hidden]{display:none}
-.group-title{margin:var(--space-5) 0 var(--space-1);font-size:var(--fs-title);font-weight:650}
+.group-title{margin:var(--space-5) 0 var(--space-3);font-size:var(--fs-title);font-weight:650}
 .group-count{color:var(--ink-2);font-weight:400}
 .group-note{margin:0 0 var(--space-3);font-size:var(--fs-body);color:var(--ink-2)}
 .job-body{min-width:0}
-/* Card head: company · title and the posting line on the left; the score and the recommended resume on the right. */
+/* Card head: company · title and the posting line on the left; the track scores and the ring on the right. */
 .job-head{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--space-4);align-items:start}
 .job-title{margin:0;font-size:var(--fs-title);font-weight:650;line-height:1.3;overflow-wrap:anywhere}
 .job-title .company{color:var(--ink)}
@@ -128,26 +144,27 @@ select.control-input:focus,.control-input:focus{outline:2px solid var(--accent);
 .job-title a:hover{text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:2px}
 .job-meta{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1) var(--space-2);margin:var(--space-1) 0 0;font-size:var(--fs-body);color:var(--ink-2);overflow-wrap:anywhere}
 .job-meta .sep{color:var(--ink-3)}
-.badge.fresh{background:var(--accent-soft);color:var(--accent)}
+.job-meta .job-check{margin-left:auto;text-decoration:none}
+.job-meta .job-check:hover{text-decoration:underline}
 .job-score{display:flex;align-items:center;gap:var(--space-3)}
-.score-text{display:flex;flex-direction:column;align-items:flex-end;gap:2px;text-align:right}
-.ring{--score:0;position:relative;flex:0 0 auto;width:48px;height:48px;border-radius:50%;background:conic-gradient(var(--accent) calc(var(--score) * 1%),var(--ring-track) 0);display:grid;place-items:center}
-.ring::before{content:"";position:absolute;inset:5px;border-radius:50%;background:var(--surface)}
-.ring b{position:relative;font-size:var(--fs-body);font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-0.01em}
-.scores{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:var(--space-1) var(--space-2);font-size:var(--fs-meta);color:var(--ink-2);font-variant-numeric:tabular-nums}
-.scores .track b{color:var(--ink);font-weight:650}
-.scores .track.best b{color:var(--accent)}
-.scores .sep{color:var(--ink-3)}
-.recommend{display:inline-block;color:var(--accent);font-size:var(--fs-meta);font-weight:650;white-space:nowrap}
+.ring{--score:0;position:relative;flex:0 0 auto;width:60px;height:60px;border-radius:50%;background:conic-gradient(var(--accent) calc(var(--score) * 1%),var(--ring-track) 0);display:grid;place-items:center}
+.ring::before{content:"";position:absolute;inset:6px;border-radius:50%;background:var(--surface)}
+.ring b{position:relative;font-size:var(--fs-title);font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-0.01em}
+/* One line per track, right-aligned, numbers in a fixed-width column; the top score (every one when tied)
+   in the text colour and semibold, the rest in the secondary colour. */
+.scores{display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:var(--fs-meta);line-height:1.4;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.scores .track{display:inline-flex;align-items:baseline;gap:var(--space-1);white-space:nowrap}
+.scores .track b{display:inline-block;min-width:2.2ch;text-align:right;font-weight:inherit}
+.scores .track.top{color:var(--ink);font-weight:600}
 .badges{display:flex;flex-wrap:wrap;gap:var(--space-1) var(--space-2);margin-top:var(--space-2)}
 .badge{display:inline-block;font-size:var(--fs-meta);font-weight:600;line-height:1.5;border-radius:var(--radius-sm);padding:0 var(--space-2);background:var(--note-bg);color:var(--note-ink);white-space:nowrap;max-width:100%}
 .badge-warn{background:var(--warn-bg);color:var(--warn-ink)}
 .badge-bad{background:var(--bad-bg);color:var(--bad-ink)}
 
-/* The action row, always in the same place and order: Open Posting, Download Letter, Open Letter, Reach Out. */
+/* The action row under the Job Description, always in the same order: Open Posting, Download CoverLetter,
+   Open CoverLetter, Message to Recruiters. */
 .job .actions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2);margin-top:var(--space-3)}
-.job .actions .mark-applied{margin-left:auto}
-.facts-label{margin:var(--space-4) 0 var(--space-1);font-size:var(--fs-meta);font-weight:650;color:var(--ink-2)}
+.facts-label{margin:var(--space-3) 0 var(--space-1);font-size:var(--fs-meta);font-weight:650;color:var(--ink-2)}
 .facts{margin:0;padding:0;list-style:none}
 .facts li{position:relative;padding-left:var(--space-4);line-height:1.5;overflow-wrap:anywhere}
 .facts li::before{content:"";position:absolute;left:var(--space-1);top:.62em;width:5px;height:5px;border-radius:50%;background:var(--accent)}
@@ -157,7 +174,14 @@ details.more>summary{list-style:none;cursor:pointer;font-size:var(--fs-meta);col
 details.more>summary::-webkit-details-marker{display:none}
 details.more[open]>summary{display:none}
 details.jd{margin-top:var(--space-3);border-top:1px solid var(--line);padding-top:var(--space-2)}
-details.jd>summary{cursor:pointer;font-size:var(--fs-meta);font-weight:650;color:var(--ink-2)}
+details.jd>summary{display:flex;align-items:center;gap:var(--space-2);cursor:pointer;font-size:var(--fs-meta);font-weight:650;color:var(--ink-2)}
+details.jd>summary::before{content:"";width:5px;height:5px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);margin:0 2px 0 1px;transition:transform .12s}
+details.jd[open]>summary::before{transform:rotate(45deg);margin-top:-2px}
+details.jd>summary::-webkit-details-marker{display:none}
+.jd-copy{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:1px solid transparent;border-radius:var(--radius-sm);background:transparent;color:var(--ink-3);cursor:pointer}
+.jd-copy:hover{color:var(--accent);border-color:var(--line-2);background:var(--surface)}
+.jd-copy:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.jd-copy.done{color:var(--accent)}
 details.jd .jd-body{margin:var(--space-2) 0 0;padding:var(--space-3);max-height:420px;overflow:auto;font-size:var(--fs-body);line-height:1.55;color:var(--ink-2);background:var(--bg);border-radius:var(--radius-sm);overflow-wrap:anywhere}
 .jd-body p{margin:0 0 var(--space-2)}
 .jd-body h1,.jd-body h2,.jd-body h3,.jd-body h4{margin:var(--space-3) 0 var(--space-1);font-size:var(--fs-body);font-weight:650;color:var(--ink)}
@@ -192,23 +216,15 @@ details.run-list ul{max-height:320px;overflow:auto}
   .job{padding:var(--space-3)}
   .job-head{grid-template-columns:1fr;gap:var(--space-2)}
   .job-score{flex-direction:row-reverse;justify-content:flex-end}
-  .ring{width:40px;height:40px}.ring::before{inset:4px}
-  .score-text{align-items:flex-start;text-align:left}
-  .scores{justify-content:flex-start}
+  .ring{width:48px;height:48px}.ring::before{inset:5px}.ring b{font-size:var(--fs-body)}
+  .scores{align-items:flex-start}
   .job .actions{display:grid;grid-template-columns:1fr 1fr}
   .job .actions .btn,.job .actions .apply{width:100%;white-space:normal;text-align:center;padding:var(--space-1) var(--space-2)}
-  .job .actions .mark-applied{grid-column:1/-1;margin-left:0}
-  /* Two controls per row; a select's first option names it ("All Resumes", "Any Freshness"), so the small
-     labels are kept for screen readers only. */
-  .toolbar{position:static;display:grid;grid-template-columns:1fr 1fr;gap:var(--space-2);padding:var(--space-2)}
-  .toolbar input[type=search]{grid-column:1/-1;min-width:0}
-  .toolbar .control{min-width:0}
-  .toolbar .control:not(.score-range)>span:first-child{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-  .toolbar .control select{width:100%;min-width:0}
-  .toolbar .score-range{grid-column:1/-1}
-  .toolbar .score-range input{flex:1 1 0;width:auto;min-width:0}
-  .toolbar .count{margin-left:0;grid-column:1/-1}
-  .toolbar #clear-filters{grid-column:1/-1}
+  /* The bar wraps: the title on its own line, then two controls per row. */
+  .toolbar{position:static;display:grid;grid-template-columns:1fr 1fr;gap:var(--space-2);padding:var(--space-2) 0}
+  .bar-title,.toolbar input[type=search]{grid-column:1/-1;min-width:0;max-width:none}
+  .toolbar select{width:100%;min-width:0}
+  .menu .menu-list{left:0;right:auto;min-width:min(280px,calc(100vw - 2 * var(--space-3)))}
   .badge{white-space:normal}
   .run dl{grid-template-columns:1fr;gap:0}
   .run dt{margin-top:var(--space-2)}
@@ -222,27 +238,81 @@ details.run-list ul{max-height:320px;overflow:auto}
 
 // Sort, filter, and search over the rendered cards. Cards carry their sort and filter keys as data attributes,
 // so the script never re-parses text and needs no library. The filter state is kept in the URL query
-// (src/report-filters.mjs, injected below), so a refresh or a shared link opens the same view.
+// (src/report-filters.mjs, injected below), so a refresh or a shared link opens the same view. The same
+// script marks the bar once it is stuck, closes the popovers, and copies a Job Description.
 export const REPORT_SCRIPT = `
 (function () {
   ${readFilters.toString()}
   ${writeFilters.toString()}
   ${cardPasses.toString()}
   ${filtersActive.toString()}
+  ${descriptionPlainText.toString()}
+  var COPY_DONE = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M3 8.5l3.2 3L13 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  var toolbar = document.getElementById('toolbar');
+  // The bar is stuck once the sentinel above it has scrolled out: a rule and a blur then set it off the list.
+  var sentinel = document.getElementById('bar-sentinel');
+  if (toolbar && sentinel && typeof IntersectionObserver === 'function') {
+    new IntersectionObserver(function (entries) { toolbar.classList.toggle('stuck', entries.some(function (entry) { return !entry.isIntersecting; })); }, { threshold: [0, 1] }).observe(sentinel);
+  }
+  // A popover closes on a click elsewhere or Escape.
+  document.addEventListener('click', function (event) {
+    document.querySelectorAll('details.menu[open]').forEach(function (menu) { if (!menu.contains(event.target)) menu.open = false; });
+  });
+  document.addEventListener('keydown', function (event) { if (event.key === 'Escape') document.querySelectorAll('details.menu[open]').forEach(function (menu) { menu.open = false; }); });
+  // Copy Job Description: the whole JD as markup (text/html) and as plain text (bullets, blank lines between
+  // blocks); a long JD the hub has not loaded yet is fetched first. The click never toggles the fold.
+  function writeClipboard(html, text) {
+    if (navigator.clipboard && window.ClipboardItem && navigator.clipboard.write) {
+      try {
+        return navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }), 'text/plain': new Blob([text], { type: 'text/plain' }) })]);
+      } catch (e) {}
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text);
+    return new Promise(function (resolve, reject) {
+      var area = document.createElement('textarea'); area.value = text; area.setAttribute('readonly', ''); area.style.position = 'fixed'; area.style.opacity = '0';
+      document.body.appendChild(area); area.select();
+      try { if (document.execCommand('copy')) resolve(); else reject(new Error('copy refused')); } catch (e) { reject(e); }
+      document.body.removeChild(area);
+    });
+  }
+  function descriptionMarkup(details) {
+    var body = details.querySelector('.jd-body');
+    var src = details.getAttribute('data-jd-src');
+    if (!src) return Promise.resolve(body ? body.innerHTML : '');
+    return fetch(src, { headers: { accept: 'text/html' } }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); }).then(function (html) {
+      if (body) body.innerHTML = html;
+      details.removeAttribute('data-jd-src');
+      return html;
+    });
+  }
+  document.addEventListener('click', function (event) {
+    var button = event.target.closest && event.target.closest('.jd-copy');
+    if (!button) return;
+    event.preventDefault();
+    event.stopPropagation();
+    var details = button.closest('details.jd');
+    if (!details || button.disabled) return;
+    button.disabled = true;
+    var icon = button.innerHTML;
+    descriptionMarkup(details).then(function (html) { return writeClipboard(html, descriptionPlainText(html)); }).then(function () {
+      button.innerHTML = COPY_DONE; button.classList.add('done');
+      setTimeout(function () { button.innerHTML = icon; button.classList.remove('done'); button.disabled = false; }, 1500);
+    }).catch(function () { button.disabled = false; button.title = 'Could not copy; open the description and copy it by hand'; });
+  }, true);
   // The main list and the other groups sort and filter separately; the count covers all of them.
   var lists = Array.prototype.slice.call(document.querySelectorAll('section.jobs'));
-  var toolbar = document.getElementById('toolbar');
   if (!lists.length || !toolbar) return;
   var cards = [];
   lists.forEach(function (list) { cards = cards.concat(Array.prototype.slice.call(list.querySelectorAll('.job'))); });
   var controls = {
     q: document.getElementById('q'), sort: document.getElementById('sort'), resume: document.getElementById('track'),
     role: document.getElementById('role'), freshness: document.getElementById('fresh'), min: document.getElementById('score-min'),
-    max: document.getElementById('score-max'), hideContacted: document.getElementById('hide-contacted'), hideApplied: document.getElementById('hide-applied')
+    max: document.getElementById('score-max'), hideContacted: document.getElementById('hide-contacted')
   };
   var count = document.getElementById('count');
   var none = document.getElementById('no-results');
   var clear = document.getElementById('clear-filters');
+  var filtersButton = document.getElementById('filters-button');
   function num(card, key) { var value = parseFloat(card.dataset[key]); return isNaN(value) ? -Infinity : value; }
   function byScore(a, b) { return num(b, 'score') - num(a, 'score'); }
   var sorters = {
@@ -255,7 +325,7 @@ export const REPORT_SCRIPT = `
     return {
       q: value(controls.q), sort: value(controls.sort) || 'score', resume: value(controls.resume), role: value(controls.role),
       freshness: value(controls.freshness), min: value(controls.min).trim(), max: value(controls.max).trim(),
-      hideContacted: Boolean(controls.hideContacted && controls.hideContacted.checked), hideApplied: Boolean(controls.hideApplied && controls.hideApplied.checked)
+      hideContacted: Boolean(controls.hideContacted && controls.hideContacted.checked)
     };
   }
   function restore(saved) {
@@ -273,6 +343,7 @@ export const REPORT_SCRIPT = `
       if (query !== location.search) history.replaceState(history.state, '', location.pathname + query + location.hash);
     } catch (e) {}
   }
+  function label(shown) { return shown === cards.length ? cards.length + (cards.length === 1 ? ' Job' : ' Jobs') : shown + ' of ' + cards.length + ' Jobs'; }
   function apply() {
     var current = state();
     var shown = 0;
@@ -282,9 +353,12 @@ export const REPORT_SCRIPT = `
       if (ok) shown += 1;
       card.parentNode.appendChild(card);
     });
-    if (count) count.textContent = shown === cards.length ? cards.length + ' shown' : shown + ' of ' + cards.length + ' shown';
+    if (count) count.textContent = label(shown);
     if (none) none.hidden = shown > 0;
-    if (clear) clear.hidden = !filtersActive(current);
+    var active = filtersActive(current);
+    if (clear) clear.hidden = !active;
+    // The Filters button shows when one of its own controls is set (search, sort, Track and Role Type are visible).
+    if (filtersButton) filtersButton.classList.toggle('active', Boolean(current.freshness || current.min !== '' || current.max !== '' || current.hideContacted));
     remember(current);
     document.dispatchEvent(new CustomEvent('report-filters', { detail: { query: writeFilters(current, '') } }));
   }
@@ -296,7 +370,7 @@ export const REPORT_SCRIPT = `
     control.addEventListener('change', apply);
   });
   if (clear) clear.addEventListener('click', function () { restore(readFilters('')); apply(); });
-  // A card's contacted or applied mark changed in place (the hub's Reach Out drawer, Mark as Applied).
+  // A card's contacted mark changed in place (the hub's Message to Recruiters drawer).
   document.addEventListener('report-cards-changed', apply);
   toolbar.addEventListener('submit', function (event) { event.preventDefault(); });
   apply();

@@ -50,31 +50,41 @@ function difference(left, right, allowed = () => false) {
 }
 
 // allowances: { addedWords, missingWords, addedFields (prefixes), addedLinks } – what the redesign may add or
-// drop on purpose (the filter bar, Mark as Applied, the renamed Download Letter action).
+// drop on purpose (the filter bar, the renamed letter actions, the compact top row).
 export function compareContent(beforeHtml, afterHtml, allowances = {}) {
   const before = pageContent(beforeHtml);
   const after = pageContent(afterHtml);
   const addedWords = new Set(allowances.addedWords || []);
   const missingWords = new Set(allowances.missingWords || []);
   const fieldPrefixes = allowances.addedFields || [];
+  const missingPrefixes = allowances.missingFields || [];
   return {
     missingWords: difference(before.words, after.words, word => missingWords.has(word)),
     addedWords: difference(after.words, before.words, word => addedWords.has(word)),
     missingLinks: difference(before.links, after.links),
     addedLinks: difference(after.links, before.links, link => (allowances.addedLinks || []).includes(link)),
-    missingFields: difference(before.fields, after.fields),
+    missingFields: difference(before.fields, after.fields, field => missingPrefixes.some(prefix => field.startsWith(prefix))),
     addedFields: difference(after.fields, before.fields, field => fieldPrefixes.some(prefix => field.startsWith(prefix))),
   };
 }
 
-// The redesign's own additions: the filter bar (Role Type, Freshness, Score, Hide Contacted, Hide Applied,
-// Clear Filters), the Freshness tags, the "Source:" line, and Mark as Applied.
+// The redesign's own additions (2026-11-08) and the compact page (2026-11-15): the filter bar (Track, Role
+// Type, Freshness, Score, Hide Contacted, Clear Filters, the Filters popover and the "⋯" menu), the "Source:"
+// line, the one-row top bar ("Sat, Nov 14 · 4 Jobs"), the History fold, the CoverLetter and Message to
+// Recruiters actions. Gone since then: the masthead's long date and "Matches · Ran …" line, the Freshness tags,
+// the Freshness Date Only value, "Apply with … Resume", Mark as Applied / Hide Applied, the group note under
+// From Yesterday, the "N matches" words in the date column, the Desktop copy row's own wording.
 export const REDESIGN_ALLOWANCES = {
-  addedWords: ['role', 'type', 'freshness', 'any', 'score', '–', 'hide', 'contacted', 'applied', 'clear', 'filters', 'source', 'mark', 'as',
-    'posted', 'today', 'date', 'only', 'new', 'since', 'last', 'poll', 'carried', 'over', 'undated', 'letter'],
-  missingWords: ['pdf'],
-  addedFields: ['select#fresh', 'input#score-min', 'input#score-max', 'input#hide-contacted', 'input#hide-applied', 'button#clear-filters',
-    'data-freshness=', 'data-badge=freshness', 'data-contacted=', 'data-applied=', 'data-apply-mark=', 'data-job=', 'button#[](button)='],
+  addedWords: ['role', 'type', 'freshness', 'any', 'score', '–', 'hide', 'contacted', 'clear', 'filters', 'source', 'as', 'all', 'tracks', 'track',
+    'posted', 'today', 'new', 'since', 'last', 'poll', 'carried', 'over', 'undated', 'letter', 'coverletter', 'message', 'to', 'recruiters',
+    'jobs', 'job', 'history', '⋯', 'thu', 'fri', 'sat', 'sun', 'mon', 'tue', 'wed', 'oct', 'nov', 'sep', 'aug', 'more', 'actions'],
+  missingWords: ['pdf', 'matches', 'match', 'ran', 'pm', 'am', 'october', 'september', 'august', 'november', '2026', 'apply', 'with', 'resume', 'resumes', 'data',
+    'date', 'only', 'sort', 'by', 'reach', 'out', 'deferred', 'the', 'review', 'budget', 'on', 'an', 'earlier', 'run', 'and', 'reviewed', 'now', 'each',
+    'card', 'says', 'when', 'it', 'was', 'first', 'found', 'strict', '24-hour', 'window', 'main', 'list', 'off', 'from', 'yesterday', 'not', 'engine',
+    'unavailable', '1', '0', '2', '3', '4', '12', 'in', 'shown', 'llm', 'mark', 'applied', '00', '16', '8', '15', '17', 'cover', 'letter', '14'],
+  missingFields: ['data-current=', 'data-month=', 'data-applied=', 'data-apply-mark=', 'input#hide-applied', 'button#[](button)='],
+  addedFields: ['select#fresh', 'input#score-min', 'input#score-max', 'input#hide-contacted', 'button#clear-filters',
+    'data-freshness=', 'data-contacted=', 'data-job=', 'button#[](button)=', 'data-badge=letter-check', 'button#filters-button', 'details#'],
 };
 
 export function assertSameContent(assert, beforeHtml, afterHtml, label, allowances = REDESIGN_ALLOWANCES) {

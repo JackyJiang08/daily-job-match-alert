@@ -240,7 +240,7 @@ disabled; do not expand them unless a task says so.
   report's "Generate Missing Letters" button): every high match of that date
   without a letter, trusted company, no cap, works with autoGenerate off.
   Cards with a letter: Download Letter + Open Letter only; the one badge is
-  "Check N details" (src/cover-letter/notes.mjs classifyEditorNotes:
+  "Check N Details" (src/cover-letter/notes.mjs classifyEditorNotes:
   needs-review = unverified detail, salutation mismatch, unsupported number,
   still too long; everything else is info, shown in the Open Letter footer). Off when the
   draft stage is the local_only placeholder or material is incomplete. Status
@@ -280,19 +280,16 @@ disabled; do not expand them unless a task says so.
   conditional headers. freshnessInstant/isUndated/holdsToExactWindow treat NEW by firstSeenAt.
 - Carried over: a job whose state.deferred entry exists when stamped gets carriedOver, firstSeenAt (entry
   discoveredAt), restored NEW basis; markDeferred(state, job, at, reason 'budget'|'quota'). Report: separate
-  "Carried Over From Yesterday" group (view.carried, section#jobs-carried; the script sorts each
+  "From Yesterday" group (view.carried, section#jobs-carried; the script sorts each
   section.jobs). semanticMatching.includeCarriedOver (Settings > Pipeline, pipelinePresent marker) false →
   clearBudgetDeferrals at startup and no budget deferral kept (quota ones stay).
-- Strict 24-hour window (src/strict-window.mjs, 2026-11-03): semanticMatching.strict24HourWindow (Settings >
-  Pipeline checkbox, pipelinePresent marker, default ON since 2026-11-08: strictWindowEnabled is `!== false`)
-  → meta.strictWindow {enabled, hours: 24}. Render-time
-  only (buildReportView): of the non-carried reviewed matches, main keeps NEW-since-poll, precise postedAt ≤ 24 h
-  before meta.generatedAt, and date-only whose postingDay ≥ meta.runDate (run's local day); the rest (earlier
-  date-only, undated, precise older e.g. email) → view.dateOnly, folded details#date-only holding
-  section.jobs#jobs-date-only (sorted/filtered by the page script). Carried over / Not reviewed untouched; match
-  count, xlsx, letters unchanged. Since 2026-11-08 the header has no window line: Run Details row "Strict 24-Hour
-  Window" = strictWindowDetail "On|Off · Main List (N) · <non-empty groups (N)>" (absent for payloads without
-  meta.strictWindow) and row "Posting Window" = "Main List: " + postingWindowLabel(main list only).
+- Strict 24-hour window: REMOVED 2026-11-15 (src/strict-window.mjs deleted). The report no longer splits a
+  "Date Only, May Be Older Than 24 Hours" group: date-only and undated reviewed matches sit in the main list in
+  the current sort; the Settings > Pipeline switch is gone and a semanticMatching.strict24HourWindow left in
+  config.json is ignored (never written, never an error); meta.strictWindow is not recorded any more (old payloads
+  carrying it render like the rest). Collection-time freshness rules (precise 24 h, date-only to the end of the
+  local day, snapshot NEW) are unchanged. Run Details row "Posting Window" = "Main List: " + postingWindowLabel
+  over the non-carried matches.
 - Dates: parsePostingDate (JSON-LD datePosted, Workday startDate, search page_age): bare date → noon UTC
   calendar date; midnight → date; zoneless clock time → ZONELESS_TIME_ZONES (jobright.ai = UTC, verified
   2026-10-11 against its "2 hours ago") else date only. postingDay reads stored noon/midnight-UTC values as
@@ -508,16 +505,17 @@ disabled; do not expand them unless a task says so.
   day; local wins). reportDateOffsetDays and the old 14:00 cut-off are gone (config key ignored). Folders from
   before 2026-11-08 (evening run → next day) keep their names; the first 18:00 run merges into that day's
   existing payload (mergeReviewedJobs, only adds). Run Details "Report Date" adds "(run on …)" when they differ.
-- Header (masthead): title = readableDate(meta.date) (standalone and hub alike); subtitle mastheadSubtitle =
-  "N Matches · Ran 6:02 PM" (time alone when completedAt's local day = meta.date, else "Ran Nov 7, 8:00 PM");
-  quotaNote line stays; banners (auth, quota, network, integrity, not reviewed) unchanged. A group with no cards
-  is not rendered (main list too when other groups have cards); the empty state only when nothing at all.
+- Header: since 2026-11-15 the one top row (see "Compact cards and page") replaces the masthead; mastheadSubtitle
+  ("N Matches · Ran 6:02 PM") is kept only for the Status summary and tests; meta.quotaNote renders as
+  p.quota-note[data-quota-note] under the row; banners (auth, quota, network, integrity, not reviewed) unchanged.
+  A group with no cards is not rendered (main list too when other groups have cards); the empty state only when
+  nothing at all.
 - Title Case for buttons, summaries/h1–h3, labels, th, dt, badges/tags, <b> labels in hub + report (not the
   xlsx, not prose, not data values). tests/title-case.test.mjs scans rendered hub pages, the letter panel and
   the Desktop report with tests/helpers/title-case.mjs (minor words lower case after the first word; words
-  with a capital pass). Constants: CARRIED_OVER_TITLE "Carried Over From Yesterday", NOT_REVIEWED_TITLE "Not
-  Reviewed (Engine Unavailable)", DATE_ONLY_GROUP_TITLE "Date Only, May Be Older Than 24 Hours",
-  LOCATION_NOT_STATED_LABEL "US Location Not Stated", STAGE_LABELS "Cover Letter Draft/Editor".
+  with a capital pass; ALLOWED_WORDS keeps "CoverLetter" as the owner spells it). Constants: CARRIED_OVER_TITLE
+  "From Yesterday" (was "Carried Over From Yesterday" until 2026-11-15), NOT_REVIEWED_TITLE "Not Reviewed (Engine
+  Unavailable)", LOCATION_NOT_STATED_LABEL "US Location Not Stated", STAGE_LABELS "Cover Letter Draft/Editor".
 
 ## Cards, JD markup, letter copy (2026-11-08)
 - Why It Matches is not rendered (cards, hub, xlsx; the Matches sheet lost that column, the [unreviewed] tag moved
@@ -579,8 +577,10 @@ disabled; do not expand them unless a task says so.
 - Tests: tests/jd-complete.test.mjs + tests/fixtures/pages/ (synthetic pages per host shape, manifest.json with
   expected outcomes; no network). History untouched: stored payloads are not re-fetched or edited.
 
-## Reach Out (2026-11-08)
-- HARD: never request, fetch, or log in to linkedin.com; never send messages. src/outreach/links.mjs builds the
+## Message to Recruiters (2026-11-08; named Reach Out until 2026-11-15)
+- HARD: never request, fetch, or log in to linkedin.com; never send messages. Only the wording changed on
+  2026-11-15 (button, drawer h2 and aria-label, Settings card, docs); ids/classes (reach-*, data-reach,
+  /outreach/*, src/outreach/) stay. src/outreach/links.mjs builds the
   URLs only (LinkedIn people search ?keywords=encodeURIComponent(…), Google ?q=…) and assertNotLinkedIn guards
   the one outgoing request (candidate search API via ctx.fetchImpl, added to createHubContext). Tests assert it
   at the network layer (ctx.fetchImpl spy + global fetch blocked).
@@ -596,8 +596,8 @@ disabled; do not expand them unless a task says so.
 - Store private/outreach/state.json by job id: firstName, contactedAt, messages, candidates. Hub: GET
   /outreach/panel (HTML fragment for the drawer), GET /outreach/resume (recommended track PDF, original name:
   managed "<stamp>-" prefix stripped), POST /outreach/{messages,name,contacted,candidates}, POST
-  /settings/outreach. Cards: Reach Out button (data-reach) on every match + "Contacted Nov 8" badge; the render
-  cache key includes contactedByJob().version. Drawer + OUTREACH_SCRIPT in src/hub/outreach-views.mjs.
+  /settings/outreach. Cards: Message to Recruiters button (data-reach) on every match + "Contacted Nov 8" badge;
+  the render cache key includes contactedByJob().version (contacted labels only since 2026-11-15). Drawer + OUTREACH_SCRIPT in src/hub/outreach-views.mjs.
 
 ## UI redesign (2026-11-08)
 - Design rules (src/report-theme.mjs, shared by the Desktop report and the hub): three type levels --fs-title 18 /
@@ -605,28 +605,64 @@ disabled; do not expand them unless a task says so.
   --control-height 32. Buttons: .btn (primary, filled) and .btn.secondary (outlined), one size; .small is kept as a
   class but no longer changes anything; .apply = primary. --ink-3 #5b6472 light / #9aa3b1 dark (≥ 4.5:1 on bg, surface
   and the tag background). Card action styles are scoped to `.job .actions` (td.actions in tables is unrelated).
-- Card (renderJobCard): .job-head = left "Company · Title" (h2.job-title > span.company + link) and p.job-meta
-  (location · role · span.meta posted text + span.badge.fresh Freshness tag), right .job-score (recommend, .scores,
-  ring); badges; .actions fixed order Open Posting, Download Letter, Open Letter, Reach Out (Generate Cover Letter in
-  place of the letter actions), then Mark as Applied (hub); Gaps / Verify; details.jd; p.job-foot "Source: …";
-  alternates. cardView adds posted (footnote minus source; "(date only)" dropped when the tag says Date Only),
-  source, freshnessKey, flags (hub data-contacted / data-applied). footnote/footnoteTitle unchanged (xlsx etc.).
-- Filter bar (renderToolbar): search, Sort by, Resume, Role Type, Freshness (values present, FRESHNESS_LABELS order),
-  Score min–max, hub-only Hide Contacted / Hide Applied (toolbar.marks), Clear Filters, count. src/report-filters.mjs
-  (readFilters / writeFilters / cardPasses / filtersActive) is injected into REPORT_SCRIPT via toString; state lives
-  in the URL query (q, sort, resume, role, freshness, min, max, hideContacted=1, hideApplied=1; defaults omitted,
-  other params kept, history.replaceState in try/catch). Events: 'report-cards-changed' re-applies (drawer contacted,
-  Mark as Applied), 'report-filters' is dispatched after each apply.
-- Mark as Applied: POST /outreach/applied {job, applied} → setApplied → private/outreach/state.json appliedAt;
-  appliedLabel "Applied Nov 8"; contactedByJob returns { labels, applied, version } (render key); button
-  .btn.secondary.mark-applied[data-apply-mark][aria-pressed], driven by OUTREACH_SCRIPT.
+- Card and filter bar: superseded by "Compact cards and page (2026-11-15)" below. Filter state in the URL query
+  (q, sort, resume, role, freshness, min, max, hideContacted=1; defaults omitted, other params kept, an old
+  hideApplied dropped). Events: 'report-cards-changed' re-applies (drawer contacted), 'report-filters' after each
+  apply.
+- Mark as Applied: REMOVED 2026-11-15 (button, Hide Applied filter, POST /outreach/applied, setApplied,
+  appliedLabel). private/outreach/state.json appliedAt values already on disk are kept and neither read nor written.
 - Hub mobile (≤ 760px): nav is one scrolling row (brand and mini status hidden), dates are a horizontal chip strip,
   report-head buttons scroll in one row, kv/conn lists stack; filter bar is a two-column grid (select labels
   visually hidden); Task Assignments stack per stage (≤ 640px). Wide tables scroll inside .card / .table-wrap;
   .file is position:relative so its hidden input cannot widen the page.
 - Snapshots: tests/fixtures/snapshots/*.html stay the pre-redesign pages; tests compare CONTENT, not bytes
   (tests/helpers/page-content.mjs assertSameContent: words, links/actions, form fields and data-* must match;
-  REDESIGN_ALLOWANCES lists the intended additions and "pdf" from Download PDF → Download Letter).
+  REDESIGN_ALLOWANCES lists the intended additions and "pdf" from Download PDF → Download Letter; extended
+  2026-11-15 with missingWords/missingFields for the compact page).
+
+## Compact cards and page (2026-11-15)
+- Card (renderJobCard), top to bottom: .job-head = h2.job-title (Company · Title) + p.job-meta (location · role ·
+  span.meta "Posted Nov 14, 3:12 PM" / "Posted Nov 14": "(date only)" only in the hover title; NO Freshness tags;
+  then a.badge.badge-warn.job-check[data-badge=letter-check] "Check N Details" at the right end, href = the letter
+  page, only for needs-review notes: cardView gets it from decorate(job).check {label,title,href}; reviewBadge's
+  label is Title Case now), right .job-score = .scores (one span.track per track "Data <b>82</b>", class .top on
+  the highest, every holder when tied: cardView score.top) + .ring 60px (b at --fs-title); .badges; Gaps / Verify;
+  details.jd (summary = span + button.jd-copy[aria-label="Copy Job Description"] with an inline SVG); .actions
+  Open Posting, Download CoverLetter, Open CoverLetter, Message to Recruiters (Generate CoverLetter in place of
+  the two letter actions; ONECLICK_SCRIPT swaps it in place and appends the check link to .job-meta); p.job-foot;
+  alternates. No "Apply with … Resume" line (cardView.recommendation gone; the xlsx Recommended Resume column
+  stays). COPY_DESCRIPTION_LABEL, INCOMPLETE_DESCRIPTION_LABEL, MENU_SLOT in report-components.mjs.
+- Copy Job Description (REPORT_SCRIPT): click on .jd-copy (capture, preventDefault+stopPropagation so the fold
+  does not toggle) → the JD markup (fetching data-jd-src first in the hub and filling the body) → navigator.
+  clipboard.write(ClipboardItem text/html + text/plain) → writeText(text) → textarea/execCommand; the icon becomes
+  a tick (.done) for 1.5 s. descriptionPlainText(html) in src/jd-html.mjs (self-contained, injected via toString):
+  blocks separated by a blank line, li → "• ", br → newline, tags stripped, entities decoded.
+- Top row (renderToolbar; view.toolbar { title: formatDateLabel(meta.date), total, roleTypes, tracks, freshness
+  (no "date only"), marks, menuSlot: options.embedded }): div.bar-sentinel + form.toolbar#toolbar = .bar-title
+  ("Sat, Nov 14 · <span.count#count>42 Jobs</span>"; the script writes "N Jobs" / "N of M Jobs"), input#q,
+  select#sort/#track/#role (aria-labels, no visible labels; "All Tracks"), details.menu#filters-menu (summary.btn
+  "Filters": Freshness, Score, Hide Contacted (hub), Clear Filters; .active when one is set), then the hub's
+  details.menu.overflow#more-menu ("⋯", aria-label More Actions: Generate Missing Letters / Update Salutations
+  forms, Open Desktop Copy, Download XLSX) which reportsPage puts into the MENU_SLOT comment of the cached body
+  (reportMenu). Sticky top:0; IntersectionObserver on the sentinel toggles .stuck (rule + backdrop blur); popovers
+  close on outside click / Escape; @media (min-width:1100px) flex-wrap:nowrap (hub nav 152px and date column
+  180px between 761 and 1279px so the row fits); ≤640px grid. No masthead, no "quiet" bar, no report-head row;
+  .hub-nav is static (scrolls away), .split aside stays sticky. Do not name a popover "more" (details.more[open]
+  > summary is hidden by the fold rule).
+- Groups: main list = every reviewed match that is not carried (date-only and undated included; strict window
+  removed); "From Yesterday" (CARRIED_OVER_TITLE) with no note line; Not Reviewed unchanged. The xlsx has no
+  group name (Freshness column values unchanged).
+- Hub date column (renderDateList): ul.datelist#datelist = grid minmax(0,1fr) max-content max-content, li
+  display:contents, a = subgrid row (span date | span.n count as a bare number with title "N matches" |
+  span.tag Today/Tomorrow); the current month and later months without a heading; earlier months in
+  details.history#history (summary "History (N)", ul#datelist-history with li.month headings), rendered open +
+  data-selected=1 when the selected date is in it; REPORTS_SCRIPT remembers it in localStorage
+  hub.reports.history (not when data-selected) and applies Only Days With Matches to both lists. Misalignment
+  cause (screenshot 2026-11-15): each row was its own flexbox, so the Today tag pushed that row's count left and
+  counts of different widths had no shared edge.
+- Screenshots: tests/fixtures/demo-output/screenshots/ (gitignored; playwright-core installed with --no-save,
+  Chrome channel; the capture script lives outside the repo). Checked at 1440/1100 × light/dark: one-row bar
+  that fits, stuck after scrolling with the nav gone, aligned counts, card order.
 
 ## Letter rules v2 (2026-11-08, from private/review/cover-letter-review-response.md)
 - config.coverLetter.rulesVersion "v1" (DEFAULT, unchanged behavior; v1 reads private/cover-letter/playbook-v1.md, the

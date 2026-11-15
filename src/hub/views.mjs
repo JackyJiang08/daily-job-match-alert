@@ -1,10 +1,11 @@
-// Hub pages. The shell adds a sticky left navigation around content built from the same components and
-// tokens as the Desktop report (report-components.mjs / report-theme.mjs), so both look alike in light
+// Hub pages. The shell adds a left navigation (it scrolls with the page; the report's top row is what stays
+// put) around content built from the same components and tokens as the Desktop report (report-components.mjs / report-theme.mjs), so both look alike in light
 // and dark mode. Every timestamp is shown in config.timeZone; resume text is never rendered here.
 import { assetPath } from './assets.mjs';
 import { percent } from '../cover-letter/recent.mjs';
 import { formatBytes, phasesText } from './report-timing.mjs';
 import { REPORT_SCRIPT, REPORT_STYLES } from '../report-theme.mjs';
+import { MENU_SLOT } from '../report-components.mjs';
 import { formatCount, formatDateLabel, formatElapsed, formatLocalDateTime, formatLocalDay, formatLocalShort, formatRelativeTime } from '../time-format.mjs';
 import { planLabel } from '../engines/quota.mjs';
 import { USAGE_PURPOSES, describeTotals, formatTokens } from '../engines/usage.mjs';
@@ -27,7 +28,7 @@ const NAV = [
 
 export const HUB_STYLES = `
 .hub{display:grid;grid-template-columns:200px minmax(0,1fr);min-height:100vh}
-.hub-nav{position:sticky;top:0;height:100vh;overflow:auto;display:flex;flex-direction:column;border-right:1px solid var(--line);padding:var(--space-5) var(--space-3) var(--space-4);background:var(--surface)}
+.hub-nav{display:flex;flex-direction:column;border-right:1px solid var(--line);padding:var(--space-5) var(--space-3) var(--space-4);background:var(--surface)}
 .hub-nav .brand{font-size:var(--fs-body);font-weight:650;margin:0 0 var(--space-4) var(--space-3);line-height:1.5;white-space:nowrap}
 .hub-nav a{display:block;padding:6px var(--space-2) 6px 9px;margin:0 0 2px;border-left:3px solid transparent;border-radius:0 var(--radius-sm) var(--radius-sm) 0;text-decoration:none;color:var(--ink-2);font-size:var(--fs-body);line-height:1.5}
 .hub-nav a.active{background:var(--accent-soft);color:var(--accent);font-weight:650;border-left-color:var(--accent)}
@@ -45,26 +46,31 @@ export const HUB_STYLES = `
 .flash.notice{background:var(--accent-soft);color:var(--accent)}
 .flash.error{background:var(--bad-bg);color:var(--bad-ink)}
 .split{display:grid;grid-template-columns:232px minmax(0,1fr);gap:var(--space-4);align-items:start}
-.split aside{position:sticky;top:var(--space-4);max-height:calc(100vh - 2 * var(--space-4));overflow:auto;display:flex;flex-direction:column}
+.split aside{position:sticky;top:0;max-height:100vh;overflow:auto;display:flex;flex-direction:column;padding-top:var(--space-2)}
 .datetools{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-1) var(--space-2);padding:0 var(--space-2) var(--space-2);font-size:var(--fs-meta);color:var(--ink-2)}
 .datetools .today-link{text-decoration:none;color:var(--accent);font-weight:650}
 .datetools label{display:inline-flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap}
-.datelist{margin:0;padding:0;list-style:none;font-size:var(--fs-body)}
-.datelist .month{position:sticky;top:0;z-index:1;margin:0;padding:var(--space-2) var(--space-2) var(--space-1);background:var(--bg);font-size:var(--fs-meta);font-weight:650;color:var(--ink-2)}
-.datelist .month-toggle{display:flex;align-items:center;gap:6px;width:100%;margin:0;padding:0;border:0;background:none;font:inherit;color:inherit;letter-spacing:inherit;text-transform:inherit;cursor:pointer;text-align:left}
-.datelist .month-toggle::before{content:"";width:5px;height:5px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg);margin:-2px 2px 0 0;transition:transform .12s}
-.datelist .month[data-collapsed="1"] .month-toggle::before{transform:rotate(-45deg);margin:0 2px 0 0}
-.datelist li[hidden]{display:none}
-.datelist a{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:baseline;gap:2px var(--space-2);padding:var(--space-1) var(--space-2);border-radius:var(--radius-sm);text-decoration:none;color:var(--ink-2)}
-.datelist a>span:first-child{margin-right:auto;white-space:nowrap}
-.datelist a .n{color:var(--ink-2);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:var(--fs-meta);text-align:right}
+/* The date column: one grid shared by every row (date | count | tag), so the counts line up under each
+   other whether or not the row carries a Today tag; month headings span the row. */
+.datelist{display:grid;grid-template-columns:minmax(0,1fr) max-content max-content;margin:0;padding:0;list-style:none;font-size:var(--fs-body);font-variant-numeric:tabular-nums}
+.datelist>li{display:contents}
+.datelist>li[hidden]{display:none}
+.datelist .month{display:block;grid-column:1/-1;position:sticky;top:0;z-index:1;margin:0;padding:var(--space-2) var(--space-2) var(--space-1);background:var(--bg);font-size:var(--fs-meta);font-weight:650;color:var(--ink-2)}
+.datelist a{display:grid;grid-template-columns:subgrid;grid-column:1/-1;align-items:baseline;column-gap:var(--space-2);padding:var(--space-1) var(--space-2);border-radius:var(--radius-sm);text-decoration:none;color:var(--ink-2)}
+.datelist a>span:first-child{grid-column:1;text-align:left;white-space:nowrap}
+.datelist a .n{grid-column:2;color:var(--ink-2);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:var(--fs-meta);text-align:right}
+.datelist a .tag{grid-column:3;justify-self:end}
+.history{margin:var(--space-3) 0 0;padding:var(--space-2) 0 0;border-top:1px solid var(--line)}
+.history>summary{list-style:none;cursor:pointer;padding:var(--space-1) var(--space-2);font-size:var(--fs-meta);font-weight:650;color:var(--ink-2);display:flex;align-items:center;gap:6px}
+.history>summary::-webkit-details-marker{display:none}
+.history>summary::before{content:"";width:5px;height:5px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);margin:0 2px 0 1px;transition:transform .12s}
+.history[open]>summary::before{transform:rotate(45deg);margin-top:-2px}
 .datelist a.active{background:var(--accent-soft);color:var(--accent);font-weight:650}
 .datelist a.active .n{color:var(--accent)}
 .datelist a.today:not(.active){color:var(--ink);font-weight:650}
 .datelist a.quiet{color:var(--ink-3)}
 .datelist .tag{font-size:var(--fs-meta);font-weight:600;line-height:1.4;border-radius:var(--radius-sm);padding:0 var(--space-1);background:var(--line);color:var(--ink-2);white-space:nowrap}
 .datelist a.active .tag{background:var(--accent-soft);color:var(--accent)}
-.report-head{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:var(--space-2);margin:0 0 var(--space-3)}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:var(--space-4);margin:0 0 var(--space-3);box-shadow:var(--shadow);min-width:0;overflow-x:auto}
 /* A wide table scrolls inside its card instead of widening the page. */
 .pair-grid>*,.split>*{min-width:0}
@@ -118,24 +124,28 @@ details.day>summary{cursor:pointer;font-size:var(--fs-body)}
 .count-some{color:var(--warn-ink);font-weight:650}
 .muted{color:var(--ink-2)}
 [hidden]{display:none!important}
+/* Between 1100 and 1279px the navigation and the date column give the report's one-row bar its room. */
+@media (min-width:761px) and (max-width:1279px){
+  .hub{grid-template-columns:152px minmax(0,1fr)}
+  .hub-main{padding:var(--space-4) var(--space-4) var(--space-6)}
+  .split{grid-template-columns:180px minmax(0,1fr);gap:var(--space-3)}
+}
 @media (max-width:760px){
   .hub{grid-template-columns:1fr}
-  .hub-nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line);flex-direction:row;flex-wrap:nowrap;align-items:center;gap:var(--space-1);padding:var(--space-2) var(--space-3);overflow-x:auto}
+  .hub-nav{border-right:0;border-bottom:1px solid var(--line);flex-direction:row;flex-wrap:nowrap;align-items:center;gap:var(--space-1);padding:var(--space-2) var(--space-3);overflow-x:auto}
   .hub-nav .brand{display:none}
   .hub-nav a{flex:0 0 auto;margin:0;padding:var(--space-1) var(--space-2);border-left:0;border-bottom:2px solid transparent;border-radius:0}
   .hub-nav a.active{border-bottom-color:var(--accent);background:transparent}
   .hub-nav .mini{display:none}
   .split{grid-template-columns:1fr;gap:var(--space-3)}
-  .split aside{position:static;max-height:none}
+  .split aside{position:static;max-height:none;padding-top:0}
   /* The dates become one scrolling strip of chips above the report. */
   .datetools{padding:0 0 var(--space-2)}
   .datelist{display:flex;gap:var(--space-2);overflow-x:auto;padding-bottom:var(--space-1)}
+  .datelist>li{display:block;flex:0 0 auto}
   .datelist li.month{display:none}
-  .datelist li{flex:0 0 auto}
-  .datelist a{flex-wrap:nowrap;border:1px solid var(--line);background:var(--surface)}
-  .datelist a>span:first-child{margin-right:0}
-  .report-head{justify-content:flex-start;flex-wrap:nowrap;overflow-x:auto;padding-bottom:var(--space-1)}
-  .report-head>*{flex:0 0 auto}
+  .datelist a{display:flex;align-items:baseline;gap:var(--space-1);border:1px solid var(--line);background:var(--surface)}
+  .history{margin:0;padding:0;border:0}
   .hub-main{padding:var(--space-3) var(--space-3) var(--space-5)}
   .kv{grid-template-columns:1fr;gap:0}
   .kv dt{margin-top:var(--space-2)}
@@ -237,40 +247,45 @@ function monthLabel(date) {
   return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, 1)).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 }
 
-// Dates newest first, grouped by month with sticky month headings; empty days carry data-empty so the
-// "Only days with matches" toggle can hide them (and any month left without visible days). The current
-// month (of `today` in config.timeZone) is always open; earlier months start collapsed unless they hold
-// the selected date (a later month, which only the tomorrow report creates, starts open), and the page
-// script restores what the owner opened or closed before.
+// Dates newest first in one three-column grid (date | match count | Today or Tomorrow tag). The current month
+// (of `today` in config.timeZone) and any later month are open; every earlier month sits under a "History" fold
+// at the bottom, grouped by month with sticky headings. The fold opens when the selected date is in it, and the
+// page script remembers whether the owner left it open (localStorage). Empty days carry data-empty so the
+// "Only days with matches" toggle can hide them (and any month left without visible days).
 export function renderDateList({ dates, selected, today }) {
   if (!dates.length) return '<p class="muted">No reports yet.</p>';
-  const items = [];
   const currentMonth = String(today || '').slice(0, 7);
   const selectedMonth = String(selected || '').slice(0, 7);
-  let month = null;
-  let collapsed = false;
-  for (const item of dates) {
-    const label = monthLabel(item.date);
-    const key = item.date.slice(0, 7);
-    if (label !== month) {
-      month = label;
-      const current = key === currentMonth;
-      collapsed = !current && key < currentMonth && key !== selectedMonth;
-      items.push(current
-        ? `<li class="month" data-month="${htmlEscape(key)}" data-current="1">${htmlEscape(label)}</li>`
-        : `<li class="month" data-month="${htmlEscape(key)}"${collapsed ? ' data-collapsed="1"' : ''}><button type="button" class="month-toggle" aria-expanded="${collapsed ? 'false' : 'true'}">${htmlEscape(label)}</button></li>`);
-    }
+  const row = item => {
     const isToday = item.date === today;
     const isFuture = Boolean(today) && item.date > today;
     const classes = [item.date === selected ? 'active' : '', isToday ? 'today' : '', item.matchCount === 0 ? 'quiet' : ''].filter(Boolean).join(' ');
-    const count = item.matchCount == null ? '' : `<span class="n">${item.matchCount} match${item.matchCount === 1 ? '' : 'es'}</span>`;
-    // Calendar tags: "Today" for the current date in config.timeZone, "Tomorrow" for anything later (the
-    // evening run writes the next application date, so that is usually the newest report).
+    const count = item.matchCount == null ? '' : `<span class="n" title="${item.matchCount} match${item.matchCount === 1 ? '' : 'es'}">${item.matchCount}</span>`;
+    // Calendar tags: "Today" for the current date in config.timeZone, "Tomorrow" for anything later.
     const tag = isToday ? '<span class="tag" data-tag="today">Today</span>' : isFuture ? '<span class="tag" data-tag="tomorrow">Tomorrow</span>' : '';
-    items.push(`<li data-month="${htmlEscape(key)}"${item.matchCount === 0 ? ' data-empty="1"' : ''}${collapsed ? ' hidden' : ''}><a href="/reports/${item.date}"${classes ? ` class="${classes}"` : ''} title="${item.date}${isToday ? ' (today)' : isFuture ? ' (after today)' : ''}"><span>${htmlEscape(formatDateLabel(item.date))}</span>${count}${tag}</a></li>`);
-  }
+    return `<li data-month="${htmlEscape(item.date.slice(0, 7))}"${item.matchCount === 0 ? ' data-empty="1"' : ''}><a href="/reports/${item.date}"${classes ? ` class="${classes}"` : ''} title="${item.date}${isToday ? ' (today)' : isFuture ? ' (after today)' : ''}"><span>${htmlEscape(formatDateLabel(item.date))}</span>${count}${tag}</a></li>`;
+  };
+  const list = (entries, withHeadings) => {
+    const items = [];
+    let month = null;
+    for (const item of entries) {
+      const key = item.date.slice(0, 7);
+      if (withHeadings && key !== month) {
+        month = key;
+        items.push(`<li class="month" data-month="${htmlEscape(key)}">${htmlEscape(monthLabel(item.date))}</li>`);
+      }
+      items.push(row(item));
+    }
+    return items.join('');
+  };
+  const current = dates.filter(item => !currentMonth || item.date.slice(0, 7) >= currentMonth);
+  const history = dates.filter(item => currentMonth && item.date.slice(0, 7) < currentMonth);
+  const open = history.some(item => item.date.slice(0, 7) === selectedMonth);
   const jump = todayTarget(dates, today);
-  return `<div class="datetools"><a class="today-link" href="/reports/${jump.date}" id="today-link" title="${jump.isToday ? `Today's report (${jump.date})` : `No report for today; newest report (${jump.date})`}">${jump.isToday ? 'Today' : 'Latest'}</a><label><input type="checkbox" id="only-matches"> Only Days With Matches</label></div><ul class="datelist" id="datelist">${items.join('')}</ul>`;
+  const historyFold = history.length
+    ? `<details class="history" id="history"${open ? ' open' : ''}${open ? ' data-selected="1"' : ''}><summary>History <span class="group-count">(${history.length})</span></summary><ul class="datelist" id="datelist-history">${list(history, true)}</ul></details>`
+    : '';
+  return `<div class="datetools"><a class="today-link" href="/reports/${jump.date}" id="today-link" title="${jump.isToday ? `Today's report (${jump.date})` : `No report for today; newest report (${jump.date})`}">${jump.isToday ? 'Today' : 'Latest'}</a><label><input type="checkbox" id="only-matches"> Only Days With Matches</label></div><ul class="datelist" id="datelist">${list(current, false)}</ul>${historyFold}`;
 }
 
 // The date the "Today" shortcut and the default selection point at: today's report when it exists,
@@ -296,13 +311,25 @@ function missingLettersControl(selected, missing) {
   return `<form class="inline" method="post" action="/letters/missing" id="missing-letters-form"><input type="hidden" name="date" value="${htmlEscape(selected)}"><button class="btn small" type="submit" id="missing-letters" title="Write a letter for every high match on this date that has none and a trusted company name">Generate Missing Letters (${Number(missing.count)})</button></form>${updateSalutationsControl(selected, missing)}`;
 }
 
+// The secondary actions of a report date, in the top row's "⋯" menu: the letter passes, the Desktop copy and
+// the workbook. The report body is cached per render key, so the menu (whose letter counts change between
+// requests) is put into the body's slot here.
+export function reportMenu({ selected, desktopPath, missingLetters }) {
+  const items = [
+    missingLettersControl(selected, missingLetters),
+    `<a class="btn secondary small" href="/desktop/${selected}" target="_blank" rel="noopener noreferrer" title="${htmlEscape(desktopPath || '')}">Open Desktop Copy</a>`,
+    `<a class="btn secondary small" href="/desktop/${selected}/xlsx" title="Download the Desktop workbook">Download XLSX</a>`,
+  ].filter(Boolean);
+  return `<details class="menu overflow" id="more-menu"><summary class="btn secondary" aria-label="More Actions" title="More Actions">⋯</summary><div class="menu-list">${items.join('')}</div></details>`;
+}
+
 export function reportsPage({ dates, selected, reportBody, desktopPath, today, missingLetters = null }) {
   const list = renderDateList({ dates, selected, today });
   const body = reportBody
-    ? `<div class="report-head">${missingLettersControl(selected, missingLetters)}<a class="btn secondary small" href="/desktop/${selected}" target="_blank" rel="noopener noreferrer" title="${htmlEscape(desktopPath)}">Open Desktop Copy</a><a class="btn secondary small" href="/desktop/${selected}/xlsx" title="Download the Desktop workbook">Download XLSX</a></div><div class="page">${reportBody}</div>`
+    ? `<div class="page">${reportBody.replace(MENU_SLOT, reportMenu({ selected, desktopPath, missingLetters }))}</div>`
     : `<p class="muted">${dates.length ? 'Pick a date on the left.' : 'Run the pipeline once and its report will appear here.'}</p>`;
-  // The Reach Out drawer (src/hub/outreach-views.mjs), filled when a card's Reach Out button is pressed.
-  const drawer = reportBody ? '<aside class="reach-drawer" id="reach-drawer" hidden aria-label="Reach Out"></aside>' : '';
+  // The Message to Recruiters drawer (src/hub/outreach-views.mjs), filled when a card's button is pressed.
+  const drawer = reportBody ? '<aside class="reach-drawer" id="reach-drawer" hidden aria-label="Message to Recruiters"></aside>' : '';
   return `<div class="split"><aside id="date-column">${list}</aside><section>${body}</section></div>${drawer}`;
 }
 
@@ -335,51 +362,39 @@ export const REPORTS_SCRIPT = JD_LOADER_SCRIPT + `
   var toggle = document.getElementById('only-matches');
   var today = document.getElementById('today-link');
   var column = document.getElementById('date-column');
+  var history = document.getElementById('history');
   if (!list || !toggle) return;
   var key = 'hub.reports.onlyMatches';
-  var monthsKey = 'hub.reports.months';
-  var active = list.querySelector('a.active');
-  var activeMonth = active ? active.closest('li').dataset.month : null;
-  // Open/closed state per month; the current month is always open and the month holding the selected
-  // date opens for this page view without being remembered.
-  var months = {};
-  try { months = JSON.parse(localStorage.getItem(monthsKey) || '{}') || {}; } catch (e) { months = {}; }
-  var collapsed = {};
-  list.querySelectorAll('li.month').forEach(function (heading) {
-    var month = heading.dataset.month;
-    if (heading.dataset.current === '1') { collapsed[month] = false; return; }
-    collapsed[month] = months[month] === 'open' ? false : months[month] === 'closed' ? true : heading.dataset.collapsed === '1';
-    if (month === activeMonth) collapsed[month] = false;
-  });
+  var historyKey = 'hub.reports.history';
+  var lists = [list].concat(history ? [history.querySelector('ul')] : []);
+  // "Only days with matches" over the current month and the History fold alike; a month heading left with
+  // no visible day goes too.
   function apply() {
     var only = toggle.checked;
     try { localStorage.setItem(key, only ? '1' : '0'); } catch (e) {}
-    var monthsWithDays = {};
-    list.querySelectorAll('li:not(.month)').forEach(function (item) {
-      var shown = !(only && item.dataset.empty === '1');
-      if (shown) monthsWithDays[item.dataset.month] = true;
-      item.hidden = !shown || collapsed[item.dataset.month] === true;
-    });
-    list.querySelectorAll('li.month').forEach(function (heading) {
-      var month = heading.dataset.month;
-      heading.hidden = !monthsWithDays[month];
-      if (collapsed[month]) heading.dataset.collapsed = '1'; else delete heading.dataset.collapsed;
-      var button = heading.querySelector('.month-toggle');
-      if (button) button.setAttribute('aria-expanded', collapsed[month] ? 'false' : 'true');
+    lists.forEach(function (node) {
+      if (!node) return;
+      var monthsWithDays = {};
+      node.querySelectorAll('li:not(.month)').forEach(function (item) {
+        var shown = !(only && item.dataset.empty === '1');
+        if (shown) monthsWithDays[item.dataset.month] = true;
+        item.hidden = !shown;
+      });
+      node.querySelectorAll('li.month').forEach(function (heading) { heading.hidden = !monthsWithDays[heading.dataset.month]; });
     });
   }
-  list.addEventListener('click', function (event) {
-    var button = event.target.closest('.month-toggle');
-    if (!button) return;
-    var month = button.closest('li').dataset.month;
-    collapsed[month] = !collapsed[month];
-    months[month] = collapsed[month] ? 'closed' : 'open';
-    try { localStorage.setItem(monthsKey, JSON.stringify(months)); } catch (e) {}
-    apply();
-  });
+  // The History fold remembers itself; the month holding the selected date opens it for this page view
+  // (rendered open by the server) without being remembered.
+  if (history) {
+    var remembered = null;
+    try { remembered = localStorage.getItem(historyKey); } catch (e) {}
+    if (history.dataset.selected !== '1' && remembered != null) history.open = remembered === '1';
+    history.addEventListener('toggle', function () { try { localStorage.setItem(historyKey, history.open ? '1' : '0'); } catch (e) {} });
+  }
   try { toggle.checked = localStorage.getItem(key) === '1'; } catch (e) {}
   toggle.addEventListener('change', apply);
   apply();
+  var active = document.querySelector('.datelist a.active');
   if (today && column) today.addEventListener('click', function () { column.scrollTop = 0; });
   if (active && column && active.offsetTop > column.clientHeight - 40) column.scrollTop = active.offsetTop - 80;
 })();
@@ -794,8 +809,7 @@ export function settingsPage({ settings, connections = null, timeZone, coverLett
       <div class="field"><span>Accepted Match Levels</span>${levels}</div>
       <label class="field"><span>Max Reviewed Per Run (0 = no limit)</span><input type="number" name="maxReviewedPerRun" class="control-input" min="0" max="5000" step="1" value="${Number(settings.maxReviewedPerRun ?? 60)}" required></label>
       <label class="field"><span>Catch-up Budget (0 = no limit)</span><input type="number" name="catchUpBudget" class="control-input" min="0" max="5000" step="1" value="${Number(settings.catchUpBudget ?? 40)}" required><span class="muted">Postings held while the engine was unavailable (Claude signed out, a usage limit) are reviewed after each run's new postings, at most this many per run, while their posting date is within 48 hours.</span></label>
-      <div class="field"><label class="check"><input type="checkbox" name="includeCarriedOver"${settings.includeCarriedOver !== false ? ' checked' : ''}> Include Carried-Over Postings</label><span class="muted">Postings over the review limit wait for the next run and appear under "Carried over from yesterday". Off: they are left unreviewed and not carried.</span></div>
-      <div class="field"><label class="check"><input type="checkbox" name="strict24HourWindow"${settings.strict24HourWindow !== false ? ' checked' : ''}> Strict 24-Hour Window</label><span class="muted">On: the report's main list keeps only postings with a precise time within 24 hours, new since the last poll, or dated the run's own day. Date-only postings from an earlier day ("Posted Yesterday") and undated ones move to the folded group "Date Only, May Be Older Than 24 Hours". On by default. Applies from the next run.</span></div>
+      <div class="field"><label class="check"><input type="checkbox" name="includeCarriedOver"${settings.includeCarriedOver !== false ? ' checked' : ''}> Include Carried-Over Postings</label><span class="muted">Postings over the review limit wait for the next run and appear under "From Yesterday". Off: they are left unreviewed and not carried.</span></div>
       <div class="field"><label class="check"><input type="checkbox" name="autoCatchUp"${settings.autoCatchUp !== false ? ' checked' : ''}> Auto Catch-Up After Network Outage</label><span class="muted">When the nightly run is cut short by this Mac's network, the hub checks every 10 minutes and reruns it once the network is back (at most twice a day, until the next nightly run).</span></div>
     </fieldset>
     <fieldset class="group"><legend>Role Scope</legend>

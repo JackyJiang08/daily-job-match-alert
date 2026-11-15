@@ -13,8 +13,9 @@ import { fixtureJob, fixturePayload, prepareReportProject, selectedMatches, star
 
 test('the checker: lower-case words fail, minor words after the first pass, proper nouns and abbreviations pass', () => {
   assert.deepEqual(titleCaseViolations('Carried over from yesterday'), ['over', 'from', 'yesterday']);
-  assert.deepEqual(titleCaseViolations('Carried Over From Yesterday'), []);
-  assert.deepEqual(titleCaseViolations('Date Only, May Be Older Than 24 Hours'), []);
+  assert.deepEqual(titleCaseViolations('From Yesterday'), []);
+  assert.deepEqual(titleCaseViolations('Download CoverLetter'), [], 'CoverLetter is the wanted spelling');
+  assert.deepEqual(titleCaseViolations('Message to Recruiters'), []);
   assert.deepEqual(titleCaseViolations('Not Reviewed (Engine Unavailable)'), []);
   assert.deepEqual(titleCaseViolations('Rename Company & Re-render'), []);
   assert.deepEqual(titleCaseViolations('Open in LinkedIn for PwC and the JD'), []);
@@ -29,7 +30,7 @@ const PAGES = ['/reports', '/reports/2026-10-17', '/reports/2026-10-16', '/resum
 test('every hub page and the letter panel: buttons, group names, labels, table headers, terms and badges are Title Case', async () => {
   const root = await prepareReportProject();
   // States that bring more badges: every report group, a dormant board, an installed schedule that is overdue.
-  const strict = { strictWindow: { enabled: true, hours: 24 }, runDate: '2026-10-16', completedAt: '2026-10-17T03:00:00.000Z', lastUpdatedAt: '2026-10-17T03:00:00.000Z' };
+  const strict = { runDate: '2026-10-16', completedAt: '2026-10-17T03:00:00.000Z', lastUpdatedAt: '2026-10-17T03:00:00.000Z' };
   const old = fixtureJob(5, { url: 'https://jobs.example.com/5', postedAt: '2026-10-15T12:00:00.000Z', postedAtPrecision: 'date' });
   const unreviewed = fixtureJob(6, { url: 'https://jobs.example.com/6', matchLevel: 'unreviewed', scoringEngine: 'local_fallback', semanticReviewed: false });
   const payload = fixturePayload('2026-10-17', [...selectedMatches(), old, unreviewed], strict);
@@ -59,7 +60,9 @@ test('every hub page and the letter panel: buttons, group names, labels, table h
       scan(panel, reply.text);
     }
     // The pages really carry the groups and badges this test is about.
-    assert.match(texts['/reports/2026-10-17'], /Date Only, May Be Older Than 24 Hours[\s\S]*Carried Over From Yesterday[\s\S]*Not Reviewed \(Engine Unavailable\)/);
+    assert.match(texts['/reports/2026-10-17'], /From Yesterday[\s\S]*Not Reviewed \(Engine Unavailable\)/);
+    assert.match(texts['/reports/2026-10-17'], /Download CoverLetter|Open CoverLetter|Generate CoverLetter/);
+    assert.match(texts['/reports/2026-10-17'], /Message to Recruiters/);
     assert.match(texts['/status'], /data-badge="overdue">Overdue<[\s\S]*data-badge="dormant"/);
     assert.deepEqual(found, []);
   } finally {
@@ -69,7 +72,7 @@ test('every hub page and the letter panel: buttons, group names, labels, table h
 });
 
 test('the Desktop report: group names, Run Details terms, badges and buttons are Title Case', () => {
-  const meta = { ...fixturePayload('2026-10-17', []).meta, runDate: '2026-10-17', strictWindow: { enabled: true, hours: 24 }, completedAt: '2026-10-17T23:02:00.000Z', lastUpdatedAt: '2026-10-17T23:02:00.000Z', networkOutage: { detail: 'The network was down for part of the run' } };
+  const meta = { ...fixturePayload('2026-10-17', []).meta, runDate: '2026-10-17', completedAt: '2026-10-17T23:02:00.000Z', lastUpdatedAt: '2026-10-17T23:02:00.000Z', networkOutage: { detail: 'The network was down for part of the run' } };
   const jobs = [
     ...selectedMatches(),
     fixtureJob(5, { url: 'https://jobs.example.com/5', postedAt: '2026-10-15T12:00:00.000Z', postedAtPrecision: 'date' }),
@@ -77,7 +80,7 @@ test('the Desktop report: group names, Run Details terms, badges and buttons are
     fixtureJob(7, { url: 'https://jobs.example.com/7', enrichment: 'failed', enrichmentReason: 'blocked', companyUncertain: true }),
   ];
   const html = buildHtml(jobs, meta, { reviewed: jobs });
-  assert.match(html, /<h1>October 17, 2026<\/h1><p class="sub">\d+ Matches · Ran 6:02 PM<\/p>/);
-  assert.match(html, /Date Only, May Be Older Than 24 Hours/);
+  assert.match(html, /<span class="bar-date">Sat, Oct 17<\/span><span class="sep">·<\/span><span class="count" id="count">\d+ Jobs<\/span>/);
+  assert.match(html, /From Yesterday/);
   assert.deepEqual(scanTitleCase(html).map(item => `${item.kind}: "${item.text}"`), []);
 });

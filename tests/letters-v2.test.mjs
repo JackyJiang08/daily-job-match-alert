@@ -226,7 +226,7 @@ test('an editor rewrite may not add numbers outside the sources or scenario word
 
 test('needs-review keeps the card badge until the owner marks the details checked', () => {
   const notes = ['check failed (numbers): numbers not on the selected resume or the playbook: 9'];
-  assert.equal(reviewBadge(notes).label, 'Check 1 detail');
+  assert.equal(reviewBadge(notes).label, 'Check 1 Detail');
   assert.equal(reviewBadge(notes, { cleared: true }), null);
 });
 
@@ -567,7 +567,7 @@ test('Settings saves the letter rules, the card shows Term Conflict under v2, an
     assert.match(decodeURIComponent((await hub.request('POST', '/settings/letter-rules', { rulesVersion: 'v2', openingStyle: 'ban-writing-to', fullTimeFrom: 'soon' })).headers.location), /month and year/);
     const report = (await hub.request('GET', '/reports/2026-11-08')).text;
     assert.match(report, /<span class="badge badge-warn" data-badge="term-conflict" title="The posting(?:'|&#39;)s term \(Spring 2027, from the title\) starts before you are available[^"]*">Term Conflict<\/span>/);
-    assert.match(report, /data-oneclick="1"[^>]*data-job="[0-9a-f]{16}">Generate Cover Letter<\/button>/, 'a manual letter stays possible');
+    assert.match(report, /data-oneclick="1"[^>]*data-job="[0-9a-f]{16}">Generate CoverLetter<\/button>/, 'a manual letter stays possible');
     await hub.ctx.letterStore.saveLetter({ date: '2026-11-08', company: 'Example Corp', markdown: '#', meta: { jobId: 'a'.repeat(16), createdAt: NOW, paragraphs: LETTER } });
     const status = (await hub.request('GET', '/status')).text;
     assert.match(status, /<article class="card" id="letter-variety"><h2>Letter Variety<\/h2>/);
@@ -592,7 +592,7 @@ test('the A/B script writes new letters next to the old ones with a summary tabl
     const before = (await hub.ctx.letterStore.listLetters()).length;
     const result = await runLettersAb({ ctx: hub.ctx, config, jobs, outDir: out });
     assert.equal((await hub.ctx.letterStore.listLetters()).length, before, 'nothing saved to the store');
-    await assert.rejects(fs.stat(path.join(root, 'private', 'outreach', 'state.json')), 'the Reach Out state is untouched');
+    await assert.rejects(fs.stat(path.join(root, 'private', 'outreach', 'state.json')), 'the Message to Recruiters state is untouched');
     assert.equal(result.rows.length, 2);
     assert.equal(result.rows[1].new.track, 'data', 'the track rule applies');
     assert.equal(result.rows[0].old.needsReview, 1);

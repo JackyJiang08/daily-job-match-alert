@@ -1,4 +1,4 @@
-// Reach Out (2026-11-08): finding a recruiter and the two outreach texts. Hard limits under test: nothing ever
+// Message to Recruiters (2026-11-08, named Reach Out until 2026-11-15): finding a recruiter and the two outreach texts. Hard limits under test: nothing ever
 // requests linkedin.com (asserted at the network layer), nothing is sent, and without a search key the
 // candidate search stays silent.
 import assert from 'node:assert/strict';
@@ -199,7 +199,7 @@ async function withGlobalFetchBlocked(work) {
   }
 }
 
-test('the hub: every card offers Reach Out; the panel lists JD contacts, search links in new tabs, candidates, messages, the resume; and never requests linkedin.com', async () => {
+test('the hub: every card offers Message to Recruiters; the panel lists JD contacts, search links in new tabs, candidates, messages, the resume; and never requests linkedin.com', async () => {
   const { root, jobId } = await prepareOutreachProject();
   const spy = networkSpy();
   const engine = { id: 'claude', label: 'Claude subscription', model: 'fable', async generateText() { return { output: { connectionNote: 'Hi {First Name}, I study statistics and saw the Data Analyst role at Example Corp. I built SQL dashboards and can help speed up reporting.', followUpMessage: 'Hi {First Name}, thank you for connecting. I rebuilt a weekly SQL dashboard. My resume is attached; could we have a brief conversation?' } }; } };
@@ -207,8 +207,8 @@ test('the hub: every card offers Reach Out; the panel lists JD contacts, search 
     const hub = await startReportHub(root, { context: { fetchImpl: spy.fetchImpl, letterEngine: engine } });
     try {
       const page = (await hub.request('/reports/2026-10-17')).text;
-      assert.match(page, new RegExp(`<button type="button" class="btn secondary" data-reach="1" data-date="2026-10-17" data-job="${jobId}">Reach Out</button>`));
-      assert.match(page, /<aside class="reach-drawer" id="reach-drawer" hidden aria-label="Reach Out"><\/aside>/);
+      assert.match(page, new RegExp(`<button type="button" class="btn secondary" data-reach="1" data-date="2026-10-17" data-job="${jobId}">Message to Recruiters</button>`));
+      assert.match(page, /<aside class="reach-drawer" id="reach-drawer" hidden aria-label="Message to Recruiters"><\/aside>/);
 
       let panel = (await hub.request(`/outreach/panel?date=2026-10-17&job=${jobId}`)).text;
       const order = ['id="reach-contacts"', 'id="reach-search"', 'id="reach-candidates"', 'id="reach-first-name"', 'id="reach-messages-empty"', 'id="reach-resume-section"', 'id="reach-contacted"'].map(marker => panel.indexOf(marker));
@@ -289,7 +289,7 @@ test('Mark as Contacted records the day, shows "Contacted Nov 8" on the card and
     assert.deepEqual(marked, { contactedAt: '2026-11-08T23:30:00.000Z', label: 'Contacted Nov 8' });
     const stored = JSON.parse(await fs.readFile(path.join(root, 'private', 'outreach', 'state.json'), 'utf8'));
     assert.equal(stored.jobs[jobId].contactedAt, '2026-11-08T23:30:00.000Z');
-    assert.match((await hub.request('/reports/2026-10-17')).text, /<span class="badge" data-badge="contacted" title="Marked as contacted in the Reach Out panel">Contacted Nov 8<\/span>/);
+    assert.match((await hub.request('/reports/2026-10-17')).text, /<span class="badge" data-badge="contacted" title="Marked as contacted in the Message to Recruiters panel">Contacted Nov 8<\/span>/);
     assert.match((await hub.request(`/outreach/panel?date=2026-10-17&job=${jobId}`)).text, /<input type="checkbox" id="reach-contacted" checked> Mark as Contacted<\/label> <span class="muted" id="reach-contacted-label">Contacted Nov 8<\/span>/);
     await post(hub, '/outreach/name', { job: jobId, firstName: '  Jordan  ' });
     assert.match((await hub.request(`/outreach/panel?date=2026-10-17&job=${jobId}`)).text, /id="reach-first-name" value="Jordan"/);
@@ -298,7 +298,7 @@ test('Mark as Contacted records the day, shows "Contacted Nov 8" on the card and
     assert.doesNotMatch((await hub.request('/reports/2026-10-17')).text, /data-badge="contacted"/);
     assert.equal((await post(hub, '/outreach/contacted', { job: 'not-a-job', contacted: '1' })).status, 400);
     // Settings > Cover Letters saves the limit and the switch.
-    assert.match((await hub.request('/settings?tab=letters')).text, /<article class="card" id="reach-out"><h2>Reach Out<\/h2>[\s\S]*name="connectionNoteLimit"[^>]*value="200"/);
+    assert.match((await hub.request('/settings?tab=letters')).text, /<article class="card" id="reach-out"><h2>Message to Recruiters<\/h2>[\s\S]*name="connectionNoteLimit"[^>]*value="200"/);
     assert.equal((await post(hub, '/settings/outreach', { connectionNoteLimit: '300', searchCandidates: 'on' })).status, 303);
     assert.deepEqual(JSON.parse(await fs.readFile(path.join(root, 'config.json'), 'utf8')).outreach, { connectionNoteLimit: 300, searchCandidates: true });
     assert.match(decodeURIComponent((await post(hub, '/settings/outreach', { connectionNoteLimit: '500' })).headers.location), /from 100 to 300/);

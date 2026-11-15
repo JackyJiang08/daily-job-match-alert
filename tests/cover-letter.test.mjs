@@ -434,7 +434,7 @@ test('the panel disables Generate until the material exists, and Settings collec
   const jobId = sha256('https://example.com/jobs/1').slice(0, 16);
   try {
     const report = await hub.request('GET', '/reports/2026-09-15');
-    assert.match(report.text, new RegExp(`<button type="button" class="btn secondary" data-oneclick="1" data-date="2026-09-15" data-job="${jobId}">Generate Cover Letter</button>`), 'a card without a letter carries the one-click button');
+    assert.match(report.text, new RegExp(`<button type="button" class="btn secondary" data-oneclick="1" data-date="2026-09-15" data-job="${jobId}">Generate CoverLetter</button>`), 'a card without a letter carries the one-click button');
     assert.match(report.text, /\/letters\/oneclick\.json/, 'the Reports page ships the one-click script');
     assert.doesNotMatch(report.text.split('<script>')[0], /data-badge="letter-ready"/, 'no badge in the markup (the page script mentions it)');
     const panel = await hub.request('GET', `/letters/new?date=2026-09-15&job=${jobId}`);
@@ -618,9 +618,9 @@ test('generate → edit → save renders a PDF, records the letter, marks the ca
     assert.doesNotMatch(list.text, /private\/cover-letters/);
     assert.match(list.text, /href="\/letters\/2026-09-15\/[0-9a-f]{16}\/JaneDoe_Cover_Letter_Acme\.pdf">Download PDF<\/a>/);
     const report = await hub.request('GET', '/reports/2026-09-15');
-    assert.doesNotMatch(report.text.split('<script>')[0], /data-badge="letter-/, 'no status badge: the only letter badge is "Check N details"');
-    assert.match(report.text, /<div class="actions"><a class="apply"[^>]*>Open Posting<\/a><a class="btn secondary" href="\/letters\/2026-09-15\/[0-9a-f]{16}\/JaneDoe_Cover_Letter_Acme\.pdf">Download Letter<\/a><a class="btn secondary" href="\/letters\/2026-09-15\/[0-9a-f]{16}" target="_blank" rel="noopener noreferrer">Open Letter<\/a><button type="button" class="btn secondary" data-reach="1" data-date="2026-09-15" data-job="[a-f0-9]{16}">Reach Out<\/button><button type="button" class="btn secondary mark-applied" data-apply-mark="1" data-job="[a-f0-9]{16}" aria-pressed="false"[^>]*>Mark as Applied<\/button><\/div>/, 'a saved letter gives the card its two letter buttons, then Reach Out');
-    assert.doesNotMatch(report.text.split('<script>')[0], /Generate Cover Letter/, 'no one-click button once a letter exists (the page script mentions the label)');
+    assert.doesNotMatch(report.text.split('<script>')[0], /data-badge="letter-/, 'no status badge: the only letter mark is the "Check N Details" link');
+    assert.match(report.text, /<div class="actions"><a class="apply"[^>]*>Open Posting<\/a><a class="btn secondary" href="\/letters\/2026-09-15\/[0-9a-f]{16}\/JaneDoe_Cover_Letter_Acme\.pdf">Download CoverLetter<\/a><a class="btn secondary" href="\/letters\/2026-09-15\/[0-9a-f]{16}" target="_blank" rel="noopener noreferrer">Open CoverLetter<\/a><button type="button" class="btn secondary" data-reach="1" data-date="2026-09-15" data-job="[a-f0-9]{16}">Message to Recruiters<\/button><\/div>/, 'a saved letter gives the card its two letter buttons, then Message to Recruiters');
+    assert.doesNotMatch(report.text.split('<script>')[0], /Generate CoverLetter/, 'no one-click button once a letter exists (the page script mentions the label)');
     assert.match(list.text, /<a class="btn secondary small" href="\/letters\/2026-09-15\/[0-9a-f]{16}">Open<\/a> <a class="btn secondary small" href="\/letters\/2026-09-15\/[0-9a-f]{16}\/JaneDoe_Cover_Letter_Acme\.pdf">Download PDF<\/a>/, 'the Letters row has the same two actions');
 
     const evil = await hub.form('/letters/generate', { date: '2026-09-15', job: jobId }, { origin: 'http://evil.example' });
@@ -692,7 +692,7 @@ test('one click on a card generates in the background: generating → ready with
     assert.equal(pdf.headers['content-disposition'], 'attachment; filename="JaneDoe_Cover_Letter_Acme.pdf"', 'the browser downloads it under the templated name');
     assert.equal(pdf.buffer.slice(0, 5).toString('latin1'), '%PDF-');
     const report = await hub.request('GET', '/reports/2026-09-15');
-    assert.match(report.text, /<a class="btn secondary" href="\/letters\/2026-09-15\/[0-9a-f]{16}\/JaneDoe_Cover_Letter_Acme\.pdf">Download Letter<\/a><a class="btn secondary" href="\/letters\/2026-09-15\/[0-9a-f]{16}" target="_blank" rel="noopener noreferrer">Open Letter<\/a>/);
+    assert.match(report.text, /<a class="btn secondary" href="\/letters\/2026-09-15\/[0-9a-f]{16}\/JaneDoe_Cover_Letter_Acme\.pdf">Download CoverLetter<\/a><a class="btn secondary" href="\/letters\/2026-09-15\/[0-9a-f]{16}" target="_blank" rel="noopener noreferrer">Open CoverLetter<\/a>/);
     assert.doesNotMatch(report.text.split('<script>')[0], /data-oneclick/);
     const opened = await hub.request('GET', `/letters/2026-09-15/${jobId}`);
     assert.match(opened.text, /<article class="card" id="letter-editor" data-state="editing">/);
@@ -714,7 +714,7 @@ test('one click on a card generates in the background: generating → ready with
     assert.equal(failed.busy, false);
     assert.match(failed.error, /engine exploded/);
     assert.equal(failed.result, null);
-    assert.match((await hub.request('GET', '/reports/2026-09-15')).text, new RegExp(`data-job="${secondId}">Generate Cover Letter</button>`), 'no letter was saved, so the card keeps its button');
+    assert.match((await hub.request('GET', '/reports/2026-09-15')).text, new RegExp(`data-job="${secondId}">Generate CoverLetter</button>`), 'no letter was saved, so the card keeps its button');
     failNext = false;
     assert.equal((await hub.form('/letters/oneclick', { date: '2026-09-15', job: secondId })).status, 202, 'a failed job does not hold the lock');
     assert.equal((await hub.ctx.letterJobs.settle()).state, 'ready');
@@ -1294,7 +1294,7 @@ test('Update Salutations gives two postings of one company the same short name a
     // Each card downloads its own letter: same file name, its own job ID folder.
     const report = (await hub.request('GET', '/reports/2026-09-15')).text;
     for (const id of ids) {
-      assert.ok(report.includes(`href="/letters/2026-09-15/${id}/JaneDoe_Cover_Letter_Acme.pdf">Download Letter</a>`), `card ${id}`);
+      assert.ok(report.includes(`href="/letters/2026-09-15/${id}/JaneDoe_Cover_Letter_Acme.pdf">Download CoverLetter</a>`), `card ${id}`);
       const download = await hub.request('GET', `/letters/2026-09-15/${id}/JaneDoe_Cover_Letter_Acme.pdf`);
       assert.equal(download.status, 200);
       assert.match(download.headers['content-disposition'], /filename="JaneDoe_Cover_Letter_Acme\.pdf"/);

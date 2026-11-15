@@ -39,10 +39,11 @@ export function classifyEditorNotes(notes) {
   return out;
 }
 
-// The card badge: "Check N details" with the items on hover, or null when nothing needs review or the owner has
-// marked the details checked (letter.reviewClearedAt, the letter page's "Mark Details Checked").
+// The card's "Check N Details" link (the items on hover; it opens the letter page), or null when nothing needs
+// review or the owner has marked the details checked (letter.reviewClearedAt, the letter page's "Mark Details
+// Checked").
 export function reviewBadge(notes, { cleared = false } = {}) {
   const { needsReview } = classifyEditorNotes(notes);
   if (!needsReview.length || cleared) return null;
-  return { key: 'letter-check', label: `Check ${needsReview.length} detail${needsReview.length === 1 ? '' : 's'}`, tone: 'warn', title: needsReview.join('\n') };
+  return { key: 'letter-check', label: `Check ${needsReview.length} Detail${needsReview.length === 1 ? '' : 's'}`, tone: 'warn', title: needsReview.join('\n') };
 }

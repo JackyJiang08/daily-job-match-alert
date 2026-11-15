@@ -58,5 +58,5 @@ test('the run breakdown counts scoring by engine and model, deferrals by cause, 
   assert.equal(quotaNote(handedOff, 0), 'Quota: Claude subscription weekly account limit reached. codex took over; every posting was reviewed.');
   assert.equal(quotaNote({ events: [] }, 0), null);
   const html = buildHtml([], { date: '2026-10-07', resumeTracks: [], warnings: [], quotaNote: quotaNote(deferred, 96) });
-  assert.match(html, /<header class="masthead"><h1>[^<]*<\/h1><p class="sub">[^<]*<\/p><p class="sub quota-note" data-quota-note>Quota: Claude subscription weekly account limit reached\. 96 posting\(s\) were not reviewed because of it and wait for the next run; no engine took over\.<\/p><\/header>/);
+  assert.match(html, /<\/form>\s*<p class="quota-note" data-quota-note>Quota: Claude subscription weekly account limit reached\. 96 posting\(s\) were not reviewed because of it and wait for the next run; no engine took over\.<\/p>/, 'the quota line sits right under the top row');
 });

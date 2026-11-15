@@ -155,7 +155,8 @@ test('end to end: the 18:00 run (00:00 UTC the next day) and a later Run Now wri
     assert.deepEqual(payload.reviewed.map(job => job.title).sort(), ['Data Analyst, New Grad', 'Legacy Analyst']);
     await assert.rejects(fs.access(path.join(root, 'state', 'report-payload-2026-11-09.json')), 'no next-day payload');
     const html = await fs.readFile(path.join(root, 'output', '2026-11-08', 'Daily Job Match Alert - 2026-11-08.html'), 'utf8');
-    assert.match(html, /<header class="masthead"><h1>November 8, 2026<\/h1><p class="sub">\d+ Match(?:es)? · Ran 6:0\d PM<\/p><\/header>/);
+    assert.match(html, /<span class="bar-date">Sun, Nov 8<\/span><span class="sep">·<\/span><span class="count" id="count">\d+ Jobs?<\/span>/);
+    assert.match(html, /<dt>Generated<\/dt><dd>Nov 8, 2026, 6:0\d PM<\/dd>|<dt>Updates Today<\/dt><dd>[^<]*6:0\d PM<\/dd>/, 'the run time is in Run Details');
 
     // Run Now later that evening (21:30, 03:30 UTC Nov 9): the same day, merged; nothing is lost.
     const second = [...first, greenhouseJob(2, 'Junior Data Scientist', '2026-11-09T03:00:00Z')];
@@ -164,7 +165,7 @@ test('end to end: the 18:00 run (00:00 UTC the next day) and a later Run Now wri
     assert.equal(payload.meta.runsToday, 3);
     assert.deepEqual(payload.reviewed.map(job => job.title).sort(), ['Data Analyst, New Grad', 'Junior Data Scientist', 'Legacy Analyst']);
     assert.deepEqual((await fs.readdir(path.join(root, 'output'))).filter(name => /^\d{4}-/.test(name)), ['2026-11-08']);
-    assert.match(await fs.readFile(path.join(root, 'output', '2026-11-08', 'Daily Job Match Alert - 2026-11-08.html'), 'utf8'), /Ran 9:3\d PM/);
+    assert.match(await fs.readFile(path.join(root, 'output', '2026-11-08', 'Daily Job Match Alert - 2026-11-08.html'), 'utf8'), /<dt>Updates Today<\/dt><dd>Daily update #3 · last updated Nov 8, 2026, 9:3\d PM<\/dd>/);
 
     // The hub's index and date list hold Nov 8 once, and no Nov 9.
     const index = JSON.parse(await fs.readFile(path.join(root, 'state', 'reports-index.json'), 'utf8'));
@@ -190,9 +191,11 @@ test('the hub lists old next-day folders and new same-day folders side by side, 
     assert.match(list, /<a href="\/reports\/2026-10-18" class="[^"]*" title="2026-10-18 \(today\)">[\s\S]*?data-tag="today"/);
     assert.doesNotMatch(list, /data-tag="tomorrow"/);
     const day = (await hub.request('/reports/2026-10-18')).text;
-    assert.match(day, /<h1>October 18, 2026<\/h1><p class="sub">1 Match · Ran 6:02 PM<\/p>/);
+    assert.match(day, /<span class="bar-date">Sun, Oct 18<\/span><span class="sep">·<\/span><span class="count" id="count">1 Job<\/span>/);
+    assert.match(day, /<dt>(?:Generated|Updates Today)<\/dt><dd>[^<]*Oct 18, 2026, 6:02 PM<\/dd>/);
     const old = (await hub.request('/reports/2026-10-16')).text;
-    assert.match(old, /<p class="sub">No Matches · Ran Oct 15, 8:00 PM<\/p>/, 'an old next-day folder keeps the run\'s date');
+    assert.match(old, /<span class="bar-date">Fri, Oct 16<\/span><span class="sep">·<\/span><span class="count" id="count">0 Jobs<\/span>/);
+    assert.match(old, /<dt>(?:Generated|Updates Today)<\/dt><dd>[^<]*Oct 15, 2026, 8:00 PM<\/dd>/, 'an old next-day folder keeps the run\'s date');
   } finally {
     await hub.close();
     await fs.rm(root, { recursive: true, force: true });

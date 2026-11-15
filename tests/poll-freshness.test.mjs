@@ -162,7 +162,7 @@ function card(overrides = {}) {
   return { source: 'Workday · Example Corp', company: 'Example Corp', title: 'Data Analyst I', location: 'Chicago, IL', roleType: 'entry_level', url: 'https://example.com/1', scores: { data: 81 }, bestScore: 81, recommendedTrack: 'data', reasons: ['SQL'], gaps: [], matchLevel: 'high', semanticReviewed: true, ...overrides };
 }
 
-test('carried-over postings render in their own "Carried Over From Yesterday" group with their first-seen time; the main list keeps tonight\'s window', () => {
+test('carried-over postings render in their own "From Yesterday" group with their first-seen time; the main list keeps tonight\'s window', () => {
   const meta = { date: '2026-10-10', timeZone: ZONE, resumeTracks: TRACKS, warnings: [], completedAt: TONIGHT.toISOString() };
   const jobs = [
     card({ url: 'https://example.com/new', postedAt: '2026-10-08T12:00:00.000Z', postedAtPrecision: 'date', freshnessBasis: NEW_SINCE_LAST_POLL, firstSeenAt: TONIGHT.toISOString(), previousPollAt: LAST_NIGHT.toISOString() }),
@@ -179,7 +179,7 @@ test('carried-over postings render in their own "Carried Over From Yesterday" gr
 
   const html = buildHtml(jobs, meta);
   const main = html.indexOf('<section class="jobs" id="jobs">');
-  const group = html.indexOf('<h2 class="group-title" id="carried-over">Carried Over From Yesterday <span class="group-count">(1)</span></h2>');
+  const group = html.indexOf('<h2 class="group-title" id="carried-over">From Yesterday <span class="group-count">(1)</span></h2>');
   const carried = html.indexOf('<section class="jobs carried" id="jobs-carried">');
   assert.ok(main >= 0 && group > main && carried > group, 'main list, then the group heading, then the carried cards');
   assert.ok(html.indexOf('https://example.com/old') > carried, 'the carried card sits in its group');
@@ -188,7 +188,7 @@ test('carried-over postings render in their own "Carried Over From Yesterday" gr
   // Only carried postings: the empty main list is not shown at all; the group is.
   const onlyCarried = buildHtml([jobs[1]], meta);
   assert.doesNotMatch(onlyCarried, /No new postings cleared the configured threshold|id="jobs"/);
-  assert.match(onlyCarried, /Carried Over From Yesterday/);
+  assert.match(onlyCarried, /From Yesterday/);
 });
 
 test('Run Details reports the freshness rule, the postings left out, carried-over counts, and corrected future times', () => {
@@ -341,7 +341,7 @@ test('end to end: night one judges by dates and defers one posting; night two ca
     const html = await fs.readFile(path.join(root, 'output', '2026-10-09', 'Daily Job Match Alert - 2026-10-09.html'), 'utf8');
     assert.match(html, /<dt>Freshness<\/dt><dd>1 new since last poll · 1 board\(s\) compared with the previous poll, 0 judged by posting dates · 1 already on the board at the last poll left out · 1 carried over · 0 future posting time\(s\) corrected/);
     assert.ok(second.matches.some(job => job.carriedOver), 'the carried posting is a match at minimum score 0');
-    assert.match(html, /<h2 class="group-title" id="carried-over">Carried Over From Yesterday/);
+    assert.match(html, /<h2 class="group-title" id="carried-over">From Yesterday/);
     const snapshots = JSON.parse(await fs.readFile(path.join(root, 'state', 'ats-snapshots.json'), 'utf8'));
     assert.equal(snapshots.boards['greenhouse:examplecorp'].count, 4);
     assert.doesNotMatch(JSON.stringify(JSON.parse(await fs.readFile(path.join(root, 'state', 'ats-boards.json'), 'utf8'))), /"ids"/, 'the registry the hub reads stays free of snapshot ids');
@@ -378,7 +378,7 @@ test('with carried-over postings switched off, nothing is carried: the budget le
   }
 });
 
-test('the run records the strict 24-hour window setting (on by default), and Run Details says so; the header does not', async () => {
+test('the run records no strict-window setting any more; a strict24HourWindow left in config.json is ignored and date-only postings stay in the main list', async () => {
   const { root, configPath } = await prepareProject();
   const silence = [console.log, console.warn, console.error];
   console.log = console.warn = console.error = () => {};
@@ -387,18 +387,19 @@ test('the run records the strict 24-hour window setting (on by default), and Run
     await main({ argv: ['node', 'index.mjs', '--config', configPath, '--now', LAST_NIGHT.toISOString()], atsFetchImpl: async () => jsonResponse({ jobs }), autoLetters: false });
     const payloadFile = path.join(root, 'state', 'report-payload-2026-10-08.json');
     const htmlFile = path.join(root, 'output', '2026-10-08', 'Daily Job Match Alert - 2026-10-08.html');
-    assert.deepEqual(JSON.parse(await fs.readFile(payloadFile, 'utf8')).meta.strictWindow, { enabled: true, hours: 24 }, 'on by default');
+    assert.equal(JSON.parse(await fs.readFile(payloadFile, 'utf8')).meta.strictWindow, undefined, 'no setting recorded');
     let html = await fs.readFile(htmlFile, 'utf8');
-    assert.match(html, /<dt>Strict 24-Hour Window<\/dt><dd>On · Main List \(1\)<\/dd>/, 'empty groups are left out of the line');
-    assert.doesNotMatch(html, /data-window-note|<p class="sub">[^<]*(?:posted within|Strict)/);
+    assert.doesNotMatch(html, /Strict 24-Hour Window|id="date-only"|Date Only, May Be Older/);
+    assert.match(html, /<dt>Posting Window<\/dt><dd>Main List: posted within/);
     const config = JSON.parse(await fs.readFile(configPath, 'utf8'));
     config.semanticMatching.strict24HourWindow = false;
     await fs.writeFile(configPath, JSON.stringify(config));
     await fs.rm(path.join(root, 'state', 'state.json'), { force: true });
     await main({ argv: ['node', 'index.mjs', '--config', configPath, '--now', LAST_NIGHT.toISOString()], atsFetchImpl: async () => jsonResponse({ jobs }), autoLetters: false });
-    assert.deepEqual(JSON.parse(await fs.readFile(payloadFile, 'utf8')).meta.strictWindow, { enabled: false, hours: 24 }, 'an explicit false turns it off');
+    assert.equal(JSON.parse(await fs.readFile(payloadFile, 'utf8')).meta.strictWindow, undefined, 'an explicit false in config.json is ignored without an error');
     html = await fs.readFile(htmlFile, 'utf8');
-    assert.match(html, /<dt>Strict 24-Hour Window<\/dt><dd>Off · Main List \(1\)<\/dd>/);
+    assert.doesNotMatch(html, /Strict 24-Hour Window/);
+    assert.match(html, /<section class="jobs" id="jobs">/);
   } finally {
     [console.log, console.warn, console.error] = silence;
     await fs.rm(root, { recursive: true, force: true });

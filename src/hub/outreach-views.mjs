@@ -1,8 +1,8 @@
-// The Reach Out panel: a drawer on the right of the Reports page, filled from GET /outreach/panel. In order:
+// The Message to Recruiters panel: a drawer on the right of the Reports page, filled from GET /outreach/panel. In order:
 // contacts the JD names, the search links (new tabs), search candidates (only when switched on and a key is
 // set), the first-name box, the invitation note (live character count, Copy), the follow-up message (Copy),
 // the recommended resume, and Mark as Contacted. Nothing here requests linkedin.com; the links are opened by
-// the owner. The script also drives the cards' Mark as Applied buttons.
+// the owner.
 import { htmlEscape } from '../utils.mjs';
 import { CANDIDATES_NOTE } from '../outreach/candidates.mjs';
 import { FIRST_NAME_PLACEHOLDER } from '../outreach/messages.mjs';
@@ -45,7 +45,7 @@ export function outreachPanel(view) {
     ? `<a class="btn secondary small" id="reach-resume" href="/outreach/resume?date=${htmlEscape(date)}&amp;job=${htmlEscape(jobId)}" download="${htmlEscape(resume.fileName)}">Download ${htmlEscape(resume.label)} Resume</a> <span class="muted">${htmlEscape(resume.fileName)}</span>`
     : `<span class="muted">${htmlEscape(resume?.reason || 'No resume PDF configured for this track')}</span>`;
   return `<div class="reach-panel" id="reach-panel" data-date="${htmlEscape(date)}" data-job="${htmlEscape(jobId)}" data-placeholder="${htmlEscape(FIRST_NAME_PLACEHOLDER)}">
-  <div class="reach-head"><h2>Reach Out</h2><button class="btn secondary small" type="button" data-reach-close aria-label="Close">Close</button></div>
+  <div class="reach-head"><h2>Message to Recruiters</h2><button class="btn secondary small" type="button" data-reach-close aria-label="Close">Close</button></div>
   <p class="reach-role"><strong>${htmlEscape(job.title || '')}</strong><br><span class="muted">${htmlEscape(company)}</span></p>
   ${contactsSection(contacts)}
   <section class="reach-section" id="reach-search"><h3>Find a Recruiter</h3><div class="reach-links">${linkButtons}</div><p class="muted">Opens in a new tab; the hub itself never visits LinkedIn.</p></section>
@@ -61,12 +61,12 @@ export function outreachPanel(view) {
 // Settings > Cover Letters: the invitation-note limit and the optional candidate search.
 export function outreachSettingsCard(settings = {}) {
   const limit = Number(settings.connectionNoteLimit) || 200;
-  return `<article class="card" id="reach-out"><h2>Reach Out</h2>
+  return `<article class="card" id="reach-out"><h2>Message to Recruiters</h2>
     <form method="post" action="/settings/outreach">
       <label class="field"><span>Connection Note Limit (characters; LinkedIn allows 200 on a free account, 300 on Premium)</span><input type="number" name="connectionNoteLimit" class="control-input" min="100" max="300" step="1" value="${limit}"></label>
       <div class="field"><label class="check"><input type="checkbox" name="searchCandidates"${settings.searchCandidates === true ? ' checked' : ''}> Search Candidates</label><span class="muted">Off by default. Uses the search discovery provider and key in private/search.json and its monthly cap: one query per posting, up to three profiles from the search results only. Without a key nothing happens.</span></div>
       <button class="btn" type="submit">Save</button>
-      <p class="form-foot">The note and the follow-up message are written with each cover letter; a posting without a letter can get them from its Reach Out panel.</p>
+      <p class="form-foot">The note and the follow-up message are written with each cover letter; a posting without a letter can get them from its Message to Recruiters panel.</p>
     </form></article>`;
 }
 
@@ -85,8 +85,8 @@ export const OUTREACH_STYLES = `
 .reach-warning{margin:0 0 var(--space-2);padding:var(--space-2) var(--space-3);border-radius:var(--radius-sm);background:var(--warn-bg);color:var(--warn-ink);font-size:var(--fs-meta)}
 `;
 
-// The drawer: opened by a card's Reach Out button, filled from the panel route; every control in it is driven
-// by delegation, so a re-fill needs no new listeners.
+// The drawer: opened by a card's Message to Recruiters button, filled from the panel route; every control in it
+// is driven by delegation, so a re-fill needs no new listeners.
 export const OUTREACH_SCRIPT = `
 (function () {
   var drawer = document.getElementById('reach-drawer');
@@ -133,27 +133,12 @@ export const OUTREACH_SCRIPT = `
     card.setAttribute('data-contacted', label ? '1' : '0');
     document.dispatchEvent(new CustomEvent('report-cards-changed'));
     if (!label) return;
-    if (!badges) { badges = document.createElement('div'); badges.className = 'badges'; card.querySelector('.job-body').insertBefore(badges, card.querySelector('.actions')); }
+    if (!badges) { var head = card.querySelector('.job-head'); badges = document.createElement('div'); badges.className = 'badges'; head.parentNode.insertBefore(badges, head.nextSibling); }
     var badge = document.createElement('span'); badge.className = 'badge'; badge.setAttribute('data-badge', 'contacted'); badge.textContent = label; badges.appendChild(badge);
-  }
-  // Mark as Applied on a card: toggles the mark (POST /outreach/applied) and updates the button in place.
-  function markApplied(button) {
-    var on = button.getAttribute('aria-pressed') !== 'true';
-    button.disabled = true;
-    post('/outreach/applied', { job: button.getAttribute('data-job'), applied: on ? '1' : '0' }).then(function (result) {
-      button.disabled = false;
-      button.setAttribute('aria-pressed', result.label ? 'true' : 'false');
-      button.textContent = result.label || 'Mark as Applied';
-      var card = button.closest('.job');
-      if (card) card.setAttribute('data-applied', result.label ? '1' : '0');
-      document.dispatchEvent(new CustomEvent('report-cards-changed'));
-    }).catch(function (error) { button.disabled = false; button.title = error.message; });
   }
   document.addEventListener('click', function (event) {
     var reach = event.target.closest && event.target.closest('[data-reach]');
     if (reach) { event.preventDefault(); open(reach); return; }
-    var mark = event.target.closest && event.target.closest('[data-apply-mark]');
-    if (mark) { event.preventDefault(); markApplied(mark); return; }
     if (!drawer.contains(event.target)) return;
     var p = panel();
     if (event.target.closest('[data-reach-close]')) { drawer.hidden = true; return; }

@@ -480,7 +480,7 @@ ${letterPlainText.toString()}
 `;
 
 // Drives the one-click buttons on job cards: start a background generation, poll its state, download
-// the PDF when it is ready, and swap the button for Download Letter and Open Letter. One letter at a time:
+// the PDF when it is ready, and swap the button for Download CoverLetter and Open CoverLetter. One letter at a time:
 // every other button is disabled while one is generating, on this page or another.
 export const ONECLICK_SCRIPT = `
 (function () {
@@ -517,19 +517,19 @@ export const ONECLICK_SCRIPT = `
   }
   function markReady(button, result) {
     button.dataset.state = 'ready';
-    var open = document.createElement('a'); open.className = 'btn secondary'; open.href = result.openUrl; open.target = '_blank'; open.rel = 'noopener noreferrer'; open.textContent = 'Open Letter';
-    var download = document.createElement('a'); download.className = 'btn secondary'; download.href = result.downloadUrl; download.textContent = 'Download Letter';
+    var open = document.createElement('a'); open.className = 'btn secondary'; open.href = result.openUrl; open.target = '_blank'; open.rel = 'noopener noreferrer'; open.textContent = 'Open CoverLetter';
+    var download = document.createElement('a'); download.className = 'btn secondary'; download.href = result.downloadUrl; download.textContent = 'Download CoverLetter';
     button.replaceWith(download, open);
     buttons = buttons.filter(function (item) { return item !== button; });
     var card = open.closest('.job');
-    var badges = card && card.querySelector('.badges');
-    if (card && !badges) { badges = document.createElement('div'); badges.className = 'badges'; card.querySelector('.job-body').insertBefore(badges, card.querySelector('.actions')); }
-    // Only a letter with details to confirm gets a badge: "Check N details", the items on hover.
-    if (badges && result.checkBadge && !badges.querySelector('[data-badge="letter-check"]')) { var badge = document.createElement('span'); badge.className = 'badge badge-warn'; badge.setAttribute('data-badge', 'letter-check'); badge.textContent = result.checkBadge.label; badge.title = result.checkBadge.title; badges.appendChild(badge); }
+    var meta = card && card.querySelector('.job-meta');
+    // Only a letter with details to confirm gets "Check N Details" at the end of the posting line (a link to the
+    // letter page, the items on hover).
+    if (meta && result.checkBadge && !meta.querySelector('[data-badge="letter-check"]')) { var check = document.createElement('a'); check.className = 'badge badge-warn job-check'; check.setAttribute('data-badge', 'letter-check'); check.href = result.openUrl; check.textContent = result.checkBadge.label; check.title = result.checkBadge.title; meta.appendChild(check); }
     var anchor = document.createElement('a'); anchor.href = result.downloadUrl; anchor.download = ''; anchor.hidden = true; document.body.appendChild(anchor); anchor.click(); anchor.remove();
   }
   function markFailed(button, message, quota) {
-    button.dataset.state = ''; button.disabled = false; button.textContent = 'Generate Cover Letter'; button.title = '';
+    button.dataset.state = ''; button.disabled = false; button.textContent = 'Generate CoverLetter'; button.title = '';
     // message is already a humanized line from the hub; quota carries the reset and the Codex option.
     noteOn(button, (quota && quota.message ? quota.message : (message || 'Generation failed (unknown error); details in the hub log')) + (quota && !quota.codexAvailable && quota.kind && quota.kind !== 'auth_expired' ? '. Try again after the reset, or sign in to Codex to generate with ChatGPT.' : ''));
     var actions = button.closest('.actions');

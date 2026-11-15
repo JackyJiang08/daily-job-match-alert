@@ -479,7 +479,7 @@ export async function saveLetter(ctx, { date, jobId, trackId, company, paragraph
 }
 
 // "Mark Details Checked" on the letter page: the owner has looked at every needs-review note, so the card loses its
-// "Check N details" badge (the notes stay on the letter). A new save of the letter starts over.
+// "Check N Details" link (the notes stay on the letter). A new save of the letter starts over.
 export async function clearLetterReview(ctx, { date, slug }) {
   const existing = await ctx.letterStore.loadLetter(date, slug);
   if (!existing) throw new HubInputError('Letter not found');

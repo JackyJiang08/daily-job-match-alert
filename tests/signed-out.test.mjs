@@ -248,8 +248,8 @@ test('the hub shows an older day that mixed unreviewed postings into its matches
   const hub = await startReportHub(root);
   try {
     const page = await hub.request('/reports/2026-10-17');
-    assert.match(page.text, /<p class="sub">1 Match · /);
-    assert.match(page.text, /<span>Sat, Oct 17<\/span><span class="n">1 match<\/span>/, 'the date list too');
+    assert.match(page.text, /<span class="count" id="count">1 Job<\/span>/, 'the reviewed count alone in the top row');
+    assert.match(page.text, /<span>Sat, Oct 17<\/span><span class="n" title="1 match">1<\/span>/, 'the date list too');
     assert.match(page.text, /<details class="run" id="not-reviewed"><summary>Not Reviewed \(Engine Unavailable\) <span class="group-count">\(2\)<\/span>/);
     assert.match(page.text, /data-banner="not-reviewed"[^>]*>2 postings were not reviewed by a model/);
     // Example Corp 1 has its letter; the two unreviewed postings are not offered to Generate Missing Letters.
