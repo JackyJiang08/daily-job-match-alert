@@ -41,11 +41,21 @@ function fakeFetch(routes) {
 
 // ------------------------------------------------------------------------------------------ extraction
 
-test('completeness: at least the minimum, never a meta tag, never a text cut with an ellipsis', () => {
+test('completeness: at least the minimum, never a meta tag; an ellipsis only cuts a short JSON-LD or list summary', () => {
   assert.equal(isCompleteText('x'.repeat(200), 200), true);
   assert.equal(isCompleteText('x'.repeat(199), 200), false);
-  assert.equal(isCompleteText(`${'x'.repeat(300)}…`, 200), false);
-  assert.equal(isCompleteText(`${'x'.repeat(300)}...  `, 200), false);
+  assert.equal(isCompleteText(`${'x'.repeat(300)}…`, 200), false, 'no source: the summary rule');
+  assert.equal(isCompleteText(`${'x'.repeat(300)}...  `, 200, 'json_ld'), false);
+  assert.equal(isCompleteText(`${'x'.repeat(300)}…`, 200, 'list'), false);
+  assert.equal(isCompleteText(`${'x'.repeat(1500)}…`, 200, 'json_ld'), true, '1,500 characters or more: the ellipsis is part of the text');
+  for (const source of ['ats_api', 'page_body', 'embedded_json']) {
+    assert.equal(isCompleteText(`${'x'.repeat(200)}…`, 200, source), true, `${source}: length alone`);
+    assert.equal(isCompleteText(`${'x'.repeat(199)}`, 200, source), false, `${source}: still the minimum`);
+  }
+  assert.equal(isCompleteText('x'.repeat(5000), 200, 'meta'), false, 'a meta tag is never complete');
+  assert.deepEqual(descriptionStatus({ description: `${'x'.repeat(5800)}…`, enrichment: 'greenhouse_api' }, { minimum: 200 }), { descriptionComplete: true, descriptionSource: 'ats_api' });
+  assert.deepEqual(descriptionStatus({ description: `${'x'.repeat(300)}...`, enrichment: 'json_ld_jobposting' }, { minimum: 200 }), { descriptionComplete: false, descriptionSource: 'json_ld' });
+  assert.deepEqual(descriptionStatus({ description: `${'x'.repeat(300)}…`, descriptionSource: 'page_body' }, { minimum: 200 }), { descriptionComplete: true, descriptionSource: 'page_body' });
   assert.deepEqual(descriptionStatus({ description: 'x'.repeat(300), enrichment: 'html_metadata' }, { minimum: 200 }), { descriptionComplete: false, descriptionSource: 'meta' });
   assert.deepEqual(descriptionStatus({ description: 'x'.repeat(300), enrichment: 'ats_api' }, { minimum: 200 }), { descriptionComplete: true, descriptionSource: 'ats_api' });
   assert.deepEqual(descriptionStatus({ description: 'x'.repeat(300), enrichment: 'json_ld_jobposting' }), { descriptionComplete: true, descriptionSource: 'json_ld' });
@@ -120,7 +130,7 @@ test('the summary: count and the first hosts by count, failed fetches left out',
   const summary = incompleteDescriptionSummary(jobs, { minimum: 200 });
   assert.equal(summary.count, 4);
   assert.deepEqual(summary.hosts, [{ host: 'alpha.example', count: 3 }, { host: 'beta.example', count: 1 }]);
-  assert.match(summary.message, /^4 posting\(s\) have an incomplete Job Description \(a page summary, fewer than 200 characters, or cut with an ellipsis\); their cards link to the posting page instead: alpha\.example \(3\), beta\.example \(1\)$/);
+  assert.match(summary.message, /^4 posting\(s\) have an incomplete Job Description \(a page summary, fewer than 200 characters, or a short summary cut with an ellipsis\); their cards link to the posting page instead: alpha\.example \(3\), beta\.example \(1\)$/);
   const many = incompleteDescriptionSummary(Array.from({ length: 10 }, (_, i) => ({ url: `https://h${i}.example/`, descriptionComplete: false })));
   assert.equal(many.hosts.length, 8);
   assert.match(many.message, /, and 2 more host\(s\)$/);
@@ -234,8 +244,9 @@ test('a short link that redirects into Greenhouse: the board API is asked for th
   const gone = await enrichJob(seed('https://go.example.link/1xI'), { minimumDescriptionCharacters: 200 }, closed.fetchImpl);
   assert.deepEqual(closed.calls, ['https://go.example.link/1xI', api, final], 'API for the final URL, then the landing page once more by its own address');
   assert.equal(gone.descriptionComplete, false);
-  assert.equal(gone.descriptionSource, 'meta');
-  assert.equal(gone.description, 'Boston, Massachusetts, United States');
+  // The page's own words (title, location, "no longer open") are the partial body and beat the meta line.
+  assert.equal(gone.descriptionSource, 'page_body');
+  assert.match(gone.description, /^Data Science Intern Boston, Massachusetts, United States The job you are looking for is no longer open/);
 });
 
 test('a redirect into SmartRecruiters asks the posting API for the final URL; an API answering HTML gives way to the page', async () => {
@@ -330,8 +341,10 @@ test('every fixture page gives the outcome its manifest names, with the minimum 
     const job = await enrichJob(seed(url), { minimumDescriptionCharacters: 200 }, fetchImpl);
     if (entry.expect === 'incomplete') {
       assert.equal(job.descriptionComplete, false, entry.file);
-      assert.ok(job.descriptionSource === 'meta' || job.descriptionSource === null, `${entry.file}: ${job.descriptionSource}`);
-      assert.equal(job.descriptionHtml, undefined, entry.file);
+      assert.ok(job.description.length < 200, `${entry.file}: ${job.description.length} characters`);
+      // A shell's crumb ("Loading…") never stands in for the meta summary; a page's own closing words may.
+      if (job.descriptionSource === 'page_body') assert.ok(job.description.length >= 50 && job.descriptionHtml === sanitizeJobHtml(job.descriptionHtml), entry.file);
+      else assert.ok((job.descriptionSource === 'meta' || job.descriptionSource === null) && job.descriptionHtml === undefined, `${entry.file}: ${job.descriptionSource}`);
     } else {
       assert.equal(job.descriptionSource, entry.expect, entry.file);
       assert.equal(job.descriptionComplete, true, entry.file);
@@ -343,6 +356,69 @@ test('every fixture page gives the outcome its manifest names, with the minimum 
       else assert.equal(job.descriptionContainer, undefined, entry.file);
     }
   }
+});
+
+test('the ellipsis rule by source: a long ATS text ending in … is complete and shown whole, a short JSON-LD one is not', async () => {
+  const api = 'https://boards-api.greenhouse.io/v1/boards/examplecorp/jobs/5150';
+  const url = 'https://job-boards.greenhouse.io/examplecorp/jobs/5150';
+  const long = `<p>${'We analyze product data and ship models to production. '.repeat(100)}</p><p>Applications are reviewed on a rolling basis…</p>`;
+  const { fetchImpl, calls } = fakeFetch({ [api]: json({ title: 'Data Scientist, New Grad', company_name: 'Example Corp', location: { name: 'Austin, Texas' }, updated_at: '2026-11-14T15:00:00Z', content: long.replace(/</g, '&lt;').replace(/>/g, '&gt;') }) });
+  const job = await enrichJob(seed(url), { minimumDescriptionCharacters: 200 }, fetchImpl);
+  assert.deepEqual(calls, [api]);
+  assert.ok(job.description.length > 5000 && /…$/.test(job.description), 'over 5,000 characters, ending in an ellipsis');
+  assert.equal(job.descriptionSource, 'ats_api');
+  assert.equal(job.descriptionComplete, true);
+  const card = fixtureJob(1, { description: job.description, descriptionHtml: job.descriptionHtml, descriptionComplete: job.descriptionComplete, descriptionSource: job.descriptionSource, url });
+  const rendered = buildHtml([card], fixturePayload('2026-11-15', [card]).meta);
+  assert.match(rendered, /<details class="jd"><summary>Job Description<\/summary><div class="jd-body"><p>We analyze product data/, 'the full JD is on the card');
+  assert.ok(rendered.includes('rolling basis…</p></div></details>'), 'whole, ellipsis included');
+  assert.doesNotMatch(rendered, new RegExp(INCOMPLETE_DESCRIPTION_LABEL));
+
+  // A 300-character JSON-LD description cut with "..." on a page with no body: still incomplete.
+  const summary = `${'Join our analytics team to build dashboards. '.repeat(6).trim()}...`;
+  assert.ok(summary.length >= 250 && summary.length <= 320);
+  const shell = `<html><head><title>Analyst</title><script type="application/ld+json">${JSON.stringify({ '@type': 'JobPosting', title: 'Analyst', description: summary, hiringOrganization: { name: 'Example Corp' }, jobLocation: { address: { addressLocality: 'Austin', addressRegion: 'TX', addressCountry: 'US' } } })}</script></head><body><div id="app"></div></body></html>`;
+  const jsonLd = fakeFetch({ 'https://careers.example-corp.com/jobs/9': html(shell) });
+  const cut = await enrichJob(seed('https://careers.example-corp.com/jobs/9'), { minimumDescriptionCharacters: 200 }, jsonLd.fetchImpl);
+  assert.equal(cut.descriptionSource, 'json_ld');
+  assert.equal(cut.descriptionComplete, false);
+  assert.equal(cut.description, summary);
+});
+
+test('with nothing complete, a short page body is kept over an empty answer and over the meta line, marked incomplete', async () => {
+  const body = `<p>${'Analyst role. '.repeat(10).trim()}</p>`;
+  assert.ok(cleanDescriptionHtml(body).length < 200);
+  const text = 'Analyst role. '.repeat(10).trim();
+  assert.ok(text.length >= 100 && text.length < 200, `${text.length} characters`);
+  const noMeta = fakeFetch({ 'https://careers.example-corp.com/jobs/150': html(`<html><head><title>Analyst</title></head><body><nav><a href="/">Home</a></nav><main>${body}</main></body></html>`) });
+  const job = await enrichJob(seed('https://careers.example-corp.com/jobs/150'), { minimumDescriptionCharacters: 200 }, noMeta.fetchImpl);
+  assert.equal(job.description, text, 'the body\'s text, not an empty string');
+  assert.equal(job.descriptionSource, 'page_body');
+  assert.equal(job.descriptionComplete, false);
+  assert.equal(job.descriptionHtml, `<p>${text}</p>`);
+  assert.equal(job.enrichment, 'html_page');
+  // The same body beside a meta summary: the body wins, since the meta tag comes last.
+  const withMeta = fakeFetch({ 'https://careers.example-corp.com/jobs/150': html(`<html><head><title>Analyst</title><meta name="description" content="${'Summary line. '.repeat(12)}"></head><body><main>${body}</main></body></html>`) });
+  const beatsMeta = await enrichJob(seed('https://careers.example-corp.com/jobs/150'), { minimumDescriptionCharacters: 200 }, withMeta.fetchImpl);
+  assert.equal(beatsMeta.descriptionSource, 'page_body');
+  assert.equal(beatsMeta.description, text);
+  // A crumb of a body (a loading placeholder) is no partial: the meta summary stays.
+  const crumb = fakeFetch({ 'https://careers.example-corp.com/jobs/150': html(`<html><head><meta name="description" content="${'Summary line. '.repeat(12)}"></head><body><main><p>Loading…</p></main></body></html>`) });
+  const placeholder = await enrichJob(seed('https://careers.example-corp.com/jobs/150'), { minimumDescriptionCharacters: 200 }, crumb.fetchImpl);
+  assert.equal(placeholder.descriptionSource, 'meta');
+  assert.equal(placeholder.descriptionComplete, false);
+  assert.match(placeholder.description, /^Summary line\./);
+  // pickDescription itself: the longest partial of JSON-LD, list and body is taken.
+  const picked = pickDescription({ body: `<html><body><main>${body}</main></body></html>`, posting: { description: 'Short JSON-LD.' }, originalJob: { description: 'Shorter list.' }, minimum: 200 });
+  assert.equal(picked.source, 'page_body');
+  assert.equal(picked.text, text);
+});
+
+test('ashbyApiUrl decodes the organisation segment before checking it and encodes it again in the API address', () => {
+  assert.deepEqual(ashbyApiUrl('https://jobs.ashbyhq.com/Acme%20Co/0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d'), { apiUrl: 'https://api.ashbyhq.com/posting-api/job-board/Acme%20Co', id: '0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d' });
+  assert.deepEqual(ashbyApiUrl('https://jobs.ashbyhq.com/Acme%20Co/0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d/application'), { apiUrl: 'https://api.ashbyhq.com/posting-api/job-board/Acme%20Co', id: '0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d' });
+  assert.equal(ashbyApiUrl('https://jobs.ashbyhq.com/Acme%2FCo/0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d'), null, 'a slash inside the organisation is refused');
+  assert.equal(ashbyApiUrl('https://jobs.ashbyhq.com/%E0%A4%A/0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d'), null, 'a malformed escape is refused');
 });
 
 // ------------------------------------------------------------------------------------------ the report

@@ -8,9 +8,10 @@
 //     and style are gone;
 //   - extractEmbeddedDescription(html, { minimum }): the longest description field with markup or line breaks in
 //     the page's embedded JSON (__NEXT_DATA__, window.__INITIAL_STATE__ and the like);
-//   - isCompleteText(text, minimum) and descriptionStatus(job, { minimum }): a description is complete when it
-//     did not come from a meta tag, has at least `minimum` characters (config.minimumDescriptionCharacters), and
-//     does not end in "…" or "...". Every posting carries descriptionComplete and descriptionSource (ats_api,
+//   - isCompleteText(text, minimum, source) and descriptionStatus(job, { minimum }): a description is complete
+//     when it did not come from a meta tag, has at least `minimum` characters (config.minimumDescriptionCharacters)
+//     and, for a JSON-LD or list text shorter than 1,500 characters, does not end in "…" or "..." (an ATS API,
+//     page-body or embedded-JSON text is judged by length alone). Every posting carries descriptionComplete and descriptionSource (ats_api,
 //     json_ld, page_body, embedded_json, list, meta, or null when there is no text at all);
 //   - incompleteDescriptionSummary(jobs): the run's info warning (count and the first hosts).
 // Nothing here fetches: enrich.mjs feeds it the page it already has. The extracted markup goes through
@@ -29,9 +30,19 @@ export function endsTruncated(text) {
   return ELLIPSIS_END.test(String(text || '').trim());
 }
 
-export function isCompleteText(text, minimum = DEFAULT_MINIMUM_DESCRIPTION_CHARACTERS) {
+// Whether a description is complete depends on where it came from (2026-11-15; a 5,800-character Greenhouse
+// API text that happened to end in "…" used to be hidden). An ATS API answer, the page body and the page's
+// embedded JSON are judged by length alone; a JSON-LD or list text is a summary when it is shorter than
+// ELLIPSIS_CHECK_CHARACTERS and ends in an ellipsis; a meta tag is never complete. Without a source the
+// summary rule applies.
+export const ELLIPSIS_CHECK_CHARACTERS = 1500;
+const LENGTH_ONLY_SOURCES = new Set(['ats_api', 'page_body', 'embedded_json']);
+
+export function isCompleteText(text, minimum = DEFAULT_MINIMUM_DESCRIPTION_CHARACTERS, source = undefined) {
   const value = String(text || '').trim();
-  return value.length >= Number(minimum) && !endsTruncated(value);
+  if (source === 'meta' || value.length < Number(minimum)) return false;
+  if (LENGTH_ONLY_SOURCES.has(source)) return true;
+  return !(value.length < ELLIPSIS_CHECK_CHARACTERS && endsTruncated(value));
 }
 
 // ------------------------------------------------------------------------------------------ the page tree
@@ -182,7 +193,7 @@ function fromRule(html, root, rule, minimum) {
   if (!kept.length) return null;
   const markup = kept.map(node => innerHtml(html, node)).join('\n');
   const text = cleanText(markup);
-  return isCompleteText(text, minimum) ? { html: markup, text, ats: rule.ats, method: 'container' } : null;
+  return isCompleteText(text, minimum, 'page_body') ? { html: markup, text, ats: rule.ats, method: 'container' } : null;
 }
 
 // The block with the most text whose links make up at most MAXIMUM_LINK_SHARE of it, tightened to the
@@ -205,12 +216,14 @@ function densest(html, root, minimum) {
   }
   const markup = innerHtml(html, best);
   const text = cleanText(markup);
-  return isCompleteText(text, minimum) ? { html: markup, text, ats: null, method: 'density' } : null;
+  return isCompleteText(text, minimum, 'page_body') ? { html: markup, text, ats: null, method: 'density' } : null;
 }
 
-// { html, text, ats, method: 'container' | 'density' } or null when the page holds no complete description.
+// { html, text, ats, method: 'container' | 'density' } or null when the page holds no description of at least
+// `minimum` characters (a minimum of 1 or less takes any text: pickDescription's partial candidate).
 export function extractJobBody(page, { minimum = DEFAULT_MINIMUM_DESCRIPTION_CHARACTERS } = {}) {
   if (!page || !/<[a-z][\s\S]*>/i.test(String(page))) return null;
+  minimum = Math.max(1, Number(minimum) || 0);
   const html = prepare(page, false);
   const root = parseTree(html);
   for (const rule of CONTAINER_RULES) {
@@ -237,7 +250,7 @@ export function extractEmbeddedDescription(page, { minimum = DEFAULT_MINIMUM_DES
       try { value = JSON.parse(`"${match[2]}"`); } catch { continue; }
       if (typeof value !== 'string' || !/<[a-z][^>]*>|&lt;[a-z]|\n/i.test(value)) continue;
       const text = cleanText(value);
-      if (!isCompleteText(text, minimum)) continue;
+      if (!isCompleteText(text, minimum, 'embedded_json')) continue;
       if (!best || text.length > best.text.length) best = { html: value, text };
     }
   }
@@ -266,7 +279,7 @@ export function inferDescriptionSource(job) {
 // { descriptionComplete, descriptionSource } for one posting.
 export function descriptionStatus(job, { minimum = DEFAULT_MINIMUM_DESCRIPTION_CHARACTERS } = {}) {
   const source = inferDescriptionSource(job);
-  const complete = source != null && source !== 'meta' && isCompleteText(job?.description, minimum);
+  const complete = source != null && isCompleteText(job?.description, minimum, source);
   return { descriptionComplete: complete, descriptionSource: source };
 }
 
@@ -293,7 +306,7 @@ export function incompleteDescriptionSummary(jobs, { limit = 8, minimum = DEFAUL
   const shown = hosts.slice(0, limit);
   const more = hosts.length - shown.length;
   const message = incomplete.length
-    ? `${incomplete.length} posting(s) have an incomplete Job Description (a page summary, fewer than ${minimum} characters, or cut with an ellipsis); their cards link to the posting page instead: ${shown.map(item => `${item.host} (${item.count})`).join(', ')}${more > 0 ? `, and ${more} more host(s)` : ''}`
+    ? `${incomplete.length} posting(s) have an incomplete Job Description (a page summary, fewer than ${minimum} characters, or a short summary cut with an ellipsis); their cards link to the posting page instead: ${shown.map(item => `${item.host} (${item.count})`).join(', ')}${more > 0 ? `, and ${more} more host(s)` : ''}`
     : '';
   return { count: incomplete.length, hosts: shown, message };
 }

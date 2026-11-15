@@ -289,8 +289,12 @@ export function ashbyApiUrl(raw) {
   let url;
   try { url = new URL(String(raw || '')); } catch { return null; }
   if (url.hostname.toLowerCase() !== 'jobs.ashbyhq.com') return null;
-  const [org, id] = url.pathname.split('/').filter(Boolean);
-  if (!org || !id || !/^[A-Za-z0-9._-]+$/.test(org) || !/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(id)) return null;
+  const [rawOrg, id] = url.pathname.split('/').filter(Boolean);
+  // The organisation segment is decoded before it is checked (jobs.ashbyhq.com/Acme%20Co/<id>) and encoded again
+  // in the API address.
+  let org;
+  try { org = decodeURIComponent(rawOrg || ''); } catch { return null; }
+  if (!org || !id || !/^[A-Za-z0-9._ -]+$/.test(org) || !/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(id)) return null;
   return { apiUrl: `https://api.ashbyhq.com/posting-api/job-board/${encodeURIComponent(org)}`, id };
 }
 
@@ -342,11 +346,12 @@ function greenhouseEnrichment(originalJob, payload, pageUrl) {
 // ------------------------------------------------------------------------------------------ completeness
 
 // The posting with descriptionSource and descriptionComplete: complete when the text did not come from a meta
-// tag, has at least `minimum` characters, and does not end in an ellipsis (src/jd-extract.mjs).
+// tag, has at least `minimum` characters and, for a JSON-LD or list summary, is not cut with an ellipsis
+// (isCompleteText, src/jd-extract.mjs).
 function withStatus(result, source, minimum) {
   const text = String(result.description || '').trim();
   const resolved = text ? source : null;
-  return { ...result, descriptionSource: resolved, descriptionComplete: resolved != null && resolved !== 'meta' && isCompleteText(text, minimum) };
+  return { ...result, descriptionSource: resolved, descriptionComplete: resolved != null && isCompleteText(text, minimum, resolved) };
 }
 
 // An API answer: the text is the API's when it gave one, else the list's.
@@ -409,19 +414,23 @@ async function fromPublicApis(originalJob, url, { headers, timeoutMs, fetchImpl,
 
 // The description of a fetched page, the first complete one of: the JSON-LD JobPosting's, the page body
 // (src/jd-extract.mjs containers, then the densest block), the page's embedded JSON, the list's own text.
-// With none complete, the longest partial text of the JSON-LD or the list; the meta description only when
-// there is nothing else, and never complete. { source, text, html (markup to clean) | null, keepHtml }.
+// With none complete, the longest partial text of the JSON-LD, the list, or the page body (extractJobBody with
+// no minimum, as long as it is more than a crumb: a quarter of the minimum, so a shell's "Loading…" does not
+// stand in for the meta summary); the meta description only when there is no text at all, and never complete.
+// { source, text, html (markup to clean) | null, keepHtml }.
 export function pickDescription({ body, posting, originalJob, minimum = DEFAULT_MINIMUM_DESCRIPTION_CHARACTERS }) {
   const jsonLd = posting?.description ? { source: 'json_ld', html: String(posting.description), text: cleanText(posting.description) } : null;
-  if (jsonLd && isCompleteText(jsonLd.text, minimum)) return jsonLd;
+  if (jsonLd && isCompleteText(jsonLd.text, minimum, 'json_ld')) return jsonLd;
   const page = extractJobBody(body, { minimum });
   if (page) return { source: 'page_body', html: page.html, text: page.text, ats: page.ats, method: page.method };
   const embedded = extractEmbeddedDescription(body, { minimum });
   if (embedded) return { source: 'embedded_json', html: embedded.html, text: embedded.text };
   const listText = String(originalJob.description || '').trim();
   const list = listText ? { source: 'list', html: null, text: listText, keepHtml: true } : null;
-  if (list && isCompleteText(list.text, minimum)) return list;
-  const partial = [jsonLd, list].filter(Boolean).sort((a, b) => b.text.length - a.text.length)[0];
+  if (list && isCompleteText(list.text, minimum, 'list')) return list;
+  const partialBody = extractJobBody(body, { minimum: 1 });
+  const bodyPart = partialBody && partialBody.text.length >= Math.ceil(Number(minimum) / 4) ? { source: 'page_body', html: partialBody.html, text: partialBody.text, ats: partialBody.ats, method: partialBody.method } : null;
+  const partial = [jsonLd, list, bodyPart].filter(Boolean).sort((a, b) => b.text.length - a.text.length)[0];
   if (partial) return partial;
   const metaText = meta(body, 'description') || meta(body, 'og:description');
   return { source: metaText ? 'meta' : null, html: null, text: metaText };

@@ -549,15 +549,20 @@ disabled; do not expand them unless a task says so.
   wins; else the densest block (text ≥ minimum, links ≤ MAXIMUM_LINK_SHARE 0.3, tightened to the largest child
   holding 80% or when the siblings are navigation/crumbs). script/style/nav/header/footer/aside stripped first;
   form only before the density pass (Taleo renders inside one). extractEmbeddedDescription: longest complete
-  "*description*"/job_description string field with markup or newlines in non-JSON-LD scripts. isCompleteText:
-  ≥ minimum (config.minimumDescriptionCharacters, default 200) and not ending in … / "...". descriptionStatus /
+  "*description*"/job_description string field with markup or newlines in non-JSON-LD scripts. isCompleteText(text,
+  minimum, source) (2026-11-15): ≥ minimum (config.minimumDescriptionCharacters, default 200); meta never; ats_api /
+  page_body / embedded_json by length alone; json_ld / list also not (< ELLIPSIS_CHECK_CHARACTERS 1500 and ending in
+  … / "..."); no source → the summary rule. descriptionStatus /
   withDescriptionStatus (pipeline, for API-fed and failed postings), incompleteDescriptionSummary (info warning
   "N posting(s) have an incomplete Job Description …: host (k), …", 8 hosts; failed fetches excluded).
 - enrich.mjs: fromPublicApis(url) = Greenhouse, SmartRecruiters, Lever (leverApiUrl → api.lever.co/v0/postings/
   {company}/{id}, leverEnrichment, enrichment 'lever_api'), Ashby (ashbyApiUrl → board API, matched by id,
   'ashby_api'), Workday CXS; tried for the original URL, then for finalUrl after the page fetch (before the ok
   check), each entry once (`tried`), failures fall through. pickDescription order: complete JSON-LD → page body →
-  embedded JSON → complete list text → longest partial of JSON-LD/list → meta (never complete). Plain-text picks
+  embedded JSON → complete list text → longest partial of JSON-LD / list / page body (extractJobBody minimum 1, kept
+  only when ≥ minimum/4 characters so a shell's "Loading…" never displaces the meta line) → meta (never complete,
+  only with no text at all). ashbyApiUrl decodes the org segment before checking it (spaces allowed) and encodes it
+  in the API address. Plain-text picks
   with newlines go through textToParagraphs before cleanDescriptionHtml. Still incomplete after a redirect → one
   more fetch of finalUrl by its own address, better answer kept. Fields: descriptionSource, descriptionComplete,
   descriptionContainer (ats label). enrichment labels: json_ld_jobposting (JSON-LD present), html_page (body or
