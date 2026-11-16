@@ -15,7 +15,7 @@
 import { DEFAULT_CATALOG, DEFAULT_LETTER_FALLBACK_ALIAS, ENGINE_PROVIDER, PROVIDER_ENGINE, canonicalModelId, defaultModelId, findModel, lightestModelId, normalizeCatalog } from './catalog.mjs';
 import { normalizeEngineId, resolveModel } from './index.mjs';
 import { normalizeQuotaPolicy } from './quota.mjs';
-import { modelKey } from './model-availability.mjs';
+import { modelKey, modelStatus, weeklyResetOf } from './model-availability.mjs';
 
 export const STAGES = ['scoring', 'supplemental', 'letterDraft', 'letterEditor', 'prescreen'];
 export const LETTER_STAGES = ['letterDraft', 'letterEditor'];
@@ -119,4 +119,50 @@ export function validateLetterAssignment(stage, form, { catalog = DEFAULT_CATALO
     fallback.push(step.id);
   }
   return { value: { engine, model: entry?.id || null, effort: engine === 'codex' ? effort : null, fallback }, errors };
+}
+
+// The hub sidebar's "Models" lines: the model each task would use right now (Review = scoring, Prescreen,
+// CoverLetter = the draft stage), walking the stage's chain past steps that cannot answer: a model under a
+// weekly limit or marked not on the plan / unknown (state/model-availability.json), Claude while it is signed
+// out, Codex when the connection probe says it is not connected. { key, label, model, short, fellBack, from,
+// reason } per task; model null with short "Off" (prescreen disabled), "Local Only" (no engine) or
+// "Unavailable" (every step blocked).
+export const SIDEBAR_STAGES = [
+  { key: 'review', stage: 'scoring', label: 'Review' },
+  { key: 'prescreen', stage: 'prescreen', label: 'Prescreen' },
+  { key: 'coverLetter', stage: 'letterDraft', label: 'CoverLetter' },
+];
+
+export function modelShortName(id, catalog = DEFAULT_CATALOG) {
+  const entry = findModel(catalog, id);
+  return entry ? String(entry.label).replace(/^Claude\s+/, '') : String(id || '');
+}
+
+export function effectiveStageModels(config = {}, { record = null, now = new Date(), claudeSignedOut = false, codexConnected = null } = {}) {
+  const catalog = normalizeCatalog(config);
+  const assignments = stageAssignments(config);
+  const weeklyReset = weeklyResetOf(config);
+  const timeZone = config.timeZone || 'America/Chicago';
+  const blocked = step => {
+    if (step.engine === 'claude' && claudeSignedOut) return 'Claude signed out';
+    if (step.engine === 'codex' && codexConnected === false) return 'Codex not connected';
+    const status = record ? modelStatus(record, step.model, { now, weeklyReset, timeZone }) : null;
+    if (status?.state === 'weekly_limit') return 'weekly limit';
+    if (status?.state === 'not_on_plan') return 'not on the plan';
+    if (status?.state === 'unknown_model') return 'unknown model';
+    return null;
+  };
+  return SIDEBAR_STAGES.map(({ key, stage, label }) => {
+    const base = { key, label, model: null, fellBack: false, from: null, reason: null };
+    if (stage === 'prescreen' && config.prescreen?.enabled === false) return { ...base, short: 'Off' };
+    const assignment = assignments[stage];
+    if (!assignment?.engine || assignment.engine === 'local_only') return { ...base, short: 'Local Only' };
+    const chain = stageChain(assignment, catalog);
+    const first = chain[0];
+    const firstReason = blocked(first);
+    const usable = chain.find(step => !blocked(step));
+    if (!usable) return { ...base, short: 'Unavailable', from: first.model, reason: firstReason };
+    const fellBack = usable !== first;
+    return { ...base, model: usable.model, short: modelShortName(usable.model, catalog), fellBack, from: fellBack ? first.model : null, reason: fellBack ? firstReason : null };
+  });
 }

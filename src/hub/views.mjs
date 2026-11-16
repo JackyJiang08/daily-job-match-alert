@@ -8,6 +8,7 @@ import { REPORT_SCRIPT, REPORT_STYLES } from '../report-theme.mjs';
 import { MENU_SLOT } from '../report-components.mjs';
 import { formatCount, formatDateLabel, formatElapsed, formatLocalDateTime, formatLocalDay, formatLocalShort, formatRelativeTime } from '../time-format.mjs';
 import { planLabel } from '../engines/quota.mjs';
+import { modelShortName } from '../engines/assignments.mjs';
 import { USAGE_PURPOSES, describeTotals, formatTokens } from '../engines/usage.mjs';
 import { htmlEscape } from '../utils.mjs';
 import { DEFAULT_SCHEDULE, scheduleClock } from '../schedule.mjs';
@@ -28,7 +29,7 @@ const NAV = [
 
 export const HUB_STYLES = `
 .hub{display:grid;grid-template-columns:200px minmax(0,1fr);min-height:100vh}
-.hub-nav{display:flex;flex-direction:column;border-right:1px solid var(--line);padding:var(--space-5) var(--space-3) var(--space-4);background:var(--surface)}
+.hub-nav{position:sticky;top:0;height:100vh;overflow:auto;display:flex;flex-direction:column;border-right:1px solid var(--line);padding:var(--space-5) var(--space-3) var(--space-4);background:var(--surface)}
 .hub-nav .brand{font-size:var(--fs-body);font-weight:650;margin:0 0 var(--space-4) var(--space-3);line-height:1.5;white-space:nowrap}
 .hub-nav a{display:block;padding:6px var(--space-2) 6px 9px;margin:0 0 2px;border-left:3px solid transparent;border-radius:0 var(--radius-sm) var(--radius-sm) 0;text-decoration:none;color:var(--ink-2);font-size:var(--fs-body);line-height:1.5}
 .hub-nav a.active{background:var(--accent-soft);color:var(--accent);font-weight:650;border-left-color:var(--accent)}
@@ -37,6 +38,8 @@ export const HUB_STYLES = `
 .hub-nav .mini b{display:block;font-weight:600;color:var(--ink-2)}
 .hub-nav .mini .ok{color:var(--accent)}.hub-nav .mini .bad{color:var(--bad-ink)}.hub-nav .mini .warn{color:var(--warn-ink)}
 .hub-nav .mini .rel{white-space:nowrap}.hub-nav .mini .rel.overdue{color:var(--bad-ink);font-weight:600}
+.hub-nav .mini .model{display:block;padding-left:var(--space-2);text-indent:calc(-1 * var(--space-2));overflow-wrap:anywhere}
+.hub-nav .mini .model.fallback{color:var(--warn-ink)}
 .hub-main{padding:var(--space-5) var(--space-5) var(--space-6);min-width:0}
 .hub-content{max-width:1280px;margin:0}
 .hub-main .page{padding:0;margin:0;max-width:none}
@@ -132,7 +135,7 @@ details.day>summary{cursor:pointer;font-size:var(--fs-body)}
 }
 @media (max-width:760px){
   .hub{grid-template-columns:1fr}
-  .hub-nav{border-right:0;border-bottom:1px solid var(--line);flex-direction:row;flex-wrap:nowrap;align-items:center;gap:var(--space-1);padding:var(--space-2) var(--space-3);overflow-x:auto}
+  .hub-nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line);flex-direction:row;flex-wrap:nowrap;align-items:center;gap:var(--space-1);padding:var(--space-2) var(--space-3);overflow-x:auto}
   .hub-nav .brand{display:none}
   .hub-nav a{flex:0 0 auto;margin:0;padding:var(--space-1) var(--space-2);border-left:0;border-bottom:2px solid transparent;border-radius:0}
   .hub-nav a.active{border-bottom-color:var(--accent);background:transparent}
@@ -195,6 +198,10 @@ export const HUB_SCRIPT = `
 })();
 `;
 
+function modelLabel(id) {
+  return id ? modelShortName(id) : 'the assigned model';
+}
+
 function resultIcon(result) {
   if (result === 'success') return '<span class="ok">✓</span>';
   if (result === 'incomplete') return '<span class="warn">⚠</span>';
@@ -221,7 +228,14 @@ function renderMiniStatus(sidebar, timeZone, now) {
   const chatgptLine = lines.chatgpt && lines.chatgpt.plan ? `<span data-plan="chatgpt">${htmlEscape(lines.chatgpt.sidebar)}</span>` : null;
   const planBlock = claudeLine || chatgptLine ? `<b>Plan</b>${[claudeLine, chatgptLine].filter(Boolean).join('<br>')}` : '';
   const auth = `${sidebar.claudeAuth?.expired ? '<b>Login</b><span class="bad" data-auth="expired">Claude signed out</span>' : ''}${planBlock}`;
-  return `<div class="mini"><b>Last Run</b>${last}<b>Next Run</b>${next}${auth}</div>`;
+  // One line per task (Review, Prescreen, CoverLetter): the model it would use now; a fallback is marked and
+  // its hover names the model it stands in for and why.
+  const models = (sidebar.models || []).slice(0, 3).map(item => {
+    const title = item.fellBack ? `${item.label}: ${item.short} in place of ${modelLabel(item.from)} (${item.reason})` : item.reason ? `${item.label}: ${modelLabel(item.from)} (${item.reason})` : `${item.label}: ${item.model || item.short}`;
+    return `<span class="model${item.fellBack || item.short === 'Unavailable' ? ' fallback' : ''}" data-model="${htmlEscape(item.key)}" title="${htmlEscape(title)}">${htmlEscape(item.label)} · ${htmlEscape(item.short)}</span>`;
+  }).join('');
+  const modelBlock = models ? `<b>Models</b>${models}` : '';
+  return `<div class="mini"><b>Last Run</b>${last}<b>Next Run</b>${next}${auth}${modelBlock}</div>`;
 }
 
 export function renderHubPage({ active, title, content, notice = '', error = '', port, script = '', sidebar = null, timeZone, now = null }) {

@@ -137,7 +137,7 @@ test('the hub date column: a three-column grid, the current month open, earlier 
     assert.match(css, /\.datelist a\{display:grid;grid-template-columns:subgrid;grid-column:1\/-1;align-items:baseline/);
     assert.match(css, /\.datelist a \.n\{grid-column:2;[^}]*text-align:right\}/);
     assert.match(css, /\.datelist a \.tag\{grid-column:3;justify-self:end\}/);
-    assert.doesNotMatch(css, /\.hub-nav\{[^}]*position:sticky/);
+    assert.match(css, /\.hub-nav\{position:sticky;top:0;height:100vh/, 'the side navigation stays put next to the sticky top row');
     assert.match(js, /var historyKey = 'hub\.reports\.history';[\s\S]*history\.addEventListener\('toggle', function \(\) \{ try \{ localStorage\.setItem\(historyKey, history\.open \? '1' : '0'\); \} catch \(e\) \{\} \}\)/);
     assert.match(js, /if \(history\.dataset\.selected !== '1' && remembered != null\) history\.open = remembered === '1';/, 'a selected date in the fold wins over the remembered state');
     assert.match(page, /<details class="history" id="history"><summary>History <span class="group-count">\(1\)<\/span><\/summary><ul class="datelist" id="datelist-history"><li class="month" data-month="2026-09">September 2026<\/li>/);

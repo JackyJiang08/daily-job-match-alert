@@ -647,7 +647,14 @@ disabled; do not expand them unless a task says so.
   (reportMenu). Sticky top:0; IntersectionObserver on the sentinel toggles .stuck (rule + backdrop blur); popovers
   close on outside click / Escape; @media (min-width:1100px) flex-wrap:nowrap (hub nav 152px and date column
   180px between 761 and 1279px so the row fits); ≤640px grid. No masthead, no "quiet" bar, no report-head row;
-  .hub-nav is static (scrolls away), .split aside stays sticky. Do not name a popover "more" (details.more[open]
+  .hub-nav is sticky, 100vh, overflow auto again (840be72 had made it static, which pushed .mini off-screen;
+  restored 2026-11-15), static only ≤760px; .split aside stays sticky. .mini = Last Run, Next Run, [Login], Plan,
+  Models (new 2026-11-15, never present before): sidebarSummary.models = sidebarModels → effectiveStageModels
+  (src/engines/assignments.mjs; Review = scoring, Prescreen, CoverLetter = letterDraft; walks stageChain past
+  weekly_limit / not_on_plan / unknown_model in state/model-availability.json, Claude when signed out, Codex when
+  the cached probe says not connected; "Off" when prescreen.enabled is false, "Local Only", "Unavailable");
+  span.model[data-model] "Review · Fable 5.1" (modelShortName), .fallback with a hover reason. Test:
+  tests/hub-sidebar.test.mjs. Do not name a popover "more" (details.more[open]
   > summary is hidden by the fold rule).
 - Groups: main list = every reviewed match that is not carried (date-only and undated included; strict window
   removed); "From Yesterday" (CARRIED_OVER_TITLE) with no note line; Not Reviewed unchanged. The xlsx has no

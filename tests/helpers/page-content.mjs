@@ -54,7 +54,7 @@ function difference(left, right, allowed = () => false) {
 export function compareContent(beforeHtml, afterHtml, allowances = {}) {
   const before = pageContent(beforeHtml);
   const after = pageContent(afterHtml);
-  const addedWords = new Set(allowances.addedWords || []);
+  const addedWords = new Set([...(allowances.addedWords || []), ...(allowances.addedWordsSidebar || [])]);
   const missingWords = new Set(allowances.missingWords || []);
   const fieldPrefixes = allowances.addedFields || [];
   const missingPrefixes = allowances.missingFields || [];
@@ -82,9 +82,11 @@ export const REDESIGN_ALLOWANCES = {
     'date', 'only', 'sort', 'by', 'reach', 'out', 'deferred', 'the', 'review', 'budget', 'on', 'an', 'earlier', 'run', 'and', 'reviewed', 'now', 'each',
     'card', 'says', 'when', 'it', 'was', 'first', 'found', 'strict', '24-hour', 'window', 'main', 'list', 'off', 'from', 'yesterday', 'not', 'engine',
     'unavailable', '1', '0', '2', '3', '4', '12', 'in', 'shown', 'llm', 'mark', 'applied', '00', '16', '8', '15', '17', 'cover', 'letter', '14'],
+  // The sidebar's Models lines (2026-11-15): words and data-model fields the old snapshots never had.
+  addedWordsSidebar: ['models', 'review', 'prescreen', 'local', 'only', 'coverletter', 'fable', '5.1', 'gpt-5.6', 'sol', 'luna', 'opus', '5.5', 'off', 'unavailable'],
   missingFields: ['data-current=', 'data-month=', 'data-applied=', 'data-apply-mark=', 'input#hide-applied', 'button#[](button)='],
   addedFields: ['select#fresh', 'input#score-min', 'input#score-max', 'input#hide-contacted', 'button#clear-filters',
-    'data-freshness=', 'data-contacted=', 'data-job=', 'button#[](button)=', 'data-badge=letter-check', 'button#filters-button', 'details#'],
+    'data-freshness=', 'data-contacted=', 'data-job=', 'button#[](button)=', 'data-badge=letter-check', 'button#filters-button', 'details#', 'data-model='],
 };
 
 export function assertSameContent(assert, beforeHtml, afterHtml, label, allowances = REDESIGN_ALLOWANCES) {

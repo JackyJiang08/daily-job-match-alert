@@ -160,14 +160,14 @@ test('Reports lists dates newest first with counts, titles the report by date, a
     assert.doesNotMatch(list.text, /<header class="masthead"|<h1[ >]|Matches · Ran|class="report-head"/, 'no masthead, no page heading, no button row above the report');
     assert.match(list.text, /<details class="menu overflow" id="more-menu"><summary class="btn secondary" aria-label="More Actions" title="More Actions">⋯<\/summary><div class="menu-list">(?:<form class="inline"[\s\S]*?<\/form>)*<a class="btn secondary small" href="\/desktop\/2026-08-27" target="_blank" rel="noopener noreferrer" title="[^"]*output\/2026-08-27\/Daily Job Match Alert - 2026-08-27\.html">Open Desktop Copy<\/a><a class="btn secondary small" href="\/desktop\/2026-08-27\/xlsx"[^>]*>Download XLSX<\/a><\/div><\/details>\s*<\/form>/, 'the secondary actions sit in the ⋯ menu at the end of the bar');
     assert.doesNotMatch(list.text, /<!--menu-->/);
-    assert.doesNotMatch(list.text, /\.hub-nav\{[^}]*position:sticky/, 'the hub navigation scrolls with the page');
+    assert.match(list.text, /\.hub-nav\{position:sticky;top:0;height:100vh;overflow:auto/, 'the hub navigation stays put beside the report (restored 2026-11-15)');
     assert.match(list.text, /\.toolbar\{position:sticky;top:0/, 'the top row is what stays');
     assert.doesNotMatch(list.text, /file:\/\//);
     assert.doesNotMatch(list.text, /Desktop copy:/);
     assert.match(list.text, /<article class="job"/);
     assert.match(list.text, /<form class="toolbar/);
     assert.match(list.text, /<dt>Trigger<\/dt><dd>scheduled<\/dd>/);
-    assert.match(list.text, /<div class="mini"><b>Last Run<\/b><span class="ok">✓<\/span> Aug 26, 8:00 PM<b>Next Run<\/b><span id="next-run" data-at="2026-08-27T23:00:00\.000Z" data-overdue-suffix="">Aug 27, 6:00 PM · <span class="rel">in 11h<\/span><\/span><\/div>/);
+    assert.match(list.text, /<div class="mini"><b>Last Run<\/b><span class="ok">✓<\/span> Aug 26, 8:00 PM<b>Next Run<\/b><span id="next-run" data-at="2026-08-27T23:00:00\.000Z" data-overdue-suffix="">Aug 27, 6:00 PM · <span class="rel">in 11h<\/span><\/span>(?:<b>Models<\/b>(?:<span class="model[^"]*"[^>]*>[^<]*<\/span>)*)?<\/div>/);
     assert.doesNotMatch(list.text, /\bUTC\b/);
     assert.match(list.text, /<a href="\/reports" class="active">Reports<\/a>/);
     const day = await hub.request('GET', '/reports/2026-08-26');
@@ -552,7 +552,7 @@ test('Status merges runs into one card, formats every time in the configured zon
     const installed = await hub.request('GET', '/status');
     assert.match(installed.text, /<dt>Next Run<\/dt><dd>Aug 28, 2026, 6:30 AM <span class="badge badge-bad" data-badge="overdue">Overdue<\/span><\/dd>/, 'the Runs card marks the missed 6:30 slot');
     assert.doesNotMatch(installed.text, /LaunchAgent not installed/);
-    assert.match(installed.text, /<b>Next Run<\/b><span id="next-run" data-at="2026-08-27T11:30:00\.000Z" data-overdue-suffix="">Aug 27, 6:30 AM · <span class="rel overdue">overdue<\/span><\/span><\/div>/, 'the 6:30 slot passed 30 minutes ago with no run since, so the sidebar flags it instead of pointing at tomorrow');
+    assert.match(installed.text, /<b>Next Run<\/b><span id="next-run" data-at="2026-08-27T11:30:00\.000Z" data-overdue-suffix="">Aug 27, 6:30 AM · <span class="rel overdue">overdue<\/span><\/span>(?:<b>Models<\/b>(?:<span class="model[^"]*"[^>]*>[^<]*<\/span>)*)?<\/div>/, 'the 6:30 slot passed 30 minutes ago with no run since, so the sidebar flags it instead of pointing at tomorrow');
 
     assert.equal(nextScheduledRun(new Date('2026-08-27T12:00:00Z'), 'America/Chicago', 20, 0).toISOString(), '2026-08-28T01:00:00.000Z');
     assert.equal(nextScheduledRun(new Date('2026-08-27T01:30:00Z'), 'America/Chicago', 20, 0).toISOString(), '2026-08-28T01:00:00.000Z', 'after 20:00 local the next slot is tomorrow');
@@ -750,7 +750,7 @@ test('the sidebar and the Runs card tell a run in progress from a due, overdue, 
   const hubRunning = await startHub(running, { alivePids: [9001] });
   try {
     const reports = await hubRunning.request('GET', '/reports');
-    assert.match(reports.text, /<b>Next Run<\/b><span id="next-run" data-running="1" data-since="2026-08-27T11:40:00\.000Z"><span class="ok">Running<\/span> since Aug 27, 6:40 AM · <span class="rel" id="running-elapsed">20m<\/span><\/span><\/div>/);
+    assert.match(reports.text, /<b>Next Run<\/b><span id="next-run" data-running="1" data-since="2026-08-27T11:40:00\.000Z"><span class="ok">Running<\/span> since Aug 27, 6:40 AM · <span class="rel" id="running-elapsed">20m<\/span><\/span>(?:<b>Models<\/b>(?:<span class="model[^"]*"[^>]*>[^<]*<\/span>)*)?<\/div>/);
     assert.doesNotMatch(/<div class="mini">[\s\S]*?<\/nav>/.exec(reports.text)[0], /due now|overdue/, 'no due or overdue wording in the sidebar while a run is in progress');
     const status = await hubRunning.request('GET', '/status');
     assert.match(status.text, /<dt>Next Run<\/dt><dd><span class="badge badge-good" data-badge="running">Running<\/span> since Aug 27, 2026, 6:40 AM · 20m so far <span class="muted">\(PID 9001\)<\/span><br><span class="muted">Next scheduled Aug 28, 2026, 6:30 AM<\/span><\/dd>/);
@@ -1055,7 +1055,7 @@ test('Subscriptions & Models shows each plan with source and detection time, 7-d
     },
   });
   try {
-    assert.match((await hub.request('GET', '/reports')).text, /<b>Plan<\/b><span data-plan="claude">Claude Max → Pro Sep 1<\/span><br><span data-plan="chatgpt">ChatGPT Plus<\/span><\/div>/);
+    assert.match((await hub.request('GET', '/reports')).text, /<b>Plan<\/b><span data-plan="claude">Claude Max → Pro Sep 1<\/span><br><span data-plan="chatgpt">ChatGPT Plus<\/span>(?:<b>Models<\/b>(?:<span class="model[^"]*"[^>]*>[^<]*<\/span>)*)?<\/div>/);
     const page = (await hub.request('GET', '/settings')).text;
     const markup = page.split('<script>')[0];
     assert.match(markup, /<a href="\/settings\?tab=models" aria-current="page" class="active">Subscriptions &amp; Models<\/a>/, 'the default tab');

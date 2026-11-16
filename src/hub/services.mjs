@@ -4,7 +4,7 @@
 // tests can point the hub at a temporary project.
 import { recentLetterStats } from '../cover-letter/recent.mjs';
 import { OPENING_STYLES, RULES_VERSIONS, letterRulesSettings, normalizeAvailability, parseMonthYear } from '../cover-letter/availability.mjs';
-import { LETTER_STAGES, validateLetterAssignment } from '../engines/assignments.mjs';
+import { LETTER_STAGES, effectiveStageModels, validateLetterAssignment } from '../engines/assignments.mjs';
 import { autoLetterSettings, autoLetterSummary, lettersLockPath, readLettersStatus } from '../auto-letters.mjs';
 import { DEFAULT_CATALOG, ENGINE_PROVIDER, PROVIDER_ENGINE, canonicalModelId, defaultModelId, findModel, normalizeCatalog, providerModels, validateLadder } from '../engines/catalog.mjs';
 import path from 'node:path';
@@ -423,8 +423,17 @@ export function annotateConnections(connections, auth) {
 export async function currentPlans(ctx, config) {
   try {
     const status = await ctx.connections.status({ commands: configuredCliCommands(config) });
-    return { claude: status?.claude?.plan || null, codex: status?.codex?.plan || null, claudeConnected: status?.claude?.connected === true };
-  } catch { return { claude: null, codex: null, claudeConnected: false }; }
+    return { claude: status?.claude?.plan || null, codex: status?.codex?.plan || null, claudeConnected: status?.claude?.connected === true, codexConnected: typeof status?.codex?.connected === 'boolean' ? status.codex.connected : null };
+  } catch { return { claude: null, codex: null, claudeConnected: false, codexConnected: null }; }
+}
+
+// The sidebar's Models lines (src/engines/assignments.mjs effectiveStageModels): the task assignments of
+// Settings → Subscriptions & Models, past any model held by a weekly limit, a missing plan, a signed-out
+// Claude, or a disconnected Codex. Nothing is written.
+export async function sidebarModels(ctx, config, { claudeSignedOut = false, codexConnected = null } = {}) {
+  let record = null;
+  try { record = await readAvailability(availabilityPath(ctx.root), ctx.io); } catch { record = null; }
+  return effectiveStageModels(config, { record, now: ctx.now(), claudeSignedOut, codexConnected });
 }
 
 // A plan change worth a banner: reported by the newest run (meta.planChange), or seen by the hub's own
@@ -539,6 +548,8 @@ export async function sidebarSummary(ctx, config) {
   const missed = Boolean(previous) && (Number.isNaN(lastRunTime) || lastRunTime < previous.getTime());
   const overdue = missed && now.getTime() - previous.getTime() >= OVERDUE_GRACE_MS;
   const running = await runningState(ctx);
+  const claudeAuth = claudeAuthView(ctx, latest);
+  const plans = await currentPlans(ctx, config);
   return {
     lastRunAt,
     lastResult: latest ? (latest.complete === true ? 'success' : 'incomplete') : null,
@@ -548,10 +559,12 @@ export async function sidebarSummary(ctx, config) {
     running: running.running,
     runningSince: running.since,
     waitingOnQuota: waitingOnQuota(ctx, latest),
-    claudeAuth: claudeAuthView(ctx, latest),
-    plans: await currentPlans(ctx, config),
+    claudeAuth,
+    plans,
     // Two lines for the sidebar: "Claude Max → Pro Oct 26" and "ChatGPT Plus".
     planLines: await sidebarPlanLines(ctx, config, now, timeZone),
+    // Up to three lines: Review, Prescreen, CoverLetter and the model each would use now.
+    models: await sidebarModels(ctx, config, { claudeSignedOut: claudeAuth.expired === true, codexConnected: plans.codexConnected }),
   };
 }
 

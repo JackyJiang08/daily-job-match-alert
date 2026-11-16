@@ -21,10 +21,12 @@ export async function addStatusFixture(root, { writePayload, fixturePayload, sel
 }
 
 // The Status page without the Hub card (its timings and cache counters differ per request) and the Runs
-// card's Backup row (added 2026-10-23 after the snapshot was taken; it reads the machine's backup folder).
+// card's Backup row (added 2026-10-23 after the snapshot was taken; it reads the machine's backup folder), and the
+// sidebar's Models lines (added 2026-11-15; tests/hub-sidebar.test.mjs covers them).
 export function withoutHubCard(html) {
   return String(html)
     .replace(/<article class="card" id="hub-card">[\s\S]*?<\/article>/, '<!-- hub card -->')
     .replace(/<article class="card" id="letter-variety">[\s\S]*?<\/article>/, '')
-    .replace(/\n\s*<dt>Backup<\/dt><dd id="backup-line">[\s\S]*?<\/dd>/, '');
+    .replace(/\n\s*<dt>Backup<\/dt><dd id="backup-line">[\s\S]*?<\/dd>/, '')
+    .replace(/<b>Models<\/b>(?:<span class="model[^"]*"[^>]*>[^<]*<\/span>)*(?=<\/div>)/, '');
 }
