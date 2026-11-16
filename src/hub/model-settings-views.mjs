@@ -133,7 +133,8 @@ export function assignmentsForm(view, settings) {
     const effort = `<select name="${row.stage}_effort" class="control-input effort-select" aria-label="${htmlEscape(row.label)} effort"${row.engine === 'codex' ? '' : ' disabled'}>${effortOptions(catalog, row.model, row.effort)}</select>`;
     const editor = editorSwitch;
     const chain = row.stage === 'prescreen' ? `<span class="muted">None: on failure the local order is kept${row.off ? ' · prescreen off (<a href="/settings?tab=pipeline#prescreen">Pipeline</a>)' : ''}</span>` : editable ? chainTags(row, catalog, true) : '';
-    return `<tr data-stage="${row.stage}"${row.off ? ' class="stage-off"' : ''}><th scope="row">${htmlEscape(row.label)}${editor ? `<br>${editor}` : ''}</th><td>${engineSelect(row)}</td><td>${model}</td><td>${effort}</td><td>${chain}</td></tr>`;
+    const paid = row.paidWarning ? `<br><span class="badge badge-warn" data-paid-credits="${row.stage}">${htmlEscape(row.paidWarning)}</span>` : '';
+    return `<tr data-stage="${row.stage}"${row.off ? ' class="stage-off"' : ''}><th scope="row">${htmlEscape(row.label)}${paid}${editor ? `<br>${editor}` : ''}</th><td>${engineSelect(row)}</td><td>${model}</td><td>${effort}</td><td>${chain}</td></tr>`;
   }).join('');
   return `<form method="post" action="/settings/assignments" id="assignments-form" class="card assignments-card">
     <h2>Task Assignments</h2>

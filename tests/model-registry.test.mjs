@@ -25,7 +25,7 @@ const NOW = new Date('2026-10-06T22:00:00Z');
 const envelopeFixture = JSON.parse(await fs.readFile(new URL('usage/claude-result.json', fixtures), 'utf8'));
 
 test('the registry holds the ids checked against the installed CLIs, and older configs migrate to them', () => {
-  assert.deepEqual(DEFAULT_CATALOG.filter(entry => entry.provider === 'anthropic').map(entry => [entry.id, entry.alias]), [['claude-fable-5-1', 'fable'], ['claude-opus-5-5', 'opus'], ['claude-sonnet-5-5', 'sonnet'], ['claude-haiku-4-5', 'haiku']]);
+  assert.deepEqual(DEFAULT_CATALOG.filter(entry => entry.provider === 'anthropic').map(entry => [entry.id, entry.alias]), [['claude-fable-5-1', 'fable'], ['claude-opus-5-5', 'opus'], ['claude-sonnet-5-5', 'sonnet'], ['claude-haiku-5-5', 'haiku']]);
   assert.deepEqual(DEFAULT_CATALOG.filter(entry => entry.provider === 'openai').map(entry => entry.id), ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-6-astra']);
   assert.deepEqual(findModel(DEFAULT_CATALOG, 'gpt-5.6-sol').efforts, ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'], 'efforts as `codex debug models` lists them');
   assert.equal(findModel(DEFAULT_CATALOG, 'claude-fable-5-1').efforts, undefined, 'efforts belong to Codex models only');
@@ -42,7 +42,7 @@ test('the registry holds the ids checked against the installed CLIs, and older c
   // Configs written with aliases resolve to full ids everywhere a model is chosen.
   assert.equal(resolveModel({ engine: 'claude_subscription' }), 'claude-fable-5-1');
   assert.equal(resolveModel({ engine: 'claude', model: 'opus' }), 'claude-opus-5-5');
-  assert.equal(resolveModel({ engine: 'claude', models: { claude: 'claude-haiku-4-5-20251001' } }), 'claude-haiku-4-5', 'a dated id maps to its registry entry');
+  assert.equal(resolveModel({ engine: 'claude', models: { claude: 'claude-haiku-5-5-20251001' } }), 'claude-haiku-5-5', 'a dated id maps to its registry entry');
   assert.deepEqual(normalizeQuotaPolicy({ modelLadder: ['fable', 'opus'] }).modelLadder, ['claude-fable-5-1', 'claude-opus-5-5']);
   assert.deepEqual(defaultLadder(), ['claude-fable-5-1', 'claude-opus-5-5']);
   assert.equal(canonicalModelId('my-private-model', 'anthropic'), 'my-private-model', 'a custom name passes through');
@@ -67,9 +67,9 @@ test('the Claude CLI receives the registry alias, and the id it actually ran is 
     assert.deepEqual(response.usage.models.map(item => item.model), ['claude-fable-5-1'], 'the recorded run used one model');
     const record = normalizeAvailability(null);
     markModelUsed(record, engine.model, { resolvedId: response.scoringModel, at: NOW.toISOString() });
-    markModelUsed(record, 'claude-haiku-4-5', { resolvedId: 'claude-haiku-4-5-20251001', at: NOW.toISOString() });
-    assert.deepEqual(record.seen, { 'claude-fable-5-1': { resolvedId: 'claude-fable-5-1', lastUsedAt: NOW.toISOString() }, 'claude-haiku-4-5': { resolvedId: 'claude-haiku-4-5-20251001', lastUsedAt: NOW.toISOString() } });
-    assert.equal(modelStatus(record, 'haiku', { now: NOW }).resolvedId, 'claude-haiku-4-5-20251001', 'an alias finds the same record');
+    markModelUsed(record, 'claude-haiku-5-5', { resolvedId: 'claude-haiku-5-5-20251001', at: NOW.toISOString() });
+    assert.deepEqual(record.seen, { 'claude-fable-5-1': { resolvedId: 'claude-fable-5-1', lastUsedAt: NOW.toISOString() }, 'claude-haiku-5-5': { resolvedId: 'claude-haiku-5-5-20251001', lastUsedAt: NOW.toISOString() } });
+    assert.equal(modelStatus(record, 'haiku', { now: NOW }).resolvedId, 'claude-haiku-5-5-20251001', 'an alias finds the same record');
 
     // reviewBatch keeps a redacted copy of the envelope for fixture recording: usage yes, answers and ids no.
     const reviewRunner = async (command, args) => (args.includes('--json-schema') ? { stdout: JSON.stringify({ ...envelopeFixture.envelope, structured_output: { results: [] }, result: 'MODEL ANSWER TEXT', session_id: 'SECRET-SESSION', uuid: 'SECRET-UUID' }), stderr: '' } : runner(command, args));
@@ -169,7 +169,7 @@ test('each CLI refusal maps to its status badge; weekly limits clear at reset, s
   markWeeklyLimit(record, 'claude-sonnet-5-5', { at: NOW.toISOString(), resetsAt: null });
   assert.equal(statusText(modelStatus(record, 'claude-sonnet-5-5', { now: NOW }), 'America/Chicago'), 'Weekly Limit Since Oct 6, 2026, 5:00 PM · No Reset Time Given', 'no reset time: when it was seen, never an estimated date');
   assert.equal(statusText(modelStatus(record, 'claude-fable-5-1', { now: NOW }), 'America/Chicago'), 'Unavailable on Pro');
-  assert.equal(modelStatus(record, 'claude-haiku-4-5', { now: NOW }).state, 'not_verified');
+  assert.equal(modelStatus(record, 'claude-haiku-5-5', { now: NOW }).state, 'not_verified');
   // A weekly limit lifts by itself at its reset time; one without a reset time after 24 hours.
   assert.equal(modelStatus(record, 'claude-opus-5-5', { now: new Date('2026-10-07T14:00:01Z') }).state, 'not_verified');
   assert.deepEqual(pruneLimits(record, { now: new Date('2026-10-07T14:00:01Z') }).map(item => item.model), ['claude-opus-5-5']);
@@ -194,7 +194,7 @@ test('ladders take registry Claude models only, without repeats, and at least on
 });
 
 test('aliased models go to the CLI as their alias, a newer release it reports counts as the same model and is flagged as a new version', async () => {
-  assert.deepEqual(['claude-fable-5-1', 'opus', 'claude-sonnet-5-5', 'claude-haiku-4-5'].map(name => cliModelArg(name)), ['fable', 'opus', 'sonnet', 'haiku']);
+  assert.deepEqual(['claude-fable-5-1', 'opus', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'haiku'].map(name => cliModelArg(name)), ['fable', 'opus', 'sonnet', 'claude-haiku-5-5', 'claude-haiku-5-5'], 'Haiku 5.5 is pinned: the CLI\'s haiku alias still names 4.5');
   assert.deepEqual(['gpt-5.6-sol', 'gpt-6-astra'].map(name => cliModelArg(name)), ['gpt-5.6-sol', 'gpt-6-astra'], 'Codex entries have no alias: the full id');
   assert.equal(cliModelArg('my-private-model'), 'my-private-model');
 
@@ -213,7 +213,7 @@ test('aliased models go to the CLI as their alias, a newer release it reports co
   markModelUsed(record, engine.model, { resolvedId: response.scoringModel, at: NOW.toISOString() });
   assert.equal(modelStatus(record, 'claude-fable-5-1', { now: NOW }).resolvedId, 'claude-fable-5-2');
   assert.equal(newerRelease('claude-fable-5-1', 'claude-fable-5-2'), 'claude-fable-5-2');
-  assert.equal(newerRelease('claude-haiku-4-5', 'claude-haiku-4-5-20251001'), null, 'a dated snapshot of the same id is not a new version');
+  assert.equal(newerRelease('claude-haiku-5-5', 'claude-haiku-5-5-20251001'), null, 'a dated snapshot of the same id is not a new version');
   assert.equal(newerRelease('claude-fable-5-1', 'claude-fable-5-1'), null);
   assert.equal(newerRelease('claude-fable-5-1', null), null);
 });

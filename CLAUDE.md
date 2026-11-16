@@ -363,7 +363,9 @@ disabled; do not expand them unless a task says so.
   models`); hub.modelChoices migrates. resolveModel, both engines, the quota
   ladder, and the hub canonicalize names to registry ids (engine.model, marks,
   display); the CLI is given the entry's alias (`--model fable`, cliModelArg)
-  or the full id when there is none (Codex). The id modelUsage reports is the
+  or the full id when there is none (Codex) or the entry is pinnedId (claude-haiku-5-5 since 2026-11-15:
+  2.1.292's `--model haiku` still answers as claude-haiku-4-5; `--model claude-haiku-5-5` answered as
+  claude-haiku-5-5, checked with one call; claudeModelMatches accepts only that id for a pinned entry). The id modelUsage reports is the
   resolvedId; a different release (newerRelease, e.g. claude-fable-5-2) shows
   "New version: <id>" in Settings and still matches its family. Never add a
   model string elsewhere.
@@ -807,3 +809,45 @@ disabled; do not expand them unless a task says so.
   private/cover-letters/<date>/<jobId>/ (older ones <date>/<Company>/). Never put a real person's data in
   code, config.example.json, docs, or fixtures: use "Jane Doe" placeholders.
   Downloads go through /letters/<date>/<folder>/<file> with a file whitelist.
+
+## Fable on Pro (2026-11-15, src/engines/plan-models.mjs)
+- Pro bills Fable to paid usage credits from the first call (Anthropic's plan notes; the CLI's refusal reads "You're
+  out of usage credits"); the project uses subscription allowances only. PAID_CREDIT_ALIASES { pro: ['fable'] };
+  claudePlanOf(config, { detected, now }) = planView('claude').plan (manual > scheduled change from its date > the
+  detected plan). planAdjustedConfig(config, plan) returns a COPY (same object when nothing is billed): ladder without
+  Fable (empty → Opus), semanticMatching.models.claude → the ladder's first step when it resolves to Fable, each
+  models.assignments stage drops Fable from its fallback and a Fable stage model gives way to its first fallback (else
+  Opus). Never rewrite config.json for this.
+- Applied: runPipeline after loadState (detected = state.observedPlans.claude; one info warning "Fable Uses Paid
+  Credits On Pro: skipped … in every task; scoring starts at …"; prescreen and scoring use the copy);
+  applySubscriptionMatching options.paidCreditModels(planFromAuth) after verifyAuth (skip set; a Fable engine switches
+  to the first ladder step left, else quotaDeferred); hub planConfigFor(ctx, config) for generateLetter / saveLetter /
+  generateOutreachMessages (detected = the cached probe), withQuotaPolicy adds the paid ids to its skip lists; testModel
+  refuses a paid model; effectiveStageModels(config, { claudePlan }) walks the adjusted chain and reports the reason
+  "paid credits on Pro"; modelSettingsView marks such steps blocked ("Paid Credits on Pro") and gives the stage row
+  paidWarning → badge data-paid-credits "Fable Uses Paid Credits On Pro" in Task Assignments (supplemental excluded).
+  Max (or no plan) → unchanged. Tests: tests/plan-models.test.mjs.
+- Owner's runs since the 2026-10-26 switch (usage.json + daily logs, read 2026-11-15): 10-30 one Fable call refused
+  ("out of usage credits", ambiguousWeeklyLimit → Opus); 10-31..11-12 Fable skipped (limit held); 11-13, 11-14, 11-15
+  Fable answered 32 review calls after the Friday weekly reset released the hold (≈115k output tokens).
+
+## Letter page (2026-11-15, src/hub/letter-page.mjs)
+- GET /letters/<date>/<folder> is a standalone document (no hub layout, nav, notes list, engine/version lines, links,
+  or form fields): letterDocument → div.top (button#copy-letter "Copy" + button#regenerate-letter "Regenerate", p.error)
+  + #letter-holder > [p.flags-top] + article.sheet#letter[data-letter] laid out like pdf.mjs letterHtml (Times 11pt,
+  centered name/contact, 1in padding, white sheet in dark mode too). Text from parseLetterMarkdown(letter.md) (the
+  markdown of the very letter the PDF was rendered from; handles the pre-09-20 blank line before the signature; all 780
+  real letters parsed with paragraphs equal to the record), else assembleLetter from the record.
+- Notes: only needs-review (classifyEditorNotes; none after reviewClearedAt). src/cover-letter/note-marks.mjs
+  placeNotes: notePhrases (quoted text, "unverified detail: X" minus "the claim that", "body says X", "number N") →
+  sentence (splitSentences rejoins exactly) by substring or standalone number, else ≥ 60% of ≥ 3 content words; hit →
+  span.flag[title=note]; misses → p.flags-top (first note, "+N More", all on hover). Real data: about half place (the
+  rest name text the editor already removed). Copy = letterPlainText(data-letter, 'top'), "Copied" for 1.5 s.
+- POST /letters/regenerate { date, slug } (JSON): refused while the automatic pass runs or material is incomplete; runs
+  regenerateLetter through ctx.letterJobs (cards wait) and awaits settle(): generateLetter(strict, same track, short
+  name fixed when shortNameSource is owner) + saveLetter; a failure after the save began rewrites the old letter.json/
+  letter.md and the old PDF bytes. Reply { slug, openUrl, downloadUrl, sheet }; errors are the runner's humanized line.
+- The old editor panel stays at /letters/<date>/<folder>/edit (no link to it); /letters/new is unchanged. Card
+  Download CoverLetter has download="<pdfFileName>" (renderAction action.download; ONECLICK markReady sets it too);
+  the route already answered content-disposition attachment. Letters list: Open CoverLetter / Download CoverLetter.
+  Tests: tests/letter-page.test.mjs.

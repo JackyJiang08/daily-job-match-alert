@@ -220,7 +220,7 @@ test('editor notes split into needs-review and info; the card shows only "Check 
     assert.doesNotMatch(page, /Letter ready|editor note/);
     assert.match(cardOf(page, 'Example Co 2'), /<p class="job-meta">[^\n]*?<a class="badge badge-warn job-check" data-badge="letter-check" href="\/letters\/2026-09-15\/[^"]+" title="unverified detail: a retail inventory dashboard\nsalutation says Example Corp, body says Example Labs\nThe 35% figure does not appear in the resume or the playbook">Check 3 Details<\/a><\/p>/, 'the link sits at the end of the posting line');
     const letters = await ctx.letterStore.listLetters();
-    const opened = (await hub.request('GET', `/letters/2026-09-15/${letters.find(item => item.company === 'Example Co 2').slug}`)).text;
+    const opened = (await hub.request('GET', `/letters/2026-09-15/${letters.find(item => item.company === 'Example Co 2').slug}/edit`)).text;
     assert.match(opened, /<details class="notes" id="editor-notes" open><summary>Check Before Sending<\/summary><ul class="issues" id="editor-notes-list"><li>unverified detail: a retail inventory dashboard<\/li><li>salutation says Example Corp, body says Example Labs<\/li><li>The 35% figure does not appear in the resume or the playbook<\/li><\/ul><p class="row"><button class="btn secondary" id="clear-review" type="button">Mark Details Checked<\/button>[\s\S]*?<\/p><\/details>/);
     assert.match(opened, /<ul class="letter-foot foot-notes" id="letter-info-notes"><li>Cover Letter Draft: Codex is not connected[^<]*<\/li><li>Editor: gpt-5\.6-sol failed[^<]*<\/li><li>Paragraph 3 uses an em dash[^<]*<\/li><li>Generated with claude-opus-5-5[^<]*<\/li><li>Condensed by the engine[^<]*<\/li><\/ul>/, 'info only in the footer');
   } finally {

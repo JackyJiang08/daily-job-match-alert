@@ -24,12 +24,13 @@ export function expandModelAlias(value) {
   return CLAUDE_MODEL_ALIASES[normalized] || normalized;
 }
 
-// The CLI is given the alias, so any release of that family counts as the configured model; a model
-// outside the registry is compared by prefix as before.
+// The CLI is given the alias, so any release of that family counts as the configured model (a pinnedId
+// entry is given its full id, so only that id or a dated snapshot of it counts); a model outside the
+// registry is compared by prefix as before.
 export function claudeModelMatches(configured, actual) {
   const entry = findModel(DEFAULT_CATALOG, configured, 'anthropic');
   const reported = normalizeModelName(actual);
-  if (entry?.alias && reported && reported !== 'unknown') return findModel(DEFAULT_CATALOG, reported)?.id === entry.id || reported.startsWith(`${familyPrefix(entry)}-`);
+  if (entry?.alias && reported && reported !== 'unknown') return findModel(DEFAULT_CATALOG, reported)?.id === entry.id || (!entry.pinnedId && reported.startsWith(`${familyPrefix(entry)}-`));
   return modelMatchesConfiguration(configured, actual, CLAUDE_MODEL_ALIASES);
 }
 

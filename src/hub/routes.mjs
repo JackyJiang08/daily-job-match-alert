@@ -23,7 +23,8 @@ import { localDate } from '../time-format.mjs';
 import { LETTER_SCRIPT, ONECLICK_SCRIPT, SAMPLE_TRACK_SCRIPT, letterPanel, lettersPage, trackLabelOf } from './letter-views.mjs';
 import { todayTarget } from './views.mjs';
 import { letterRulesSettings, postingTermConflict, termConflictBadge } from '../cover-letter/availability.mjs';
-import { clearLetterReview, findLetterJob, generateLetter, generateOutreachMessages, initialShortName, jobIdOf, letterCompanyFor, letterEngineFor, oneClickLetter, renameLetter, saveLetter, updateSalutations } from './letters.mjs';
+import { clearLetterReview, findLetterJob, generateLetter, generateOutreachMessages, initialShortName, jobIdOf, letterCompanyFor, letterEngineFor, oneClickLetter, regenerateLetter, renameLetter, saveLetter, updateSalutations } from './letters.mjs';
+import { letterDocument, letterSheet, letterViewOf } from './letter-page.mjs';
 import { LetterBusyError } from './letter-jobs.mjs';
 import { QuotaError, describeQuota } from '../engines/quota.mjs';
 import { AuthExpiredError, EngineError, humanizeEngineError } from '../engines/engine-errors.mjs';
@@ -261,7 +262,8 @@ export function createHubHandler(ctx) {
           // letter page's footer. Without a letter the card carries a one-click button that the page script
           // drives (ONECLICK_SCRIPT).
           const openUrl = letter ? `/letters/${letter.date}/${letter.slug}` : null;
-          const download = letter?.pdf && letter.pdfFileName ? [{ href: `${openUrl}/${encodeURIComponent(letter.pdfFileName)}`, label: 'Download CoverLetter' }] : [];
+          // A direct download: the PDF route answers with content-disposition attachment and the short-name file name.
+          const download = letter?.pdf && letter.pdfFileName ? [{ href: `${openUrl}/${encodeURIComponent(letter.pdfFileName)}`, label: 'Download CoverLetter', download: letter.pdfFileName }] : [];
           const check = letter ? reviewBadge(letter.editorNotes, { cleared: Boolean(letter.reviewClearedAt) }) : null;
           return {
             flags: flags(id),
@@ -379,6 +381,16 @@ export function createHubHandler(ctx) {
     const copy = { name: parts.name, contact: parts.contact, date: parts.date, signature: parts.signature };
     const content = letterPanel({ copy, date, jobId: id, job: shownJob, tracks, selectedTrack, company: existing?.record?.company || shortGuess || companyGuess.name || '', readiness, existing, engineLabel: `${engine.label} · ${engine.model}`, confirmCompany: confirm, companyUncertain: companyGuess.uncertain });
     await page(response, 200, { active: 'letters', title: `Cover letter · ${companyGuess.name || job.title}`, content, script: LETTER_SCRIPT, error: url.searchParams.get('error') || '', notice: confirm ? `Confirm the company name${companyGuess.name ? ` (best guess: ${companyGuess.name})` : ''}, then Regenerate` : (url.searchParams.get('notice') || '') });
+  }
+
+  // Open CoverLetter: the letter on its own page (src/hub/letter-page.mjs), with Copy and Regenerate only.
+  async function letterView(existing) {
+    const readiness = await ctx.letterStore.readiness();
+    return letterViewOf(existing, { profile: readiness.profile || {}, assemble: assembleLetter });
+  }
+
+  async function getLetterPage(date, existing, response) {
+    send(response, 200, letterDocument({ date, slug: existing.slug, view: await letterView(existing) }));
   }
 
   async function getLetterDownload(date, slug, fileName, response) {
@@ -508,6 +520,27 @@ export function createHubHandler(ctx) {
       case '/settings/outreach': {
         const saved = await saveOutreachSettings(ctx, validateOutreachSettings(fields));
         redirect(response, '/settings?tab=letters#reach-out', `Message to Recruiters saved: notes up to ${saved.connectionNoteLimit} characters, candidate search ${saved.searchCandidates ? 'on' : 'off'}`);
+        return;
+      }
+      case '/letters/regenerate': {
+        const date = assertDate(fields.date);
+        const letterSlug = String(fields.slug || '');
+        if (!/^[A-Za-z0-9]{1,80}$/.test(letterSlug)) throw new HubInputError('Invalid letter');
+        const autoRunning = await autoLettersView(ctx);
+        if (autoRunning?.running) { json(response, 409, { error: `Automatic cover letters are being written (${autoRunning.done} of ${autoRunning.planned}); try again when they finish` }); return; }
+        const readiness = await ctx.letterStore.readiness();
+        if (!readiness.ready) throw new HubInputError(`Cover-letter material is incomplete (${readiness.missing.join(', ')}); upload it under Settings first`);
+        const existing = await ctx.letterStore.loadLetter(date, letterSlug);
+        if (!existing) throw new HubInputError('Letter not found');
+        // Through the one-click runner, so the report's Generate CoverLetter buttons wait while it runs.
+        ctx.letterJobs.start({ date, jobId: existing.record.jobId || letterSlug, company: existing.record.company || null, run: async () => {
+          const saved = await regenerateLetter(ctx, { date, slug: letterSlug });
+          return { company: saved.record.company, slug: saved.slug, openUrl: `/letters/${date}/${saved.slug}`, downloadUrl: saved.downloadUrl };
+        } });
+        const done = await ctx.letterJobs.settle();
+        if (done.state !== 'ready') { json(response, done.quota ? 429 : done.errorKind === 'auth_expired' ? 401 : done.errorKind === 'input' ? 400 : 502, { error: done.error || 'Regenerate failed; details in the hub log' }); return; }
+        const fresh = await ctx.letterStore.loadLetter(date, done.result.slug);
+        json(response, 200, { slug: done.result.slug, openUrl: done.result.openUrl, downloadUrl: done.result.downloadUrl, sheet: letterSheet(await letterView(fresh)) });
         return;
       }
       case '/letters/generate': {
@@ -685,7 +718,14 @@ export function createHubHandler(ctx) {
         if (letterOpen) {
           const existing = await ctx.letterStore.loadLetter(letterOpen[1], letterOpen[2]);
           if (!existing) return await page(response, 404, { active: 'letters', title: 'Not Found', content: '<h1 class="hub-title">Letter Not Found</h1>' });
-          return await getLetterPanel(url, response, { date: letterOpen[1], jobId: existing.record.jobId, existing });
+          return await getLetterPage(letterOpen[1], existing, response);
+        }
+        // The editor (track, short name, Rename Company & Re-render, Save & Render) for a saved letter; no page links here.
+        const letterEdit = /^\/letters\/(\d{4}-\d{2}-\d{2})\/([A-Za-z0-9]{1,80})\/edit$/.exec(url.pathname);
+        if (letterEdit) {
+          const existing = await ctx.letterStore.loadLetter(letterEdit[1], letterEdit[2]);
+          if (!existing) return await page(response, 404, { active: 'letters', title: 'Not Found', content: '<h1 class="hub-title">Letter Not Found</h1>' });
+          return await getLetterPanel(url, response, { date: letterEdit[1], jobId: existing.record.jobId, existing });
         }
         const letterFile = /^\/letters\/(\d{4}-\d{2}-\d{2})\/([A-Za-z0-9]{1,80})\/([^/]{1,200})$/.exec(url.pathname);
         if (letterFile) return await getLetterDownload(letterFile[1], letterFile[2], letterFile[3], response);
@@ -700,7 +740,7 @@ export function createHubHandler(ctx) {
       }
       return send(response, 405, 'Method not allowed', 'text/plain; charset=utf-8');
     } catch (error) {
-      const wantsJson = (url.pathname.startsWith('/outreach/') && request.method === 'POST') || url.pathname === '/run' || url.pathname === '/letters/generate' || url.pathname === '/letters/save' || url.pathname === '/letters/clear-review' || url.pathname === '/letters/rename' || url.pathname === '/letters/oneclick' || url.pathname === '/settings/cover-letter/sample-track' || url.pathname.endsWith('.json');
+      const wantsJson = (url.pathname.startsWith('/outreach/') && request.method === 'POST') || url.pathname === '/run' || url.pathname === '/letters/generate' || url.pathname === '/letters/regenerate' || url.pathname === '/letters/save' || url.pathname === '/letters/clear-review' || url.pathname === '/letters/rename' || url.pathname === '/letters/oneclick' || url.pathname === '/settings/cover-letter/sample-track' || url.pathname.endsWith('.json');
       const letterRoute = url.pathname.startsWith('/letters/') || url.pathname === '/outreach/messages';
       const status = error instanceof HubInputError || error instanceof LetterInputError ? 400 : error instanceof HubLockedError || error instanceof LetterBusyError ? 409 : error instanceof QuotaError ? 429 : error instanceof AuthExpiredError ? 401 : error instanceof EngineError ? 502 : Number(error?.status) || 500;
       // Letter routes never echo an engine's raw text: a humanized line goes out, the raw text to the log.

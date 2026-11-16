@@ -208,7 +208,7 @@ export function lettersPage({ letters, timeZone = 'America/Chicago' }) {
       <td>${readable(letter.createdAt || letter.savedAt, timeZone)}</td>
       <td>${Array.isArray(letter.editorNotes) ? letter.editorNotes.length : 0}</td>
       <td class="file"><span class="mono">${htmlEscape(letter.pdfFileName || '')}</span></td>
-      <td class="actions"><a class="btn secondary small" href="/letters/${letter.date}/${letter.slug}">Open</a> ${letter.pdfFileName && letter.pdf ? `<a class="btn secondary small" href="/letters/${letter.date}/${letter.slug}/${encodeURIComponent(letter.pdfFileName)}">Download PDF</a>` : ''}</td>
+      <td class="actions"><a class="btn secondary small" href="/letters/${letter.date}/${letter.slug}">Open CoverLetter</a> ${letter.pdfFileName && letter.pdf ? `<a class="btn secondary small" href="/letters/${letter.date}/${letter.slug}/${encodeURIComponent(letter.pdfFileName)}">Download CoverLetter</a>` : ''}</td>
     </tr>`).join('')}</table></div>`
     : '<p class="muted">No cover letters yet. Open a report and use Generate Cover Letter on a job card.</p>';
   return `<h1 class="hub-title">Letters</h1><p class="hub-sub">Letters you generate are kept on this Mac. Reopen one to edit or download it again.</p><article class="card">${rows}</article>`;
@@ -518,7 +518,7 @@ export const ONECLICK_SCRIPT = `
   function markReady(button, result) {
     button.dataset.state = 'ready';
     var open = document.createElement('a'); open.className = 'btn secondary'; open.href = result.openUrl; open.target = '_blank'; open.rel = 'noopener noreferrer'; open.textContent = 'Open CoverLetter';
-    var download = document.createElement('a'); download.className = 'btn secondary'; download.href = result.downloadUrl; download.textContent = 'Download CoverLetter';
+    var download = document.createElement('a'); download.className = 'btn secondary'; download.href = result.downloadUrl; download.setAttribute('download', decodeURIComponent(result.downloadUrl.split('/').pop() || '')); download.textContent = 'Download CoverLetter';
     button.replaceWith(download, open);
     buttons = buttons.filter(function (item) { return item !== button; });
     var card = open.closest('.job');

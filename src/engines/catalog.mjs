@@ -4,7 +4,9 @@
 //
 // Entries: { provider: 'anthropic' | 'openai', id, label, alias, efforts?, isDefault?, weight? }. weight
 // ('light' | 'standard' | 'heavy') orders models by cost; gpt-5.6-luna is light per `codex debug models`
-// ("fast and efficient"), claude-haiku-4-5 is Claude's light tier. The defaults
+// ("fast and efficient"), claude-haiku-5-5 is Claude's light tier. pinnedId: the CLI is given the full id
+// instead of the alias (Claude Code 2.1.292 still resolves `--model haiku` to claude-haiku-4-5, while
+// `--model claude-haiku-5-5` answered as claude-haiku-5-5 on 2026-11-15). The defaults
 // were checked against the CLIs installed on the owner's Mac (Claude Code 2.1.292: the binary's model
 // table and its alias defaults; codex-cli 0.153.0: `codex debug models`), not taken on faith.
 // config.models.catalog replaces the defaults; the older hub.modelChoices lists are migrated.
@@ -19,7 +21,7 @@ export const DEFAULT_CATALOG = [
   { provider: 'anthropic', id: 'claude-fable-5-1', label: 'Claude Fable 5.1', alias: 'fable', isDefault: true, weight: 'heavy' },
   { provider: 'anthropic', id: 'claude-opus-5-5', label: 'Claude Opus 5.5', alias: 'opus', weight: 'heavy' },
   { provider: 'anthropic', id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', alias: 'sonnet', weight: 'standard' },
-  { provider: 'anthropic', id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', alias: 'haiku', weight: 'light' },
+  { provider: 'anthropic', id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5', alias: 'haiku', weight: 'light', pinnedId: true },
   { provider: 'openai', id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', alias: null, efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'], isDefault: true, weight: 'standard' },
   { provider: 'openai', id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', alias: null, efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'], weight: 'standard' },
   { provider: 'openai', id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', alias: null, efforts: ['low', 'medium', 'high', 'xhigh', 'max'], weight: 'light' },
@@ -42,7 +44,7 @@ function cleanEntry(raw, fallbackProvider = null) {
   const alias = raw.alias ? String(raw.alias).trim().toLowerCase() : null;
   const efforts = provider === 'openai' && Array.isArray(raw.efforts) ? raw.efforts.map(item => String(item).trim().toLowerCase()).filter(Boolean) : undefined;
   const weight = ['light', 'standard', 'heavy'].includes(raw.weight) ? raw.weight : undefined;
-  return { provider, id, label: String(raw.label || id).trim() || id, alias: alias || null, ...(efforts ? { efforts } : {}), ...(raw.isDefault ? { isDefault: true } : {}), ...(weight ? { weight } : {}) };
+  return { provider, id, label: String(raw.label || id).trim() || id, alias: alias || null, ...(efforts ? { efforts } : {}), ...(raw.isDefault ? { isDefault: true } : {}), ...(weight ? { weight } : {}), ...(raw.pinnedId ? { pinnedId: true } : {}) };
 }
 
 // The registry for a config: config.models.catalog when present; otherwise the defaults plus whatever the
@@ -78,7 +80,7 @@ function dedupe(entries) {
 }
 
 // The entry a name refers to: its full id, its alias, or a dated / [1m] variant of its id
-// ("claude-haiku-4-5-20251001" → claude-haiku-4-5). Null for a name the registry does not know.
+// ("claude-haiku-5-5-20260101" → claude-haiku-5-5). Null for a name the registry does not know.
 export function findModel(catalog, value, provider = null) {
   const name = normalizeModelName(value);
   if (!name) return null;
@@ -96,11 +98,12 @@ export function canonicalModelId(value, provider = null, catalog = DEFAULT_CATAL
 }
 
 // What the CLI is given for a model: the registry alias when the entry has one (claude --model fable, so
-// the CLI picks the current release of that family), else the full id (Codex models have no alias). The
+// the CLI picks the current release of that family), else the full id (Codex models have no alias, and a
+// pinnedId entry's alias still names an older release in the CLI). The
 // id the CLI actually ran comes back in its usage report and is recorded as the resolved id.
 export function cliModelArg(value, catalog = DEFAULT_CATALOG) {
   const entry = findModel(catalog, value);
-  return entry ? (entry.alias || entry.id) : (value == null || value === '' ? null : String(value).trim());
+  return entry ? (entry.pinnedId ? entry.id : entry.alias || entry.id) : (value == null || value === '' ? null : String(value).trim());
 }
 
 // The family prefix of an aliased entry ("claude-fable" for claude-fable-5-1): any release the alias may
@@ -110,7 +113,7 @@ export function familyPrefix(entry) {
 }
 
 // A different release than the registry id ("claude-fable-5-2" for claude-fable-5-1), or null. A dated
-// snapshot of the same id (claude-haiku-4-5-20251001) is the same release.
+// snapshot of the same id (claude-haiku-5-5-20260101) is the same release.
 export function newerRelease(entryOrId, resolvedId, catalog = DEFAULT_CATALOG) {
   const entry = typeof entryOrId === 'string' ? findModel(catalog, entryOrId) : entryOrId;
   if (!entry || !resolvedId) return null;

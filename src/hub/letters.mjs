@@ -15,7 +15,8 @@ import { saveOutreachMessages } from '../outreach/store.mjs';
 import { renderLetterPdf } from '../cover-letter/pdf.mjs';
 import { LetterInputError } from '../cover-letter/store.mjs';
 import { sha256 } from '../utils.mjs';
-import { HubInputError, configuredCliCommands, currentPlans, markModelUnavailableInHub, modelAvailabilityView, readReportPayload, updateAvailabilityInHub } from './services.mjs';
+import { HubInputError, configuredCliCommands, currentPlans, markModelUnavailableInHub, modelAvailabilityView, planConfigFor, readReportPayload, updateAvailabilityInHub } from './services.mjs';
+import { PAID_CREDIT_WARNING, claudePlanOf, paidCreditModels } from '../engines/plan-models.mjs';
 import { firstAvailableModel, markModelUsed, markWeeklyLimit, nextAvailableModel } from '../engines/model-availability.mjs';
 import { planLabel } from '../engines/quota.mjs';
 import { appendUsage, usageEntries, usagePath } from '../engines/usage.mjs';
@@ -178,8 +179,11 @@ async function withQuotaPolicy(ctx, config, engineChoice, attempt) {
   // A model the plan refused earlier, or whose weekly limit has not reset, is skipped before the first
   // call; the note names the step taken.
   const limited = availability.limited || [];
-  const skipped = [...availability.unavailable, ...limited];
+  // A model the plan bills to paid usage credits (Fable on Pro) is never called.
+  const paid = paidCreditModels(claudePlanOf(config, { detected: plans.claude, now: ctx.now() }), normalizeCatalog(config));
+  const skipped = [...availability.unavailable, ...limited, ...paid];
   const startModel = configured.id === 'claude' ? firstAvailableModel(configured.model, policy.modelLadder, skipped) : configured.model;
+  if (configured.id === 'claude' && paid.includes(startModel)) throw new EngineError(`${PAID_CREDIT_WARNING}: no other Claude model is on the ladder. Change the model in Settings → Subscriptions & Models.`, null, 'model_unavailable');
   const first = startModel === configured.model ? configured : letterEngineFor(ctx, config, { ...engineChoice, engine: configured.id, model: startModel });
   const startNote = startModel === configured.model ? null
     : limited.includes(configured.model) && !availability.unavailable.includes(configured.model) ? `Generated with ${startModel}: ${configured.model} weekly limit`
@@ -192,7 +196,7 @@ async function withQuotaPolicy(ctx, config, engineChoice, attempt) {
     if (verdict?.kind === 'model_unavailable' && first.id === 'claude') {
       await markModelUnavailableInHub(ctx, first.model, { plan: plans.claude, notice: verdict.notice, at: ctx.now().toISOString(), kind: verdict.reason || 'not_on_plan' }).catch(() => {});
       ctx.quotaLog?.record?.({ kind: 'model_unavailable', model: first.model, plan: plans.claude, at: ctx.now().toISOString(), engine: first.id, source: 'cover-letter', action: 'downgraded' });
-      const next = nextAvailableModel(policy.modelLadder, first.model, [...availability.unavailable, first.model]);
+      const next = nextAvailableModel(policy.modelLadder, first.model, [...availability.unavailable, ...paid, first.model]);
       if (next) {
         const fallback = letterEngineFor(ctx, config, { ...engineChoice, engine: first.id, model: next });
         const note = `Generated with ${next}: ${first.model} unavailable on ${planLabel(plans.claude)}`;
@@ -297,7 +301,7 @@ export async function v2RulesInputs(ctx, config, { job, jobId = null, trackId, r
 // (`companyEdited`). Otherwise the alias table, then the model's validated shortName, then the cleaned
 // company name decide (src/cover-letter/short-name.mjs).
 export async function generateLetter(ctx, { date, jobId, trackId, company, companyEdited = false, engine: engineChoice = null, strict = false, rulesVersion = null, saveOutreach = true, extraLetters = [] }) {
-  const config = await ctx.loadConfig();
+  const config = await planConfigFor(ctx, await ctx.loadConfig());
   const settings = letterRulesSettings(config);
   const version = rulesVersion || settings.rulesVersion;
   const readiness = await ctx.letterStore.readiness();
@@ -412,7 +416,7 @@ export async function finishLetterV2(ctx, config, { job, trackId, profile, compa
 }
 
 export async function saveLetter(ctx, { date, jobId, trackId, company, paragraphs, engine, model, effort = null, reviewEngine = null, reviewModel = null, reviewEffort = null, source = 'manual', issues = [], editorNotes = [], samplesUsed = [], shortNameSource = null, rules = null }) {
-  const config = await ctx.loadConfig();
+  const config = await planConfigFor(ctx, await ctx.loadConfig());
   const { profile } = await ctx.letterStore.readiness();
   if (!String(profile.name || '').trim()) throw new HubInputError('Add your name under Settings before downloading a letter');
   const { job, id, tracks } = await findLetterJob(ctx, date, jobId);
@@ -476,6 +480,32 @@ export async function saveLetter(ctx, { date, jobId, trackId, company, paragraph
     paragraphs: finalParagraphs,
     wordCount: saved.record.wordCount,
   };
+}
+
+// The letter page's Regenerate: a new draft for the same posting, resume track and company short name, saved
+// and rendered at once (like Generate CoverLetter on a card), so the page and the PDF change together. A failed
+// draft saves nothing; a failure after the save began puts the old letter back. Returns the saved letter.
+export async function regenerateLetter(ctx, { date, slug }) {
+  const existing = await ctx.letterStore.loadLetter(date, slug);
+  if (!existing) throw new HubInputError('Letter not found');
+  const record = existing.record;
+  if (!record.jobId) throw new HubInputError('This letter has no posting on record; use Generate CoverLetter on its job card instead');
+  const owner = record.shortNameSource === 'owner';
+  const draft = await generateLetter(ctx, { date, jobId: record.jobId, trackId: record.track || null, company: record.company, companyEdited: owner, strict: true });
+  const oldPdf = record.pdfFileName ? path.join(existing.directory, record.pdfFileName) : null;
+  const oldPdfBytes = oldPdf ? await ctx.io.readFile(oldPdf).catch(() => null) : null;
+  try {
+    return await saveLetter(ctx, {
+      date, jobId: record.jobId, trackId: draft.track.id, company: draft.company, paragraphs: draft.paragraphs,
+      engine: draft.engine, model: draft.model, effort: draft.effort, reviewEngine: draft.reviewEngine, reviewModel: draft.reviewModel, reviewEffort: draft.reviewEffort,
+      source: record.source === 'auto' ? 'auto' : 'manual', issues: draft.issues || [], editorNotes: draft.editorNotes || [], samplesUsed: draft.samplesUsed || [],
+      shortNameSource: owner ? 'owner' : draft.shortNameSource || null, rules: draft.rules,
+    });
+  } catch (error) {
+    await ctx.letterStore.saveLetter({ date, company: record.company || slug, markdown: existing.markdown, meta: record }).catch(() => {});
+    if (oldPdfBytes) await ctx.io.writeFile(oldPdf, oldPdfBytes).catch(() => {});
+    throw error;
+  }
 }
 
 // "Mark Details Checked" on the letter page: the owner has looked at every needs-review note, so the card loses its
@@ -558,7 +588,7 @@ export async function updateSalutations(ctx, { date }) {
 // letter draft assignment, with the recommended track's resume and the playbook when there is one. The result
 // is kept in private/outreach/state.json.
 export async function generateOutreachMessages(ctx, { date, jobId }) {
-  const config = await ctx.loadConfig();
+  const config = await planConfigFor(ctx, await ctx.loadConfig());
   const { job, id, tracks } = await findLetterJob(ctx, date, jobId);
   const { text } = await resumeTextFor(ctx, config, job.recommendedTrack || tracks[0]?.id);
   const settings = letterRulesSettings(config);

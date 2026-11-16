@@ -2,6 +2,7 @@
 // writes only config.json (through config-file.mjs, under the run lock) and the hub's own private
 // directory (uploaded PDFs, hub-state.json, run logs). Every filesystem call goes through ctx.io so
 // tests can point the hub at a temporary project.
+import { PAID_CREDIT_WARNING, claudePlanOf, paidCreditModel, planAdjustedConfig } from '../engines/plan-models.mjs';
 import { recentLetterStats } from '../cover-letter/recent.mjs';
 import { OPENING_STYLES, RULES_VERSIONS, letterRulesSettings, normalizeAvailability, parseMonthYear } from '../cover-letter/availability.mjs';
 import { LETTER_STAGES, effectiveStageModels, validateLetterAssignment } from '../engines/assignments.mjs';
@@ -22,7 +23,7 @@ import { builtinSources } from '../collectors/catalog.mjs';
 import { WEEKDAYS, availabilityPath, markModelUnavailable, markModelUsed, markWeeklyLimit, pruneAvailability, pruneLimits, readAvailability, weeklyResetOf, writeAvailability } from '../engines/model-availability.mjs';
 import { classifyEngineError, humanizeEngineError } from '../engines/engine-errors.mjs';
 import { planLabel } from '../engines/quota.mjs';
-import { planView } from '../engines/plans.mjs';
+import { displayPlan, planView } from '../engines/plans.mjs';
 import { appendUsage, describeTotals, readUsage, usageEntries, usagePath, usageWindow } from '../engines/usage.mjs';
 import { quotaNoticesPath, readQuotaNotices } from '../engines/quota-notices.mjs';
 import { describeQuota, normalizeQuotaPolicy } from '../engines/quota.mjs';
@@ -427,13 +428,20 @@ export async function currentPlans(ctx, config) {
   } catch { return { claude: null, codex: null, claudeConnected: false, codexConnected: null }; }
 }
 
+// The config a letter call runs with: on a plan that bills a model to paid usage credits (Fable on Pro),
+// every chain skips it (src/engines/plan-models.mjs). config.json is not touched.
+export async function planConfigFor(ctx, config) {
+  const plans = await currentPlans(ctx, config);
+  return planAdjustedConfig(config, claudePlanOf(config, { detected: plans.claude, now: ctx.now() }));
+}
+
 // The sidebar's Models lines (src/engines/assignments.mjs effectiveStageModels): the task assignments of
-// Settings → Subscriptions & Models, past any model held by a weekly limit, a missing plan, a signed-out
-// Claude, or a disconnected Codex. Nothing is written.
-export async function sidebarModels(ctx, config, { claudeSignedOut = false, codexConnected = null } = {}) {
+// Settings → Subscriptions & Models, past any model held by a weekly limit, a missing plan, a model the plan
+// bills to paid usage credits (Fable on Pro), a signed-out Claude, or a disconnected Codex. Nothing is written.
+export async function sidebarModels(ctx, config, { claudeSignedOut = false, codexConnected = null, claudePlan = null } = {}) {
   let record = null;
   try { record = await readAvailability(availabilityPath(ctx.root), ctx.io); } catch { record = null; }
-  return effectiveStageModels(config, { record, now: ctx.now(), claudeSignedOut, codexConnected });
+  return effectiveStageModels(config, { record, now: ctx.now(), claudeSignedOut, codexConnected, claudePlan });
 }
 
 // A plan change worth a banner: reported by the newest run (meta.planChange), or seen by the hub's own
@@ -564,7 +572,7 @@ export async function sidebarSummary(ctx, config) {
     // Two lines for the sidebar: "Claude Max → Pro Oct 26" and "ChatGPT Plus".
     planLines: await sidebarPlanLines(ctx, config, now, timeZone),
     // Up to three lines: Review, Prescreen, CoverLetter and the model each would use now.
-    models: await sidebarModels(ctx, config, { claudeSignedOut: claudeAuth.expired === true, codexConnected: plans.codexConnected }),
+    models: await sidebarModels(ctx, config, { claudeSignedOut: claudeAuth.expired === true, codexConnected: plans.codexConnected, claudePlan: claudePlanOf(config, { detected: plans.claude, now }) }),
   };
 }
 
@@ -1053,6 +1061,9 @@ export async function testModel(ctx, config, form) {
   const catalog = normalizeCatalog(config);
   const entry = findModel(catalog, String(form.model || ''));
   if (!entry) throw new HubInputError('Pick a model from the registry to test');
+  const plans = await currentPlans(ctx, config);
+  const claudePlan = claudePlanOf(config, { detected: plans.claude, now: ctx.now() });
+  if (paidCreditModel(entry.id, claudePlan, catalog)) throw new HubInputError(`${PAID_CREDIT_WARNING}: ${entry.id} is not tested on ${displayPlan(claudePlan)}`);
   if (ctx.letterJobs?.busy?.()) throw new ModelTestBusyError('A cover letter is generating; test the model after it finishes');
   const lettersLock = await readLockStatus(lettersLockPath(ctx.root), ctx.pidAlive, ctx.io).catch(() => ({ locked: false }));
   if (lettersLock.locked) throw new ModelTestBusyError(`Automatic cover letters hold the letters lock (PID ${lettersLock.pid}); test the model after they finish`);

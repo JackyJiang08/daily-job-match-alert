@@ -276,6 +276,23 @@ export async function applySubscriptionMatching(jobs, resumes, preferences, opti
     const auth = await engine.verifyAuth();
     if (auth && typeof auth === 'object' && auth.subscriptionType) plan = String(auth.subscriptionType).toLowerCase();
     if (typeof options.onAuth === 'function') await options.onAuth({ engine: engineName, plan, status: auth });
+    // Models the reported plan bills to paid usage credits (Fable on Pro) are never called: skipped like a
+    // refused model, and a scoring model among them hands over to the first ladder step left.
+    const paid = engineName === 'claude' && typeof options.paidCreditModels === 'function' ? options.paidCreditModels(plan) || [] : [];
+    for (const id of paid) unavailable.add(modelKey(id));
+    if (paid.length && !options.engineInstance && unavailable.has(modelKey(engine.model))) {
+      const billed = normalizeModelName(engine.model);
+      const next = policy.modelLadder.map(normalizeModelName).find(id => !skip().has(modelKey(id)));
+      if (!next) {
+        addWarning(options, `${billed} is billed to usage credits on ${planLabel(plan)} and no other model is on the ladder; ${candidates.length} postings were deferred to the next run`);
+        return jobs.map(job => (candidates.some(item => item.url === job.url) ? { ...job, quotaDeferred: true } : job));
+      }
+      engine = makeEngine(engineName, next);
+      strategicModels.add(next);
+      downgradeNote = `${billed} billed to usage credits on ${planLabel(plan)}`;
+      quotaEvents.push({ kind: 'model_unavailable', model: billed, plan, resetsAt: null, at: clock().toISOString(), action: 'skipped', detail: `switched to ${next} (billed to usage credits on ${planLabel(plan)})`, engine: engineName, message: `${billed} is billed to usage credits on ${planLabel(plan)}` });
+      addWarning(options, `${billed} is billed to usage credits on ${planLabel(plan)}; scoring with ${next}`, 'info');
+    }
   } catch (error) {
     if (classifyEngineError(error, { now: clock(), policy })?.kind === 'auth_expired') {
       const notice = engineNotice(error);

@@ -519,7 +519,7 @@ test('track rule: a customer support or product role uses the DA resume; reasons
     assert.equal(cited.track.id, 'agent');
     assert.ok(cited.notesNeedReview.some(note => note.includes(SCORING_EVIDENCE_NOTE)));
     const saved = JSON.parse((await hub.request('POST', '/letters/save', { date: '2026-11-08', job: jobIdOf(engineer), track: 'agent', company: 'Example Corp', paragraph: cited.paragraphs, engine: 'codex', model: 'gpt-5.6-sol', editorNotes: JSON.stringify(cited.editorNotes), rules: JSON.stringify(cited.rules) })).text);
-    const page = (await hub.request('GET', `/letters/2026-11-08/${saved.slug}`)).text;
+    const page = (await hub.request('GET', `/letters/2026-11-08/${saved.slug}/edit`)).text;
     assert.match(page, /<button class="btn secondary" id="da-button" type="button" title="[^"]+">Regenerate With DA Resume<\/button>/);
     assert.match(page, /data-da-track="data"/);
     assert.match(page, /daButton\.addEventListener\('click', function \(\) \{ document\.getElementById\('letter-track'\)\.value = panel\.dataset\.daTrack;/);

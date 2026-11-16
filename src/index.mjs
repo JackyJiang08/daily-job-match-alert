@@ -46,6 +46,8 @@ import { holdsToExactWindow, resolveCompanyName } from './posting-fields.mjs';
 import { describeConnections } from './engines/index.mjs';
 import { describeQuota, normalizeQuotaPolicy } from './engines/quota.mjs';
 import { AUTH_EXPIRED_MESSAGE, AUTH_EXPIRED_NOTIFICATION, classifyEngineError, isAuthExpiredText } from './engines/engine-errors.mjs';
+import { PAID_CREDIT_WARNING, claudePlanOf, paidCreditModels, planAdjustedConfig } from './engines/plan-models.mjs';
+import { normalizeCatalog } from './engines/catalog.mjs';
 import { HOLD_GRACE_MS, availabilityPath, markModelUnavailable, markModelUsed, markWeeklyLimit, pruneAvailability, pruneLimits, readAvailability, unavailableModelNames, weeklyResetOf, writeAvailability } from './engines/model-availability.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -982,6 +984,15 @@ async function runPipeline(config, clock, options = {}) {
   await fs.mkdir(config.outputDirectory, { recursive: true });
   const statePath = statePathFor(config);
   const { state, seenDrop } = await loadState(config, statePath, { now, warnings, options });
+  // On Pro, Fable is billed to paid usage credits from the first call: every chain of this run skips it
+  // (src/engines/plan-models.mjs); config.json is left as it is.
+  const configuredPlan = claudePlanOf(config, { detected: state.observedPlans?.claude?.type || null, now });
+  const planConfig = planAdjustedConfig(config, configuredPlan);
+  if (planConfig !== config) {
+    const skipped = paidCreditModels(configuredPlan, normalizeCatalog(config));
+    warnings.push(createWarning('llm', 'plan', `${PAID_CREDIT_WARNING}: skipped ${skipped.join(', ')} in every task; scoring starts at ${resolveModel(planConfig.semanticMatching || {}, 'claude')}`, 'info'));
+    config = planConfig;
+  }
   const cutoff = new Date(now.getTime() - config.lookbackHours * 60 * 60 * 1000);
   const debug = {};
   const prefs = config.preferences || {};
@@ -1197,6 +1208,8 @@ async function runPipeline(config, clock, options = {}) {
       quotaEvents,
       now: () => new Date(),
       plan: observedPlan,
+      // The plan the CLI reports at the start of scoring may differ from the last one recorded.
+      paidCreditModels: detected => paidCreditModels(claudePlanOf(config, { detected, now }), normalizeCatalog(config)),
       // A redacted copy of the last successful envelope (usage and modelUsage only) for fixture recording.
       envelopeLog: path.join(config.root, 'state', 'logs', 'claude-envelope-last.json'),
       unavailableModels: unavailableModelNames(availability),

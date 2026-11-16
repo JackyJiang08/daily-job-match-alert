@@ -11,6 +11,7 @@ import { describeQuota, planLabel } from '../engines/quota.mjs';
 import { planView, displayPlan } from '../engines/plans.mjs';
 import { formatLocalDateTime } from '../time-format.mjs';
 import { usageWindow } from '../engines/usage.mjs';
+import { PAID_CREDIT_WARNING, paidCreditModel } from '../engines/plan-models.mjs';
 
 export const STATUS_LABELS = {
   available: 'Available', not_verified: 'Not Verified', weekly_limit: 'Weekly Limit', not_on_plan: 'Unavailable', unknown_model: 'Unknown Model',
@@ -30,9 +31,11 @@ export function statusText(status, timeZone, plan = null) {
   return STATUS_LABELS[status.state] || status.state;
 }
 
+// A step the plan bills to paid usage credits (Fable on Pro) is blocked too: runs skip it before any call.
 function step(catalog, record, entry, { now, timeZone, plan, weeklyReset = null }) {
   const status = modelStatus(record, entry.model, { now, weeklyReset, timeZone });
-  return { ...entry, alias: findModel(catalog, entry.model)?.alias || null, status, blocked: BLOCKING.has(status.state), reason: BLOCKING.has(status.state) ? statusText(status, timeZone, plan) : null };
+  const paid = entry.engine === 'claude' && paidCreditModel(entry.model, plan, catalog);
+  return { ...entry, alias: findModel(catalog, entry.model)?.alias || null, status, paid, blocked: paid || BLOCKING.has(status.state), reason: paid ? `Paid Credits on ${planLabel(plan)}` : BLOCKING.has(status.state) ? statusText(status, timeZone, plan) : null };
 }
 
 // The latest limit event for an engine: from this hub's own log or the newest run, with the reset time a
@@ -58,7 +61,10 @@ export function modelSettingsView({ config = {}, settings = {}, connections = nu
   const stages = ['scoring', 'supplemental', 'letterDraft', 'letterEditor', 'prescreen'].map(stage => {
     const assignment = assignments[stage];
     const chain = stageChain(assignment, catalog).map(entry => step(catalog, record, entry, { now, timeZone, plan: planFor(ENGINE_PROVIDER[entry.engine])?.plan, weeklyReset }));
-    return { stage, label: STAGE_LABELS[stage], ...assignment, chain, off: (stage === 'letterEditor' && settings.editorReview === false) || (stage === 'prescreen' && config.prescreen?.enabled === false) };
+    // The config names a model this plan bills to paid credits: a warning beside the task (config.json is
+    // not changed; the run skips the model).
+    const paidWarning = !assignment?.linked && chain.some(item => item.paid) ? PAID_CREDIT_WARNING : null;
+    return { stage, label: STAGE_LABELS[stage], ...assignment, chain, paidWarning, off: (stage === 'letterEditor' && settings.editorReview === false) || (stage === 'prescreen' && config.prescreen?.enabled === false) };
   });
   const usedBy = id => stages.filter(row => !row.reserved && !row.linked && !row.off && row.chain.some(item => modelKey(item.model) === modelKey(id)))
     .map(row => ({ stage: row.label, primary: modelKey(row.model) === modelKey(id) }));

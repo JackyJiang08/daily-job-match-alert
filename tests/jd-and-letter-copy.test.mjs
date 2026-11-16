@@ -164,7 +164,7 @@ test('the letter page: Copy Full Letter is the primary button, Copy From Salutat
   await fs.writeFile(recordFile, JSON.stringify({ ...record, company: 'Example Corp', paragraphs: PARAGRAPHS, createdAt: '2026-11-09T00:30:00Z', timeZone: 'America/Chicago' }));
   const hub = await startReportHub(root);
   try {
-    const page = (await hub.request('/letters/2026-10-17/ExampleCorp1')).text;
+    const page = (await hub.request('/letters/2026-10-17/ExampleCorp1/edit')).text;
     assert.match(page, /<h1 class="hub-title">Cover Letter<\/h1>\s*<div class="row letter-copy" id="letter-copy" data-letter="[^"]+"><button class="btn" id="copy-full" type="button">Copy Full Letter<\/button><button class="btn secondary" id="copy-salutation" type="button">Copy From Salutation<\/button><span class="letter-status" id="copy-status" role="status"><\/span><\/div>/);
     assert.doesNotMatch(page, /Copy Paragraph|data-copy-paragraph|class="[^"]*copy-para/i);
     // What the page script has to work with: the parts in data-letter, the company field, the paragraph boxes.

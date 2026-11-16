@@ -78,7 +78,8 @@ function renderAction(action) {
     const title = action.title ? ` title="${htmlEscape(action.title)}"` : '';
     return `<button type="button" class="${className}"${data}${pressed}${title}${action.disabled ? ' disabled' : ''}>${htmlEscape(action.label)}</button>`;
   }
-  return `<a class="${className}" href="${htmlEscape(action.href)}"${action.newTab ? ` ${EXTERNAL_LINK}` : ''}>${htmlEscape(action.label)}</a>`;
+  const download = action.download == null ? '' : action.download ? ` download="${htmlEscape(action.download)}"` : ' download';
+  return `<a class="${className}" href="${htmlEscape(action.href)}"${download}${action.newTab ? ` ${EXTERNAL_LINK}` : ''}>${htmlEscape(action.label)}</a>`;
 }
 
 // "Check N Details" at the right end of the posting line: only when the letter's editor left something the

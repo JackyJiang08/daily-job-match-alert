@@ -14,8 +14,9 @@
 // keeps the labelled placeholder engine, so demos and tests never call a model.
 import { DEFAULT_CATALOG, DEFAULT_LETTER_FALLBACK_ALIAS, ENGINE_PROVIDER, PROVIDER_ENGINE, canonicalModelId, defaultModelId, findModel, lightestModelId, normalizeCatalog } from './catalog.mjs';
 import { normalizeEngineId, resolveModel } from './index.mjs';
-import { normalizeQuotaPolicy } from './quota.mjs';
+import { normalizeQuotaPolicy, planLabel } from './quota.mjs';
 import { modelKey, modelStatus, weeklyResetOf } from './model-availability.mjs';
+import { paidCreditModel, planAdjustedConfig } from './plan-models.mjs';
 
 export const STAGES = ['scoring', 'supplemental', 'letterDraft', 'letterEditor', 'prescreen'];
 export const LETTER_STAGES = ['letterDraft', 'letterEditor'];
@@ -123,8 +124,9 @@ export function validateLetterAssignment(stage, form, { catalog = DEFAULT_CATALO
 
 // The hub sidebar's "Models" lines: the model each task would use right now (Review = scoring, Prescreen,
 // CoverLetter = the draft stage), walking the stage's chain past steps that cannot answer: a model under a
-// weekly limit or marked not on the plan / unknown (state/model-availability.json), Claude while it is signed
-// out, Codex when the connection probe says it is not connected. { key, label, model, short, fellBack, from,
+// weekly limit or marked not on the plan / unknown (state/model-availability.json), a model the Claude plan
+// bills to paid usage credits (Fable on Pro: never called, src/engines/plan-models.mjs), Claude while it is
+// signed out, Codex when the connection probe says it is not connected. { key, label, model, short, fellBack, from,
 // reason } per task; model null with short "Off" (prescreen disabled), "Local Only" (no engine) or
 // "Unavailable" (every step blocked).
 export const SIDEBAR_STAGES = [
@@ -138,14 +140,17 @@ export function modelShortName(id, catalog = DEFAULT_CATALOG) {
   return entry ? String(entry.label).replace(/^Claude\s+/, '') : String(id || '');
 }
 
-export function effectiveStageModels(config = {}, { record = null, now = new Date(), claudeSignedOut = false, codexConnected = null } = {}) {
+export function effectiveStageModels(config = {}, { record = null, now = new Date(), claudeSignedOut = false, codexConnected = null, claudePlan = null } = {}) {
   const catalog = normalizeCatalog(config);
   const assignments = stageAssignments(config);
+  // What a run would call: on Pro the chains without Fable (the same copy the run makes).
+  const runAssignments = stageAssignments(planAdjustedConfig(config, claudePlan));
   const weeklyReset = weeklyResetOf(config);
   const timeZone = config.timeZone || 'America/Chicago';
   const blocked = step => {
     if (step.engine === 'claude' && claudeSignedOut) return 'Claude signed out';
     if (step.engine === 'codex' && codexConnected === false) return 'Codex not connected';
+    if (step.engine === 'claude' && paidCreditModel(step.model, claudePlan, catalog)) return `paid credits on ${planLabel(claudePlan)}`;
     const status = record ? modelStatus(record, step.model, { now, weeklyReset, timeZone }) : null;
     if (status?.state === 'weekly_limit') return 'weekly limit';
     if (status?.state === 'not_on_plan') return 'not on the plan';
@@ -157,12 +162,11 @@ export function effectiveStageModels(config = {}, { record = null, now = new Dat
     if (stage === 'prescreen' && config.prescreen?.enabled === false) return { ...base, short: 'Off' };
     const assignment = assignments[stage];
     if (!assignment?.engine || assignment.engine === 'local_only') return { ...base, short: 'Local Only' };
-    const chain = stageChain(assignment, catalog);
-    const first = chain[0];
+    const first = stageChain(assignment, catalog)[0];
     const firstReason = blocked(first);
-    const usable = chain.find(step => !blocked(step));
+    const usable = stageChain(runAssignments[stage], catalog).find(step => !blocked(step));
     if (!usable) return { ...base, short: 'Unavailable', from: first.model, reason: firstReason };
-    const fellBack = usable !== first;
+    const fellBack = usable.model !== first.model || usable.engine !== first.engine;
     return { ...base, model: usable.model, short: modelShortName(usable.model, catalog), fellBack, from: fellBack ? first.model : null, reason: fellBack ? firstReason : null };
   });
 }

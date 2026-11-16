@@ -942,7 +942,7 @@ test('the Quota card shows seven days of subscription usage by full model id, by
   await fs.writeFile(path.join(root, 'state', 'usage.json'), JSON.stringify({ version: 1, entries: [
     entry('2026-08-27T01:10:00Z', 'review', 'claude-fable-5-1', 1000, 2000),
     entry('2026-08-27T01:12:00Z', 'supplemental', 'claude-fable-5-1', 100, 200),
-    entry('2026-08-25T01:10:00Z', 'review', 'claude-haiku-4-5-20251001', 400, 20),
+    entry('2026-08-25T01:10:00Z', 'review', 'claude-haiku-5-5-20251001', 400, 20),
     entry('2026-08-26T15:00:00Z', 'letter', 'gpt-6-astra', 5000, 300, { effort: 'medium', source: 'hub' }),
     entry('2026-08-01T01:00:00Z', 'review', 'claude-opus-5', 9, 9),
   ] }));
@@ -953,7 +953,7 @@ test('the Quota card shows seven days of subscription usage by full model id, by
     assert.match(usage, /^6\.5k in · 2\.5k out \(4 calls\)/, 'the 7-day total leaves the Aug 1 entry out');
     assert.match(usage, /<li data-usage-model="gpt-6-astra"><span class="mono">gpt-6-astra<\/span> <span class="muted">\(medium effort\)<\/span>: 5\.0k in · 300 out \(1 call\)<\/li>/);
     assert.match(usage, /<li data-usage-model="claude-fable-5-1"><span class="mono">claude-fable-5-1<\/span>: 1\.1k in · 2\.2k out \(2 calls\)<\/li>/);
-    assert.match(usage, /<li data-usage-model="claude-haiku-4-5-20251001">/);
+    assert.match(usage, /<li data-usage-model="claude-haiku-5-5-20251001">/);
     assert.doesNotMatch(usage, /claude-opus-5|data-usage-model="fable"/);
     assert.match(usage, /<li data-usage-purpose="review">review: 1\.4k in · 2\.0k out \(2 calls\)<\/li><li data-usage-purpose="supplemental">supplemental: 100 in · 200 out \(1 call\)<\/li><li data-usage-purpose="letter">letter: 5\.0k in · 300 out \(1 call\)<\/li>/);
     assert.match(usage, /<span class="mono" id="quota-usage-nights">08-21 0 · 08-22 0 · 08-23 0 · 08-24 420 · 08-25 0 · 08-26 8\.6k · 08-27 0<\/span>/, 'nights are local days in America/Chicago');
@@ -981,16 +981,16 @@ test('Test sends one short prompt to one model through a fake engine, updates it
   });
   const status = async id => new RegExp(`<tr data-model="${id.replace(/\./g, '\\.')}">([\\s\\S]*?)<\\/tr>`).exec((await hub.request('GET', '/settings')).text.split('<script>')[0])[1];
   try {
-    const ok = await hub.form('/settings/models/test', { model: 'claude-haiku-4-5', confirm: '1' });
+    const ok = await hub.form('/settings/models/test', { model: 'claude-haiku-5-5', confirm: '1' });
     assert.equal(ok.status, 303);
-    assert.match(decodeURIComponent(ok.headers.location), /notice=claude-haiku-4-5 answered; the CLI reported claude-haiku-4-5-20260901/);
-    assert.deepEqual(calls, [{ engine: 'claude', model: 'claude-haiku-4-5', prompt: 'Reply with OK' }], 'one fixed prompt, one model, the full id');
-    const haiku = await status('claude-haiku-4-5');
-    assert.match(haiku, /<td><span class="mono">claude-haiku-4-5-20260901<\/span><\/td>/, 'the current version is the id the CLI reported (a dated snapshot, not a new version)');
+    assert.match(decodeURIComponent(ok.headers.location), /notice=claude-haiku-5-5 answered; the CLI reported claude-haiku-5-5-20260901/);
+    assert.deepEqual(calls, [{ engine: 'claude', model: 'claude-haiku-5-5', prompt: 'Reply with OK' }], 'one fixed prompt, one model, the full id');
+    const haiku = await status('claude-haiku-5-5');
+    assert.match(haiku, /<td><span class="mono">claude-haiku-5-5-20260901<\/span><\/td>/, 'the current version is the id the CLI reported (a dated snapshot, not a new version)');
     assert.match(haiku, /data-model-state="available">Available/);
     assert.match(haiku, /<td class="nowrap" title="Aug 27, 2026, 7:00 AM">Aug 27, 7:00 AM<\/td>/, 'last used is the test time');
     const usage = JSON.parse(await fs.readFile(path.join(root, 'state', 'usage.json'), 'utf8'));
-    assert.deepEqual(usage.entries.map(entry => [entry.purpose, entry.model, entry.source]), [['test', 'claude-haiku-4-5-20260901', 'hub']]);
+    assert.deepEqual(usage.entries.map(entry => [entry.purpose, entry.model, entry.source]), [['test', 'claude-haiku-5-5-20260901', 'hub']]);
 
     reply = 'unknown';
     const refused = await hub.form('/settings/models/test', { model: 'gpt-5.5', confirm: '1' });
@@ -1003,19 +1003,19 @@ test('Test sends one short prompt to one model through a fake engine, updates it
 
     // Guards: no confirmation, a name outside the registry, the run lock held, a letter generating.
     calls.length = 0;
-    assert.match(decodeURIComponent((await hub.form('/settings/models/test', { model: 'claude-haiku-4-5' })).headers.location), /error=Confirm the test call first/);
+    assert.match(decodeURIComponent((await hub.form('/settings/models/test', { model: 'claude-haiku-5-5' })).headers.location), /error=Confirm the test call first/);
     assert.match(decodeURIComponent((await hub.form('/settings/models/test', { model: 'claude-opus-9', confirm: '1' })).headers.location), /error=Pick a model from the registry/);
     await fs.writeFile(path.join(root, 'state', '.lock'), '9001\n');
     hub.alivePids.add(9001);
-    const locked = await hub.form('/settings/models/test', { model: 'claude-haiku-4-5', confirm: '1' });
+    const locked = await hub.form('/settings/models/test', { model: 'claude-haiku-5-5', confirm: '1' });
     assert.match(decodeURIComponent(locked.headers.location), /error=The nightly run holds the run lock \(PID 9001\); test the model after it finishes/);
     hub.alivePids.delete(9001);
     await fs.rm(path.join(root, 'state', '.lock'), { force: true });
     hub.ctx.letterJobs = { ...hub.ctx.letterJobs, busy: () => true };
-    const busy = await hub.form('/settings/models/test', { model: 'claude-haiku-4-5', confirm: '1' });
+    const busy = await hub.form('/settings/models/test', { model: 'claude-haiku-5-5', confirm: '1' });
     assert.match(decodeURIComponent(busy.headers.location), /error=A cover letter is generating; test the model after it finishes/);
     assert.deepEqual(calls, [], 'no refused request reached an engine');
-    assert.equal((await hub.form('/settings/models/test', { model: 'claude-haiku-4-5', confirm: '1' }, { origin: 'http://evil.example' })).status, 403);
+    assert.equal((await hub.form('/settings/models/test', { model: 'claude-haiku-5-5', confirm: '1' }, { origin: 'http://evil.example' })).status, 403);
     const settings = (await hub.request('GET', '/settings')).text;
     assert.match(settings, /window\.confirm\('Send one short test prompt/, 'the page asks before sending');
   } finally {
@@ -1031,7 +1031,7 @@ test('Subscriptions & Models shows each plan with source and detection time, 7-d
     models: { 'claude-fable-5-1': { model: 'claude-fable-5-1', plan: 'max', detectedAt: '2026-08-26T12:00:00.000Z', kind: 'not_on_plan' } },
     limits: { 'claude-opus-5-5': { model: 'claude-opus-5-5', at: '2026-08-27T01:02:00.000Z', resetsAt: '2026-08-29T14:00:00.000Z' } },
     seen: {
-      'claude-haiku-4-5': { resolvedId: 'claude-haiku-4-5-20251001', lastUsedAt: '2026-08-26T20:00:00.000Z' },
+      'claude-haiku-5-5': { resolvedId: 'claude-haiku-5-5-20251001', lastUsedAt: '2026-08-26T20:00:00.000Z' },
       'claude-sonnet-5-5': { resolvedId: 'claude-sonnet-5-6', lastUsedAt: '2026-08-26T21:00:00.000Z' },
       'gpt-5.6-sol': { resolvedId: 'gpt-5.6-sol', lastUsedAt: '2026-08-26T22:00:00.000Z' },
     },
@@ -1075,7 +1075,7 @@ test('Subscriptions & Models shows each plan with source and detection time, 7-d
     assert.match(row('claude-opus-5-5'), /<span class="stage" title="Scoring \(fallback\)">Scoring<\/span> <span class="stage" title="Cover Letter Draft \(fallback\)">Letter Draft<\/span> <span class="stage" title="Cover Letter Editor \(fallback\)">Letter Editor<\/span>/, 'the ladder step and both letter fallbacks');
     assert.match(row('claude-opus-5-5'), /<span class="badge badge-warn" data-model-state="weekly_limit">Weekly Limit Until Aug 29, 2026, 9:00 AM<\/span>/);
     assert.match(row('claude-sonnet-5-5'), /<td><span class="mono">claude-sonnet-5-6<\/span><br><span class="new-version" data-new-version="claude-sonnet-5-6">New version: claude-sonnet-5-6<\/span><\/td>/);
-    assert.match(row('claude-haiku-4-5'), /<td><span class="mono">claude-haiku-4-5-20251001<\/span><\/td><td><span class="badge badge-good" data-model-state="available">Available<\/span><\/td>/);
+    assert.match(row('claude-haiku-5-5'), /<td><span class="mono">claude-haiku-5-5-20251001<\/span><\/td><td><span class="badge badge-good" data-model-state="available">Available<\/span><\/td>/);
     assert.match(row('gpt-5.6-sol'), /<td><span class="mono">gpt-5\.6-sol<\/span><br><form class="inline test-form" method="post" action="\/settings\/models\/test" data-test-model="gpt-5\.6-sol">[\s\S]*?<button class="link-button" type="submit"[^>]*>Test<\/button><\/form><\/td>/, 'Test is an inline secondary action in the model cell');
     const openaiModels = /<article class="card model-card" data-provider="openai">([\s\S]*?)<\/article>/.exec(markup)[1];
     assert.match(openaiModels, /<details class="all-models"><summary>Show All Models \(3 More\)<\/summary>[\s\S]*?data-model="gpt-5\.6-terra"[\s\S]*?data-model="gpt-6-astra"[\s\S]*?<\/details>/);
@@ -1157,7 +1157,7 @@ test('while the automatic pass writes letters, cards say so and manual letters w
     assert.match(status, /<dd id="auto-letters-counts">0 generated · 0 failed <span class="muted">\(skipped: 1 with an uncertain company\)<\/span><\/dd>/);
     // Test is refused while the letters lock is held.
     hub.ctx.makeTestEngine = () => { throw new Error('must not be built'); };
-    assert.match(decodeURIComponent((await hub.form('/settings/models/test', { model: 'claude-haiku-4-5', confirm: '1' })).headers.location), /error=Automatic cover letters hold the letters lock \(PID 777\)/);
+    assert.match(decodeURIComponent((await hub.form('/settings/models/test', { model: 'claude-haiku-5-5', confirm: '1' })).headers.location), /error=Automatic cover letters hold the letters lock \(PID 777\)/);
 
     // The pass finished: the letter is on the card with its editor notes, highlighted for an unverified detail.
     hub.alivePids.delete(777);
