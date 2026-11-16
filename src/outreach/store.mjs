@@ -1,8 +1,9 @@
 // The Reach Out panel's state, per posting (by job id, so a posting keeps it across report dates):
 // private/outreach/state.json (gitignored with the rest of private/). Written atomically.
-//   { version: 1, updatedAt, jobs: { <jobId>: { firstName, contactedAt, appliedAt, messages: { connectionNote,
-//     followUpMessage, limit, source: 'letter' | 'panel', generatedAt }, candidates: { at, provider, status,
-//     results: [{ name, headline, url }] } } } }
+//   { version: 1, updatedAt, jobs: { <jobId>: { contactedAt, copied: { <person key>: at }, messages: {
+//     connectionNote, followUpMessage, limit, source: 'letter' | 'panel', generatedAt } } } }
+// contactedAt is set by the first copied message (the card's "Contacted Nov 8"). firstName, candidates and
+// appliedAt from before 2026-11-16 may still be on disk; they are kept and no longer read.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { writeJsonAtomic } from '../json-file.mjs';

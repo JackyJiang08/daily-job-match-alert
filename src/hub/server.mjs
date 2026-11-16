@@ -48,8 +48,10 @@ export function createHubContext(options) {
     managedResumeDirectory: path.join(privateDirectory, 'resumes'),
     extractText: options.extractText || ((file, settings) => extractPdfText(file, settings)),
     loadConfig: options.loadConfig || (() => loadConfig(configPath, { notify: () => {} })),
-    // The only outgoing request of Reach Out is the optional candidate search API (src/outreach/candidates.mjs).
+    // The only outgoing request of Message to Recruiters is the people search API (src/outreach/people.mjs).
     fetchImpl: options.fetchImpl || ((...args) => fetch(...args)),
+    // How long one people-search call may take before the panel falls back to the Find buttons.
+    peopleTimeoutMs: options.peopleTimeoutMs || undefined,
   };
   ctx.letterStore = options.letterStore || createLetterStore({
     root, io, now,

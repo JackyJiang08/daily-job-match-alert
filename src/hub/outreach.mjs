@@ -1,76 +1,85 @@
-// Reach Out (2026-11-08): the services behind the Reports page's drawer. Hard limits: nothing here requests,
-// fetches, or signs in to linkedin.com, and nothing is ever sent; the hub builds links and text and the owner
+// Message to Recruiters (2026-11-08, people list 2026-11-16): the services behind the Reports page's drawer.
+// Hard limits: nothing here requests, fetches, or signs in to linkedin.com, and nothing is ever sent; the hub
+// lists people found through the search API (src/outreach/people.mjs) and the text for each, and the owner
 // does the rest in the browser. State lives in private/outreach/state.json (src/outreach/store.mjs).
-import path from 'node:path';
 import { enabledResumeTracks } from '../config.mjs';
-import { CANDIDATES_NOTE, candidateSearchStatus, searchCandidates } from '../outreach/candidates.mjs';
+import { readRegistry, registryPath } from '../collectors/ats-boards.mjs';
+import { resolveCompanyName } from '../posting-fields.mjs';
+import { digestPath } from '../resume-digest.mjs';
 import { extractJdContacts } from '../outreach/contacts.mjs';
-import { outreachLinks } from '../outreach/links.mjs';
 import { connectionNoteLimit } from '../outreach/messages.mjs';
+import { BIG_COMPANY_JOBS, fallbackSearches, findPeople, outreachProfile, peopleCached, postingPeople, peopleSearchStatus, readPeopleUsage, peopleSearchSettings } from '../outreach/people.mjs';
 import { contactedLabel, readOutreach, updateOutreach } from '../outreach/store.mjs';
 import { findLetterJob, initialShortName, letterCompanyFor } from './letters.mjs';
 import { HubInputError } from './services.mjs';
-import { outreachPanel } from './outreach-views.mjs';
+import { outreachPanel, peopleSection } from './outreach-views.mjs';
 
-// A resume the hub stored itself is named "<upload time>-<original name>"; the download uses the original.
-const MANAGED_PREFIX = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-/;
-
-export function originalResumeName(file) {
-  return path.basename(String(file || '')).replace(MANAGED_PREFIX, '') || 'Resume.pdf';
-}
-
-// The recommended track's resume PDF: { available, label, file, fileName, reason }.
-export async function resumeForJob(ctx, config, job, tracks = []) {
-  const all = enabledResumeTracks(config);
-  const track = all.find(item => item.id === job.recommendedTrack) || all.find(item => tracks.some(entry => entry.id === item.id)) || all[0];
-  if (!track) return { available: false, reason: 'No enabled resume track' };
-  const label = track.label || track.id;
-  if (!track.pdf) return { available: false, label, reason: `The ${label} track has no resume PDF configured` };
-  try {
-    await ctx.io.access(track.pdf);
-  } catch {
-    return { available: false, label, reason: `The ${label} resume PDF is missing` };
-  }
-  return { available: true, label, file: track.pdf, fileName: originalResumeName(track.pdf) };
-}
-
-async function companyFor(ctx, job) {
+// Everything a people search for one posting needs: the short name, the names to recognize the company by,
+// the owner's schools, the JD contacts, and whether the company is large (its board lists > 200 postings).
+async function searchInputs(ctx, config, job) {
   const readiness = await ctx.letterStore.readiness().catch(() => ({ profile: {} }));
-  return initialShortName(job, readiness.profile?.companyAliases || []).name || letterCompanyFor(job).name || job.company || '';
+  const aliases = readiness.profile?.companyAliases || [];
+  const company = initialShortName(job, aliases).name || letterCompanyFor(job).name || job.company || '';
+  const chain = [letterCompanyFor(job).name, job.company, ...resolveCompanyName(job).candidates.filter(item => item.source !== 'url').map(item => item.value)].filter(Boolean);
+  const lower = new Set([company, ...chain].map(name => String(name).toLowerCase()));
+  const aliasNames = aliases.filter(item => lower.has(String(item.full || '').toLowerCase()) || lower.has(String(item.short || '').toLowerCase())).flatMap(item => [item.full, item.short]);
+  const digests = [];
+  for (const track of enabledResumeTracks(config)) {
+    const text = await ctx.io.readFile(digestPath(config.root || ctx.root, track.id), 'utf8').catch(() => null);
+    if (text) digests.push(text);
+  }
+  let bigCompany = false;
+  if (job.board) {
+    const registry = await readRegistry(registryPath({ ...config, root: config.root || ctx.root }), ctx.io).catch(() => null);
+    bigCompany = Number(registry?.boards?.[job.board]?.lastJobCount || 0) > BIG_COMPANY_JOBS;
+  }
+  return { company, companyNames: [...chain, ...aliasNames], profile: outreachProfile({ digests, config }), contacts: extractJdContacts(job.description), bigCompany };
 }
 
+function rootConfig(ctx, config) {
+  return config.root ? config : { ...config, root: ctx.root };
+}
+
+// One search per posting at a time: a second open of the same panel waits for the first.
+const inFlight = new Map();
+
+async function runSearch(ctx, config, job, id, inputs) {
+  if (!inFlight.has(id)) {
+    const work = findPeople({ root: ctx.root, config, job, ...inputs, io: ctx.io, fetchImpl: ctx.fetchImpl, now: ctx.now(), timeoutMs: ctx.peopleTimeoutMs }).finally(() => inFlight.delete(id));
+    inFlight.set(id, work);
+  }
+  return inFlight.get(id);
+}
+
+function sectionView(result, inputs, job, entry) {
+  return { people: result.people, status: result.status, fallback: fallbackSearches({ company: inputs.company, job, profile: inputs.profile }), copied: entry?.copied || {}, fellow: inputs.profile.schools[0]?.short || '' };
+}
+
+// The panel. People come straight from the cache when every query is there, or when no search can run (no key,
+// switched off, cap reached: the three Find buttons); otherwise the panel says "Finding People…" and its
+// script asks POST /outreach/people.
 export async function outreachPanelHtml(ctx, { date, jobId }) {
-  const config = await ctx.loadConfig();
-  const { job, id, tracks } = await findLetterJob(ctx, date, jobId);
-  const company = await companyFor(ctx, job);
-  const state = await readOutreach(ctx.root, ctx.io);
-  const entry = state.jobs[id] || {};
-  const status = await candidateSearchStatus(config, ctx.io);
-  const cached = entry.candidates || null;
-  const candidates = {
-    available: status.available,
-    provider: status.provider || null,
-    searched: Boolean(cached),
-    results: cached?.results || [],
-    reason: cached && cached.status !== 'ok' ? cached.reason || `The search did not finish (${cached.status})` : null,
-  };
-  return outreachPanel({
-    date, jobId: id, job, company,
-    contacts: extractJdContacts(job.description),
-    links: outreachLinks({ company, job }),
-    candidates, entry,
-    limit: connectionNoteLimit(config),
-    resume: await resumeForJob(ctx, config, job, tracks),
-    contacted: contactedLabel(entry, config.timeZone || 'America/Chicago'),
-  });
+  const config = rootConfig(ctx, await ctx.loadConfig());
+  const { job, id } = await findLetterJob(ctx, date, jobId);
+  const inputs = await searchInputs(ctx, config, job);
+  const entry = (await readOutreach(ctx.root, ctx.io)).jobs[id] || {};
+  const status = await peopleSearchStatus(ctx.root, config, { io: ctx.io, now: ctx.now() });
+  const ready = !status.available || await peopleCached({ root: ctx.root, company: inputs.company, job, profile: inputs.profile, io: ctx.io, now: ctx.now() });
+  const section = ready
+    ? sectionView(await runSearch(ctx, config, job, id, inputs), inputs, job, entry)
+    : { loading: true, people: postingPeople(inputs.contacts), copied: entry.copied || {}, fallback: fallbackSearches({ company: inputs.company, job, profile: inputs.profile }) };
+  return outreachPanel({ date, jobId: id, job, company: inputs.company, section, entry, limit: connectionNoteLimit(config) });
 }
 
-export async function resumeDownload(ctx, { date, jobId }) {
-  const config = await ctx.loadConfig();
-  const { job, tracks } = await findLetterJob(ctx, date, jobId);
-  const resume = await resumeForJob(ctx, config, job, tracks);
-  if (!resume.available) throw new HubInputError(resume.reason);
-  return { content: await ctx.io.readFile(resume.file), fileName: resume.fileName };
+// POST /outreach/people: the search (cached queries cost nothing). A failed or capped search is not an error
+// here: the section falls back to the three Find buttons.
+export async function peopleHtml(ctx, { date, jobId }) {
+  const config = rootConfig(ctx, await ctx.loadConfig());
+  const { job, id } = await findLetterJob(ctx, date, jobId);
+  const inputs = await searchInputs(ctx, config, job);
+  const entry = (await readOutreach(ctx.root, ctx.io)).jobs[id] || {};
+  const result = await runSearch(ctx, config, job, id, inputs);
+  return { status: result.status, calls: result.calls, html: peopleSection(sectionView(result, inputs, job, entry)) };
 }
 
 function validJobId(value) {
@@ -79,41 +88,21 @@ function validJobId(value) {
   return id;
 }
 
-export async function saveFirstName(ctx, { jobId, firstName }) {
-  const name = String(firstName || '').replace(/\s+/g, ' ').trim().slice(0, 60);
-  await updateOutreach(ctx.root, validJobId(jobId), entry => { entry.firstName = name; }, { io: ctx.io, now: ctx.now() });
-  return { firstName: name };
-}
-
-// Mark as Contacted: the date it was ticked (cleared when unticked); the card shows "Contacted Nov 8".
-export async function setContacted(ctx, { jobId, contacted }) {
+// A row's copy icon: the person is marked copied (the row fades and shows a check), and the first copy for a
+// posting sets contactedAt, which the card shows as "Contacted Nov 8".
+export async function markCopied(ctx, { jobId, person }) {
   const config = await ctx.loadConfig();
-  const on = contacted === true || contacted === '1' || contacted === 'true' || contacted === 'on';
+  const key = String(person || '');
+  if (!/^[\p{L}\p{N}%._-]{1,100}$/u.test(key)) throw new HubInputError('Invalid person');
   const entry = await updateOutreach(ctx.root, validJobId(jobId), item => {
-    if (on) item.contactedAt = item.contactedAt || ctx.now().toISOString();
-    else delete item.contactedAt;
+    const at = ctx.now().toISOString();
+    item.copied = { ...(item.copied && typeof item.copied === 'object' ? item.copied : {}), [key]: at };
+    item.contactedAt = item.contactedAt || at;
   }, { io: ctx.io, now: ctx.now() });
-  // The Reports render cache keys on the contacted labels (contactedByJob), so the card updates on its own.
-  return { contactedAt: entry.contactedAt || null, label: contactedLabel(entry, config.timeZone || 'America/Chicago') };
+  return { copied: key, label: contactedLabel(entry, config.timeZone || 'America/Chicago') };
 }
 
-// One candidate search per posting; the result (or why there is none) is kept and shown from then on.
-export async function findCandidates(ctx, { date, jobId }) {
-  const config = await ctx.loadConfig();
-  const { job, id } = await findLetterJob(ctx, date, jobId);
-  const state = await readOutreach(ctx.root, ctx.io);
-  if (state.jobs[id]?.candidates) return { ...state.jobs[id].candidates, cached: true, note: CANDIDATES_NOTE };
-  const result = await searchCandidates({ config, company: await companyFor(ctx, job), io: ctx.io, fetchImpl: ctx.fetchImpl, now: ctx.now() });
-  // Off or without a key nothing was asked, and nothing is recorded.
-  if (result.status === 'off' || result.status === 'no-key') return { ...result, cached: false, note: CANDIDATES_NOTE };
-  const record = { at: ctx.now().toISOString(), provider: result.provider, status: result.status, reason: result.reason || null, results: result.results };
-  await updateOutreach(ctx.root, id, entry => { entry.candidates = record; }, { io: ctx.io, now: ctx.now() });
-  return { ...record, cached: false, note: CANDIDATES_NOTE };
-}
-
-// For the cards: job id → "Contacted Nov 8" (labels) and a signature of the map for the render cache key. (The
-// Mark as Applied button and its filter left the page on 2026-11-15; an appliedAt already on disk is kept and
-// neither read nor written here.)
+// For the cards: job id → "Contacted Nov 8" (labels) and a signature of the map for the render cache key.
 export async function contactedByJob(ctx, timeZone) {
   const state = await readOutreach(ctx.root, ctx.io);
   const labels = new Map();
@@ -124,10 +113,21 @@ export async function contactedByJob(ctx, timeZone) {
   return { labels, version: [...labels].map(([id, label]) => `${id}:${label}`).sort().join(',') };
 }
 
-// Settings > Cover Letters "Reach Out": the invitation-note limit and the optional candidate search.
+// Settings > Cover Letters "Message to Recruiters": the note limit and the people search (switch and cap).
 export function validateOutreachSettings(form) {
   const limit = Number(form.connectionNoteLimit);
   if (!Number.isInteger(limit) || limit < 100 || limit > 300) throw new HubInputError('Connection note limit must be a whole number from 100 to 300 characters');
+  const cap = Number(form.peopleSearchCap ?? 300);
+  if (!Number.isInteger(cap) || cap < 0 || cap > 10000) throw new HubInputError('People search monthly cap must be a whole number from 0 to 10000');
   const on = value => value === 'on' || value === 'true' || value === true;
-  return { connectionNoteLimit: limit, searchCandidates: on(form.searchCandidates) };
+  return { connectionNoteLimit: limit, peopleSearch: { enabled: on(form.peopleSearch), monthlyCap: cap } };
+}
+
+// The Settings card's view: the saved values, this month's use, and whether a key is there.
+export async function outreachSettingsView(ctx, config) {
+  const withRoot = rootConfig(ctx, config);
+  const settings = peopleSearchSettings(withRoot);
+  const usage = await readPeopleUsage(ctx.root, withRoot, { io: ctx.io, now: ctx.now() });
+  const status = await peopleSearchStatus(ctx.root, withRoot, { io: ctx.io, now: ctx.now() });
+  return { connectionNoteLimit: connectionNoteLimit(config), peopleSearch: settings, usage, keyMissing: status.reason === 'no-key' };
 }

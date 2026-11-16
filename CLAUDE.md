@@ -579,27 +579,48 @@ disabled; do not expand them unless a task says so.
 - Tests: tests/jd-complete.test.mjs + tests/fixtures/pages/ (synthetic pages per host shape, manifest.json with
   expected outcomes; no network). History untouched: stored payloads are not re-fetched or edited.
 
-## Message to Recruiters (2026-11-08; named Reach Out until 2026-11-15)
-- HARD: never request, fetch, or log in to linkedin.com; never send messages. Only the wording changed on
-  2026-11-15 (button, drawer h2 and aria-label, Settings card, docs); ids/classes (reach-*, data-reach,
-  /outreach/*, src/outreach/) stay. src/outreach/links.mjs builds the
-  URLs only (LinkedIn people search ?keywords=encodeURIComponent(…), Google ?q=…) and assertNotLinkedIn guards
-  the one outgoing request (candidate search API via ctx.fetchImpl, added to createHubContext). Tests assert it
-  at the network layer (ctx.fetchImpl spy + global fetch blocked).
-- contacts.mjs extractJdContacts(description) (labeled role, "contact X at email", "Name, Recruiter",
-  recruiting mailboxes; accommodation/privacy/etc. addresses dropped). candidates.mjs: config.outreach.
-  searchCandidates (default false) + search-discovery provider/key/monthly cap (searchRequest recent:false,
-  count 10), ≤3 linkedin.com/in results from the API's titles/snippets, one query per posting (cached).
-- messages.mjs: LETTER_SCHEMA now requires connectionNote + followUpMessage (OUTREACH_PROPERTIES); letterRules
-  (outreachLimit) adds outreachRules; generateCoverLetter returns result.outreach (outreachFrom: dashes →
-  commas, greeting "Hi {First Name},", note ≤ connectionNoteLimit(config) 100–300 default 200, follow-up ≤ 750);
-  hub generateLetter saves it (source letter). generateOutreachMessages = one OUTREACH_SCHEMA call on the
-  letterDraft plan (panel Generate Messages). Identity facts come from the RESUME (no personal data in code).
-- Store private/outreach/state.json by job id: firstName, contactedAt, messages, candidates. Hub: GET
-  /outreach/panel (HTML fragment for the drawer), GET /outreach/resume (recommended track PDF, original name:
-  managed "<stamp>-" prefix stripped), POST /outreach/{messages,name,contacted,candidates}, POST
-  /settings/outreach. Cards: Message to Recruiters button (data-reach) on every match + "Contacted Nov 8" badge;
-  the render cache key includes contactedByJob().version (contacted labels only since 2026-11-15). Drawer + OUTREACH_SCRIPT in src/hub/outreach-views.mjs.
+## Message to Recruiters (2026-11-08; named Reach Out until 2026-11-15; people list 2026-11-16)
+- HARD: never request, fetch, or log in to linkedin.com; never send messages. ids/classes (reach-*, data-reach,
+  /outreach/*, src/outreach/) stay. links.mjs: googleSearchUrl, isLinkedInUrl, assertNotLinkedIn (guards every
+  people-search request; ctx.fetchImpl only). Tests assert it at the network layer (fetch stub + global fetch
+  blocked). The LinkedIn people-search links, candidates.mjs, the first-name box, resume download
+  (/outreach/resume) and Mark as Contacted (/outreach/contacted, /outreach/name, /outreach/candidates) are GONE.
+- src/outreach/people.mjs: four kinds — posting (contacts.mjs extractJdContacts, always first, no cap), recruiter,
+  team, alumni (one search each via search-discovery searchRequest recent:false count 10; key from
+  private/search.json, provider from sources.searchDiscovery.provider). Queries: peopleQueries (recruiter terms
+  early-career vs technical; team = functionTerm (JD "join our X team" name, else title/JD function list) +
+  (manager OR director OR lead OR head) + quoted city; alumni = schoolSpellings OR-ed: full, without " at ",
+  short). Profile: outreachProfile(digests resumes/<track>.digest.md, else config.outreach.profile {schools:
+  ["Name" | {name, short}], pastEmployers}); config short wins; schoolShortName = initials (≥3) else the name.
+  pastEmployers are read but unused (owner agreed 2026-11-16). No school → no alumni query.
+- Parsing: parseProfileResult (title split on - – — | ·, "| LinkedIn" suffix, emoji, "(She/Her)", ", MBA"
+  stripped; /in/<slug> only, any subdomain → www). Kept only when companyMention(title+snippet, companyNamesFor
+  [short name, letterCompanyFor, job.company, resolveCompanyName candidates except url, matching aliases]) is
+  'current' (former/ex-/previously/retired right before a mention → dropped). Dedupe by slug.
+- Score (scorePerson; < 2 hidden): recruiter early-talent words +3 on internship/new_grad, recruiter/TA +2;
+  team +2 per function word, manager/lead/director +1, VP+ −3 when the board's lastJobCount > 200
+  (state/ats-boards.json); alumni school spelling in snippet +2, function word +2; city/state +2 for all.
+  headline = title middle part; when it is only the company the snippet is read too. pickPeople: posting rows
+  first (a searched person with the same name merges into it, lending the URL), caps recruiter 2 / team 2 /
+  alumni 1, leftovers fill to 5.
+- findPeople: cache private/outreach/people-cache.json {version, updatedAt, entries: {<kind>:<company>:<…>: {at,
+  kind, people: [{name, firstName, headline, snippet ≤300, url, slug}]}}} 30 days (recruiter key adds
+  early/experienced, team key = function term, alumni key = spellings); expired entries pruned on write.
+  Usage private/outreach/people-usage.json {month, queries, provider, lastQueryAt}, counted before each call;
+  cap outreach.peopleSearch.monthlyCap (default 300), enabled default true (searchCandidates: true also reads
+  as on); no key ⇒ off. A non-OK answer, a throw or the timeout (8 s; ctx.peopleTimeoutMs) stops the rest;
+  status 'ok'|'off'|'no-key'|'cap'|'error'. Nightly run never calls it.
+- messages.mjs: LETTER_SCHEMA requires connectionNote + followUpMessage (same call as the letter);
+  personalizeMessage(template, {firstName, fellow, limit}) — "Hi <First>," or "Hi there,"; fellow phrase only
+  if ≤ limit (note only). It is self-contained (var, no imports) because OUTREACH_SCRIPT inlines its
+  toString(). generateOutreachMessages = panel Generate Messages (one call).
+- Hub (src/hub/outreach.mjs): GET /outreach/panel renders people at once when every query is cached or no
+  search can run, else JD contacts + "Finding People…" + <template id="reach-fallback">; the script POSTs
+  /outreach/people ({status, calls, html}; failures are 200 with the Find buttons; one in-flight search per
+  job) and falls back client-side after 30 s or on any error. POST /outreach/copied {job, person} → state
+  copied[person] + contactedAt (card badge). Settings card: connectionNoteLimit, peopleSearch, peopleSearchCap,
+  usage line (outreachSettingsView). Store private/outreach/state.json by job id: contactedAt, copied,
+  messages (older firstName/candidates/appliedAt kept, unread). Chaos: people-search-down (429, hang, refused).
 
 ## UI redesign (2026-11-08)
 - Design rules (src/report-theme.mjs, shared by the Desktop report and the hub): three type levels --fs-title 18 /

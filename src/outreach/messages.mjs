@@ -105,8 +105,21 @@ export function outreachFrom(output, { limit = DEFAULT_CONNECTION_NOTE_LIMIT } =
   return { connectionNote: note.text, followUpMessage: follow.text, limit, issues };
 }
 
-// The text with the first name the owner typed; without one, the placeholder stays.
-export function withFirstName(text, firstName) {
-  const name = String(firstName || '').replace(/\s+/g, ' ').trim();
-  return name ? String(text || '').split(FIRST_NAME_PLACEHOLDER).join(name) : String(text || '');
+export const NO_NAME_GREETING = 'Hi there,';
+
+// The message for one person (the Message to Recruiters panel; also inlined into its script, so it uses no
+// outside names): "Hi <First Name>," when the person has a name, else "Hi there,"; an Alumni row adds
+// "Fellow <School> here." after the greeting when the text then still fits `limit`.
+export function personalizeMessage(template, options) {
+  var o = options || {};
+  var placeholder = '{First Name}';
+  var name = String(o.firstName || '').replace(/\s+/g, ' ').trim();
+  var text = String(template || '');
+  var greeting = name ? 'Hi ' + name + ',' : 'Hi there,';
+  var out = text.split('Hi ' + placeholder + ',').join(greeting).split(placeholder).join(name || 'there');
+  if (o.fellow && out.indexOf(greeting) === 0) {
+    var fellow = greeting + ' Fellow ' + o.fellow + ' here.' + out.slice(greeting.length);
+    if (!o.limit || fellow.length <= o.limit) out = fellow;
+  }
+  return out;
 }

@@ -1,44 +1,27 @@
-// Message to Recruiters (2026-11-08, named Reach Out until 2026-11-15): finding a recruiter and the two outreach texts. Hard limits under test: nothing ever
-// requests linkedin.com (asserted at the network layer), nothing is sent, and without a search key the
-// candidate search stays silent.
+// Message to Recruiters (2026-11-08, named Reach Out until 2026-11-15; people list 2026-11-16): the panel, the
+// two outreach texts and the JD contacts. Hard limits under test: nothing ever requests linkedin.com (asserted at
+// the network layer), nothing is sent, and without a search key nothing is searched. The people search itself
+// (queries, parsing, ranking, cache, cap) is in tests/people.test.mjs.
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import test from 'node:test';
-import { candidateQuery, searchCandidates } from '../src/outreach/candidates.mjs';
 import { extractJdContacts } from '../src/outreach/contacts.mjs';
-import { assertNotLinkedIn, googleSearchUrl, isLinkedInUrl, linkedInPeopleSearchUrl, outreachLinks, roleDirection } from '../src/outreach/links.mjs';
-import { FIRST_NAME_PLACEHOLDER, cleanOutreachText, connectionNoteLimit, fitToLimit, hasDashPunctuation, outreachFrom, outreachRules, withFirstName } from '../src/outreach/messages.mjs';
+import { assertNotLinkedIn, googleSearchUrl, isLinkedInUrl } from '../src/outreach/links.mjs';
+import { FIRST_NAME_PLACEHOLDER, cleanOutreachText, connectionNoteLimit, fitToLimit, hasDashPunctuation, outreachFrom, outreachRules, personalizeMessage } from '../src/outreach/messages.mjs';
+import { peopleCachePath, peopleUsagePath } from '../src/outreach/people.mjs';
 import { readOutreach } from '../src/outreach/store.mjs';
 import { generateCoverLetter } from '../src/cover-letter/generate.mjs';
 import { LETTER_SCHEMA } from '../src/cover-letter/compose.mjs';
-import { originalResumeName } from '../src/hub/outreach.mjs';
 import { jobIdOf } from '../src/hub/letters.mjs';
 import { OUTREACH_SCRIPT } from '../src/hub/outreach-views.mjs';
 import { fixtureJob, fixturePayload, prepareReportProject, startReportHub, writePayload } from './helpers/report-hub.mjs';
 
-// ------------------------------------------------------------------------------------------ links
+// ------------------------------------------------------------------------------------------ guard
 
-test('search links: LinkedIn people search and Google, URL-encoded, the company quoted when it has spaces', () => {
-  const links = outreachLinks({ company: 'Dow Jones', job: { title: 'Data Analyst, New Grad' } });
-  assert.deepEqual(links.map(link => link.label), ['LinkedIn: Recruiters', 'LinkedIn: Data Recruiters', 'Google: LinkedIn Profiles']);
-  assert.equal(links[0].url, 'https://www.linkedin.com/search/results/people/?keywords=%22Dow%20Jones%22%20(recruiter%20OR%20%22talent%20acquisition%22%20OR%20%22university%20recruiting%22%20OR%20%22campus%20recruiting%22)');
-  assert.equal(links[1].url, 'https://www.linkedin.com/search/results/people/?keywords=%22Dow%20Jones%22%20(recruiter%20OR%20%22talent%20acquisition%22%20OR%20%22university%20recruiting%22%20OR%20%22campus%20recruiting%22)%20data');
-  assert.equal(links[2].url, 'https://www.google.com/search?q=site%3Alinkedin.com%2Fin%20%22Dow%20Jones%22%20(recruiter%20OR%20%22talent%20acquisition%22)');
-  // One word stays bare on LinkedIn and is quoted for Google; & and + are encoded.
-  const pg = outreachLinks({ company: 'P&G', job: { title: 'Software Engineer I' } });
-  assert.equal(new URL(pg[0].url).searchParams.get('keywords'), 'P&G (recruiter OR "talent acquisition" OR "university recruiting" OR "campus recruiting")');
-  assert.equal(new URL(pg[1].url).searchParams.get('keywords'), 'P&G (recruiter OR "talent acquisition" OR "university recruiting" OR "campus recruiting") technology');
-  assert.equal(new URL(pg[2].url).searchParams.get('q'), 'site:linkedin.com/in "P&G" (recruiter OR "talent acquisition")');
-  assert.ok(pg[0].url.includes('P%26G'));
-  assert.equal(linkedInPeopleSearchUrl('a+b c'), 'https://www.linkedin.com/search/results/people/?keywords=a%2Bb%20c');
+test('the LinkedIn guard: linkedin.com and its subdomains are refused, other hosts pass; Google links are plain URLs', () => {
   assert.equal(googleSearchUrl('x y'), 'https://www.google.com/search?q=x%20y');
-  assert.deepEqual(['Product Analyst', 'Technology Consulting Analyst', 'Machine Learning Engineer', 'Business Intelligence Analyst'].map(title => roleDirection({ title })), ['product', 'consulting', 'technology', 'data']);
-  assert.equal(candidateQuery('Dow Jones'), 'site:linkedin.com/in "Dow Jones" (recruiter OR "talent acquisition")');
-});
-
-test('the LinkedIn guard: linkedin.com and its subdomains are refused, other hosts pass', () => {
   for (const url of ['https://www.linkedin.com/in/someone', 'https://linkedin.com', 'http://uk.LinkedIn.com/jobs']) {
     assert.equal(isLinkedInUrl(url), true, url);
     assert.throws(() => assertNotLinkedIn(url), /never requests linkedin\.com/);
@@ -87,14 +70,10 @@ test('the invitation note is held to the limit, opens with the greeting, and tak
   const roomy = outreachFrom({ connectionNote: `Hi ${NOTE}`, followUpMessage: 'x' }, { limit: 300 });
   assert.equal(roomy.connectionNote, `Hi ${NOTE}`, 'under 300 nothing is cut');
   assert.equal(fitToLimit('Hi {First Name}, one two three four five six seven', 30).text.length <= 30, true);
-  // The name the owner types replaces the placeholder; without one the placeholder stays.
-  assert.equal(withFirstName('Hi {First Name}, thanks {First Name}.', ' Jordan '), 'Hi Jordan, thanks Jordan.');
-  assert.equal(withFirstName('Hi {First Name},', ''), 'Hi {First Name},');
-  // The drawer does the same live: the placeholder split and joined with the typed name, and a counter
-  // against the limit that turns red past it.
+  // The drawer fills the selected person's name with the same function, and its counter turns red past the limit.
   assert.doesNotThrow(() => new Function(OUTREACH_SCRIPT), 'the drawer script parses');
-  assert.match(OUTREACH_SCRIPT, /text\.split\(p\.getAttribute\('data-placeholder'\)\)\.join\(name\)/);
-  assert.match(OUTREACH_SCRIPT, /count\.classList\.toggle\('over', node\.textContent\.length > limit\)/);
+  assert.ok(OUTREACH_SCRIPT.includes(personalizeMessage.toString()));
+  assert.match(OUTREACH_SCRIPT, /count\.classList\.toggle\('over', note && node\.textContent\.length > limit\)/);
   // A missing or different greeting is replaced by the fixed one.
   assert.equal(cleanOutreachText('Hello Sam, I saw the role.'), 'Hi {First Name}, I saw the role.');
 });
@@ -137,11 +116,6 @@ test('the cover letter call returns both texts in the same call; no extra call i
   assert.equal(result.outreach.limit, 250);
 });
 
-test('a managed resume downloads under its original file name', () => {
-  assert.equal(originalResumeName('/x/private/resumes/data/2026-11-01T10-00-00-000Z-Jane Doe Resume.pdf'), 'Jane Doe Resume.pdf');
-  assert.equal(originalResumeName('/Users/x/Desktop/Data Resume.pdf'), 'Data Resume.pdf');
-});
-
 // ------------------------------------------------------------------------------------------ hub
 
 function post(hub, pathname, fields) {
@@ -157,35 +131,50 @@ function post(hub, pathname, fields) {
   });
 }
 
-const JD = 'We are hiring a Data Analyst to build dashboards. Recruiter: Jane Doe (jane.doe@example.com). '.repeat(4);
-const BRAVE = { web: { results: [
-  { title: 'Jane Doe - University Recruiter - Example Corp | LinkedIn', url: 'https://www.linkedin.com/in/jane-doe-example', description: 'Recruiting early-career talent at Example Corp.' },
-  { title: 'Example Corp Careers', url: 'https://careers.example.com/', description: 'Jobs.' },
-  { title: 'Sam Lee – Talent Acquisition – Example Corp', url: 'https://www.linkedin.com/in/sam-lee', description: 'Talent acquisition.' },
-  { title: 'Ana Ruiz | Example Corp', url: 'https://www.linkedin.com/in/ana-ruiz', description: 'Campus recruiting.' },
-  { title: 'Lee Park - Recruiter', url: 'https://www.linkedin.com/in/lee-park', description: 'Fourth result, not shown.' },
-] } };
+const JD = 'You will join our Payments Analytics team and build dashboards. Recruiter: Jane Doe (jane.doe@example.com). '.repeat(4);
+const URL_OF = slug => `https://www.linkedin.com/in/${slug}`;
+const ANSWERS = {
+  recruiter: [
+    { title: 'Jane Doe - University Recruiter - Example Corp | LinkedIn', url: URL_OF('jane-doe'), description: 'Campus recruiting at Example Corp.' },
+    { title: 'Sam Lee - Campus Recruiter - Example Corp | LinkedIn', url: URL_OF('sam-lee'), description: 'Early career recruiting, Chicago.' },
+    { title: 'Kim Roe - Former Recruiter | LinkedIn', url: URL_OF('kim-roe'), description: 'Ex-Example Corp.' },
+  ],
+  team: [{ title: 'Lee Park - Payments Analytics Manager - Example Corp | LinkedIn', url: URL_OF('lee-park'), description: 'Example Corp.' }],
+  alumni: [{ title: 'Ana Ruiz - Data Engineer - Example Corp | LinkedIn', url: URL_OF('ana-ruiz'), description: 'Example State University. Analytics platform.' }],
+};
+const SAVED_NOTE = 'Hi {First Name}, I study statistics at Example State University and saw the Data Analyst Intern role at Example Corp. I built SQL dashboards.';
+const FOLLOW = 'Hi {First Name}, thank you for connecting. I rebuilt a weekly SQL dashboard. My resume is attached; could we have a brief conversation?';
 
-async function prepareOutreachProject({ key = true, searchCandidates = true } = {}) {
+function kindOf(url) {
+  const query = new URL(url).searchParams.get('q');
+  return /recruiter/.test(query) ? 'recruiter' : /manager OR/.test(query) ? 'team' : 'alumni';
+}
+
+async function prepareOutreachProject({ key = true, usage = null, jobs = null } = {}) {
   const root = await prepareReportProject();
   const config = JSON.parse(await fs.readFile(path.join(root, 'config.json'), 'utf8'));
-  const resumeDirectory = path.join(root, 'private', 'resumes', 'data');
-  await fs.mkdir(resumeDirectory, { recursive: true });
-  await fs.writeFile(path.join(resumeDirectory, '2026-11-01T10-00-00-000Z-Jane Doe Resume.pdf'), '%PDF-1.4 resume');
-  config.resumes.tracks[0].pdf = './private/resumes/data/2026-11-01T10-00-00-000Z-Jane Doe Resume.pdf';
-  config.outreach = { connectionNoteLimit: 200, searchCandidates };
+  config.outreach = { connectionNoteLimit: 200 };
   config.sources = { searchDiscovery: { enabled: false, provider: 'brave', monthlyQueryCap: 5 } };
   await fs.writeFile(path.join(root, 'config.json'), JSON.stringify(config, null, 2));
+  await fs.mkdir(path.join(root, 'resumes'), { recursive: true });
+  await fs.writeFile(path.join(root, 'resumes', 'data.digest.md'), 'Skills: sql\nExample State University Aug 2023 – May 2027\nExample Co | Data Intern | Chicago, IL Jun 2026 – Aug 2026\n');
   if (key) await fs.writeFile(path.join(root, 'private', 'search.json'), JSON.stringify({ brave: 'test-key-not-real' }));
-  const job = fixtureJob(1, { description: JD, company: 'Example Corp', recommendedTrack: 'data' });
-  await writePayload(root, fixturePayload('2026-10-17', [job]));
-  return { root, jobId: jobIdOf(job) };
+  if (usage) {
+    await fs.mkdir(path.dirname(peopleUsagePath(root)), { recursive: true });
+    await fs.writeFile(peopleUsagePath(root), JSON.stringify(usage));
+  }
+  const list = jobs || [fixtureJob(1, { description: JD, company: 'Example Corp', title: 'Data Analyst Intern', roleType: 'internship', location: 'Chicago, IL' })];
+  await writePayload(root, fixturePayload('2026-10-17', list));
+  const ids = list.map(jobIdOf);
+  await fs.mkdir(path.join(root, 'private', 'outreach'), { recursive: true });
+  await fs.writeFile(path.join(root, 'private', 'outreach', 'state.json'), JSON.stringify({ version: 1, jobs: Object.fromEntries(ids.map(id => [id, { messages: { connectionNote: SAVED_NOTE, followUpMessage: FOLLOW, limit: 200, source: 'letter' } }])) }));
+  return { root, jobId: ids[0], ids };
 }
 
 // Every request the hub makes goes through ctx.fetchImpl; the global fetch must never be used.
-function networkSpy(reply = () => new Response(JSON.stringify(BRAVE), { status: 200, headers: { 'content-type': 'application/json' } })) {
+function networkSpy(reply = url => new Response(JSON.stringify({ web: { results: ANSWERS[kindOf(url)] } }), { status: 200, headers: { 'content-type': 'application/json' } })) {
   const requests = [];
-  return { requests, fetchImpl: async (url, init) => { requests.push(String(url)); return reply(url, init); } };
+  return { requests, fetchImpl: async (url, init) => { requests.push(String(url)); assert.equal(isLinkedInUrl(url), false, `asked for ${url}`); return reply(url, init); } };
 }
 
 async function withGlobalFetchBlocked(work) {
@@ -199,54 +188,52 @@ async function withGlobalFetchBlocked(work) {
   }
 }
 
-test('the hub: every card offers Message to Recruiters; the panel lists JD contacts, search links in new tabs, candidates, messages, the resume; and never requests linkedin.com', async () => {
+const rows = html => [...html.matchAll(/<li class="reach-person[^"]*" data-person="([^"]+)" data-first="([^"]*)" data-fellow="([^"]*)"[\s\S]*?<span class="badge reach-kind" data-kind="([a-z]+)">([^<]+)<\/span>/g)].map(match => ({ key: match[1], first: match[2], fellow: match[3], kind: match[4], label: match[5] }));
+
+test('the panel: people found on open (three searches for a new company, none after), one row each with the message for them; never linkedin.com', async () => {
   const { root, jobId } = await prepareOutreachProject();
   const spy = networkSpy();
-  const engine = { id: 'claude', label: 'Claude subscription', model: 'fable', async generateText() { return { output: { connectionNote: 'Hi {First Name}, I study statistics and saw the Data Analyst role at Example Corp. I built SQL dashboards and can help speed up reporting.', followUpMessage: 'Hi {First Name}, thank you for connecting. I rebuilt a weekly SQL dashboard. My resume is attached; could we have a brief conversation?' } }; } };
   await withGlobalFetchBlocked(async global => {
-    const hub = await startReportHub(root, { context: { fetchImpl: spy.fetchImpl, letterEngine: engine } });
+    const hub = await startReportHub(root, { context: { fetchImpl: spy.fetchImpl } });
     try {
       const page = (await hub.request('/reports/2026-10-17')).text;
       assert.match(page, new RegExp(`<button type="button" class="btn secondary" data-reach="1" data-date="2026-10-17" data-job="${jobId}">Message to Recruiters</button>`));
       assert.match(page, /<aside class="reach-drawer" id="reach-drawer" hidden aria-label="Message to Recruiters"><\/aside>/);
 
+      // Not cached yet: the panel says "Finding People…" and asks nothing by itself.
       let panel = (await hub.request(`/outreach/panel?date=2026-10-17&job=${jobId}`)).text;
-      const order = ['id="reach-contacts"', 'id="reach-search"', 'id="reach-candidates"', 'id="reach-first-name"', 'id="reach-messages-empty"', 'id="reach-resume-section"', 'id="reach-contacted"'].map(marker => panel.indexOf(marker));
-      assert.ok(order.every((position, index) => position > 0 && (index === 0 || position > order[index - 1])), `panel order ${order}`);
-      assert.match(panel, /<strong>Jane Doe<\/strong> · Recruiter · <a href="mailto:jane\.doe@example\.com">jane\.doe@example\.com<\/a> <span class="badge" data-badge="source-jd">From the JD<\/span>/);
-      for (const match of panel.matchAll(/<a class="btn secondary small" data-reach-link="[^"]+" href="([^"]+)" target="_blank" rel="noopener noreferrer">/g)) assert.match(match[1], /^https:\/\/www\.(?:linkedin|google)\.com\//);
-      assert.equal([...panel.matchAll(/data-reach-link=/g)].length, 3);
-      assert.match(panel, /From search results, may be outdated, verify before reaching out/);
-      assert.match(panel, /<button class="btn secondary small" type="button" data-reach-candidates>Search Candidates<\/button>/);
-      assert.match(panel, /href="\/outreach\/resume\?date=2026-10-17&amp;job=[a-f0-9]{16}" download="Jane Doe Resume\.pdf">Download Data Resume<\/a>/);
+      assert.match(panel, /<p class="reach-title">Example Corp — Data Analyst Intern<\/p><button class="reach-close" type="button" data-reach-close title="Close" aria-label="Close">×<\/button>/);
+      assert.match(panel, /<section class="reach-people" id="reach-people" data-loading="1"><ul class="reach-list"><li class="reach-person selected" data-person="posting-jane-doe"[\s\S]*<p class="muted reach-finding">Finding People…<\/p><\/section><template id="reach-fallback">/);
+      assert.match(panel, /<p class="reach-text" id="reach-text">Hi Jane, I study statistics/, 'the JD contact is there while the search runs');
       assert.equal(spy.requests.length, 0, 'opening the panel requests nothing');
+      // Only the three parts: no explanations, search link lists, resume, side-by-side messages, or Mark as Contacted.
+      assert.doesNotMatch(panel, /reach-resume|Mark as Contacted|reach-first-name|linkedin\.com\/search|<h3>|Connection Note/);
 
-      // One candidate search, from the API's own results; the profiles are links, never fetched.
-      const found = JSON.parse((await post(hub, '/outreach/candidates', { date: '2026-10-17', job: jobId })).text);
+      const found = JSON.parse((await post(hub, '/outreach/people', { date: '2026-10-17', job: jobId })).text);
       assert.equal(found.status, 'ok');
-      assert.deepEqual(found.results.map(item => item.name), ['Jane Doe', 'Sam Lee', 'Ana Ruiz']);
-      assert.equal(found.results[0].headline, 'University Recruiter · Example Corp · Recruiting early-career talent at Example Corp.');
-      const again = JSON.parse((await post(hub, '/outreach/candidates', { date: '2026-10-17', job: jobId })).text);
-      assert.equal(again.cached, true, 'at most one query per posting');
-      assert.equal(spy.requests.length, 1);
-      assert.match(spy.requests[0], /^https:\/\/api\.search\.brave\.com\/res\/v1\/web\/search\?q=site%3Alinkedin\.com%2Fin\+%22Example\+Corp%22/);
-      assert.doesNotMatch(spy.requests[0], /freshness=/, 'no past-day filter for people');
+      assert.equal(found.calls, 3, 'a new company costs three searches');
+      assert.equal(spy.requests.length, 3);
+      assert.ok(spy.requests.every(url => url.startsWith('https://api.search.brave.com/res/v1/web/search?q=site%3Alinkedin.com%2Fin')));
+      // The JD's recruiter first (and the same person from the search is not listed twice), then the searched kinds.
+      assert.deepEqual(rows(found.html).map(row => [row.key, row.label]), [['posting-jane-doe', 'In Posting'], ['sam-lee', 'Recruiter'], ['lee-park', 'Team'], ['ana-ruiz', 'Alumni']]);
+      assert.equal(rows(found.html)[3].fellow, 'ESU');
+      assert.match(found.html, /<a class="reach-icon" href="https:\/\/www\.linkedin\.com\/in\/jane-doe" target="_blank" rel="noopener noreferrer" title="Open Profile" aria-label="Open Profile">↗<\/a>/);
+      assert.equal([...found.html.matchAll(/data-reach-copy-person/g)].length, 4);
+      assert.doesNotMatch(found.html, /kim-roe/, 'a former employee is left out');
 
-      // Messages for a posting without a letter: one call, stored in private/.
-      const generated = await post(hub, '/outreach/messages', { date: '2026-10-17', job: jobId });
-      assert.equal(generated.status, 200, generated.text);
+      // Opened again (or another posting at the same company): straight from the cache, no search.
       panel = (await hub.request(`/outreach/panel?date=2026-10-17&job=${jobId}`)).text;
-      assert.match(panel, /<h3>Connection Note <span class="reach-count" data-reach-count data-limit="200"><\/span><\/h3><p class="reach-text" data-reach-text data-template="Hi \{First Name\}, I study statistics/);
-      assert.match(panel, /<button class="btn secondary small" type="button" data-reach-copy="reach-follow-up">Copy<\/button>/);
-      assert.match(panel, /<a href="https:\/\/www\.linkedin\.com\/in\/jane-doe-example" target="_blank" rel="noopener noreferrer">Jane Doe<\/a>/);
+      assert.doesNotMatch(panel, /data-loading/);
+      assert.equal(rows(panel).length, 4);
+      assert.equal(spy.requests.length, 3);
+      assert.match(panel, /<p class="reach-text" id="reach-text">Hi Jane, I study statistics/, 'the first row is selected');
+      assert.match(panel, /data-note="Hi \{First Name\}, I study statistics[^"]*" data-follow="Hi \{First Name\}, thank you for connecting/);
+      assert.match(panel, /<button class="reach-link" type="button" data-reach-mode>Follow-Up<\/button><span class="reach-count" id="reach-count"><\/span>/);
+      assert.match(panel, /data-reach-copy title="Copy" aria-label="Copy"/);
 
-      const resume = await hub.request(`/outreach/resume?date=2026-10-17&job=${jobId}`);
-      assert.equal(resume.status, 200);
-      assert.equal(resume.headers['content-type'], 'application/pdf');
-      assert.match(resume.headers['content-disposition'], /attachment; filename="Jane Doe Resume\.pdf"/);
-      assert.equal(resume.text, '%PDF-1.4 resume');
-
-      // At the network layer: not one request to linkedin.com, and nothing through the global fetch.
+      const cacheText = await fs.readFile(peopleCachePath(root), 'utf8');
+      assert.doesNotMatch(cacheText, /test-key-not-real/);
+      assert.match((await hub.request('/settings?tab=letters')).text, /<p class="muted" id="people-search-usage">Used This Month: 3 \/ 300 searches\.<\/p>/);
       assert.deepEqual(spy.requests.filter(isLinkedInUrl), []);
       assert.deepEqual(global, []);
     } finally {
@@ -256,51 +243,74 @@ test('the hub: every card offers Message to Recruiters; the panel lists JD conta
   });
 });
 
-test('without a search key (or with the switch off) the candidate search is silent: no section, no request', async () => {
-  for (const options of [{ key: false, searchCandidates: true }, { key: true, searchCandidates: false }]) {
-    const { root, jobId } = await prepareOutreachProject(options);
+test('no key, or the monthly cap reached: Find Recruiters / Find Team / Find Alumni open Google; nothing is requested; "Hi there," without a name', async () => {
+  const plain = fixtureJob(2, { description: 'Build dashboards for the finance team. '.repeat(10), company: 'Example Corp', title: 'Data Analyst', roleType: 'new_grad', location: 'Chicago, IL' });
+  for (const options of [{ key: false }, { key: true, usage: { month: '2026-10', queries: 300 } }]) {
+    const { root, ids } = await prepareOutreachProject({ ...options, jobs: [fixtureJob(1, { description: JD, company: 'Example Corp', title: 'Data Analyst Intern', roleType: 'internship', location: 'Chicago, IL' }), plain] });
     const spy = networkSpy();
     const hub = await startReportHub(root, { context: { fetchImpl: spy.fetchImpl } });
     try {
-      const panel = (await hub.request(`/outreach/panel?date=2026-10-17&job=${jobId}`)).text;
-      assert.doesNotMatch(panel, /reach-candidates|From search results/);
-      const reply = JSON.parse((await post(hub, '/outreach/candidates', { date: '2026-10-17', job: jobId })).text);
-      assert.equal(reply.status, options.key ? 'off' : 'no-key');
-      assert.deepEqual(reply.results, []);
+      const panel = (await hub.request(`/outreach/panel?date=2026-10-17&job=${ids[0]}`)).text;
+      assert.doesNotMatch(panel, /Finding People/);
+      assert.deepEqual(rows(panel).map(row => row.label), ['In Posting'], 'the JD contact stays');
+      const buttons = [...panel.matchAll(/<a class="btn secondary small" data-reach-find="([a-z]+)" href="([^"]+)" target="_blank" rel="noopener noreferrer">([^<]+)<\/a>/g)];
+      assert.deepEqual(buttons.map(match => match[3]), ['Find Recruiters', 'Find Team', 'Find Alumni']);
+      assert.ok(buttons.every(match => match[2].startsWith('https://www.google.com/search?q=site%3Alinkedin.com%2Fin%20%22Example%20Corp%22')));
+      assert.equal(new URL(buttons[2][2].replace(/&amp;/g, '&')).searchParams.get('q'), 'site:linkedin.com/in "Example Corp" ("Example State University" OR "ESU")');
+      const other = (await hub.request(`/outreach/panel?date=2026-10-17&job=${ids[1]}`)).text;
+      assert.match(other, /<p class="reach-text" id="reach-text">Hi there, I study statistics/);
+      const reply = JSON.parse((await post(hub, '/outreach/people', { date: '2026-10-17', job: ids[1] })).text);
+      assert.equal(reply.status, options.key ? 'cap' : 'no-key');
+      assert.equal([...reply.html.matchAll(/data-reach-find=/g)].length, 3);
       assert.equal(spy.requests.length, 0);
-      assert.equal((await readOutreach(root)).jobs[jobId]?.candidates, undefined, 'nothing recorded');
     } finally {
       await hub.close();
       await fs.rm(root, { recursive: true, force: true });
     }
   }
-  // The module alone: no key, no request.
-  const requests = [];
-  const result = await searchCandidates({ config: { root: '/nonexistent', outreach: { searchCandidates: true } }, company: 'Example Corp', fetchImpl: async url => { requests.push(url); } });
-  assert.equal(result.status, 'no-key');
-  assert.equal(requests.length, 0);
 });
 
-test('Mark as Contacted records the day, shows "Contacted Nov 8" on the card and in the panel, and clears when unticked; the first name is kept', async () => {
+test('a timeout or a 429 from the search API falls back to the three buttons, with no error and no hang', async () => {
+  for (const reply of [() => new Response('{}', { status: 429 }), () => new Promise(() => {})]) {
+    const { root, jobId } = await prepareOutreachProject();
+    const spy = networkSpy(reply);
+    const hub = await startReportHub(root, { context: { fetchImpl: spy.fetchImpl, peopleTimeoutMs: 50 } });
+    try {
+      const answer = await post(hub, '/outreach/people', { date: '2026-10-17', job: jobId });
+      assert.equal(answer.status, 200);
+      const data = JSON.parse(answer.text);
+      assert.equal(data.status, 'error');
+      assert.equal(data.calls, 1, 'the first failure stops the rest');
+      assert.equal([...data.html.matchAll(/data-reach-find=/g)].length, 3);
+    } finally {
+      await hub.close();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('a row\'s copy icon marks that person copied and the posting contacted ("Contacted Nov 8" on the card); Settings saves the switch and cap', async () => {
   const { root, jobId } = await prepareOutreachProject({ key: false });
   const hub = await startReportHub(root, { now: '2026-11-08T23:30:00Z' }); // Nov 8, 5:30 PM in Chicago
   try {
-    const marked = JSON.parse((await post(hub, '/outreach/contacted', { job: jobId, contacted: '1' })).text);
-    assert.deepEqual(marked, { contactedAt: '2026-11-08T23:30:00.000Z', label: 'Contacted Nov 8' });
-    const stored = JSON.parse(await fs.readFile(path.join(root, 'private', 'outreach', 'state.json'), 'utf8'));
-    assert.equal(stored.jobs[jobId].contactedAt, '2026-11-08T23:30:00.000Z');
-    assert.match((await hub.request('/reports/2026-10-17')).text, /<span class="badge" data-badge="contacted" title="Marked as contacted in the Message to Recruiters panel">Contacted Nov 8<\/span>/);
-    assert.match((await hub.request(`/outreach/panel?date=2026-10-17&job=${jobId}`)).text, /<input type="checkbox" id="reach-contacted" checked> Mark as Contacted<\/label> <span class="muted" id="reach-contacted-label">Contacted Nov 8<\/span>/);
-    await post(hub, '/outreach/name', { job: jobId, firstName: '  Jordan  ' });
-    assert.match((await hub.request(`/outreach/panel?date=2026-10-17&job=${jobId}`)).text, /id="reach-first-name" value="Jordan"/);
-    const cleared = JSON.parse((await post(hub, '/outreach/contacted', { job: jobId, contacted: '0' })).text);
-    assert.deepEqual(cleared, { contactedAt: null, label: null });
-    assert.doesNotMatch((await hub.request('/reports/2026-10-17')).text, /data-badge="contacted"/);
-    assert.equal((await post(hub, '/outreach/contacted', { job: 'not-a-job', contacted: '1' })).status, 400);
-    // Settings > Cover Letters saves the limit and the switch.
-    assert.match((await hub.request('/settings?tab=letters')).text, /<article class="card" id="reach-out"><h2>Message to Recruiters<\/h2>[\s\S]*name="connectionNoteLimit"[^>]*value="200"/);
-    assert.equal((await post(hub, '/settings/outreach', { connectionNoteLimit: '300', searchCandidates: 'on' })).status, 303);
-    assert.deepEqual(JSON.parse(await fs.readFile(path.join(root, 'config.json'), 'utf8')).outreach, { connectionNoteLimit: 300, searchCandidates: true });
+    const marked = JSON.parse((await post(hub, '/outreach/copied', { job: jobId, person: 'posting-jane-doe' })).text);
+    assert.deepEqual(marked, { copied: 'posting-jane-doe', label: 'Contacted Nov 8' });
+    const stored = (await readOutreach(root)).jobs[jobId];
+    assert.equal(stored.contactedAt, '2026-11-08T23:30:00.000Z');
+    assert.deepEqual(stored.copied, { 'posting-jane-doe': '2026-11-08T23:30:00.000Z' });
+    assert.match((await hub.request('/reports/2026-10-17')).text, /<span class="badge" data-badge="contacted" title="A message was copied in the Message to Recruiters panel">Contacted Nov 8<\/span>/);
+    assert.match((await hub.request(`/outreach/panel?date=2026-10-17&job=${jobId}`)).text, /<li class="reach-person selected copied" data-person="posting-jane-doe"/);
+    assert.equal((await post(hub, '/outreach/copied', { job: 'not-a-job', person: 'x' })).status, 400);
+    assert.equal((await post(hub, '/outreach/copied', { job: jobId, person: '<script>' })).status, 400);
+    // Settings > Cover Letters: the limit, the switch and the cap; the older searchCandidates key is dropped.
+    const settings = (await hub.request('/settings?tab=letters')).text;
+    assert.match(settings, /<article class="card" id="reach-out"><h2>Message to Recruiters<\/h2>[\s\S]*name="connectionNoteLimit"[^>]*value="200"[\s\S]*name="peopleSearch" checked> People Search[\s\S]*name="peopleSearchCap"[^>]*value="300"/);
+    assert.match(settings, /No Search Key in private\/search\.json: the panel offers Google searches instead\./);
+    const config = JSON.parse(await fs.readFile(path.join(root, 'config.json'), 'utf8'));
+    config.outreach.searchCandidates = true;
+    await fs.writeFile(path.join(root, 'config.json'), JSON.stringify(config));
+    assert.equal((await post(hub, '/settings/outreach', { connectionNoteLimit: '300', peopleSearchCap: '50' })).status, 303);
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(root, 'config.json'), 'utf8')).outreach, { connectionNoteLimit: 300, peopleSearch: { enabled: false, monthlyCap: 50 } });
     assert.match(decodeURIComponent((await post(hub, '/settings/outreach', { connectionNoteLimit: '500' })).headers.location), /from 100 to 300/);
   } finally {
     await hub.close();

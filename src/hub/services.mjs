@@ -822,7 +822,7 @@ export async function readSettings(ctx) {
     payloadRetentionDays: retentionDays(config),
     editorReview: config.coverLetter?.editorReview !== false,
     autoLetters: autoLetterSettings(config),
-    outreach: { connectionNoteLimit: connectionNoteLimit(config), searchCandidates: config.outreach?.searchCandidates === true },
+    outreach: { connectionNoteLimit: connectionNoteLimit(config) },
     letterRules: letterRulesSettings(config),
     prescreen: prescreenOverview(config, await readStateView(ctx)),
     hubPort: Number(config.hub?.port || 4747),
@@ -1243,10 +1243,13 @@ export async function savePrescreen(ctx, form) {
   return { enabled, threshold, enforce };
 }
 
-// Settings > Cover Letters "Reach Out": config.outreach { connectionNoteLimit, searchCandidates }.
+// Settings > Cover Letters "Message to Recruiters": config.outreach { connectionNoteLimit, peopleSearch:
+// { enabled, monthlyCap } }. The older searchCandidates switch is dropped on save (peopleSearch replaces it).
 export async function saveOutreachSettings(ctx, settings) {
   await updateConfigFile(ctx.configPath, config => {
-    config.outreach = { ...(config.outreach && typeof config.outreach === 'object' ? config.outreach : {}), ...settings };
+    const outreach = config.outreach && typeof config.outreach === 'object' ? config.outreach : {};
+    delete outreach.searchCandidates;
+    config.outreach = { ...outreach, ...settings, peopleSearch: { ...(outreach.peopleSearch && typeof outreach.peopleSearch === 'object' ? outreach.peopleSearch : {}), ...settings.peopleSearch } };
     return true;
   }, { fs: ctx.io, pidAlive: ctx.pidAlive });
   return settings;

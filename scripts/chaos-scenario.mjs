@@ -1,7 +1,7 @@
 // One chaos scenario: build an isolated config under <workRoot>/<scenario>, run src/index.mjs
 // against it, and assert that the Desktop-equivalent output folder still holds a usable report.
 //
-//   node scripts/chaos-scenario.mjs <baseline|offline|llm-down|bad-input|xlsx-recovery|ats-500|network-drop|review-cap|fable-weekly-limit|account-limit|signed-out|backlog-priority|state-corrupt> <workRoot>
+//   node scripts/chaos-scenario.mjs <baseline|offline|llm-down|bad-input|xlsx-recovery|ats-500|network-drop|review-cap|fable-weekly-limit|account-limit|signed-out|backlog-priority|state-corrupt|people-search-down> <workRoot>
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -759,6 +759,61 @@ scenarios['state-corrupt'] = async function stateCorrupt() {
   assert.ok([1, 2, 3].some(generation => names.includes(`state.json.${generation}`)));
   assert.equal(await exists(config.backup.directory), false, 'a manual run makes no nightly backup');
   return `torn state.json restored from ${warning.message.match(/\(([^)]+)\)/)[1]}, ${seenBefore.length} seen mark(s) kept, ${run.summary.meta.matchCount} match(es), torn copy kept aside`;
+};
+
+// The people search behind Message to Recruiters fails: the search API answers 429, never answers, or cannot be
+// reached. Opening the panel must still finish quickly with the three Find buttons (Google searches the owner
+// opens), no error status, no request to linkedin.com, and the hub keeps serving.
+scenarios['people-search-down'] = async function peopleSearchDown() {
+  const { prepareReportProject, startReportHub, fixtureJob, fixturePayload, writePayload } = await import('../tests/helpers/report-hub.mjs');
+  const { jobIdOf } = await import('../src/hub/letters.mjs');
+  const { isLinkedInUrl } = await import('../src/outreach/links.mjs');
+  const failures = {
+    'HTTP 429': async () => new Response('{"error":"rate limited"}', { status: 429 }),
+    timeout: () => new Promise(() => {}),
+    refused: async () => { throw Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:9'), { code: 'ECONNREFUSED' }); },
+  };
+  const seen = [];
+  for (const [label, reply] of Object.entries(failures)) {
+    const root = await prepareReportProject();
+    const requests = [];
+    const job = fixtureJob(1, { company: 'Example Corp', title: 'Data Analyst Intern', roleType: 'internship', location: 'Chicago, IL' });
+    await writePayload(root, fixturePayload('2026-10-17', [job]));
+    await fs.mkdir(path.join(root, 'private'), { recursive: true });
+    await fs.writeFile(path.join(root, 'private', 'search.json'), JSON.stringify({ brave: 'chaos-key-not-real' }));
+    const hub = await startReportHub(root, { context: { peopleTimeoutMs: 300, fetchImpl: async (url, init) => { requests.push(String(url)); return reply(url, init); } } });
+    try {
+      const panel = (await hub.request(`/outreach/panel?date=2026-10-17&job=${jobIdOf(job)}`)).text;
+      assert.match(panel, /Finding People…/, `${label}: the panel opens before the search`);
+      const started = Date.now();
+      const answer = await new Promise((resolve, reject) => {
+        const body = new URLSearchParams({ date: '2026-10-17', job: jobIdOf(job) }).toString();
+        const request = http.request({ host: '127.0.0.1', port: hub.port(), path: '/outreach/people', method: 'POST', headers: { host: `127.0.0.1:${hub.port()}`, 'content-type': 'application/x-www-form-urlencoded', 'content-length': Buffer.byteLength(body) } }, response => {
+          const chunks = [];
+          response.on('data', chunk => chunks.push(chunk));
+          response.on('end', () => resolve({ status: response.statusCode, text: Buffer.concat(chunks).toString('utf8') }));
+        });
+        request.setTimeout(10_000, () => request.destroy(new Error('the people search hung')));
+        request.on('error', reject);
+        request.end(body);
+      });
+      const elapsed = Date.now() - started;
+      assert.equal(answer.status, 200, `${label}: ${answer.text}`);
+      const data = JSON.parse(answer.text);
+      assert.equal(data.status, 'error', `${label}: status ${data.status}`);
+      assert.deepEqual([...data.html.matchAll(/data-reach-find="[a-z]+"[^>]*>([^<]+)</g)].map(match => match[1]), ['Find Recruiters', 'Find Team', 'Find Alumni'], `${label}: three buttons`);
+      assert.ok(elapsed < 5000, `${label}: took ${elapsed} ms`);
+      assert.equal(requests.length, 1, `${label}: the first failure stops the other searches`);
+      assert.deepEqual(requests.filter(isLinkedInUrl), [], `${label}: linkedin.com was requested`);
+      assert.doesNotMatch(data.html, /chaos-key-not-real/);
+      assert.equal((await hub.request('/reports/2026-10-17')).status, 200, `${label}: the hub stopped serving`);
+      seen.push(`${label} ${elapsed} ms`);
+    } finally {
+      await hub.close();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }
+  return `the panel fell back to the three Find buttons each time (${seen.join(', ')}), no error, nothing asked of linkedin.com`;
 };
 
 const scenario = scenarios[scenarioName];

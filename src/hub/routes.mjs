@@ -5,7 +5,7 @@ import { reviewBadge } from '../cover-letter/notes.mjs';
 import { buildReportView, reviewReportJobs } from '../report.mjs';
 import { jobDescriptionHtml } from '../jd-html.mjs';
 import { assembleLetter } from '../cover-letter/compose.mjs';
-import { contactedByJob, findCandidates, outreachPanelHtml, resumeDownload, saveFirstName, setContacted, validateOutreachSettings } from './outreach.mjs';
+import { contactedByJob, markCopied, outreachPanelHtml, outreachSettingsView, peopleHtml, validateOutreachSettings } from './outreach.mjs';
 import { OUTREACH_SCRIPT } from './outreach-views.mjs';
 import path from 'node:path';
 import { resolvePayloadFile } from '../payload-store.mjs';
@@ -236,11 +236,11 @@ export function createHubHandler(ctx) {
       if (!rendered) {
         const lettersByJob = await timer.phase('letters', () => ctx.letterStore.lettersByJob().catch(() => new Map()));
         const pending = new Set(autoStatus?.running ? autoStatus.pending : []);
-        // Every card gets Message to Recruiters (the drawer, src/hub/outreach-views.mjs) and, once ticked,
+        // Every card gets Message to Recruiters (the drawer, src/hub/outreach-views.mjs) and, once a message is copied there,
         // "Contacted Nov 8". The action row keeps one order: Open Posting, Download CoverLetter, Open CoverLetter,
         // Message to Recruiters (Generate CoverLetter stands in for the two letter actions).
         const reach = id => ({ button: true, label: 'Message to Recruiters', data: { reach: '1', date: selected, job: id } });
-        const contactedBadge = id => (contacted.labels.has(id) ? [{ key: 'contacted', label: contacted.labels.get(id), tone: 'note', title: 'Marked as contacted in the Message to Recruiters panel' }] : []);
+        const contactedBadge = id => (contacted.labels.has(id) ? [{ key: 'contacted', label: contacted.labels.get(id), tone: 'note', title: 'A message was copied in the Message to Recruiters panel' }] : []);
         const flags = id => ({ contacted: contacted.labels.has(id) ? '1' : '0' });
         // v2 rules: a posting whose own term starts before the owner is available gets "Term Conflict" (no automatic
         // letter; the Generate button stays).
@@ -314,6 +314,7 @@ export function createHubHandler(ctx) {
   async function getSettings(url, response) {
     const settings = await readSettings(ctx);
     const config = await ctx.loadConfig().catch(() => ({}));
+    settings.outreach = await outreachSettingsView(ctx, config).catch(() => settings.outreach);
     const probed = ctx.connections ? await ctx.connections.status({ commands: configuredCliCommands(config) }).catch(() => null) : null;
     const latest = await latestReportSummary(ctx);
     const connections = annotateConnections(probed, claudeAuthView(ctx, latest));
@@ -496,16 +497,12 @@ export function createHubHandler(ctx) {
         json(response, 200, await generateOutreachMessages(ctx, { date: assertDate(fields.date), jobId: fields.job }));
         return;
       }
-      case '/outreach/name': {
-        json(response, 200, await saveFirstName(ctx, { jobId: fields.job, firstName: fields.firstName }));
+      case '/outreach/people': {
+        json(response, 200, await peopleHtml(ctx, { date: assertDate(fields.date), jobId: fields.job }));
         return;
       }
-      case '/outreach/contacted': {
-        json(response, 200, await setContacted(ctx, { jobId: fields.job, contacted: fields.contacted }));
-        return;
-      }
-      case '/outreach/candidates': {
-        json(response, 200, await findCandidates(ctx, { date: assertDate(fields.date), jobId: fields.job }));
+      case '/outreach/copied': {
+        json(response, 200, await markCopied(ctx, { jobId: fields.job, person: fields.person }));
         return;
       }
       case '/settings/letter-rules': {
@@ -519,7 +516,7 @@ export function createHubHandler(ctx) {
       }
       case '/settings/outreach': {
         const saved = await saveOutreachSettings(ctx, validateOutreachSettings(fields));
-        redirect(response, '/settings?tab=letters#reach-out', `Message to Recruiters saved: notes up to ${saved.connectionNoteLimit} characters, candidate search ${saved.searchCandidates ? 'on' : 'off'}`);
+        redirect(response, '/settings?tab=letters#reach-out', `Message to Recruiters saved: notes up to ${saved.connectionNoteLimit} characters, people search ${saved.peopleSearch.enabled ? `on, up to ${saved.peopleSearch.monthlyCap} a month` : 'off'}`);
         return;
       }
       case '/letters/regenerate': {
@@ -708,11 +705,6 @@ export function createHubHandler(ctx) {
           return json(response, 200, status.quota || status.errorKind === 'auth_expired' ? { ...status, codexAvailable: await codexAvailable() } : status);
         }
         if (url.pathname === '/outreach/panel') return send(response, 200, await outreachPanelHtml(ctx, { date: assertDate(url.searchParams.get('date')), jobId: url.searchParams.get('job') }));
-        if (url.pathname === '/outreach/resume') {
-          const resume = await resumeDownload(ctx, { date: assertDate(url.searchParams.get('date')), jobId: url.searchParams.get('job') });
-          response.writeHead(200, { 'content-type': 'application/pdf', 'content-disposition': `attachment; filename="${resume.fileName.replace(/[^\x20-\x7e]|["\\]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(resume.fileName)}`, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
-          return response.end(resume.content);
-        }
         if (url.pathname === '/letters/new') return await getLetterPanel(url, response, { date: assertDate(url.searchParams.get('date')), jobId: url.searchParams.get('job') });
         const letterOpen = /^\/letters\/(\d{4}-\d{2}-\d{2})\/([A-Za-z0-9]{1,80})$/.exec(url.pathname);
         if (letterOpen) {
