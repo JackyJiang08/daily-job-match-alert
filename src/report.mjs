@@ -6,9 +6,9 @@ import { describeTotals } from './engines/usage.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import { jobScores, reportTracks, trackScore } from './resume-tracks.mjs';
-import { renderReportPage } from './report-components.mjs';
+import { jobCountLabel, renderReportPage } from './report-components.mjs';
 import { warningText } from './warnings.mjs';
-import { formatDateLabel, formatLocalDateTime, formatLocalDay, formatLocalShort, formatLocalTime, localDate } from './time-format.mjs';
+import { formatLongDate, formatLocalDateTime, formatLocalDay, formatLocalShort, formatLocalTime, localDate } from './time-format.mjs';
 import { normalizeLocation, sha256 } from './utils.mjs';
 import { freshnessKey } from './report-filters.mjs';
 import { FRESHNESS_LABELS, companyIsUncertain, displayCompanyName, freshnessLabel, isNewSinceLastPoll, postedAtPrecision, postedText } from './posting-fields.mjs';
@@ -159,7 +159,7 @@ export function cardView(job, tracks, timeZone = null, decorate = null, review =
     bestScore: Number(job.bestScore) || 0,
     scores,
     recommendedTrack,
-    check: extra.check && extra.check.href ? { label: String(extra.check.label), title: extra.check.title ? String(extra.check.title) : '', href: String(extra.check.href) } : null,
+    check: extra.check && extra.check.href ? { label: String(extra.check.label), title: extra.check.title ? String(extra.check.title) : '', href: String(extra.check.href), seen: extra.check.seen === true } : null,
     badges: [...jobBadges(job, review), ...(Array.isArray(extra.badges) ? extra.badges : [])],
     reasons: (job.reasons || []).map(String),
     gaps: displayGaps(job, review),
@@ -476,8 +476,10 @@ export function buildReportView(matchJobs, meta, options = {}) {
     title: REPORT_TITLE,
     dateLabel: readableDate(meta.date),
     matchLabel: matchLabel(jobs.length),
-    // The one top row: "Sat, Nov 14 · 42 Jobs" and the controls; the hub fills the "⋯" menu slot.
-    toolbar: { roleTypes, tracks, freshness, total: jobs.length, marks: options.marks || null, title: formatDateLabel(meta.date), menuSlot: options.embedded === true },
+    // The one top row: "November 14, 2026 · 42 Jobs" and the controls; the hub fills the date and "⋯" slots.
+    toolbar: { roleTypes, tracks, freshness, total: jobs.length, marks: options.marks || null, title: formatLongDate(meta.date, meta.timeZone), menuSlot: options.embedded === true, dateSlot: options.embedded === true },
+    // The browser tab: "November 14, 2026 · 42 Jobs".
+    tabTitle: `${formatLongDate(meta.date, meta.timeZone)} · ${jobCountLabel(jobs.length)}`,
     quotaNote: meta.quotaNote || null,
     authBanner: signedOutBanner(meta.authExpired),
     banner: meta.authExpired ? null : (meta.quota?.banner || null),

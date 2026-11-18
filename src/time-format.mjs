@@ -57,6 +57,38 @@ export function formatDateLabel(date) {
   return value.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
 }
 
+// The instant at which a YYYY-MM-DD calendar date is that date in the zone: noon UTC, moved a day when the
+// zone is far enough from UTC to put noon on another day. Null for anything that is not a date.
+function instantOfDate(date, zone) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date || ''));
+  if (!match) return null;
+  const noon = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12);
+  const seen = localDate(new Date(noon), zone);
+  const shift = seen === date ? 0 : seen > date ? -1 : 1;
+  return new Date(noon + shift * 86_400_000);
+}
+
+const LONG_FORMATTERS = new Map();
+function longFormatter(zone, options) {
+  const key = `${zone}|${JSON.stringify(options)}`;
+  if (!LONG_FORMATTERS.has(key)) LONG_FORMATTERS.set(key, new Intl.DateTimeFormat('en-US', { ...options, timeZone: zone }));
+  return LONG_FORMATTERS.get(key);
+}
+
+// "November 15, 2026" from a YYYY-MM-DD report date, in config.timeZone (the report's top row and tab title).
+export function formatLongDate(date, timeZone) {
+  const zone = safeZone(timeZone);
+  const instant = instantOfDate(date, zone);
+  return instant ? longFormatter(zone, { month: 'long', day: 'numeric', year: 'numeric' }).format(instant) : String(date || '');
+}
+
+// "November 2026" from a YYYY-MM month (the date picker's heading).
+export function formatMonthLabel(month, timeZone) {
+  const zone = safeZone(timeZone);
+  const instant = instantOfDate(`${String(month || '').slice(0, 7)}-15`, zone);
+  return instant ? longFormatter(zone, { month: 'long', year: 'numeric' }).format(instant) : String(month || '');
+}
+
 // YYYY-MM-DD of `now` in the zone
 // One formatter per zone: building an Intl.DateTimeFormat costs far more than formatting with it.
 const DATE_FORMATTERS = new Map();

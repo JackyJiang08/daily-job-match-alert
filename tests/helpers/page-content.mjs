@@ -56,13 +56,15 @@ export function compareContent(beforeHtml, afterHtml, allowances = {}) {
   const after = pageContent(afterHtml);
   const addedWords = new Set([...(allowances.addedWords || []), ...(allowances.addedWordsSidebar || [])]);
   const missingWords = new Set(allowances.missingWords || []);
+  const missingPatterns = allowances.missingWordPatterns || [];
+  const linkPrefixes = allowances.addedLinkPrefixes || [];
   const fieldPrefixes = allowances.addedFields || [];
   const missingPrefixes = allowances.missingFields || [];
   return {
-    missingWords: difference(before.words, after.words, word => missingWords.has(word)),
+    missingWords: difference(before.words, after.words, word => missingWords.has(word) || missingPatterns.some(pattern => pattern.test(word))),
     addedWords: difference(after.words, before.words, word => addedWords.has(word)),
     missingLinks: difference(before.links, after.links),
-    addedLinks: difference(after.links, before.links, link => (allowances.addedLinks || []).includes(link)),
+    addedLinks: difference(after.links, before.links, link => (allowances.addedLinks || []).includes(link) || linkPrefixes.some(prefix => link.startsWith(prefix))),
     missingFields: difference(before.fields, after.fields, field => missingPrefixes.some(prefix => field.startsWith(prefix))),
     addedFields: difference(after.fields, before.fields, field => fieldPrefixes.some(prefix => field.startsWith(prefix))),
   };
@@ -74,6 +76,20 @@ export function compareContent(beforeHtml, afterHtml, allowances = {}) {
 // Recruiters actions. Gone since then: the masthead's long date and "Matches · Ran …" line, the Freshness tags,
 // the Freshness Date Only value, "Apply with … Resume", Mark as Applied / Hide Applied, the group note under
 // From Yesterday, the "N matches" words in the date column, the Desktop copy row's own wording.
+// The date controls in the top row (2026-11-18) in place of the date column: ‹ › and the month picker add the
+// day numbers, the month and year, the two-letter weekdays, more links to report dates (‹, ›, the picker's days,
+// Today) and their buttons and data-*; the column's short dates ("Sat, Oct 17"), its Today tag, the Only Days
+// With Matches box, and the old tab title ("Report 2026-10-17") are gone.
+const DATE_NAV = {
+  addedWords: [...Array.from({ length: 31 }, (_, index) => String(index + 1)), '2026', 'january', 'february', 'march', 'april', 'may', 'june', 'july',
+    'august', 'september', 'october', 'november', 'december', 'su', 'mo', 'tu', 'we', 'th', 'fr', 'sa'],
+  missingWords: ['report', 'days', 'today', 'thu', 'fri', 'sat', 'sun', 'mon', 'tue', 'wed', 'oct', 'nov', 'sep', 'aug'],
+  missingWordPatterns: [/^\d{4}-\d{2}-\d{2}$/],
+  missingFields: ['data-empty=', 'data-tag=today', 'data-tag=tomorrow', 'input#only-matches'],
+  addedFields: ['button#cal-', 'button#date-', 'data-current=', 'data-date=', 'data-keep-query=', 'data-label=', 'data-next=', 'data-prev='],
+  addedLinkPrefixes: ['/reports/'],
+};
+
 export const REDESIGN_ALLOWANCES = {
   addedWords: ['role', 'type', 'freshness', 'any', 'score', '–', 'hide', 'contacted', 'clear', 'filters', 'source', 'as', 'all', 'tracks', 'track',
     'posted', 'today', 'new', 'since', 'last', 'poll', 'carried', 'over', 'undated', 'letter', 'coverletter', 'message', 'to', 'recruiters',
@@ -86,8 +102,14 @@ export const REDESIGN_ALLOWANCES = {
   addedWordsSidebar: ['models', 'review', 'prescreen', 'local', 'only', 'coverletter', 'fable', '5.1', 'gpt-5.6', 'sol', 'luna', 'opus', '5.5', 'off', 'unavailable'],
   missingFields: ['data-current=', 'data-month=', 'data-applied=', 'data-apply-mark=', 'input#hide-applied', 'button#[](button)='],
   addedFields: ['select#fresh', 'input#score-min', 'input#score-max', 'input#hide-contacted', 'button#clear-filters',
-    'data-freshness=', 'data-contacted=', 'data-job=', 'button#[](button)=', 'data-badge=letter-check', 'button#filters-button', 'details#', 'data-model='],
+    'data-freshness=', 'data-contacted=', 'data-job=', 'button#[](button)=', 'data-badge=letter-check', 'button#filters-button', 'details#', 'data-model=',
+    ...DATE_NAV.addedFields],
+  missingWordPatterns: DATE_NAV.missingWordPatterns,
+  addedLinkPrefixes: DATE_NAV.addedLinkPrefixes,
 };
+REDESIGN_ALLOWANCES.addedWords.push(...DATE_NAV.addedWords);
+REDESIGN_ALLOWANCES.missingWords.push(...DATE_NAV.missingWords);
+REDESIGN_ALLOWANCES.missingFields.push(...DATE_NAV.missingFields);
 
 export function assertSameContent(assert, beforeHtml, afterHtml, label, allowances = REDESIGN_ALLOWANCES) {
   const diff = compareContent(beforeHtml, afterHtml, allowances);

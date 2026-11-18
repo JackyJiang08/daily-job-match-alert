@@ -5,8 +5,8 @@ import { assetPath } from './assets.mjs';
 import { percent } from '../cover-letter/recent.mjs';
 import { formatBytes, phasesText } from './report-timing.mjs';
 import { REPORT_SCRIPT, REPORT_STYLES } from '../report-theme.mjs';
-import { MENU_SLOT } from '../report-components.mjs';
-import { formatCount, formatDateLabel, formatElapsed, formatLocalDateTime, formatLocalDay, formatLocalShort, formatRelativeTime } from '../time-format.mjs';
+import { DATE_SLOT, MENU_SLOT } from '../report-components.mjs';
+import { formatCount, formatDateLabel, formatElapsed, formatLongDate, formatMonthLabel, formatLocalDateTime, formatLocalDay, formatLocalShort, formatRelativeTime } from '../time-format.mjs';
 import { planLabel } from '../engines/quota.mjs';
 import { modelShortName } from '../engines/assignments.mjs';
 import { USAGE_PURPOSES, describeTotals, formatTokens } from '../engines/usage.mjs';
@@ -48,35 +48,39 @@ export const HUB_STYLES = `
 .flash{margin:0 0 var(--space-4);padding:var(--space-3) var(--space-4);border-radius:var(--radius);font-size:var(--fs-body)}
 .flash.notice{background:var(--accent-soft);color:var(--accent)}
 .flash.error{background:var(--bad-bg);color:var(--bad-ink)}
-.split{display:grid;grid-template-columns:232px minmax(0,1fr);gap:var(--space-4);align-items:start}
-.split aside{position:sticky;top:0;max-height:100vh;overflow:auto;display:flex;flex-direction:column;padding-top:var(--space-2)}
-.datetools{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-1) var(--space-2);padding:0 var(--space-2) var(--space-2);font-size:var(--fs-meta);color:var(--ink-2)}
-.datetools .today-link{text-decoration:none;color:var(--accent);font-weight:650}
-.datetools label{display:inline-flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap}
-/* The date column: one grid shared by every row (date | count | tag), so the counts line up under each
-   other whether or not the row carries a Today tag; month headings span the row. */
-.datelist{display:grid;grid-template-columns:minmax(0,1fr) max-content max-content;margin:0;padding:0;list-style:none;font-size:var(--fs-body);font-variant-numeric:tabular-nums}
-.datelist>li{display:contents}
-.datelist>li[hidden]{display:none}
-.datelist .month{display:block;grid-column:1/-1;position:sticky;top:0;z-index:1;margin:0;padding:var(--space-2) var(--space-2) var(--space-1);background:var(--bg);font-size:var(--fs-meta);font-weight:650;color:var(--ink-2)}
-.datelist a{display:grid;grid-template-columns:subgrid;grid-column:1/-1;align-items:baseline;column-gap:var(--space-2);padding:var(--space-1) var(--space-2);border-radius:var(--radius-sm);text-decoration:none;color:var(--ink-2)}
-.datelist a>span:first-child{grid-column:1;text-align:left;white-space:nowrap}
-.datelist a .n{grid-column:2;color:var(--ink-2);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:var(--fs-meta);text-align:right}
-.datelist a .tag{grid-column:3;justify-self:end}
-.history{margin:var(--space-3) 0 0;padding:var(--space-2) 0 0;border-top:1px solid var(--line)}
-.history>summary{list-style:none;cursor:pointer;padding:var(--space-1) var(--space-2);font-size:var(--fs-meta);font-weight:650;color:var(--ink-2);display:flex;align-items:center;gap:6px}
-.history>summary::-webkit-details-marker{display:none}
-.history>summary::before{content:"";width:5px;height:5px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);margin:0 2px 0 1px;transition:transform .12s}
-.history[open]>summary::before{transform:rotate(45deg);margin-top:-2px}
-.datelist a.active{background:var(--accent-soft);color:var(--accent);font-weight:650}
-.datelist a.active .n{color:var(--accent)}
-.datelist a.today:not(.active){color:var(--ink);font-weight:650}
-.datelist a.quiet{color:var(--ink-3)}
-.datelist .tag{font-size:var(--fs-meta);font-weight:600;line-height:1.4;border-radius:var(--radius-sm);padding:0 var(--space-1);background:var(--line);color:var(--ink-2);white-space:nowrap}
-.datelist a.active .tag{background:var(--accent-soft);color:var(--accent)}
+/* The report takes the whole width beside the navigation. */
+.hub-content:has(.report-view){max-width:none}
+/* The top row's date controls: ‹ date ›, then " · N Jobs". The date never shrinks or wraps. */
+.date-nav{display:inline-flex;align-items:center;gap:var(--space-1);flex:0 0 auto;align-self:center}
+.date-step{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:1px solid var(--line-2);border-radius:var(--radius-sm);background:var(--surface);color:var(--ink);font:inherit;font-size:var(--fs-title);font-weight:400;line-height:1;text-decoration:none;cursor:pointer}
+.date-step:hover{border-color:var(--ink-3)}
+.date-step:disabled{color:var(--ink-3);opacity:.45;cursor:default}
+.date-pick{position:relative;display:inline-flex}
+.date-button{font:inherit;font-weight:700;color:var(--ink);background:none;border:0;border-radius:var(--radius-sm);padding:0 var(--space-1);white-space:nowrap;cursor:pointer}
+.date-button:hover,.date-button[aria-expanded=true]{background:var(--accent-soft);color:var(--accent)}
+.date-step:focus-visible,.date-button:focus-visible,.cal a:focus-visible,.cal button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+/* The month picker: a popover under the date (a bottom sheet at 760px and narrower). */
+.cal{position:absolute;left:0;top:calc(100% + var(--space-2));z-index:7;width:300px;padding:var(--space-3);background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 8px 24px rgba(16,24,40,.16);font-size:var(--fs-body);font-weight:400;letter-spacing:0;color:var(--ink)}
+.cal-backdrop{display:none}
+.cal-head{display:flex;align-items:center;justify-content:space-between;gap:var(--space-2);margin:0 0 var(--space-2)}
+.cal-title{font-weight:650}
+.cal-step{width:28px;height:28px;padding:0;border:1px solid var(--line-2);border-radius:var(--radius-sm);background:var(--surface);color:var(--ink);font:inherit;font-size:var(--fs-title);line-height:1;cursor:pointer}
+.cal-step:disabled{color:var(--ink-3);opacity:.45;cursor:default}
+.cal-week,.cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:2px}
+.cal-week span{text-align:center;font-size:var(--fs-meta);color:var(--ink-3);padding:0 0 var(--space-1)}
+.cal-day{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;min-height:40px;border:1px solid transparent;border-radius:var(--radius-sm);text-decoration:none;color:var(--ink);line-height:1.2}
+.cal-day .cal-d{font-size:var(--fs-body)}
+.cal-day .cal-n{min-height:1.2em;font-size:var(--fs-meta);font-variant-numeric:tabular-nums;color:var(--ink-2)}
+a.cal-day:hover{background:var(--accent-soft)}
+.cal-day.off{color:var(--ink-3);opacity:.45;cursor:default}
+.cal-day.zero .cal-n{color:var(--ink-3);opacity:.7}
+.cal-day.today{border-color:var(--ink-3)}
+.cal-day.current,.cal-day.current:hover{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.cal-day.current .cal-n{color:var(--accent-ink);opacity:1}
+.cal-foot{display:flex;justify-content:flex-end;margin:var(--space-2) 0 0}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:var(--space-4);margin:0 0 var(--space-3);box-shadow:var(--shadow);min-width:0;overflow-x:auto}
 /* A wide table scrolls inside its card instead of widening the page. */
-.pair-grid>*,.split>*{min-width:0}
+.pair-grid>*{min-width:0}
 .card h2{margin:0 0 var(--space-1);font-size:var(--fs-title);font-weight:650}
 .card h3{margin:var(--space-3) 0 var(--space-1);font-size:var(--fs-meta);font-weight:650;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-2)}
 .kv{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:var(--space-1) var(--space-4);margin:var(--space-2) 0 0;font-size:var(--fs-body)}
@@ -127,11 +131,10 @@ details.day>summary{cursor:pointer;font-size:var(--fs-body)}
 .count-some{color:var(--warn-ink);font-weight:650}
 .muted{color:var(--ink-2)}
 [hidden]{display:none!important}
-/* Between 1100 and 1279px the navigation and the date column give the report's one-row bar its room. */
+/* Between 761 and 1279px the navigation narrows to give the report's one-row bar its room. */
 @media (min-width:761px) and (max-width:1279px){
   .hub{grid-template-columns:152px minmax(0,1fr)}
   .hub-main{padding:var(--space-4) var(--space-4) var(--space-6)}
-  .split{grid-template-columns:180px minmax(0,1fr);gap:var(--space-3)}
 }
 @media (max-width:760px){
   .hub{grid-template-columns:1fr}
@@ -140,15 +143,12 @@ details.day>summary{cursor:pointer;font-size:var(--fs-body)}
   .hub-nav a{flex:0 0 auto;margin:0;padding:var(--space-1) var(--space-2);border-left:0;border-bottom:2px solid transparent;border-radius:0}
   .hub-nav a.active{border-bottom-color:var(--accent);background:transparent}
   .hub-nav .mini{display:none}
-  .split{grid-template-columns:1fr;gap:var(--space-3)}
-  .split aside{position:static;max-height:none;padding-top:0}
-  /* The dates become one scrolling strip of chips above the report. */
-  .datetools{padding:0 0 var(--space-2)}
-  .datelist{display:flex;gap:var(--space-2);overflow-x:auto;padding-bottom:var(--space-1)}
-  .datelist>li{display:block;flex:0 0 auto}
-  .datelist li.month{display:none}
-  .datelist a{display:flex;align-items:baseline;gap:var(--space-1);border:1px solid var(--line);background:var(--surface)}
-  .history{margin:0;padding:0;border:0}
+  /* The month picker becomes a bottom sheet over a dimmed page (no blur on the bar: a filter would make the
+     bar, not the viewport, the sheet's frame). */
+  .toolbar.stuck{-webkit-backdrop-filter:none;backdrop-filter:none;background:var(--bg)}
+  .cal{position:fixed;left:0;right:0;bottom:0;top:auto;width:auto;max-height:85vh;overflow:auto;border-radius:var(--radius) var(--radius) 0 0;padding:var(--space-4) var(--space-4) var(--space-5);z-index:31}
+  .cal-backdrop:not([hidden]){display:block;position:fixed;inset:0;z-index:30;background:rgba(16,24,40,.4)}
+  .cal-day{min-height:48px}
   .hub-main{padding:var(--space-3) var(--space-3) var(--space-5)}
   .kv{grid-template-columns:1fr;gap:0}
   .kv dt{margin-top:var(--space-2)}
@@ -255,51 +255,67 @@ export function renderHubPage({ active, title, content, notice = '', error = '',
 
 // ---------------------------------------------------------------------------------------------- reports
 
-function monthLabel(date) {
-  const match = /^(\d{4})-(\d{2})/.exec(String(date || ''));
-  if (!match) return String(date || '');
-  return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, 1)).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+const WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+
+function jobsLabel(count) {
+  return `${count} ${count === 1 ? 'Job' : 'Jobs'}`;
 }
 
-// Dates newest first in one three-column grid (date | match count | Today or Tomorrow tag). The current month
-// (of `today` in config.timeZone) and any later month are open; every earlier month sits under a "History" fold
-// at the bottom, grouped by month with sticky headings. The fold opens when the selected date is in it, and the
-// page script remembers whether the owner left it open (localStorage). Empty days carry data-empty so the
-// "Only days with matches" toggle can hide them (and any month left without visible days).
-export function renderDateList({ dates, selected, today }) {
-  if (!dates.length) return '<p class="muted">No reports yet.</p>';
-  const currentMonth = String(today || '').slice(0, 7);
-  const selectedMonth = String(selected || '').slice(0, 7);
-  const row = item => {
-    const isToday = item.date === today;
-    const isFuture = Boolean(today) && item.date > today;
-    const classes = [item.date === selected ? 'active' : '', isToday ? 'today' : '', item.matchCount === 0 ? 'quiet' : ''].filter(Boolean).join(' ');
-    const count = item.matchCount == null ? '' : `<span class="n" title="${item.matchCount} match${item.matchCount === 1 ? '' : 'es'}">${item.matchCount}</span>`;
-    // Calendar tags: "Today" for the current date in config.timeZone, "Tomorrow" for anything later.
-    const tag = isToday ? '<span class="tag" data-tag="today">Today</span>' : isFuture ? '<span class="tag" data-tag="tomorrow">Tomorrow</span>' : '';
-    return `<li data-month="${htmlEscape(item.date.slice(0, 7))}"${item.matchCount === 0 ? ' data-empty="1"' : ''}><a href="/reports/${item.date}"${classes ? ` class="${classes}"` : ''} title="${item.date}${isToday ? ' (today)' : isFuture ? ' (after today)' : ''}"><span>${htmlEscape(formatDateLabel(item.date))}</span>${count}${tag}</a></li>`;
-  };
-  const list = (entries, withHeadings) => {
-    const items = [];
-    let month = null;
-    for (const item of entries) {
-      const key = item.date.slice(0, 7);
-      if (withHeadings && key !== month) {
-        month = key;
-        items.push(`<li class="month" data-month="${htmlEscape(key)}">${htmlEscape(monthLabel(item.date))}</li>`);
-      }
-      items.push(row(item));
+// The days ‹ and › step through: a report with matches (an unknown count counts as matches).
+export function datesWithMatches(dates) {
+  return dates.filter(item => item.matchCount !== 0).map(item => item.date).sort();
+}
+
+// The previous and next report dates with matches around `selected` (null at either end).
+export function neighborDates(dates, selected) {
+  const days = datesWithMatches(dates);
+  return { prev: days.filter(date => date < selected).at(-1) || null, next: days.find(date => date > selected) || null };
+}
+
+// One month of the date picker: a Sunday-first grid; a day with a report is a link with its match count under
+// it (0 in light grey), a day without one is grey and not a link; today has a ring, the date on view is filled.
+// data-prev / data-next name the nearest earlier and later months that have reports (empty at either end).
+export function calendarMonth({ month, byDate, selected, today, timeZone, prev = '', next = '' }) {
+  const [year, monthIndex] = month.split('-').map(Number);
+  const days = new Date(Date.UTC(year, monthIndex, 0)).getUTCDate();
+  const lead = new Date(Date.UTC(year, monthIndex - 1, 1)).getUTCDay();
+  const cells = Array.from({ length: lead }, () => '<span class="cal-blank" aria-hidden="true"></span>');
+  for (let day = 1; day <= days; day += 1) {
+    const date = `${month}-${String(day).padStart(2, '0')}`;
+    const item = byDate.get(date);
+    const marks = [date === today ? 'today' : '', date === selected ? 'current' : ''];
+    if (!item) {
+      cells.push(`<span class="${['cal-day', 'off', ...marks].filter(Boolean).join(' ')}" aria-disabled="true" title="No Report"><span class="cal-d">${day}</span><span class="cal-n"></span></span>`);
+      continue;
     }
-    return items.join('');
-  };
-  const current = dates.filter(item => !currentMonth || item.date.slice(0, 7) >= currentMonth);
-  const history = dates.filter(item => currentMonth && item.date.slice(0, 7) < currentMonth);
-  const open = history.some(item => item.date.slice(0, 7) === selectedMonth);
-  const jump = todayTarget(dates, today);
-  const historyFold = history.length
-    ? `<details class="history" id="history"${open ? ' open' : ''}${open ? ' data-selected="1"' : ''}><summary>History <span class="group-count">(${history.length})</span></summary><ul class="datelist" id="datelist-history">${list(history, true)}</ul></details>`
-    : '';
-  return `<div class="datetools"><a class="today-link" href="/reports/${jump.date}" id="today-link" title="${jump.isToday ? `Today's report (${jump.date})` : `No report for today; newest report (${jump.date})`}">${jump.isToday ? 'Today' : 'Latest'}</a><label><input type="checkbox" id="only-matches"> Only Days With Matches</label></div><ul class="datelist" id="datelist">${list(current, false)}</ul>${historyFold}`;
+    const count = item.matchCount;
+    const classes = ['cal-day', count === 0 ? 'zero' : '', ...marks].filter(Boolean).join(' ');
+    const label = `${formatLongDate(date, timeZone)}${count == null ? '' : ` · ${jobsLabel(count)}`}`;
+    cells.push(`<a class="${classes}" href="/reports/${date}" data-keep-query data-date="${date}" aria-label="${htmlEscape(label)}"${date === selected ? ' aria-current="date"' : ''}><span class="cal-d">${day}</span><span class="cal-n">${count == null ? '' : Number(count)}</span></a>`);
+  }
+  return `<div class="cal-grid" data-month="${month}" data-label="${htmlEscape(formatMonthLabel(month, timeZone))}" data-prev="${prev}" data-next="${next}"${month === String(selected).slice(0, 7) ? '' : ' hidden'}>${cells.join('')}</div>`;
+}
+
+// The left end of the report's top row (2026-11-18, replacing the date column): ‹, the date (a button that opens
+// the month picker), ›. ‹ and › go to the nearest report date with matches and are disabled at either end; the
+// links keep the filter query (data-keep-query, REPORTS_SCRIPT). The picker lists only months with reports.
+export function renderDateNav({ dates, selected, today, timeZone }) {
+  const { prev, next } = neighborDates(dates, selected);
+  const step = (date, id, label, glyph) => (date
+    ? `<a class="date-step" id="${id}" href="/reports/${date}" data-keep-query aria-label="${label}" title="${label}: ${htmlEscape(formatLongDate(date, timeZone))}">${glyph}</a>`
+    : `<button type="button" class="date-step" id="${id}" aria-label="${label}" title="${label}" disabled>${glyph}</button>`);
+  const byDate = new Map(dates.map(item => [item.date, item]));
+  const months = [...new Set(dates.map(item => item.date.slice(0, 7)))].sort();
+  const current = String(selected).slice(0, 7);
+  const grids = months.map((month, index) => calendarMonth({ month, byDate, selected, today, timeZone, prev: months[index - 1] || '', next: months[index + 1] || '' })).join('');
+  const shown = months.indexOf(current);
+  const jump = todayTarget([...dates].sort((a, b) => b.date.localeCompare(a.date)), today);
+  const todayTitle = jump.isToday ? `Today's Report: ${formatLongDate(jump.date, timeZone)}` : `No Report for Today; Opens the Newest Report (${formatLongDate(jump.date, timeZone)})`;
+  const calendar = `<div class="cal" id="calendar" role="dialog" aria-label="Choose Date" data-current="${current}" hidden>
+<div class="cal-head"><button type="button" class="cal-step" id="cal-prev" aria-label="Previous Month"${shown > 0 ? '' : ' disabled'}>‹</button><span class="cal-title" id="cal-title">${htmlEscape(formatMonthLabel(current, timeZone))}</span><button type="button" class="cal-step" id="cal-next" aria-label="Next Month"${shown >= 0 && shown < months.length - 1 ? '' : ' disabled'}>›</button></div>
+<div class="cal-week" aria-hidden="true">${WEEKDAYS.map(day => `<span>${day}</span>`).join('')}</div>${grids}
+<div class="cal-foot"><a class="btn secondary cal-today" id="cal-today" href="/reports/${jump.date}" data-keep-query title="${htmlEscape(todayTitle)}">Today</a></div></div><div class="cal-backdrop" id="cal-backdrop" hidden></div>`;
+  return `<span class="date-nav" id="date-nav">${step(prev, 'date-prev', 'Previous Day With Matches', '‹')}<span class="date-pick"><button type="button" class="bar-date date-button" id="date-button" aria-haspopup="dialog" aria-expanded="false" aria-controls="calendar">${htmlEscape(formatLongDate(selected, timeZone))}</button>${calendar}</span>${step(next, 'date-next', 'Next Day With Matches', '›')}</span>`;
 }
 
 // The date the "Today" shortcut and the default selection point at: today's report when it exists,
@@ -337,14 +353,15 @@ export function reportMenu({ selected, desktopPath, missingLetters }) {
   return `<details class="menu overflow" id="more-menu"><summary class="btn secondary" aria-label="More Actions" title="More Actions">⋯</summary><div class="menu-list">${items.join('')}</div></details>`;
 }
 
-export function reportsPage({ dates, selected, reportBody, desktopPath, today, missingLetters = null }) {
-  const list = renderDateList({ dates, selected, today });
+// The report fills the width beside the navigation; its top row's date slot gets ‹ date › and the picker, and
+// the "⋯" slot the secondary actions (both request-specific, so they are not in the cached body).
+export function reportsPage({ dates, selected, reportBody, desktopPath, today, missingLetters = null, timeZone }) {
   const body = reportBody
-    ? `<div class="page">${reportBody.replace(MENU_SLOT, reportMenu({ selected, desktopPath, missingLetters }))}</div>`
-    : `<p class="muted">${dates.length ? 'Pick a date on the left.' : 'Run the pipeline once and its report will appear here.'}</p>`;
+    ? `<div class="page">${reportBody.replace(DATE_SLOT, renderDateNav({ dates, selected, today, timeZone })).replace(MENU_SLOT, reportMenu({ selected, desktopPath, missingLetters }))}</div>`
+    : `<p class="muted">${dates.length ? 'No report for this date.' : 'Run the pipeline once and its report will appear here.'}</p>`;
   // The Message to Recruiters drawer (src/hub/outreach-views.mjs), filled when a card's button is pressed.
   const drawer = reportBody ? '<aside class="reach-drawer" id="reach-drawer" hidden aria-label="Message to Recruiters"></aside>' : '';
-  return `<div class="split"><aside id="date-column">${list}</aside><section>${body}</section></div>${drawer}`;
+  return `<section class="report-view">${body}</section>${drawer}`;
 }
 
 // The on-demand JD loader (see report.mjs lazyDescription); the rest of REPORTS_SCRIPT is unchanged.
@@ -370,47 +387,83 @@ export const JD_LOADER_SCRIPT = `
 })();
 `;
 
+// The top row's date controls (and a card's Check badge turning grey): ‹ / › and the picker's days keep the filter query when followed (the page
+// script keeps the filters in the URL); ← and → step like ‹ and › unless a field has focus or the picker is
+// open; the picker opens on the month on view, pages through months with reports, and closes on a click
+// outside or Escape. The old date column's localStorage keys are removed once.
 export const REPORTS_SCRIPT = JD_LOADER_SCRIPT + `
 (function () {
-  var list = document.getElementById('datelist');
-  var toggle = document.getElementById('only-matches');
-  var today = document.getElementById('today-link');
-  var column = document.getElementById('date-column');
-  var history = document.getElementById('history');
-  if (!list || !toggle) return;
-  var key = 'hub.reports.onlyMatches';
-  var historyKey = 'hub.reports.history';
-  var lists = [list].concat(history ? [history.querySelector('ul')] : []);
-  // "Only days with matches" over the current month and the History fold alike; a month heading left with
-  // no visible day goes too.
-  function apply() {
-    var only = toggle.checked;
-    try { localStorage.setItem(key, only ? '1' : '0'); } catch (e) {}
-    lists.forEach(function (node) {
-      if (!node) return;
-      var monthsWithDays = {};
-      node.querySelectorAll('li:not(.month)').forEach(function (item) {
-        var shown = !(only && item.dataset.empty === '1');
-        if (shown) monthsWithDays[item.dataset.month] = true;
-        item.hidden = !shown;
-      });
-      node.querySelectorAll('li.month').forEach(function (heading) { heading.hidden = !monthsWithDays[heading.dataset.month]; });
+  try { localStorage.removeItem('hub.reports.history'); localStorage.removeItem('hub.reports.onlyMatches'); } catch (e) {}
+  function withQuery(link) { return link.pathname + location.search; }
+  function keepQuery(event) {
+    var link = event.target.closest && event.target.closest('a[data-keep-query]');
+    if (link) link.setAttribute('href', withQuery(link));
+  }
+  document.addEventListener('click', keepQuery, true);
+  document.addEventListener('auxclick', keepQuery, true);
+  // Opening a letter page (the Check link or Open CoverLetter) greys that card's "Check N Details" at once; the
+  // server records it too, so the next render agrees.
+  function letterOpened(event) {
+    var link = event.target.closest && event.target.closest('.job a[href^="/letters/"]');
+    var card = link && link.closest('.job');
+    var check = card && card.querySelector('.job-check');
+    if (!check || link.pathname !== check.pathname) return;
+    check.classList.remove('badge-warn');
+    check.classList.add('badge-muted');
+    check.setAttribute('data-seen', '1');
+  }
+  document.addEventListener('click', letterOpened);
+  document.addEventListener('auxclick', letterOpened);
+  var button = document.getElementById('date-button');
+  var calendar = document.getElementById('calendar');
+  var backdrop = document.getElementById('cal-backdrop');
+  var title = document.getElementById('cal-title');
+  var prevMonth = document.getElementById('cal-prev');
+  var nextMonth = document.getElementById('cal-next');
+  function isOpen() { return Boolean(calendar && !calendar.hidden); }
+  function shownGrid() { return calendar.querySelector('.cal-grid:not([hidden])'); }
+  function showMonth(month) {
+    var target = month && calendar.querySelector('.cal-grid[data-month="' + month + '"]');
+    if (!target) return;
+    calendar.querySelectorAll('.cal-grid').forEach(function (grid) { grid.hidden = grid !== target; });
+    title.textContent = target.getAttribute('data-label');
+    prevMonth.disabled = !target.getAttribute('data-prev');
+    nextMonth.disabled = !target.getAttribute('data-next');
+  }
+  function openCalendar() {
+    showMonth(calendar.getAttribute('data-current'));
+    calendar.hidden = false;
+    if (backdrop) backdrop.hidden = false;
+    button.setAttribute('aria-expanded', 'true');
+    var focus = calendar.querySelector('.cal-grid:not([hidden]) [aria-current]') || calendar.querySelector('.cal-grid:not([hidden]) a');
+    if (focus) focus.focus();
+  }
+  function closeCalendar(refocus) {
+    if (!isOpen()) return;
+    calendar.hidden = true;
+    if (backdrop) backdrop.hidden = true;
+    button.setAttribute('aria-expanded', 'false');
+    if (refocus) button.focus();
+  }
+  if (button && calendar) {
+    button.addEventListener('click', function () { if (isOpen()) closeCalendar(false); else openCalendar(); });
+    prevMonth.addEventListener('click', function () { var grid = shownGrid(); if (grid) showMonth(grid.getAttribute('data-prev')); });
+    nextMonth.addEventListener('click', function () { var grid = shownGrid(); if (grid) showMonth(grid.getAttribute('data-next')); });
+    document.addEventListener('click', function (event) {
+      if (isOpen() && !calendar.contains(event.target) && !button.contains(event.target)) closeCalendar(false);
     });
   }
-  // The History fold remembers itself; the month holding the selected date opens it for this page view
-  // (rendered open by the server) without being remembered.
-  if (history) {
-    var remembered = null;
-    try { remembered = localStorage.getItem(historyKey); } catch (e) {}
-    if (history.dataset.selected !== '1' && remembered != null) history.open = remembered === '1';
-    history.addEventListener('toggle', function () { try { localStorage.setItem(historyKey, history.open ? '1' : '0'); } catch (e) {} });
-  }
-  try { toggle.checked = localStorage.getItem(key) === '1'; } catch (e) {}
-  toggle.addEventListener('change', apply);
-  apply();
-  var active = document.querySelector('.datelist a.active');
-  if (today && column) today.addEventListener('click', function () { column.scrollTop = 0; });
-  if (active && column && active.offsetTop > column.clientHeight - 40) column.scrollTop = active.offsetTop - 80;
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape' && isOpen()) { closeCalendar(true); return; }
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || isOpen()) return;
+    var target = event.target;
+    if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+    var link = document.getElementById(event.key === 'ArrowLeft' ? 'date-prev' : 'date-next');
+    if (!link || link.tagName !== 'A') return;
+    event.preventDefault();
+    location.href = withQuery(link);
+  });
 })();
 `;
 

@@ -518,6 +518,16 @@ export async function clearLetterReview(ctx, { date, slug }) {
   return { reviewClearedAt: record.reviewClearedAt };
 }
 
+// The letter page was opened: the card's "Check N Details" turns grey (record.reviewSeenAt). Written once, and
+// only while there is something to check; a new save of the letter (Regenerate included) starts over.
+export async function markLetterReviewSeen(ctx, existing, date) {
+  const record = existing.record || {};
+  if (record.reviewSeenAt || record.reviewClearedAt || !classifyEditorNotes(record.editorNotes || []).needsReview.length) return existing;
+  const meta = { ...record, reviewSeenAt: ctx.now().toISOString() };
+  await ctx.letterStore.saveLetter({ date, company: record.company || existing.slug, markdown: existing.markdown, meta });
+  return { ...existing, record: meta };
+}
+
 // Rename Company & Re-render: a new salutation and file name for a saved letter, rendered again from the
 // stored paragraphs. No engine call; the model's text is untouched.
 export async function renameLetter(ctx, { date, slug, company, shortNameSource = 'owner', meta = {} }) {

@@ -80,7 +80,7 @@ test('the Desktop report: group names, Run Details terms, badges and buttons are
     fixtureJob(7, { url: 'https://jobs.example.com/7', enrichment: 'failed', enrichmentReason: 'blocked', companyUncertain: true }),
   ];
   const html = buildHtml(jobs, meta, { reviewed: jobs });
-  assert.match(html, /<span class="bar-date">Sat, Oct 17<\/span><span class="sep">·<\/span><span class="count" id="count">\d+ Jobs<\/span>/);
+  assert.match(html, /<span class="bar-date">October 17, 2026<\/span><span class="sep">·<\/span><span class="count" id="count">\d+ Jobs<\/span>/);
   assert.match(html, /From Yesterday/);
   assert.deepEqual(scanTitleCase(html).map(item => `${item.kind}: "${item.text}"`), []);
 });

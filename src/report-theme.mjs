@@ -95,13 +95,13 @@ a{color:inherit}
 
 .banner{margin:0 0 var(--space-4);padding:var(--space-3) var(--space-4);border-radius:var(--radius);background:var(--warn-bg);color:var(--warn-ink);font-size:var(--fs-body)}
 .quota-note{margin:0 0 var(--space-3);font-size:var(--fs-body);color:var(--warn-ink);font-weight:600}
-/* The one top row: the date and the count, then the search, sort, Track and Role Type controls, the Filters
+/* The one top row: the date ("November 15, 2026"; ‹ date › in the hub) and the count, then the search, sort, Track and Role Type controls, the Filters
    popover and the hub's "⋯" menu. It stays at the top while the list scrolls (a rule and a blur once it is
    stuck); at 1100px and wider it never wraps. */
 .bar-sentinel{height:0}
 .toolbar{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2);margin:0 0 var(--space-4);padding:var(--space-2) 0;background:var(--bg);border-bottom:1px solid transparent}
 .toolbar.stuck{background:var(--surface-glass);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);border-bottom-color:var(--line)}
-.bar-title{display:inline-flex;align-items:baseline;gap:var(--space-2);margin-right:auto;font-size:var(--fs-title);font-weight:700;letter-spacing:-0.01em;line-height:1.3;white-space:nowrap}
+.bar-title{display:inline-flex;align-items:baseline;gap:var(--space-2);flex:0 0 auto;margin-right:auto;font-size:var(--fs-title);font-weight:700;letter-spacing:-0.01em;line-height:1.3;white-space:nowrap}
 .bar-title .sep{color:var(--ink-3);font-weight:400}
 .bar-title .count{font-size:var(--fs-body);font-weight:400;color:var(--ink-2);font-variant-numeric:tabular-nums}
 /* One control style for every text input and select, in the report toolbar and in the hub forms. */
@@ -301,7 +301,7 @@ export const REPORT_SCRIPT = `
   }, true);
   // The main list and the other groups sort and filter separately; the count covers all of them.
   var lists = Array.prototype.slice.call(document.querySelectorAll('section.jobs'));
-  if (!lists.length || !toolbar) return;
+  if (!toolbar) return;
   var cards = [];
   lists.forEach(function (list) { cards = cards.concat(Array.prototype.slice.call(list.querySelectorAll('.job'))); });
   var controls = {
@@ -333,7 +333,15 @@ export const REPORT_SCRIPT = `
       var control = controls[key];
       if (!control) return;
       if (control.type === 'checkbox') { control.checked = Boolean(saved[key]); return; }
-      if (control.tagName === 'SELECT' && saved[key] && !Array.prototype.some.call(control.options, function (option) { return option.value === saved[key]; })) return;
+      // A value this date does not offer (another day's role type or track) stays selected, so the filter
+      // survives a date change; the list then says no posting matches.
+      if (control.tagName === 'SELECT' && saved[key] && !Array.prototype.some.call(control.options, function (option) { return option.value === saved[key]; })) {
+        var extra = document.createElement('option');
+        extra.value = saved[key];
+        extra.textContent = String(saved[key]).replace(/[_-]+/g, ' ').replace(/\b[a-z]/g, function (letter) { return letter.toUpperCase(); });
+        extra.setAttribute('data-absent', '1');
+        control.appendChild(extra);
+      }
       control.value = saved[key] == null ? '' : saved[key];
     });
   }
@@ -357,11 +365,55 @@ export const REPORT_SCRIPT = `
     if (none) none.hidden = shown > 0;
     var active = filtersActive(current);
     if (clear) clear.hidden = !active;
-    // The Filters button shows when one of its own controls is set (search, sort, Track and Role Type are visible).
-    if (filtersButton) filtersButton.classList.toggle('active', Boolean(current.freshness || current.min !== '' || current.max !== '' || current.hideContacted));
+    markFilters(current);
     remember(current);
     document.dispatchEvent(new CustomEvent('report-filters', { detail: { query: writeFilters(current, '') } }));
   }
+  // The Filters button shows when one of its own controls is set (search and sort stay in the row; Track and
+  // Role Type count only while they are folded into it).
+  function markFilters(current) {
+    if (!filtersButton) return;
+    var folded = ' ' + (toolbar.getAttribute('data-folded') || '') + ' ';
+    filtersButton.classList.toggle('active', Boolean(current.freshness || current.min !== '' || current.max !== '' || current.hideContacted
+      || (folded.indexOf(' resume ') >= 0 && current.resume) || (folded.indexOf(' role ') >= 0 && current.role)));
+  }
+  // At 1100px and wider the row never wraps: when it does not fit, Role Type and then Track move to the top of
+  // the Filters popover (the date is never cut), and back into the row once there is room again.
+  var filtersMenu = document.getElementById('filters-menu');
+  var filtersList = filtersMenu && filtersMenu.querySelector('.menu-list');
+  var folds = [['resume', 'Track'], ['role', 'Role Type']].map(function (pair) {
+    var wrap = document.createElement('label');
+    wrap.className = 'control folded';
+    wrap.hidden = true;
+    var name = document.createElement('span');
+    name.textContent = pair[1];
+    wrap.appendChild(name);
+    return { key: pair[0], control: controls[pair[0]], wrap: wrap };
+  }).filter(function (fold) { return fold.control; });
+  if (filtersList) folds.slice().reverse().forEach(function (fold) { filtersList.insertBefore(fold.wrap, filtersList.firstChild); });
+  function fit() {
+    if (!filtersMenu || !filtersList || !folds.length) return;
+    folds.forEach(function (fold) { toolbar.insertBefore(fold.control, filtersMenu); fold.wrap.hidden = true; });
+    toolbar.removeAttribute('data-folded');
+    var folded = [];
+    if (getComputedStyle(toolbar).flexWrap === 'nowrap') {
+      for (var i = folds.length - 1; i >= 0 && toolbar.scrollWidth > toolbar.clientWidth + 1; i -= 1) {
+        folds[i].wrap.appendChild(folds[i].control);
+        folds[i].wrap.hidden = false;
+        folded.push(folds[i].key);
+      }
+    }
+    if (folded.length) toolbar.setAttribute('data-folded', folded.join(' '));
+    markFilters(state());
+  }
+  var fitQueued = false;
+  window.addEventListener('resize', function () {
+    if (fitQueued) return;
+    fitQueued = true;
+    requestAnimationFrame(function () { fitQueued = false; fit(); });
+  });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+  fit();
   restore(readFilters(location.search));
   Object.keys(controls).forEach(function (key) {
     var control = controls[key];

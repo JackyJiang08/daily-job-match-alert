@@ -211,7 +211,7 @@ const scenarios = {
     assert.equal(run.exitCode, 0, `baseline exited ${run.exitCode}`);
     assert.deepEqual(artifacts.warnings, [], `baseline produced warnings: ${warningLines(artifacts.warnings).join(' | ')}`);
     assert.equal(await readWarningsFile(config, run), null, 'a warning-free run must not write warnings.txt');
-    assert.match(artifacts.html, /<span class="bar-date">Thu, Aug 27<\/span><span class="sep">·<\/span><span class="count" id="count">\d+ Jobs?<\/span>/);
+    assert.match(artifacts.html, /<span class="bar-date">August 27, 2026<\/span><span class="sep">·<\/span><span class="count" id="count">\d+ Jobs?<\/span>/);
     assert.match(artifacts.html, /<dt>(?:Generated|Updates Today)<\/dt><dd>[^<]*7:00 AM<\/dd>/, 'the run time is in Run Details');
     assert.ok(run.summary.meta.matchCount >= 1, 'baseline produced no matches');
     assert.ok(artifacts.xlsxPath, 'baseline did not write the xlsx');

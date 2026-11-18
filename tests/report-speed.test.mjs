@@ -108,7 +108,8 @@ test('reports index: built once from the payloads when missing, then the list pa
     const list = await hub.request('/reports/2026-10-16');
     assert.equal(list.status, 200);
     assert.deepEqual(reads, [], 'list, counts, and sidebar come from the index; the cached day needs no read');
-    assert.match(list.text, /<a href="\/reports\/2026-10-17" class="today" title="2026-10-17 \(today\)"><span>Sat, Oct 17<\/span><span class="n" title="4 matches">4<\/span>/);
+    assert.match(list.text, /<a class="cal-day today" href="\/reports\/2026-10-17" data-keep-query data-date="2026-10-17" aria-label="October 17, 2026 · 4 Jobs"><span class="cal-d">17<\/span><span class="cal-n">4<\/span><\/a>/, 'the picker\'s counts come from the index');
+    assert.match(list.text, /<a class="date-step" id="date-next" href="\/reports\/2026-10-17"/, '› from the index too');
   });
 });
 

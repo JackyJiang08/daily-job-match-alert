@@ -194,6 +194,8 @@ export const SAMPLE_TRACK_SCRIPT = `
 `;
 
 // ---------------------------------------------------------------------------------------------- letters list
+// Each row ends with Open CoverLetter, Download CoverLetter and Edit Letter (the editor panel at
+// /letters/<date>/<folder>/edit; its only entry point, the report cards do not link it).
 
 export function lettersPage({ letters, timeZone = 'America/Chicago' }) {
   const sorted = [...letters].sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.savedAt || '').localeCompare(String(a.savedAt || '')));
@@ -208,7 +210,7 @@ export function lettersPage({ letters, timeZone = 'America/Chicago' }) {
       <td>${readable(letter.createdAt || letter.savedAt, timeZone)}</td>
       <td>${Array.isArray(letter.editorNotes) ? letter.editorNotes.length : 0}</td>
       <td class="file"><span class="mono">${htmlEscape(letter.pdfFileName || '')}</span></td>
-      <td class="actions"><a class="btn secondary small" href="/letters/${letter.date}/${letter.slug}">Open CoverLetter</a> ${letter.pdfFileName && letter.pdf ? `<a class="btn secondary small" href="/letters/${letter.date}/${letter.slug}/${encodeURIComponent(letter.pdfFileName)}">Download CoverLetter</a>` : ''}</td>
+      <td class="actions"><a class="btn secondary small" href="/letters/${letter.date}/${letter.slug}">Open CoverLetter</a> ${letter.pdfFileName && letter.pdf ? `<a class="btn secondary small" href="/letters/${letter.date}/${letter.slug}/${encodeURIComponent(letter.pdfFileName)}">Download CoverLetter</a> ` : ''}<a class="btn secondary small" href="/letters/${letter.date}/${letter.slug}/edit" data-letter-edit title="The editor: track, short name, Rename Company &amp; Re-render, Save &amp; Render">Edit Letter</a></td>
     </tr>`).join('')}</table></div>`
     : '<p class="muted">No cover letters yet. Open a report and use Generate Cover Letter on a job card.</p>';
   return `<h1 class="hub-title">Letters</h1><p class="hub-sub">Letters you generate are kept on this Mac. Reopen one to edit or download it again.</p><article class="card">${rows}</article>`;

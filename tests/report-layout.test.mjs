@@ -1,6 +1,6 @@
 // The compact cards and page (2026-11-15): the highest score marked (ties included), the copy icon and the
 // plain-text form of a Job Description, the card order and the renamed actions, date-only postings in the
-// main list, the History fold of the hub's date column, and the one-row top bar. Rendering only: no engine,
+// main list, and the one-row top bar (its hub date controls: tests/report-date-nav.test.mjs). Rendering only: no engine,
 // no network.
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -10,7 +10,7 @@ import { descriptionPlainText } from '../src/jd-html.mjs';
 import { COPY_DESCRIPTION_LABEL, MENU_SLOT, renderJobCard } from '../src/report-components.mjs';
 import { REPORT_SCRIPT } from '../src/report-theme.mjs';
 import { CARRIED_OVER_TITLE, buildHtml, buildReportView, cardView } from '../src/report.mjs';
-import { renderDateList, reportsPage } from '../src/hub/views.mjs';
+import { reportsPage } from '../src/hub/views.mjs';
 import { jobIdOf } from '../src/hub/letters.mjs';
 import { scanTitleCase } from './helpers/title-case.mjs';
 import { fixtureJob, fixturePayload, prepareReportProject, selectedMatches, startReportHub, writePayload } from './helpers/report-hub.mjs';
@@ -103,7 +103,7 @@ test('date-only and undated postings sit in the main list in the current sort; n
 
 test('the top row: one form with the date and count, the four controls, the Filters popover, and the hub menu slot', () => {
   const html = buildHtml(selectedMatches(), META);
-  assert.match(html, /<div class="bar-sentinel" id="bar-sentinel" aria-hidden="true"><\/div><form class="toolbar" id="toolbar" autocomplete="off">\s*<div class="bar-title"><span class="bar-date">Sat, Nov 14<\/span><span class="sep">·<\/span><span class="count" id="count">4 Jobs<\/span><\/div>\s*<input type="search" id="q"[^>]*>\s*<select id="sort" class="control" aria-label="Sort by">[\s\S]*?<select id="track" class="control" aria-label="Track">[\s\S]*?<select id="role" class="control" aria-label="Role type">[\s\S]*?<details class="menu" id="filters-menu"><summary class="btn secondary" id="filters-button">Filters<\/summary>/);
+  assert.match(html, /<div class="bar-sentinel" id="bar-sentinel" aria-hidden="true"><\/div><form class="toolbar" id="toolbar" autocomplete="off">\s*<div class="bar-title"><span class="bar-date">November 14, 2026<\/span><span class="sep">·<\/span><span class="count" id="count">4 Jobs<\/span><\/div>\s*<input type="search" id="q"[^>]*>\s*<select id="sort" class="control" aria-label="Sort by">[\s\S]*?<select id="track" class="control" aria-label="Track">[\s\S]*?<select id="role" class="control" aria-label="Role type">[\s\S]*?<details class="menu" id="filters-menu"><summary class="btn secondary" id="filters-button">Filters<\/summary>/);
   assert.doesNotMatch(html, /<header|<h1|masthead|Matches · Ran|<!--menu-->/);
   assert.match(html, /\.toolbar\{position:sticky;top:0;z-index:5/);
   assert.match(html, /\.toolbar\.stuck\{[^}]*backdrop-filter:blur\(10px\);border-bottom-color:var\(--line\)\}/);
@@ -113,39 +113,6 @@ test('the top row: one form with the date and count, the four controls, the Filt
   const page = reportsPage({ dates: [{ date: '2026-11-14', matchCount: 4 }], selected: '2026-11-14', reportBody: `<form class="toolbar">${MENU_SLOT}</form>`, desktopPath: '/Users/jane/Desktop/x.html', today: '2026-11-14', missingLetters: { count: 2, letters: 1 } });
   assert.match(page, /<form class="toolbar"><details class="menu overflow" id="more-menu"><summary class="btn secondary" aria-label="More Actions" title="More Actions">⋯<\/summary><div class="menu-list"><form class="inline" method="post" action="\/letters\/missing"[\s\S]*?Generate Missing Letters \(2\)<\/button><\/form><form class="inline" method="post" action="\/letters\/update-salutations"[\s\S]*?Update Salutations \(1\)<\/button><\/form><a class="btn secondary small" href="\/desktop\/2026-11-14" target="_blank" rel="noopener noreferrer" title="\/Users\/jane\/Desktop\/x\.html">Open Desktop Copy<\/a><a class="btn secondary small" href="\/desktop\/2026-11-14\/xlsx" title="Download the Desktop workbook">Download XLSX<\/a><\/div><\/details><\/form>/);
   assert.doesNotMatch(page, /<!--menu-->|class="report-head"/);
-});
-
-test('the hub date column: a three-column grid, the current month open, earlier months under History (open for a selected date in it)', async () => {
-  const dates = [{ date: '2026-11-15', matchCount: 3 }, { date: '2026-11-14', matchCount: 12 }, { date: '2026-11-02', matchCount: 0 }, { date: '2026-10-28', matchCount: 1 }, { date: '2026-09-30', matchCount: 7 }];
-  const list = renderDateList({ dates, selected: '2026-11-14', today: '2026-11-15' });
-  assert.match(list, /<ul class="datelist" id="datelist"><li data-month="2026-11"><a href="\/reports\/2026-11-15" class="today" title="2026-11-15 \(today\)"><span>Sun, Nov 15<\/span><span class="n" title="3 matches">3<\/span><span class="tag" data-tag="today">Today<\/span><\/a><\/li><li data-month="2026-11"><a href="\/reports\/2026-11-14" class="active" title="2026-11-14"><span>Sat, Nov 14<\/span><span class="n" title="12 matches">12<\/span><\/a><\/li><li data-month="2026-11" data-empty="1"><a href="\/reports\/2026-11-02" class="quiet" title="2026-11-02"><span>Mon, Nov 2<\/span><span class="n" title="0 matches">0<\/span><\/a><\/li><\/ul>/);
-  assert.match(list, /<details class="history" id="history"><summary>History <span class="group-count">\(2\)<\/span><\/summary><ul class="datelist" id="datelist-history"><li class="month" data-month="2026-10">October 2026<\/li><li data-month="2026-10"><a href="\/reports\/2026-10-28" title="2026-10-28"><span>Wed, Oct 28<\/span><span class="n" title="1 match">1<\/span><\/a><\/li><li class="month" data-month="2026-09">September 2026<\/li><li data-month="2026-09"><a href="\/reports\/2026-09-30" title="2026-09-30"><span>Wed, Sep 30<\/span><span class="n" title="7 matches">7<\/span><\/a><\/li><\/ul><\/details>/);
-  assert.doesNotMatch(list, /month-toggle|data-collapsed|matches<\/span>/);
-  assert.match(renderDateList({ dates, selected: '2026-09-30', today: '2026-11-15' }), /<details class="history" id="history" open data-selected="1">/);
-  assert.doesNotMatch(renderDateList({ dates: dates.slice(0, 3), selected: '2026-11-14', today: '2026-11-15' }), /history/, 'no earlier month, no fold');
-  assert.deepEqual(scanTitleCase(list), []);
-  // The page: the grid styles, the script's localStorage key, and the fold's open state surviving the toggle.
-  const root = await prepareReportProject();
-  await writePayload(root, fixturePayload('2026-09-30', [fixtureJob(30)]));
-  const hub = await startReportHub(root);
-  try {
-    const page = (await hub.request('/reports/2026-10-17')).text;
-    const css = (await hub.request(/href="(\/assets\/hub-[a-f0-9]+\.css)"/.exec(page)[1])).text;
-    const js = (await hub.request(/src="(\/assets\/hub-[a-f0-9]+\.js)"/.exec(page)[1])).text;
-    assert.match(css, /\.datelist\{display:grid;grid-template-columns:minmax\(0,1fr\) max-content max-content;[^}]*font-variant-numeric:tabular-nums\}/);
-    assert.match(css, /\.datelist>li\{display:contents\}/);
-    assert.match(css, /\.datelist a\{display:grid;grid-template-columns:subgrid;grid-column:1\/-1;align-items:baseline/);
-    assert.match(css, /\.datelist a \.n\{grid-column:2;[^}]*text-align:right\}/);
-    assert.match(css, /\.datelist a \.tag\{grid-column:3;justify-self:end\}/);
-    assert.match(css, /\.hub-nav\{position:sticky;top:0;height:100vh/, 'the side navigation stays put next to the sticky top row');
-    assert.match(js, /var historyKey = 'hub\.reports\.history';[\s\S]*history\.addEventListener\('toggle', function \(\) \{ try \{ localStorage\.setItem\(historyKey, history\.open \? '1' : '0'\); \} catch \(e\) \{\} \}\)/);
-    assert.match(js, /if \(history\.dataset\.selected !== '1' && remembered != null\) history\.open = remembered === '1';/, 'a selected date in the fold wins over the remembered state');
-    assert.match(page, /<details class="history" id="history"><summary>History <span class="group-count">\(1\)<\/span><\/summary><ul class="datelist" id="datelist-history"><li class="month" data-month="2026-09">September 2026<\/li>/);
-    assert.match((await hub.request('/reports/2026-09-30')).text, /<details class="history" id="history" open data-selected="1">/);
-  } finally {
-    await hub.close();
-    await fs.rm(root, { recursive: true, force: true });
-  }
 });
 
 test('the hub card: Check N Details links to the letter page, the actions are the four, and the applied mark is gone', async () => {

@@ -36,14 +36,16 @@ test('HTML output escapes remote content, links the posting, and keeps the JD fo
   assert.doesNotMatch(html, /<link |src="http|https:\/\/cdn/);
 });
 
-test('the top row is one line: the short date and the job count on the left, no masthead above it', () => {
+test('the top row is one line: the full date ("November 15, 2026") and the job count on the left, no ‹ › or picker in the Desktop copy, no masthead above it', () => {
   assert.equal(readableDate('2026-09-11'), 'September 11, 2026');
   assert.equal(readableDate('not-a-date'), 'not-a-date');
   const nine = buildHtml(Array.from({ length: 9 }, (_, index) => ({ ...job, url: `https://example.com/jobs/${index}` })), { ...meta, date: '2026-09-11' });
-  assert.equal(header(nine), '<span class="bar-date">Fri, Sep 11</span><span class="sep">·</span><span class="count" id="count">9 Jobs</span>');
-  assert.match(nine, /<title>Daily Job Match Alert — September 11, 2026<\/title>/);
-  assert.equal(header(buildHtml([job], meta)), '<span class="bar-date">Thu, Aug 27</span><span class="sep">·</span><span class="count" id="count">1 Job</span>');
-  assert.equal(header(buildHtml([], meta)), '<span class="bar-date">Thu, Aug 27</span><span class="sep">·</span><span class="count" id="count">0 Jobs</span>');
+  assert.equal(header(nine), '<span class="bar-date">September 11, 2026</span><span class="sep">·</span><span class="count" id="count">9 Jobs</span>');
+  assert.match(nine, /<title>September 11, 2026 · 9 Jobs<\/title>/, 'the tab title is the top row');
+  assert.match(buildHtml([job], meta), /<title>August 27, 2026 · 1 Job<\/title>/);
+  assert.doesNotMatch(nine, /date-prev|date-next|id="calendar"|<!--date-->/, 'one day, no navigation');
+  assert.equal(header(buildHtml([job], meta)), '<span class="bar-date">August 27, 2026</span><span class="sep">·</span><span class="count" id="count">1 Job</span>');
+  assert.equal(header(buildHtml([], meta)), '<span class="bar-date">August 27, 2026</span><span class="sep">·</span><span class="count" id="count">0 Jobs</span>');
   assert.doesNotMatch(nine, /<header class="masthead"|<h1[ >]|Matches · Ran|linear-gradient/);
   assert.match(nine, /<div class="bar-sentinel" id="bar-sentinel" aria-hidden="true"><\/div><form class="toolbar" id="toolbar" autocomplete="off">\s*<div class="bar-title">/, 'the bar is the first thing on the page, after its sticky sentinel');
   assert.match(nine, /IntersectionObserver[\s\S]*classList\.toggle\('stuck'/, 'the script marks the bar once it is stuck');
@@ -90,7 +92,7 @@ test('run metadata lives only in the collapsed Run details block, including the 
 test('the run time stays out of the top row (Run Details has it); mastheadSubtitle is kept for the Status summary', () => {
   const ran = { ...meta, timeZone: 'America/Chicago', completedAt: '2026-09-13T01:00:00Z', trigger: 'scheduled', runsToday: 1, lastUpdatedAt: '2026-09-13T01:00:00Z' };
   const html = buildHtml([job], { ...ran, date: '2026-09-13' });
-  assert.equal(header(html), '<span class="bar-date">Sun, Sep 13</span><span class="sep">·</span><span class="count" id="count">1 Job</span>');
+  assert.equal(header(html), '<span class="bar-date">September 13, 2026</span><span class="sep">·</span><span class="count" id="count">1 Job</span>');
   // A folder from before 2026-11 (the evening run wrote the next day's report) keeps the run's date in the summary line.
   assert.equal(mastheadSubtitle([job], { ...ran, date: '2026-09-13' }), '1 Match · Ran Sep 12, 8:00 PM');
   // A run on the report's own day shows the time alone.
@@ -101,7 +103,7 @@ test('the run time stays out of the top row (Run Details has it); mastheadSubtit
   assert.doesNotMatch(html, /\bUTC\b/);
   const embedded = buildReportView([job], { ...ran, date: '2026-09-13' }, { embedded: true });
   assert.equal(embedded.masthead, undefined, 'no masthead view any more');
-  assert.deepEqual({ title: embedded.toolbar.title, total: embedded.toolbar.total, menuSlot: embedded.toolbar.menuSlot, quotaNote: embedded.quotaNote }, { title: 'Sun, Sep 13', total: 1, menuSlot: true, quotaNote: null }, 'the hub view gets the menu slot; no quota event, no quota line');
+  assert.deepEqual({ title: embedded.toolbar.title, total: embedded.toolbar.total, menuSlot: embedded.toolbar.menuSlot, quotaNote: embedded.quotaNote }, { title: 'September 13, 2026', total: 1, menuSlot: true, quotaNote: null }, 'the hub view gets the menu slot; no quota event, no quota line');
   assert.equal(buildReportView([job], meta).toolbar.menuSlot, false, 'the Desktop file has no menu slot');
   // Older payloads without completedAt fall back to lastUpdatedAt.
   assert.equal(mastheadSubtitle([], { date: '2026-08-27', timeZone: 'America/Chicago', lastUpdatedAt: '2026-08-27T13:30:00Z' }), 'No Matches · Ran 8:30 AM');

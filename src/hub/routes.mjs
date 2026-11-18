@@ -23,7 +23,7 @@ import { localDate } from '../time-format.mjs';
 import { LETTER_SCRIPT, ONECLICK_SCRIPT, SAMPLE_TRACK_SCRIPT, letterPanel, lettersPage, trackLabelOf } from './letter-views.mjs';
 import { todayTarget } from './views.mjs';
 import { letterRulesSettings, postingTermConflict, termConflictBadge } from '../cover-letter/availability.mjs';
-import { clearLetterReview, findLetterJob, generateLetter, generateOutreachMessages, initialShortName, jobIdOf, letterCompanyFor, letterEngineFor, oneClickLetter, regenerateLetter, renameLetter, saveLetter, updateSalutations } from './letters.mjs';
+import { clearLetterReview, findLetterJob, generateLetter, generateOutreachMessages, initialShortName, jobIdOf, letterCompanyFor, letterEngineFor, markLetterReviewSeen, oneClickLetter, regenerateLetter, renameLetter, saveLetter, updateSalutations } from './letters.mjs';
 import { letterDocument, letterSheet, letterViewOf } from './letter-page.mjs';
 import { LetterBusyError } from './letter-jobs.mjs';
 import { QuotaError, describeQuota } from '../engines/quota.mjs';
@@ -220,10 +220,11 @@ export function createHubHandler(ctx) {
     let reportBody = null;
     let desktopPath = null;
     let missingLetters = null;
+    let tabTitle = null;
     if (selected) {
       const day = await reportDay(selected, timer);
       if (!day) {
-        await page(response, 404, { active: 'reports', title: 'Reports', content: reportsPage({ dates, selected: null, reportBody: null, desktopPath: null, today }), error: `No report payload for ${selected}` }, timer);
+        await page(response, 404, { active: 'reports', title: 'Reports', content: reportsPage({ dates, selected: null, reportBody: null, desktopPath: null, today, timeZone }), error: `No report payload for ${selected}` }, timer);
         return;
       }
       // Postings the automatic letters pass is still working through (state/letters-auto.json).
@@ -265,6 +266,7 @@ export function createHubHandler(ctx) {
           // A direct download: the PDF route answers with content-disposition attachment and the short-name file name.
           const download = letter?.pdf && letter.pdfFileName ? [{ href: `${openUrl}/${encodeURIComponent(letter.pdfFileName)}`, label: 'Download CoverLetter', download: letter.pdfFileName }] : [];
           const check = letter ? reviewBadge(letter.editorNotes, { cleared: Boolean(letter.reviewClearedAt) }) : null;
+          // Grey once the letter page has been opened (record.reviewSeenAt); a new save starts over.
           return {
             flags: flags(id),
             actions: letter
@@ -272,18 +274,22 @@ export function createHubHandler(ctx) {
               ? [...download, { href: openUrl, label: 'Open CoverLetter', newTab: true }, reach(id)]
               : [{ button: true, label: 'Generate CoverLetter', data: { oneclick: '1', date: selected, job: id } }, reach(id)],
             badges: [...contactedBadge(id), ...(letter ? [] : termBadge(job))],
-            check: check ? { label: check.label, title: check.title, href: openUrl } : null,
+            check: check ? { label: check.label, title: check.title, href: openUrl, seen: Boolean(letter.reviewSeenAt) } : null,
           };
         };
         const lazy = { src: card => (day.shared.has(card.id) ? null : `/reports/${selected}/jd/${card.id}`) };
-        const body = await timer.phase('render', () => renderReportBody(buildReportView(day.matches, { timeZone, ...day.meta }, { embedded: true, decorate, marks: { contacted: true }, review: day.review, notReviewed: day.notReviewed || [], lazyDescription: lazy })));
-        rendered = ctx.reportCache.setRender(renderKey, { reportBody: body, missingCount: missingLetterJobs(day.matches, lettersByJob).length, letterCount: [...lettersByJob.values()].filter(letter => letter.date === selected).length });
+        const { view, body } = await timer.phase('render', () => {
+          const built = buildReportView(day.matches, { timeZone, ...day.meta }, { embedded: true, decorate, marks: { contacted: true }, review: day.review, notReviewed: day.notReviewed || [], lazyDescription: lazy });
+          return { view: built, body: renderReportBody(built) };
+        });
+        rendered = ctx.reportCache.setRender(renderKey, { reportBody: body, tabTitle: view.tabTitle, missingCount: missingLetterJobs(day.matches, lettersByJob).length, letterCount: [...lettersByJob.values()].filter(letter => letter.date === selected).length });
       }
       reportBody = rendered.reportBody;
+      tabTitle = rendered.tabTitle;
       desktopPath = desktopCopyPath(config, selected);
       missingLetters = { count: rendered.missingCount, letters: rendered.letterCount || 0, running: Boolean(autoStatus?.running), done: autoStatus?.done || 0, planned: autoStatus?.planned || 0 };
     }
-    await page(response, 200, { active: 'reports', title: selected ? `Report ${selected}` : 'Reports', content: reportsPage({ dates, selected, reportBody, desktopPath, today, missingLetters }), script: REPORTS_SCRIPT + ONECLICK_SCRIPT + OUTREACH_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' }, timer);
+    await page(response, 200, { active: 'reports', title: tabTitle || 'Reports', content: reportsPage({ dates, selected, reportBody, desktopPath, today, missingLetters, timeZone }), script: REPORTS_SCRIPT + ONECLICK_SCRIPT + OUTREACH_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' }, timer);
   }
 
   // GET /reports/<date>/jd/<card id>: the full Job Description of one card as the markup the Desktop report
@@ -391,7 +397,8 @@ export function createHubHandler(ctx) {
   }
 
   async function getLetterPage(date, existing, response) {
-    send(response, 200, letterDocument({ date, slug: existing.slug, view: await letterView(existing) }));
+    const seen = await markLetterReviewSeen(ctx, existing, date).catch(() => existing);
+    send(response, 200, letterDocument({ date, slug: existing.slug, view: await letterView(seen) }));
   }
 
   async function getLetterDownload(date, slug, fileName, response) {

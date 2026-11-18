@@ -13,6 +13,7 @@ import { notePhrases, placeNotes, splitSentences } from '../src/cover-letter/not
 import { parseLetterMarkdown } from '../src/hub/letter-page.mjs';
 import { jobIdOf, oneClickLetter } from '../src/hub/letters.mjs';
 import { createHubContext, createHubServer } from '../src/hub/server.mjs';
+import { REPORTS_SCRIPT } from '../src/hub/views.mjs';
 
 const fixtures = new URL('./fixtures/', import.meta.url);
 const NOW = '2026-09-15T15:00:00Z';
@@ -165,6 +166,41 @@ test('Regenerate: a failure keeps the old letter (page, record, PDF) and answers
     const saved = await hub.ctx.letterStore.loadLetter(DATE, hub.slug);
     assert.match(saved.record.paragraphs[0], /^Paragraph 1 version 2 /);
     assert.equal(saved.record.editorNotes.includes(NOTES[0]), false, 'the new letter carries its own notes');
+  } finally {
+    await hub.close();
+    await fs.rm(hub.root, { recursive: true, force: true });
+  }
+});
+
+test('Check N Details: orange until the letter page is opened, then grey; Regenerate starts over and a clean letter has no badge; Edit Letter sits in the Letters list only', async () => {
+  const hub = await setUp();
+  try {
+    const card = async () => /<a class="badge [^"]*job-check"[^>]*>[^<]*<\/a>/.exec((await hub.request('GET', `/reports/${DATE}`)).text)?.[0] || null;
+    assert.match(await card(), /^<a class="badge badge-warn job-check" data-badge="letter-check" href="\/letters\/2026-09-15\/[^"]+" title="[^"]*">Check 3 Details<\/a>$/);
+    assert.equal((await hub.ctx.letterStore.loadLetter(DATE, hub.slug)).record.reviewSeenAt, undefined);
+
+    assert.equal((await hub.request('GET', `/letters/${DATE}/${hub.slug}`)).status, 200);
+    const seen = await hub.ctx.letterStore.loadLetter(DATE, hub.slug);
+    assert.equal(seen.record.reviewSeenAt, NOW.replace('Z', '.000Z'), 'the first open is recorded');
+    assert.deepEqual(seen.record.editorNotes, NOTES, 'the notes stay on the letter');
+    assert.match(await card(), /^<a class="badge badge-muted job-check" data-badge="letter-check" data-seen="1" href="[^"]+" title="[^"]*">Check 3 Details<\/a>$/, 'grey on the next render');
+    await hub.request('GET', `/letters/${DATE}/${hub.slug}`);
+    assert.equal((await hub.ctx.letterStore.loadLetter(DATE, hub.slug)).record.savedAt, seen.record.savedAt, 'a second open writes nothing');
+    // The report page greys the badge at once when the letter page is opened from the card.
+    assert.match(REPORTS_SCRIPT, /\.job a\[href\^="\/letters\/"\][\s\S]*?link\.pathname !== check\.pathname[\s\S]*?check\.classList\.add\('badge-muted'\);\s*check\.setAttribute\('data-seen', '1'\);/);
+
+    // Regenerate: the new letter replaces the record, so the old notes and the seen mark go; this editor finds nothing.
+    assert.equal((await hub.request('POST', '/letters/regenerate', { date: DATE, slug: hub.slug })).status, 200);
+    const fresh = await hub.ctx.letterStore.loadLetter(DATE, hub.slug);
+    assert.equal(fresh.record.reviewSeenAt, undefined);
+    assert.equal(fresh.record.editorNotes.some(note => NOTES.includes(note)), false);
+    assert.equal(await card(), null, 'no needs-review note, no badge');
+
+    // The old editor: linked from the Letters list (right end of the row), never from a card.
+    const letters = (await hub.request('GET', '/letters')).text;
+    assert.match(letters, new RegExp(`<td class="actions">[\\s\\S]*?<a class="btn secondary small" href="/letters/${DATE}/${hub.slug}/edit" data-letter-edit title="[^"]*">Edit Letter</a></td>`));
+    assert.equal((await hub.request('GET', `/letters/${DATE}/${hub.slug}/edit`)).status, 200);
+    assert.doesNotMatch((await hub.request('GET', `/reports/${DATE}`)).text, /\/edit"/);
   } finally {
     await hub.close();
     await fs.rm(hub.root, { recursive: true, force: true });

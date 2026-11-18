@@ -13,22 +13,31 @@ export const COPY_DESCRIPTION_LABEL = 'Copy Job Description';
 // The hub's "⋯" menu is filled by the hub page (reportsPage replaces this marker), so the cached report body
 // never carries request-specific controls.
 export const MENU_SLOT = '<!--menu-->';
+// The hub puts ‹ date › and the month picker here (reportsPage); the Desktop report shows the date as text.
+export const DATE_SLOT = '<!--date-->';
 
 const COPY_ICON = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>';
+
+// "1 Job", "3 Jobs": the top row's count and the tab title.
+export function jobCountLabel(total) {
+  return `${total} ${total === 1 ? 'Job' : 'Jobs'}`;
+}
 
 function option(value, label, selected = false) {
   return `<option value="${htmlEscape(value)}"${selected ? ' selected' : ''}>${htmlEscape(label)}</option>`;
 }
 
-// The one top row (2026-11-15), sticky while the list scrolls: the date and the count on the left; search,
+// The one top row (2026-11-15), sticky while the list scrolls: the date ("November 15, 2026"; in the hub ‹ date ›
+// with the month picker, 2026-11-18) and the count on the left; search,
 // sort, Track and Role Type on the right; Freshness, the score range, Hide Contacted (hub) and Clear Filters
 // in the "Filters" popover; the hub's secondary actions in a "⋯" menu that the hub page fills in. The page
 // script keeps the filter state in the URL query (src/report-filters.mjs).
-export function renderToolbar({ roleTypes, tracks, total, freshness = [], marks = null, title = '', menuSlot = false }) {
+export function renderToolbar({ roleTypes, tracks, total, freshness = [], marks = null, title = '', menuSlot = false, dateSlot = false }) {
   const contacted = marks ? `<label class="check"><input type="checkbox" id="hide-contacted"> Hide Contacted</label>` : '';
-  const count = `${total} ${total === 1 ? 'Job' : 'Jobs'}`;
+  const count = jobCountLabel(total);
+  const date = dateSlot ? DATE_SLOT : title ? `<span class="bar-date">${htmlEscape(title)}</span>` : '';
   return `<div class="bar-sentinel" id="bar-sentinel" aria-hidden="true"></div><form class="toolbar" id="toolbar" autocomplete="off">
-    <div class="bar-title">${title ? `<span class="bar-date">${htmlEscape(title)}</span><span class="sep">·</span>` : ''}<span class="count" id="count">${count}</span></div>
+    <div class="bar-title">${date ? `${date}<span class="sep">·</span>` : ''}<span class="count" id="count">${count}</span></div>
     <input type="search" id="q" placeholder="Search company or title" aria-label="Search company or title">
     <select id="sort" class="control" aria-label="Sort by">${option('score', 'Best Score', true)}${option('company', 'Company')}${option('posted', 'Posted Time')}</select>
     <select id="track" class="control" aria-label="Track">${option('', 'All Tracks')}${tracks.map(track => option(track.id, track.label)).join('')}</select>
@@ -83,11 +92,11 @@ function renderAction(action) {
 }
 
 // "Check N Details" at the right end of the posting line: only when the letter's editor left something the
-// owner must confirm; it opens the letter page.
+// owner must confirm; it opens the letter page. Grey (badge-muted, data-seen) once that page has been opened.
 function renderCheck(check) {
   if (!check) return '';
   const title = check.title ? ` title="${htmlEscape(check.title)}"` : '';
-  return `<a class="badge badge-warn job-check" data-badge="letter-check" href="${htmlEscape(check.href)}"${title}>${htmlEscape(check.label)}</a>`;
+  return `<a class="badge ${check.seen ? 'badge-muted' : 'badge-warn'} job-check" data-badge="letter-check"${check.seen ? ' data-seen="1"' : ''} href="${htmlEscape(check.href)}"${title}>${htmlEscape(check.label)}</a>`;
 }
 
 // The folded Job Description with its copy icon in the summary (the page script copies the whole JD as
@@ -190,7 +199,7 @@ ${renderRunDetails(view.runDetails)}
 
 export function renderReportPage(view) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${htmlEscape(view.title)} — ${htmlEscape(view.dateLabel)}</title>
+<title>${htmlEscape(view.tabTitle || `${view.title} — ${view.dateLabel}`)}</title>
 <style>${REPORT_STYLES}</style></head>
 <body><main class="page">
 ${renderReportBody(view)}

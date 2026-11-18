@@ -634,7 +634,7 @@ disabled; do not expand them unless a task says so.
   apply.
 - Mark as Applied: REMOVED 2026-11-15 (button, Hide Applied filter, POST /outreach/applied, setApplied,
   appliedLabel). private/outreach/state.json appliedAt values already on disk are kept and neither read nor written.
-- Hub mobile (≤ 760px): nav is one scrolling row (brand and mini status hidden), dates are a horizontal chip strip,
+- Hub mobile (≤ 760px): nav is one scrolling row (brand and mini status hidden), the month picker is a bottom sheet,
   report-head buttons scroll in one row, kv/conn lists stack; filter bar is a two-column grid (select labels
   visually hidden); Task Assignments stack per stage (≤ 640px). Wide tables scroll inside .card / .table-wrap;
   .file is position:relative so its hidden input cannot widen the page.
@@ -660,18 +660,22 @@ disabled; do not expand them unless a task says so.
   clipboard.write(ClipboardItem text/html + text/plain) → writeText(text) → textarea/execCommand; the icon becomes
   a tick (.done) for 1.5 s. descriptionPlainText(html) in src/jd-html.mjs (self-contained, injected via toString):
   blocks separated by a blank line, li → "• ", br → newline, tags stripped, entities decoded.
-- Top row (renderToolbar; view.toolbar { title: formatDateLabel(meta.date), total, roleTypes, tracks, freshness
-  (no "date only"), marks, menuSlot: options.embedded }): div.bar-sentinel + form.toolbar#toolbar = .bar-title
-  ("Sat, Nov 14 · <span.count#count>42 Jobs</span>"; the script writes "N Jobs" / "N of M Jobs"), input#q,
+- Top row (renderToolbar; view.toolbar { title: formatLongDate(meta.date, meta.timeZone), total, roleTypes, tracks,
+  freshness (no "date only"), marks, menuSlot/dateSlot: options.embedded }): div.bar-sentinel + form.toolbar#toolbar =
+  .bar-title (Desktop: "span.bar-date November 14, 2026 · <span.count#count>42 Jobs</span>"; hub: DATE_SLOT filled by
+  reportsPage, see "Date controls"; jobCountLabel; the script writes "N Jobs" / "N of M Jobs"), input#q,
   select#sort/#track/#role (aria-labels, no visible labels; "All Tracks"), details.menu#filters-menu (summary.btn
   "Filters": Freshness, Score, Hide Contacted (hub), Clear Filters; .active when one is set), then the hub's
   details.menu.overflow#more-menu ("⋯", aria-label More Actions: Generate Missing Letters / Update Salutations
   forms, Open Desktop Copy, Download XLSX) which reportsPage puts into the MENU_SLOT comment of the cached body
   (reportMenu). Sticky top:0; IntersectionObserver on the sentinel toggles .stuck (rule + backdrop blur); popovers
-  close on outside click / Escape; @media (min-width:1100px) flex-wrap:nowrap (hub nav 152px and date column
-  180px between 761 and 1279px so the row fits); ≤640px grid. No masthead, no "quiet" bar, no report-head row;
+  close on outside click / Escape; @media (min-width:1100px) flex-wrap:nowrap (hub nav 152px between 761 and
+  1279px); REPORT_SCRIPT fit() (load, resize, fonts.ready): while flex-wrap is nowrap and scrollWidth > clientWidth,
+  select#role then #track move into label.control.folded at the top of #filters-menu .menu-list (toolbar
+  data-folded="role resume"; a folded control that is set marks Filters .active), back when there is room; .bar-title
+  flex 0 0 auto (the date is never cut); ≤640px grid. No masthead, no "quiet" bar, no report-head row;
   .hub-nav is sticky, 100vh, overflow auto again (840be72 had made it static, which pushed .mini off-screen;
-  restored 2026-11-15), static only ≤760px; .split aside stays sticky. .mini = Last Run, Next Run, [Login], Plan,
+  restored 2026-11-15), static only ≤760px. .mini = Last Run, Next Run, [Login], Plan,
   Models (new 2026-11-15, never present before): sidebarSummary.models = sidebarModels → effectiveStageModels
   (src/engines/assignments.mjs; Review = scoring, Prescreen, CoverLetter = letterDraft; walks stageChain past
   weekly_limit / not_on_plan / unknown_model in state/model-availability.json, Claude when signed out, Codex when
@@ -682,17 +686,38 @@ disabled; do not expand them unless a task says so.
 - Groups: main list = every reviewed match that is not carried (date-only and undated included; strict window
   removed); "From Yesterday" (CARRIED_OVER_TITLE) with no note line; Not Reviewed unchanged. The xlsx has no
   group name (Freshness column values unchanged).
-- Hub date column (renderDateList): ul.datelist#datelist = grid minmax(0,1fr) max-content max-content, li
-  display:contents, a = subgrid row (span date | span.n count as a bare number with title "N matches" |
-  span.tag Today/Tomorrow); the current month and later months without a heading; earlier months in
-  details.history#history (summary "History (N)", ul#datelist-history with li.month headings), rendered open +
-  data-selected=1 when the selected date is in it; REPORTS_SCRIPT remembers it in localStorage
-  hub.reports.history (not when data-selected) and applies Only Days With Matches to both lists. Misalignment
-  cause (screenshot 2026-11-15): each row was its own flexbox, so the Today tag pushed that row's count left and
-  counts of different widths had no shared edge.
+- Hub date column: REMOVED 2026-11-18 (renderDateList, .split/aside#date-column, .datelist/.datetools/.history CSS,
+  Only Days With Matches, History fold). REPORTS_SCRIPT removes the old localStorage keys hub.reports.history and
+  hub.reports.onlyMatches once. See "Date controls (2026-11-18)".
 - Screenshots: tests/fixtures/demo-output/screenshots/ (gitignored; playwright-core installed with --no-save,
   Chrome channel; the capture script lives outside the repo). Checked at 1440/1100 × light/dark: one-row bar
   that fits, stuck after scrolling with the nav gone, aligned counts, card order.
+
+## Date controls (2026-11-18, src/hub/views.mjs)
+- The report fills the width beside the nav (section.report-view; .hub-content:has(.report-view) max-width none).
+  reportsPage replaces DATE_SLOT ('<!--date-->', report-components.mjs) with renderDateNav({ dates, selected, today,
+  timeZone }) and MENU_SLOT with reportMenu (both request-specific; the cached body keeps the slots).
+- renderDateNav: span.date-nav#date-nav = ‹ (a.date-step#date-prev[data-keep-query] or button disabled) + span.date-pick
+  (button.bar-date.date-button#date-button "November 15, 2026" aria-haspopup=dialog aria-expanded + div.cal#calendar
+  [role=dialog][data-current=YYYY-MM][hidden] + div.cal-backdrop#cal-backdrop) + › (#date-next). neighborDates /
+  datesWithMatches: matchCount !== 0 (null counts as matches), so 0-match and missing days are skipped.
+- The picker: .cal-head (button.cal-step#cal-prev, span.cal-title#cal-title, #cal-next), .cal-week Su..Sa, one
+  calendarMonth grid per month with reports (div.cal-grid[data-month][data-label "November 2026"][data-prev][data-next],
+  only the selected month not hidden; Sunday-first blanks span.cal-blank): a report day = a.cal-day[data-keep-query]
+  [data-date][aria-label "November 15, 2026 · 3 Jobs"] (span.cal-d + span.cal-n count, .zero light grey, .today ring,
+  .current filled + aria-current=date), no report = span.cal-day.off[aria-disabled] (not a link); .cal-foot
+  a.btn.secondary.cal-today#cal-today → todayTarget (title says when it is the newest report instead). ≤760px: fixed
+  bottom sheet + backdrop (.toolbar.stuck loses its backdrop-filter there so the sheet is fixed to the viewport).
+- formatLongDate / formatMonthLabel (src/time-format.mjs): Intl.DateTimeFormat en-US long month in config.timeZone at
+  the instant the calendar date is that date in the zone (noon UTC, shifted a day for far zones). Tab titles: Desktop
+  view.tabTitle "November 15, 2026 · 3 Jobs"; hub "<same> — Daily Job Match Alert Hub" (rendered.tabTitle).
+- REPORTS_SCRIPT: a[data-keep-query] click/auxclick → href = pathname + location.search (filters ride along; URL stays
+  /reports/<date>, history normal); ← / → follow #date-prev / #date-next when they are links, not with a modifier, an
+  input/textarea/select/contenteditable target, or the picker open; the picker opens on data-current, pages by
+  data-prev/next (buttons disabled at the ends), closes on outside click or Escape (focus back to the date).
+  REPORT_SCRIPT restore() appends an option for a select value the date does not offer (data-absent) so the filter
+  survives a date change. Tests: tests/report-date-nav.test.mjs (fake DOM via vm), hub/report-speed/run-schedule
+  updates; snapshot allowances DATE_NAV in tests/helpers/page-content.mjs (addedLinkPrefixes, missingWordPatterns).
 
 ## Letter rules v2 (2026-11-08, from private/review/cover-letter-review-response.md)
 - config.coverLetter.rulesVersion "v1" (DEFAULT, unchanged behavior; v1 reads private/cover-letter/playbook-v1.md, the
@@ -868,7 +893,14 @@ disabled; do not expand them unless a task says so.
   regenerateLetter through ctx.letterJobs (cards wait) and awaits settle(): generateLetter(strict, same track, short
   name fixed when shortNameSource is owner) + saveLetter; a failure after the save began rewrites the old letter.json/
   letter.md and the old PDF bytes. Reply { slug, openUrl, downloadUrl, sheet }; errors are the runner's humanized line.
-- The old editor panel stays at /letters/<date>/<folder>/edit (no link to it); /letters/new is unchanged. Card
+- The old editor panel stays at /letters/<date>/<folder>/edit; its only entry is "Edit Letter" (a[data-letter-edit]) at the
+  right end of each Letters list row (2026-11-18); cards never link it. /letters/new is unchanged. Card
   Download CoverLetter has download="<pdfFileName>" (renderAction action.download; ONECLICK markReady sets it too);
-  the route already answered content-disposition attachment. Letters list: Open CoverLetter / Download CoverLetter.
+  the route already answered content-disposition attachment. Letters list: Open CoverLetter / Download CoverLetter / Edit Letter.
+- Check N Details seen (2026-11-18): GET /letters/<date>/<folder> calls markLetterReviewSeen (src/hub/letters.mjs):
+  once, only with needs-review notes and no reviewClearedAt, record.reviewSeenAt via letterStore.saveLetter (render
+  cache invalidated). getReports passes check.seen → renderCheck badge-muted + data-seen="1" (else badge-warn);
+  REPORTS_SCRIPT greys it in the open report when a card link to the same letter page is clicked. Regenerate saves a
+  fresh record (new editorNotes, no reviewSeenAt/reviewClearedAt), so the badge goes unless the new letter has
+  needs-review notes. The 6-posting letters A/B is not re-run; the page-body 50-character minimum stays.
   Tests: tests/letter-page.test.mjs.
