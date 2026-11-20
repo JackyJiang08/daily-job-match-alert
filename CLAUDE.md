@@ -758,8 +758,8 @@ disabled; do not expand them unless a task says so.
   --shots <dir>` also writes screenshots (tests/fixtures/demo-output/screenshots/shapes/, gitignored). The test
   skips when playwright-core or Chrome is missing (CI).
 - Content snapshots: tests/fixtures/snapshots/shapes/*.html, captured from e813d85 before the restyle. contentOf()
-  drops <style> bodies, asset hashes, class/style attributes and the frame wrappers (WRAPPERS), blanks timings and
-  the hub-timings rows, then compares exactly. The hub JS asset may differ only by SCRIPT_CHANGES (the editor's
+  drops <style> bodies, asset hashes, class/style attributes and the frame wrappers (WRAPPERS), blanks timings,
+  the hub-timings rows and the platform's backup folder (Status; macOS vs XDG on Linux CI), then compares exactly. The hub JS asset may differ only by SCRIPT_CHANGES (the editor's
   text-frame), checked by re-hashing.
 
 ## Letter rules v2 (2026-11-08, from private/review/cover-letter-review-response.md)

@@ -86,7 +86,8 @@ export function contentOf(html) {
     }
   }
   // The Status page's table of the hub's own page timings records wall-clock times: its rows are left out.
-  return out.join('').replace(/(<table id="hub-timings">)[\s\S]*?<\/table>/, '$1</table>').replace(/\d+(?:\.\d+)? ms\b/g, 'N ms');
+  // The backup folder differs by platform (Application Support on macOS); the snapshots were taken on macOS.
+  return out.join('').replace(/title="ROOT\/[^"]*\/backups"/g, 'title="ROOT/BACKUPS"').replace(/(<table id="hub-timings">)[\s\S]*?<\/table>/, '$1</table>').replace(/\d+(?:\.\d+)? ms\b/g, 'N ms');
 }
 
 // The one script change: the letter editor puts a new paragraph's text area in its frame. With that change
