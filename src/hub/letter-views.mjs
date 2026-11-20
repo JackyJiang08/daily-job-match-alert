@@ -23,15 +23,15 @@ export const LETTER_STYLES = `
 .letter-head .kv{margin:0}
 .letter-controls{min-width:280px}
 .para-row{display:grid;grid-template-columns:28px minmax(0,1fr);gap:var(--space-2);align-items:start;margin:0 0 var(--space-2)}
-.para-row .num{font-size:var(--fs-meta);color:var(--ink-3);padding-top:9px;text-align:right;font-variant-numeric:tabular-nums}
-.para{width:100%;min-height:96px;font:inherit;font-size:var(--fs-body);line-height:var(--lh);color:var(--ink);background:var(--surface);border:1px solid var(--line-2);border-radius:var(--radius-sm);padding:var(--space-2) var(--space-3);resize:vertical;box-sizing:border-box;margin:0}
-.para:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+.para-row .num{font-size:var(--fs-meta);color:var(--ink-3);padding-top:15px;text-align:right;font-variant-numeric:tabular-nums}
+.para{display:block;width:100%;min-height:88px;font:inherit;font-size:var(--fs-body);line-height:var(--lh);color:var(--ink);resize:vertical;box-sizing:border-box;margin:0}
 .issues{margin:var(--space-2) 0 0;padding:0;list-style:none;font-size:var(--fs-meta)}
 .issues li{padding:2px 0;color:var(--warn-ink)}
 .letter-counts{font-size:var(--fs-meta);color:var(--ink-2);margin:0 0 var(--space-3)}
 .letter-foot{font-size:var(--fs-meta);color:var(--ink-3);margin:var(--space-3) 0 0}
 .letter-status{font-size:var(--fs-body);color:var(--ink-2);margin:var(--space-2) 0 0}
 .letter-status.error{color:var(--bad-ink)}
+.letter-status:empty{margin:0}
 details.notes{margin:var(--space-2) 0 0;font-size:var(--fs-meta)}
 details.notes>summary{cursor:pointer;color:var(--ink-2);font-weight:600}
 .two-col{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 var(--space-4)}
@@ -151,7 +151,7 @@ export function coverLetterSettingsSection({ profile, readiness, timeZone }) {
     </fieldset>
     <fieldset class="group" id="company-short-names"><legend>Company Short Names</legend>
       <p class="muted" style="margin:0 0 var(--space-2)">One per line, full name = short name (for example: PricewaterhouseCoopers = PwC). A name listed here is used in the salutation, the file name, and the body after the first mention, ahead of the short name the model picks.</p>
-      <textarea name="companyAliases" class="control-input" rows="5" spellcheck="false" placeholder="Hewlett Packard Enterprise = HPE&#10;The Procter &amp; Gamble Company = P&amp;G">${htmlEscape(aliasText(profile.companyAliases))}</textarea>
+      <div class="text-frame"><textarea name="companyAliases" class="control-input" rows="5" spellcheck="false" placeholder="Hewlett Packard Enterprise = HPE&#10;The Procter &amp; Gamble Company = P&amp;G">${htmlEscape(aliasText(profile.companyAliases))}</textarea></div>
     </fieldset>
     <fieldset class="group"><legend>Playbook</legend>
       <p class="muted" style="margin:0 0 var(--space-2)">Your writing rules and evidence library; Replace swaps the whole file.</p>
@@ -219,7 +219,7 @@ export function lettersPage({ letters, timeZone = 'America/Chicago' }) {
 // ---------------------------------------------------------------------------------------------- panel
 
 function paragraphEditor(paragraphs) {
-  return paragraphs.map((paragraph, index) => `<div class="para-row"><span class="num">${index + 1}</span><textarea class="para" name="paragraph" data-index="${index}">${htmlEscape(paragraph)}</textarea></div>`).join('');
+  return paragraphs.map((paragraph, index) => `<div class="para-row"><span class="num">${index + 1}</span><div class="text-frame"><textarea class="para" name="paragraph" data-index="${index}">${htmlEscape(paragraph)}</textarea></div></div>`).join('');
 }
 
 function countsLine(record) {
@@ -352,7 +352,8 @@ ${letterPlainText.toString()}
       var row = document.createElement('div'); row.className = 'para-row';
       var num = document.createElement('span'); num.className = 'num'; num.textContent = String(index + 1);
       var area = document.createElement('textarea'); area.className = 'para'; area.name = 'paragraph'; area.dataset.index = String(index); area.value = text;
-      row.appendChild(num); row.appendChild(area); box.appendChild(row);
+      var frame = document.createElement('div'); frame.className = 'text-frame'; frame.appendChild(area);
+      row.appendChild(num); row.appendChild(frame); box.appendChild(row);
     });
   }
   function words(list) { return list.join(' ').split(/\\s+/).filter(Boolean).length; }

@@ -122,7 +122,7 @@ export function inlineAssets(html) {
     .replace(/<script src="\/assets\/(hub-[a-f0-9]{16}\.js)"><\/script>/g, (all, name) => `<script>${readAsset(name)?.body.toString('utf8') ?? ''}</script>`);
 }
 
-export const LAZY = /<details class="jd" data-jd-src="([^"]+)"><summary><span>Job Description<\/span><button type="button" class="jd-copy"[^>]*>[\s\S]*?<\/button><\/summary><div class="jd-body"><p>([\s\S]*?)<\/p><\/div><\/details>/g;
+export const LAZY = /<details class="jd" data-jd-src="([^"]+)"><summary><span>Job Description<\/span><button type="button" class="jd-copy"[^>]*>[\s\S]*?<\/button><\/summary><div class="jd-frame"><div class="jd-body"><p>([\s\S]*?)<\/p><\/div><\/div><\/details>/g;
 
 // The page as it was before the change: assets inline, the JD loader taken out of the page script, and
 // every lazy JD replaced by its full markup from the JD route, embedded the way the Desktop page embeds it.

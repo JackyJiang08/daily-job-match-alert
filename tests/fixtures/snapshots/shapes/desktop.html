@@ -1,0 +1,562 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>October 17, 2026 · 4 Jobs</title>
+<style>
+:root{
+  color-scheme: light dark;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* Type scale, three levels: titles (page and card headings), body, and supporting text. */
+  --fs-title: 18px;
+  --fs-body: 14px;
+  --fs-meta: 12px;
+  --fs-page: var(--fs-title);
+  --lh: 1.5;
+  /* One accent, one neutral ramp. */
+  --accent: #0f766e;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(15, 118, 110, 0.10);
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-glass: rgba(255, 255, 255, 0.82);
+  --ink: #1c2430;
+  --ink-2: #4b5563;
+  --ink-3: #5b6472;
+  --line: #e3e7ec;
+  --line-2: #cfd5dd;
+  --ring-track: #e5e9ee;
+  /* Semantic badge tones. */
+  --note-bg: #fbf3d5;
+  --note-ink: #6b5300;
+  --warn-bg: #fdebd3;
+  --warn-ink: #8a4b00;
+  --bad-bg: #fbe3e3;
+  --bad-ink: #8b1d1d;
+  /* Shape and rhythm: every gap, margin and padding is one of the six spacing steps. */
+  --radius: 10px;
+  --radius-sm: 6px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 40px;
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --control-height: 32px;
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5l3.5 3.5 3.5-3.5' fill='none' stroke='%235b6472' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+@media (prefers-color-scheme: dark){:root{
+  --accent: #2dd4bf;
+  --accent-ink: #04211e;
+  --accent-soft: rgba(45, 212, 191, 0.14);
+  --bg: #0f1318;
+  --surface: #171c23;
+  --surface-glass: rgba(23, 28, 35, 0.82);
+  --ink: #e6e9ee;
+  --ink-2: #b4bcc8;
+  --ink-3: #9aa3b1;
+  --line: #252c36;
+  --line-2: #333c48;
+  --ring-track: #2a323d;
+  --note-bg: #3a3412;
+  --note-ink: #e8d57a;
+  --warn-bg: #3a2a12;
+  --warn-ink: #f2c184;
+  --bad-bg: #3d1a1a;
+  --bad-ink: #f3a9a9;
+  --shadow: none;
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5l3.5 3.5 3.5-3.5' fill='none' stroke='%239aa3b1' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:var(--fs-body)/var(--lh) var(--font)}
+a{color:inherit}
+.page{max-width:920px;margin:0 auto;padding:var(--space-5) var(--space-4) var(--space-6)}
+
+/* Buttons: one primary style (filled) and one secondary style (outlined), one size everywhere. "small" is
+   kept as a class for older markup and no longer changes the size. */
+.btn,.apply{display:inline-flex;align-items:center;justify-content:center;gap:var(--space-1);min-height:var(--control-height);padding:0 var(--space-3);border:1px solid var(--accent);border-radius:var(--radius-sm);background:var(--accent);color:var(--accent-ink);font:inherit;font-size:var(--fs-body);font-weight:600;line-height:1.2;text-decoration:none;white-space:nowrap;cursor:pointer}
+.btn:hover,.apply:hover{filter:brightness(1.06)}
+.btn.secondary{background:var(--surface);color:var(--ink);border-color:var(--line-2)}
+.btn.secondary:hover{filter:none;border-color:var(--ink-3)}
+.btn.small{min-height:var(--control-height);padding:0 var(--space-3);font-size:var(--fs-body)}
+.btn.danger{background:var(--bad-bg);color:var(--bad-ink);border-color:transparent}
+.btn[disabled]{opacity:.55;cursor:not-allowed;filter:none}
+.btn:focus-visible,.apply:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
+
+.banner{margin:0 0 var(--space-4);padding:var(--space-3) var(--space-4);border-radius:var(--radius);background:var(--warn-bg);color:var(--warn-ink);font-size:var(--fs-body)}
+.quota-note{margin:0 0 var(--space-3);font-size:var(--fs-body);color:var(--warn-ink);font-weight:600}
+/* The one top row: the date ("November 15, 2026"; ‹ date › in the hub) and the count, then the search, sort, Track and Role Type controls, the Filters
+   popover and the hub's "⋯" menu. It stays at the top while the list scrolls (a rule and a blur once it is
+   stuck); at 1100px and wider it never wraps. */
+.bar-sentinel{height:0}
+.toolbar{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2);margin:0 0 var(--space-4);padding:var(--space-2) 0;background:var(--bg);border-bottom:1px solid transparent}
+.toolbar.stuck{background:var(--surface-glass);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);border-bottom-color:var(--line)}
+.bar-title{display:inline-flex;align-items:baseline;gap:var(--space-2);flex:0 0 auto;margin-right:auto;font-size:var(--fs-title);font-weight:700;letter-spacing:-0.01em;line-height:1.3;white-space:nowrap}
+.bar-title .sep{color:var(--ink-3);font-weight:400}
+.bar-title .count{font-size:var(--fs-body);font-weight:400;color:var(--ink-2);font-variant-numeric:tabular-nums}
+/* One control style for every text input and select, in the report toolbar and in the hub forms. */
+.control-input,.toolbar input:not([type=checkbox]),.toolbar select{font:inherit;font-size:var(--fs-body);line-height:1.3;color:var(--ink);background:var(--surface);border:1px solid var(--line-2);border-radius:var(--radius-sm);padding:var(--space-1) var(--space-2);min-height:var(--control-height);box-sizing:border-box}
+select.control-input,.toolbar select{appearance:none;-webkit-appearance:none;background-image:var(--chevron);background-repeat:no-repeat;background-position:right var(--space-2) center;padding-right:28px;cursor:pointer}
+select.control-input:focus,.control-input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+.toolbar input[type=search]{flex:1 1 120px;min-width:56px;max-width:320px}
+.toolbar select{flex:0 0 auto;max-width:100%}
+.toolbar .control{display:inline-flex;align-items:center;gap:var(--space-2);font-size:var(--fs-meta);color:var(--ink-2);white-space:nowrap}
+.toolbar .score-range input{width:64px;text-align:center;font-variant-numeric:tabular-nums}
+.toolbar .check{display:inline-flex;align-items:center;gap:var(--space-1);font-size:var(--fs-body);color:var(--ink-2);white-space:nowrap;cursor:pointer}
+.toolbar input:focus,.toolbar select:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+/* Popovers: a details element whose summary is a secondary button; the list drops under it, right-aligned. */
+.menu{position:relative;flex:0 0 auto}
+.menu>summary{list-style:none}
+.menu>summary::-webkit-details-marker{display:none}
+.menu>summary.active{border-color:var(--accent);color:var(--accent)}
+.menu .menu-list{position:absolute;right:0;top:calc(100% + var(--space-1));z-index:6;display:flex;flex-direction:column;align-items:stretch;gap:var(--space-2);min-width:240px;padding:var(--space-3);background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 8px 24px rgba(16,24,40,.12)}
+.menu .menu-list .control{justify-content:space-between}
+.menu .menu-list .control>span:first-child{flex:0 0 auto}
+.menu .menu-list .inline,.menu .menu-list form{display:block;width:100%}
+.menu .menu-list .btn{display:flex;width:100%}
+.menu.overflow>summary{min-width:var(--control-height);padding:0 var(--space-2);font-size:var(--fs-title);line-height:1}
+@media (min-width:1100px){.toolbar{flex-wrap:nowrap}}
+@media (min-width:1100px) and (max-width:1279px){.toolbar{gap:6px}.bar-title{gap:6px}}
+
+.jobs{display:flex;flex-direction:column;gap:var(--space-3);margin:0;padding:0;list-style:none}
+.job{padding:var(--space-4);background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
+.job[hidden]{display:none}
+.group-title{margin:var(--space-5) 0 var(--space-3);font-size:var(--fs-title);font-weight:650}
+.group-count{color:var(--ink-2);font-weight:400}
+.group-note{margin:0 0 var(--space-3);font-size:var(--fs-body);color:var(--ink-2)}
+.job-body{min-width:0}
+/* Card head: company · title and the posting line on the left; the track scores and the ring on the right. */
+.job-head{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--space-4);align-items:start}
+.job-title{margin:0;font-size:var(--fs-title);font-weight:650;line-height:1.3;overflow-wrap:anywhere}
+.job-title .company{color:var(--ink)}
+.job-title .dot{color:var(--ink-3);font-weight:400}
+.job-title a{text-decoration:none}
+.job-title a:hover{text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:2px}
+.job-meta{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1) var(--space-2);margin:var(--space-1) 0 0;font-size:var(--fs-body);color:var(--ink-2);overflow-wrap:anywhere}
+.job-meta .sep{color:var(--ink-3)}
+.job-meta .job-check{margin-left:auto;text-decoration:none}
+.job-meta .job-check:hover{text-decoration:underline}
+.job-score{display:flex;align-items:center;gap:var(--space-3)}
+.ring{--score:0;position:relative;flex:0 0 auto;width:60px;height:60px;border-radius:50%;background:conic-gradient(var(--accent) calc(var(--score) * 1%),var(--ring-track) 0);display:grid;place-items:center}
+.ring::before{content:"";position:absolute;inset:6px;border-radius:50%;background:var(--surface)}
+.ring b{position:relative;font-size:var(--fs-title);font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-0.01em}
+/* One line per track, right-aligned, numbers in a fixed-width column; the top score (every one when tied)
+   in the text colour and semibold, the rest in the secondary colour. */
+.scores{display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:var(--fs-meta);line-height:1.4;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.scores .track{display:inline-flex;align-items:baseline;gap:var(--space-1);white-space:nowrap}
+.scores .track b{display:inline-block;min-width:2.2ch;text-align:right;font-weight:inherit}
+.scores .track.top{color:var(--ink);font-weight:600}
+.badges{display:flex;flex-wrap:wrap;gap:var(--space-1) var(--space-2);margin-top:var(--space-2)}
+.badge{display:inline-block;font-size:var(--fs-meta);font-weight:600;line-height:1.5;border-radius:var(--radius-sm);padding:0 var(--space-2);background:var(--note-bg);color:var(--note-ink);white-space:nowrap;max-width:100%}
+.badge-warn{background:var(--warn-bg);color:var(--warn-ink)}
+.badge-bad{background:var(--bad-bg);color:var(--bad-ink)}
+
+/* The action row under the Job Description, always in the same order: Open Posting, Download CoverLetter,
+   Open CoverLetter, Message to Recruiters. */
+.job .actions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2);margin-top:var(--space-3)}
+.facts-label{margin:var(--space-3) 0 var(--space-1);font-size:var(--fs-meta);font-weight:650;color:var(--ink-2)}
+.facts{margin:0;padding:0;list-style:none}
+.facts li{position:relative;padding-left:var(--space-4);line-height:1.5;overflow-wrap:anywhere}
+.facts li::before{content:"";position:absolute;left:var(--space-1);top:.62em;width:5px;height:5px;border-radius:50%;background:var(--accent)}
+.facts.gaps li::before{background:transparent;border:1px solid var(--ink-3);width:5px;height:5px}
+details.more{margin-top:2px}
+details.more>summary{list-style:none;cursor:pointer;font-size:var(--fs-meta);color:var(--accent);padding-left:var(--space-4)}
+details.more>summary::-webkit-details-marker{display:none}
+details.more[open]>summary{display:none}
+details.jd{margin-top:var(--space-3);border-top:1px solid var(--line);padding-top:var(--space-2)}
+details.jd>summary{display:flex;align-items:center;gap:var(--space-2);cursor:pointer;font-size:var(--fs-meta);font-weight:650;color:var(--ink-2)}
+details.jd>summary::before{content:"";width:5px;height:5px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);margin:0 2px 0 1px;transition:transform .12s}
+details.jd[open]>summary::before{transform:rotate(45deg);margin-top:-2px}
+details.jd>summary::-webkit-details-marker{display:none}
+.jd-copy{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:1px solid transparent;border-radius:var(--radius-sm);background:transparent;color:var(--ink-3);cursor:pointer}
+.jd-copy:hover{color:var(--accent);border-color:var(--line-2);background:var(--surface)}
+.jd-copy:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.jd-copy.done{color:var(--accent)}
+details.jd .jd-body{margin:var(--space-2) 0 0;padding:var(--space-3);max-height:420px;overflow:auto;font-size:var(--fs-body);line-height:1.55;color:var(--ink-2);background:var(--bg);border-radius:var(--radius-sm);overflow-wrap:anywhere}
+.jd-body p{margin:0 0 var(--space-2)}
+.jd-body h1,.jd-body h2,.jd-body h3,.jd-body h4{margin:var(--space-3) 0 var(--space-1);font-size:var(--fs-body);font-weight:650;color:var(--ink)}
+.jd-body ul,.jd-body ol{margin:0 0 var(--space-2);padding-left:var(--space-5)}
+.jd-body li{margin:0 0 2px}
+.jd-body strong,.jd-body b{color:var(--ink);font-weight:650}
+.jd-body a{color:var(--accent)}
+.jd-missing{margin:var(--space-3) 0 0;padding-top:var(--space-2);border-top:1px solid var(--line);font-size:var(--fs-meta);color:var(--ink-2)}
+.jd-missing a{color:var(--accent)}
+.jd-body>:first-child{margin-top:0}
+.jd-body>:last-child{margin-bottom:0}
+.job-foot{margin:var(--space-2) 0 0;font-size:var(--fs-meta);color:var(--ink-2);overflow-wrap:anywhere}
+.job-foot a{color:var(--ink-2)}
+.alternates{margin:var(--space-2) 0 0;font-size:var(--fs-meta);color:var(--ink-2);overflow-wrap:anywhere}
+
+.empty{padding:var(--space-6) var(--space-4);text-align:center;background:var(--surface);border:1px dashed var(--line-2);border-radius:var(--radius);color:var(--ink-2)}
+.empty[hidden]{display:none}
+
+details.run{margin-top:var(--space-6);padding-top:var(--space-3);border-top:1px solid var(--line);font-size:var(--fs-meta);color:var(--ink-2)}
+details.run>summary{cursor:pointer;font-weight:600;color:var(--ink-2)}
+.run dl{display:grid;grid-template-columns:max-content 1fr;gap:var(--space-1) var(--space-4);margin:var(--space-3) 0 0}
+.run dt{color:var(--ink-2)}
+.run dd{margin:0;color:var(--ink);overflow-wrap:anywhere}
+.run dd ul{margin:2px 0 0;padding-left:var(--space-4)}
+details.run-list[open]>summary{display:block}
+details.run-list ul{max-height:320px;overflow:auto}
+.run dd li{margin:0}
+.foot{margin-top:var(--space-5);font-size:var(--fs-meta);color:var(--ink-2)}
+
+@media (max-width:640px){
+  .page{padding:var(--space-4) var(--space-3) var(--space-5)}
+  .job{padding:var(--space-3)}
+  .job-head{grid-template-columns:1fr;gap:var(--space-2)}
+  .job-score{flex-direction:row-reverse;justify-content:flex-end}
+  .ring{width:48px;height:48px}.ring::before{inset:5px}.ring b{font-size:var(--fs-body)}
+  .scores{align-items:flex-start}
+  .job .actions{display:grid;grid-template-columns:1fr 1fr}
+  .job .actions .btn,.job .actions .apply{width:100%;white-space:normal;text-align:center;padding:var(--space-1) var(--space-2)}
+  /* The bar wraps: the title on its own line, then two controls per row. */
+  .toolbar{position:static;display:grid;grid-template-columns:1fr 1fr;gap:var(--space-2);padding:var(--space-2) 0}
+  .bar-title,.toolbar input[type=search]{grid-column:1/-1;min-width:0;max-width:none}
+  .toolbar select{width:100%;min-width:0}
+  .menu .menu-list{left:0;right:auto;min-width:min(280px,calc(100vw - 2 * var(--space-3)))}
+  .badge{white-space:normal}
+  .run dl{grid-template-columns:1fr;gap:0}
+  .run dt{margin-top:var(--space-2)}
+}
+@media print{
+  body{background:#fff}
+  .toolbar,.foot{display:none}
+  .job{break-inside:avoid;box-shadow:none}
+}
+</style></head>
+<body><main class="page">
+<div class="bar-sentinel" id="bar-sentinel" aria-hidden="true"></div><form class="toolbar" id="toolbar" autocomplete="off">
+    <div class="bar-title"><span class="bar-date">October 17, 2026</span><span class="sep">·</span><span class="count" id="count">4 Jobs</span></div>
+    <input type="search" id="q" placeholder="Search company or title" aria-label="Search company or title">
+    <select id="sort" class="control" aria-label="Sort by"><option value="score" selected>Best Score</option><option value="company">Company</option><option value="posted">Posted Time</option></select>
+    <select id="track" class="control" aria-label="Track"><option value="">All Tracks</option><option value="data">Data</option><option value="llm">LLM</option></select>
+    <select id="role" class="control" aria-label="Role type"><option value="">All Role Types</option><option value="new_grad">New Grad</option></select>
+    <details class="menu" id="filters-menu"><summary class="btn secondary" id="filters-button">Filters</summary><div class="menu-list">
+      <label class="control"><span>Freshness</span><select id="fresh"><option value="">Any Freshness</option><option value="carried-over">Carried Over</option></select></label>
+      <span class="control score-range"><span>Score</span><input type="number" id="score-min" min="0" max="100" step="1" inputmode="numeric" placeholder="0" aria-label="Minimum Score"><span aria-hidden="true">–</span><input type="number" id="score-max" min="0" max="100" step="1" inputmode="numeric" placeholder="100" aria-label="Maximum Score"></span>
+      <button type="button" class="btn secondary" id="clear-filters" hidden>Clear Filters</button>
+    </div></details>
+  </form>
+
+
+<section class="jobs" id="jobs"><article class="job" data-score="81" data-company="example corp 1" data-posted="1792245600000" data-role="new_grad" data-track="data" data-search="example corp 1 data analyst 1" data-freshness="date-only">
+    <div class="job-body">
+      <div class="job-head">
+        <div class="job-main">
+          <h2 class="job-title"><span class="company">Example Corp 1</span><span class="dot"> · </span><a target="_blank" rel="noopener noreferrer" href="https://jobs.example.com/1">Data Analyst 1</a></h2>
+          <p class="job-meta"><span>Remote - US</span><span class="sep">·</span><span>New Grad</span><span class="sep">·</span><span class="meta" title="Date only: the source reports no time of day">Posted Oct 17</span></p>
+        </div>
+        <div class="job-score"><div class="scores"><span class="track top" data-track="data">Data <b>81</b></span><span class="track" data-track="llm">LLM <b>60</b></span></div><div class="ring" style="--score:81" role="img" aria-label="Best score 81"><b>81</b></div></div>
+      </div>
+      
+      <div class="facts-label">Gaps / Verify</div><ul class="facts gaps"><li>JD skill not found in resume: dbt</li></ul>
+      <details class="jd"><summary><span>Job Description</span><button type="button" class="jd-copy" aria-label="Copy Job Description" title="Copy Job Description"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button></summary><div class="jd-body"><p>About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience. About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience. About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience. About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience. About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience. About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience.</p></div></details>
+      <div class="actions"><a class="apply" target="_blank" rel="noopener noreferrer" href="https://jobs.example.com/1">Open Posting</a></div>
+      <p class="job-foot">Source: Example Board</p>
+    </div>
+  </article>
+<article class="job" data-score="82" data-company="example corp 2" data-posted="1792245600000" data-role="new_grad" data-track="data" data-search="example corp 2 data analyst 2" data-freshness="date-only">
+    <div class="job-body">
+      <div class="job-head">
+        <div class="job-main">
+          <h2 class="job-title"><span class="company">Example Corp 2</span><span class="dot"> · </span><a target="_blank" rel="noopener noreferrer" href="https://jobs.example.com/2">Data Analyst 2</a></h2>
+          <p class="job-meta"><span>Remote - US</span><span class="sep">·</span><span>New Grad</span><span class="sep">·</span><span class="meta" title="Date only: the source reports no time of day">Posted Oct 17</span></p>
+        </div>
+        <div class="job-score"><div class="scores"><span class="track top" data-track="data">Data <b>82</b></span><span class="track" data-track="llm">LLM <b>60</b></span></div><div class="ring" style="--score:82" role="img" aria-label="Best score 82"><b>82</b></div></div>
+      </div>
+      
+      <div class="facts-label">Gaps / Verify</div><ul class="facts gaps"><li>JD skill not found in resume: dbt</li></ul>
+      <details class="jd"><summary><span>Job Description</span><button type="button" class="jd-copy" aria-label="Copy Job Description" title="Copy Job Description"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button></summary><div class="jd-body"><p>Short JD: under three hundred characters, kept whole. &lt;i&gt;tags&lt;/i&gt; &amp; &quot;quotes&quot;.</p></div></details>
+      <div class="actions"><a class="apply" target="_blank" rel="noopener noreferrer" href="https://jobs.example.com/2">Open Posting</a></div>
+      <p class="job-foot">Source: Example Board</p>
+    </div>
+  </article>
+<article class="job" data-score="84" data-company="example corp 4" data-posted="1792245600000" data-role="new_grad" data-track="data" data-search="example corp 4 data analyst 4" data-freshness="date-only">
+    <div class="job-body">
+      <div class="job-head">
+        <div class="job-main">
+          <h2 class="job-title"><span class="company">Example Corp 4</span><span class="dot"> · </span><a target="_blank" rel="noopener noreferrer" href="https://jobs.example.com/4">Data Analyst 4</a></h2>
+          <p class="job-meta"><span>Remote - US</span><span class="sep">·</span><span>New Grad</span><span class="sep">·</span><span class="meta" title="Date only: the source reports no time of day">Posted Oct 17</span></p>
+        </div>
+        <div class="job-score"><div class="scores"><span class="track top" data-track="data">Data <b>84</b></span><span class="track" data-track="llm">LLM <b>60</b></span></div><div class="ring" style="--score:84" role="img" aria-label="Best score 84"><b>84</b></div></div>
+      </div>
+      
+      <div class="facts-label">Gaps / Verify</div><ul class="facts gaps"><li>JD skill not found in resume: dbt</li></ul>
+      <details class="jd"><summary><span>Job Description</span><button type="button" class="jd-copy" aria-label="Copy Job Description" title="Copy Job Description"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button></summary><div class="jd-body"><p>ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé😀 tail after the emoji at index 299</p></div></details>
+      <div class="actions"><a class="apply" target="_blank" rel="noopener noreferrer" href="https://jobs.example.com/4">Open Posting</a></div>
+      <p class="job-foot">Source: Example Board</p>
+    </div>
+  </article></section><h2 class="group-title" id="carried-over">From Yesterday <span class="group-count">(1)</span></h2><section class="jobs carried" id="jobs-carried"><article class="job" data-score="83" data-company="example corp 3" data-posted="1792245600000" data-role="new_grad" data-track="data" data-search="example corp 3 data analyst 3" data-freshness="carried-over">
+    <div class="job-body">
+      <div class="job-head">
+        <div class="job-main">
+          <h2 class="job-title"><span class="company">Example Corp 3</span><span class="dot"> · </span><a target="_blank" rel="noopener noreferrer" href="https://jobs.example.com/3">Data Analyst 3</a></h2>
+          <p class="job-meta"><span>Somewhere</span><span class="sep">·</span><span>New Grad</span><span class="sep">·</span><span class="meta" title="Carried over: deferred by the review budget on an earlier run and reviewed now. Date only: the source reports no time of day">Posted Oct 17 · first seen Oct 15, 9:00 PM</span></p>
+        </div>
+        <div class="job-score"><div class="scores"><span class="track top" data-track="data">Data <b>83</b></span><span class="track" data-track="llm">LLM <b>60</b></span></div><div class="ring" style="--score:83" role="img" aria-label="Best score 83"><b>83</b></div></div>
+      </div>
+      <div class="badges"><span class="badge" data-badge="location-unverified" title="The posting does not state a US location; confirm you can work from the United States before applying">US Location Not Stated</span></div>
+      <div class="facts-label">Gaps / Verify</div><ul class="facts gaps"><li>Location not stated: verify the posting allows work from the United States</li></ul>
+      <details class="jd"><summary><span>Job Description</span><button type="button" class="jd-copy" aria-label="Copy Job Description" title="Copy Job Description"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button></summary><div class="jd-body"><p>About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience. About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience. About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience. About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience. About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience. About the role: You will build &lt;b&gt;analytics&lt;/b&gt; pipelines &amp; dashboards for &quot;Example Corp&quot; teams. Responsibilities include SQL modelling, experiment design, stakeholder updates, and résumé-grade documentation — naïve café data included. Requirements: Python, SQL, statistics; 0-2 years of experience.</p></div></details>
+      <div class="actions"><a class="apply" target="_blank" rel="noopener noreferrer" href="https://jobs.example.com/3">Open Posting</a></div>
+      <p class="job-foot">Source: Example Board</p>
+    </div>
+  </article></section><div class="empty" id="no-results" hidden>No matches for the current filters.</div>
+<details class="run" id="run-details"><summary>Run Details</summary><dl><dt>Report Date</dt><dd>October 17, 2026</dd><dt>Posting Window</dt><dd>Main List: posted within the last 24 hours</dd><dt>Lookback Window</dt><dd>24 hours</dd><dt>Resume Tracks</dt><dd>Data, LLM</dd><dt>Scoring Model</dt><dd>local_only</dd><dt>Postings</dt><dd>6 reviewed · 4 matched</dd><dt>Trigger</dt><dd>scheduled</dd><dt>Updates Today</dt><dd>Daily update #1 · last updated Oct 16, 2026, 8:00 PM</dd><dt>Status</dt><dd>No semantic review ran; scores are local triage only<ul><li>1 match(es) do not state a US location; confirm you can work from the United States before applying</li><li>No pipeline warnings</li></ul></dd></dl></details>
+<footer class="foot">Generated locally. Scores are triage aids, not facts. Verify eligibility, posting date, and JD before applying. No applications were submitted.</footer>
+</main>
+<script>
+(function () {
+  function readFilters(search) {
+  var params = new URLSearchParams(search || '');
+  var score = function (value) {
+    var text = String(value == null ? '' : value).trim();
+    if (!/^\d{1,3}$/.test(text)) return '';
+    return String(Math.min(100, Number(text)));
+  };
+  return {
+    q: String(params.get('q') || '').slice(0, 200),
+    sort: ['score', 'company', 'posted'].indexOf(params.get('sort')) >= 0 ? params.get('sort') : 'score',
+    resume: String(params.get('resume') || ''),
+    role: String(params.get('role') || ''),
+    freshness: String(params.get('freshness') || ''),
+    min: score(params.get('min')),
+    max: score(params.get('max')),
+    hideContacted: params.get('hideContacted') === '1',
+  };
+}
+  function writeFilters(state, search) {
+  var params = new URLSearchParams(search || '');
+  ['q', 'sort', 'resume', 'role', 'freshness', 'min', 'max', 'hideContacted', 'hideApplied'].forEach(function (key) { params.delete(key); });
+  if (state.q && String(state.q).trim()) params.set('q', String(state.q).trim());
+  if (state.sort && state.sort !== 'score') params.set('sort', state.sort);
+  if (state.resume) params.set('resume', state.resume);
+  if (state.role) params.set('role', state.role);
+  if (state.freshness) params.set('freshness', state.freshness);
+  if (state.min !== '' && state.min != null) params.set('min', String(state.min));
+  if (state.max !== '' && state.max != null) params.set('max', String(state.max));
+  if (state.hideContacted) params.set('hideContacted', '1');
+  var text = params.toString();
+  return text ? '?' + text : '';
+}
+  function cardPasses(card, state) {
+  var term = String(state.q || '').trim().toLowerCase();
+  var score = parseFloat(card.score);
+  if (state.role && card.role !== state.role) return false;
+  if (state.resume && card.track !== state.resume) return false;
+  if (state.freshness && card.freshness !== state.freshness) return false;
+  if (state.min !== '' && state.min != null && !(score >= Number(state.min))) return false;
+  if (state.max !== '' && state.max != null && !(score <= Number(state.max))) return false;
+  if (state.hideContacted && card.contacted === '1') return false;
+  if (term && String(card.search || '').indexOf(term) < 0) return false;
+  return true;
+}
+  function filtersActive(state) {
+  return Boolean(String(state.q || '').trim() || state.resume || state.role || state.freshness || state.min !== '' || state.max !== '' || state.hideContacted);
+}
+  function descriptionPlainText(html) {
+  var text = String(html || '')
+    .replace(/\r?\n/g, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '• ')
+    .replace(/<\/li>/gi, '\n')
+    .replace(/<\/(?:ul|ol)>/gi, '\n')
+    .replace(/<(?:ul|ol)[^>]*>/gi, '')
+    .replace(/<\/(?:p|h[1-6]|div)>/gi, '\n\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&(#?\w+);/g, function (all, name) {
+      var table = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', middot: '·', hellip: '…', rarr: '→', mdash: '—', ndash: '–' };
+      if (table[name] != null) return table[name];
+      if (name.charAt(0) === '#') { var code = name.charAt(1) === 'x' || name.charAt(1) === 'X' ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10); return isNaN(code) ? all : String.fromCodePoint(code); }
+      return all;
+    });
+  return text
+    .split('\n').map(function (line) { return line.replace(/[ \t ]+/g, ' ').trim(); }).join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/(\n• [^\n]*)\n\n(?=• )/g, '$1\n')
+    .trim();
+}
+  var COPY_DONE = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M3 8.5l3.2 3L13 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  var toolbar = document.getElementById('toolbar');
+  // The bar is stuck once the sentinel above it has scrolled out: a rule and a blur then set it off the list.
+  var sentinel = document.getElementById('bar-sentinel');
+  if (toolbar && sentinel && typeof IntersectionObserver === 'function') {
+    new IntersectionObserver(function (entries) { toolbar.classList.toggle('stuck', entries.some(function (entry) { return !entry.isIntersecting; })); }, { threshold: [0, 1] }).observe(sentinel);
+  }
+  // A popover closes on a click elsewhere or Escape.
+  document.addEventListener('click', function (event) {
+    document.querySelectorAll('details.menu[open]').forEach(function (menu) { if (!menu.contains(event.target)) menu.open = false; });
+  });
+  document.addEventListener('keydown', function (event) { if (event.key === 'Escape') document.querySelectorAll('details.menu[open]').forEach(function (menu) { menu.open = false; }); });
+  // Copy Job Description: the whole JD as markup (text/html) and as plain text (bullets, blank lines between
+  // blocks); a long JD the hub has not loaded yet is fetched first. The click never toggles the fold.
+  function writeClipboard(html, text) {
+    if (navigator.clipboard && window.ClipboardItem && navigator.clipboard.write) {
+      try {
+        return navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }), 'text/plain': new Blob([text], { type: 'text/plain' }) })]);
+      } catch (e) {}
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text);
+    return new Promise(function (resolve, reject) {
+      var area = document.createElement('textarea'); area.value = text; area.setAttribute('readonly', ''); area.style.position = 'fixed'; area.style.opacity = '0';
+      document.body.appendChild(area); area.select();
+      try { if (document.execCommand('copy')) resolve(); else reject(new Error('copy refused')); } catch (e) { reject(e); }
+      document.body.removeChild(area);
+    });
+  }
+  function descriptionMarkup(details) {
+    var body = details.querySelector('.jd-body');
+    var src = details.getAttribute('data-jd-src');
+    if (!src) return Promise.resolve(body ? body.innerHTML : '');
+    return fetch(src, { headers: { accept: 'text/html' } }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); }).then(function (html) {
+      if (body) body.innerHTML = html;
+      details.removeAttribute('data-jd-src');
+      return html;
+    });
+  }
+  document.addEventListener('click', function (event) {
+    var button = event.target.closest && event.target.closest('.jd-copy');
+    if (!button) return;
+    event.preventDefault();
+    event.stopPropagation();
+    var details = button.closest('details.jd');
+    if (!details || button.disabled) return;
+    button.disabled = true;
+    var icon = button.innerHTML;
+    descriptionMarkup(details).then(function (html) { return writeClipboard(html, descriptionPlainText(html)); }).then(function () {
+      button.innerHTML = COPY_DONE; button.classList.add('done');
+      setTimeout(function () { button.innerHTML = icon; button.classList.remove('done'); button.disabled = false; }, 1500);
+    }).catch(function () { button.disabled = false; button.title = 'Could not copy; open the description and copy it by hand'; });
+  }, true);
+  // The main list and the other groups sort and filter separately; the count covers all of them.
+  var lists = Array.prototype.slice.call(document.querySelectorAll('section.jobs'));
+  if (!toolbar) return;
+  var cards = [];
+  lists.forEach(function (list) { cards = cards.concat(Array.prototype.slice.call(list.querySelectorAll('.job'))); });
+  var controls = {
+    q: document.getElementById('q'), sort: document.getElementById('sort'), resume: document.getElementById('track'),
+    role: document.getElementById('role'), freshness: document.getElementById('fresh'), min: document.getElementById('score-min'),
+    max: document.getElementById('score-max'), hideContacted: document.getElementById('hide-contacted')
+  };
+  var count = document.getElementById('count');
+  var none = document.getElementById('no-results');
+  var clear = document.getElementById('clear-filters');
+  var filtersButton = document.getElementById('filters-button');
+  function num(card, key) { var value = parseFloat(card.dataset[key]); return isNaN(value) ? -Infinity : value; }
+  function byScore(a, b) { return num(b, 'score') - num(a, 'score'); }
+  var sorters = {
+    score: byScore,
+    company: function (a, b) { return (a.dataset.company || '').localeCompare(b.dataset.company || '') || byScore(a, b); },
+    posted: function (a, b) { return num(b, 'posted') - num(a, 'posted') || byScore(a, b); }
+  };
+  function state() {
+    var value = function (control) { return control ? String(control.value || '') : ''; };
+    return {
+      q: value(controls.q), sort: value(controls.sort) || 'score', resume: value(controls.resume), role: value(controls.role),
+      freshness: value(controls.freshness), min: value(controls.min).trim(), max: value(controls.max).trim(),
+      hideContacted: Boolean(controls.hideContacted && controls.hideContacted.checked)
+    };
+  }
+  function restore(saved) {
+    Object.keys(controls).forEach(function (key) {
+      var control = controls[key];
+      if (!control) return;
+      if (control.type === 'checkbox') { control.checked = Boolean(saved[key]); return; }
+      // A value this date does not offer (another day's role type or track) stays selected, so the filter
+      // survives a date change; the list then says no posting matches.
+      if (control.tagName === 'SELECT' && saved[key] && !Array.prototype.some.call(control.options, function (option) { return option.value === saved[key]; })) {
+        var extra = document.createElement('option');
+        extra.value = saved[key];
+        extra.textContent = String(saved[key]).replace(/[_-]+/g, ' ').replace(/[a-z]/g, function (letter) { return letter.toUpperCase(); });
+        extra.setAttribute('data-absent', '1');
+        control.appendChild(extra);
+      }
+      control.value = saved[key] == null ? '' : saved[key];
+    });
+  }
+  function remember(current) {
+    try {
+      var query = writeFilters(current, location.search);
+      if (query !== location.search) history.replaceState(history.state, '', location.pathname + query + location.hash);
+    } catch (e) {}
+  }
+  function label(shown) { return shown === cards.length ? cards.length + (cards.length === 1 ? ' Job' : ' Jobs') : shown + ' of ' + cards.length + ' Jobs'; }
+  function apply() {
+    var current = state();
+    var shown = 0;
+    cards.slice().sort(sorters[current.sort] || byScore).forEach(function (card) {
+      var ok = cardPasses(card.dataset, current);
+      card.hidden = !ok;
+      if (ok) shown += 1;
+      card.parentNode.appendChild(card);
+    });
+    if (count) count.textContent = label(shown);
+    if (none) none.hidden = shown > 0;
+    var active = filtersActive(current);
+    if (clear) clear.hidden = !active;
+    markFilters(current);
+    remember(current);
+    document.dispatchEvent(new CustomEvent('report-filters', { detail: { query: writeFilters(current, '') } }));
+  }
+  // The Filters button shows when one of its own controls is set (search and sort stay in the row; Track and
+  // Role Type count only while they are folded into it).
+  function markFilters(current) {
+    if (!filtersButton) return;
+    var folded = ' ' + (toolbar.getAttribute('data-folded') || '') + ' ';
+    filtersButton.classList.toggle('active', Boolean(current.freshness || current.min !== '' || current.max !== '' || current.hideContacted
+      || (folded.indexOf(' resume ') >= 0 && current.resume) || (folded.indexOf(' role ') >= 0 && current.role)));
+  }
+  // At 1100px and wider the row never wraps: when it does not fit, Role Type and then Track move to the top of
+  // the Filters popover (the date is never cut), and back into the row once there is room again.
+  var filtersMenu = document.getElementById('filters-menu');
+  var filtersList = filtersMenu && filtersMenu.querySelector('.menu-list');
+  var folds = [['resume', 'Track'], ['role', 'Role Type']].map(function (pair) {
+    var wrap = document.createElement('label');
+    wrap.className = 'control folded';
+    wrap.hidden = true;
+    var name = document.createElement('span');
+    name.textContent = pair[1];
+    wrap.appendChild(name);
+    return { key: pair[0], control: controls[pair[0]], wrap: wrap };
+  }).filter(function (fold) { return fold.control; });
+  if (filtersList) folds.slice().reverse().forEach(function (fold) { filtersList.insertBefore(fold.wrap, filtersList.firstChild); });
+  function fit() {
+    if (!filtersMenu || !filtersList || !folds.length) return;
+    folds.forEach(function (fold) { toolbar.insertBefore(fold.control, filtersMenu); fold.wrap.hidden = true; });
+    toolbar.removeAttribute('data-folded');
+    var folded = [];
+    if (getComputedStyle(toolbar).flexWrap === 'nowrap') {
+      for (var i = folds.length - 1; i >= 0 && toolbar.scrollWidth > toolbar.clientWidth + 1; i -= 1) {
+        folds[i].wrap.appendChild(folds[i].control);
+        folds[i].wrap.hidden = false;
+        folded.push(folds[i].key);
+      }
+    }
+    if (folded.length) toolbar.setAttribute('data-folded', folded.join(' '));
+    markFilters(state());
+  }
+  var fitQueued = false;
+  window.addEventListener('resize', function () {
+    if (fitQueued) return;
+    fitQueued = true;
+    requestAnimationFrame(function () { fitQueued = false; fit(); });
+  });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+  fit();
+  restore(readFilters(location.search));
+  Object.keys(controls).forEach(function (key) {
+    var control = controls[key];
+    if (!control) return;
+    control.addEventListener('input', apply);
+    control.addEventListener('change', apply);
+  });
+  if (clear) clear.addEventListener('click', function () { restore(readFilters('')); apply(); });
+  // A card's contacted mark changed in place (the hub's Message to Recruiters drawer).
+  document.addEventListener('report-cards-changed', apply);
+  toolbar.addEventListener('submit', function (event) { event.preventDefault(); });
+  apply();
+})();
+</script>
+</body></html>

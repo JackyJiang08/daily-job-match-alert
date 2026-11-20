@@ -370,8 +370,8 @@ test('the ellipsis rule by source: a long ATS text ending in … is complete and
   assert.equal(job.descriptionComplete, true);
   const card = fixtureJob(1, { description: job.description, descriptionHtml: job.descriptionHtml, descriptionComplete: job.descriptionComplete, descriptionSource: job.descriptionSource, url });
   const rendered = buildHtml([card], fixturePayload('2026-11-15', [card]).meta);
-  assert.match(rendered, /<details class="jd"><summary><span>Job Description<\/span><button type="button" class="jd-copy"[^>]*>[\s\S]*?<\/button><\/summary><div class="jd-body"><p>We analyze product data/, 'the full JD is on the card');
-  assert.ok(rendered.includes('rolling basis…</p></div></details>'), 'whole, ellipsis included');
+  assert.match(rendered, /<details class="jd"><summary><span>Job Description<\/span><button type="button" class="jd-copy"[^>]*>[\s\S]*?<\/button><\/summary><div class="jd-frame"><div class="jd-body"><p>We analyze product data/, 'the full JD is on the card');
+  assert.ok(rendered.includes('rolling basis…</p></div></div></details>'), 'whole, ellipsis included');
   assert.doesNotMatch(rendered, new RegExp(INCOMPLETE_DESCRIPTION_LABEL));
 
   // A 300-character JSON-LD description cut with "..." on a page with no body: still incomplete.
@@ -432,8 +432,8 @@ test('a card with an incomplete JD shows one line with the posting link, no frag
   assert.match(html, new RegExp(`<p class="jd-missing">${INCOMPLETE_DESCRIPTION_LABEL} · <a target="_blank" rel="noopener noreferrer" href="https://www\\.example\\.com/en/jobs/10601943">Open Posting</a></p>`));
   assert.doesNotMatch(html, /Explore corporate jobs/, 'the fragment is not shown');
   assert.equal((html.split('<script>')[0].match(/…/g) || []).length, 1, 'the only ellipsis left on the page is the legacy card\'s, rendered as before');
-  assert.match(html, /<details class="jd"><summary><span>Job Description<\/span><button type="button" class="jd-copy"[^>]*>[\s\S]*?<\/button><\/summary><div class="jd-body"><p>A complete JD\.<\/p><p>Second paragraph\.<\/p><\/div><\/details>/);
-  assert.match(html, /<details class="jd"><summary><span>Job Description<\/span><button type="button" class="jd-copy"[^>]*>[\s\S]*?<\/button><\/summary><div class="jd-body"><p>An older payload without the flag…<\/p><\/div><\/details>/);
+  assert.match(html, /<details class="jd"><summary><span>Job Description<\/span><button type="button" class="jd-copy"[^>]*>[\s\S]*?<\/button><\/summary><div class="jd-frame"><div class="jd-body"><p>A complete JD\.<\/p><p>Second paragraph\.<\/p><\/div><\/div><\/details>/);
+  assert.match(html, /<details class="jd"><summary><span>Job Description<\/span><button type="button" class="jd-copy"[^>]*>[\s\S]*?<\/button><\/summary><div class="jd-frame"><div class="jd-body"><p>An older payload without the flag…<\/p><\/div><\/div><\/details>/);
   assert.equal((html.match(/<details class="jd">/g) || []).length, 2, 'two folded JDs, none for the incomplete card');
   assert.match(html, /Incomplete Job Descriptions<\/dt>[\s\S]*?1 posting\(s\): their cards link to the posting page[\s\S]*?example\.com: 1/);
   // The view: no lazy preview for an incomplete card even in the hub, which asks for one.
@@ -472,7 +472,7 @@ test('the only display-side cut is the hub preview: the Desktop report embeds a 
   assert.ok(text.length > 39_000 && text.length < 50_000);
   const job = fixtureJob(7, { description: text, descriptionComplete: true, descriptionSource: 'page_body', url: 'https://jobs.example.com/7' });
   const html = buildHtml([job], fixturePayload('2026-11-14', [job]).meta);
-  assert.ok(html.includes(`${'Paragraph of the posting. '.repeat(1500)}END</p></div></details>`), 'inline and uncut');
+  assert.ok(html.includes(`${'Paragraph of the posting. '.repeat(1500)}END</p></div></div></details>`), 'inline and uncut');
   const root = await prepareReportProject();
   await writePayload(root, fixturePayload('2026-11-14', [job]));
   const hub = await startReportHub(root);

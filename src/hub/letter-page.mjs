@@ -10,7 +10,7 @@
 import { classifyEditorNotes } from '../cover-letter/notes.mjs';
 import { placeNotes, splitSentences } from '../cover-letter/note-marks.mjs';
 import { LETTER_CLOSING, letterPlainText, salutationFor } from '../cover-letter/plain-text.mjs';
-import { REPORT_TOKENS, REPORT_TOKENS_DARK } from '../report-theme.mjs';
+import { REPORT_TOKENS, REPORT_TOKENS_DARK, SQUIRCLE_STYLES } from '../report-theme.mjs';
 import { htmlEscape } from '../utils.mjs';
 
 // The parts of a saved letter.md (compose.mjs assembleLetter markdown), or null when it is not in that shape.
@@ -85,13 +85,14 @@ ${view.paragraphs.map((paragraph, index) => paragraphHtml(paragraph, index, mark
 export const LETTER_PAGE_STYLES = `
 :root{${REPORT_TOKENS}}
 @media (prefers-color-scheme:dark){:root{${REPORT_TOKENS_DARK}}}
+${SQUIRCLE_STYLES}
 *{box-sizing:border-box}
 html,body{margin:0}
 body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:var(--fs-body);line-height:var(--lh)}
 main{max-width:8.5in;margin:0 auto;padding:var(--space-5) var(--space-4) var(--space-6)}
 .top{display:flex;flex-direction:column;align-items:flex-end;gap:var(--space-1);margin:0 0 var(--space-3)}
 .buttons{display:flex;gap:var(--space-2)}
-.btn{display:inline-flex;align-items:center;justify-content:center;height:var(--control-height);padding:0 var(--space-4);border-radius:var(--radius-sm);border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);font:inherit;font-weight:600;cursor:pointer;min-width:96px}
+.btn{display:inline-flex;align-items:center;justify-content:center;height:var(--control-height);padding:0 var(--space-4);border-radius:var(--r-sm);border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);font:inherit;font-weight:600;cursor:pointer;min-width:96px}
 .btn.secondary{background:var(--surface);color:var(--accent)}
 .btn:disabled{opacity:.6;cursor:default}
 .error{margin:0;color:var(--bad-ink);font-size:var(--fs-meta);text-align:right;max-width:60ch}
@@ -103,7 +104,7 @@ main{max-width:8.5in;margin:0 auto;padding:var(--space-5) var(--space-4) var(--s
 .flags-top:hover .more{display:none}
 .flags-top:hover .rest{display:block}
 .flags-top:hover .rest span{display:block}
-.sheet{background:#fff;color:#000;box-shadow:0 1px 3px rgba(16,24,40,.12);border:1px solid var(--line);padding:1in;font-family:"Times New Roman",Times,serif;font-size:11pt;line-height:1.15}
+.sheet{background:#fff;color:#000;box-shadow:var(--shadow-pop);border:1px solid var(--line);border-radius:var(--r-xl);padding:1in;font-family:"Times New Roman",Times,serif;font-size:11pt;line-height:1.15}
 .sheet p{margin:0 0 7pt}
 .sheet header{text-align:center;margin-bottom:8pt}
 .sheet header p{text-align:center;margin:0}
@@ -112,7 +113,7 @@ main{max-width:8.5in;margin:0 auto;padding:var(--space-5) var(--space-4) var(--s
 .sheet .signature{margin:0}
 .flag{text-decoration:underline;text-decoration-color:rgba(214,140,0,.55);text-decoration-thickness:2px;text-underline-offset:3px;cursor:help}
 @media (max-width:760px){main{padding:var(--space-3) var(--space-4)}.sheet{padding:var(--space-5)}}
-@media print{.top,.flags-top{display:none}body{background:#fff}.sheet{box-shadow:none;border:0;padding:0}.flag{text-decoration:none}}
+@media print{.top,.flags-top{display:none}body{background:#fff}.sheet{box-shadow:none;border:0;border-radius:0;padding:0}.flag{text-decoration:none}}
 `;
 
 export const LETTER_PAGE_SCRIPT = `

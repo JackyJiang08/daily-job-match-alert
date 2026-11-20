@@ -79,7 +79,7 @@ test('plain text and older payloads show as paragraphs at their own line breaks;
   const meta = fixturePayload('2026-11-08', []).meta;
   const html = buildHtml([fixtureJob(1, { descriptionHtml: MALICIOUS }), fixtureJob(2, { url: 'https://jobs.example.com/2', description: 'Line one.\n\nLine two.' })], meta);
   const summary = '<summary><span>Job Description</span><button type="button" class="jd-copy" aria-label="Copy Job Description" title="Copy Job Description">';
-  const body = inner => new RegExp(`<details class="jd">${summary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}<svg [^>]*>[\\s\\S]*?</svg></button></summary><div class="jd-body">${inner.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}</div></details>`);
+  const body = inner => new RegExp(`<details class="jd">${summary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}<svg [^>]*>[\\s\\S]*?</svg></button></summary><div class="jd-frame"><div class="jd-body">${inner.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}</div></div></details>`);
   assert.match(html, body(CLEAN), 'folded by default, markup inside, the copy icon in the summary');
   assert.match(html, body('<p>Line one.</p><p>Line two.</p>'));
   assert.doesNotMatch(html, /steal\(\)|evil\.example|Why It Matches|facts reasons/);
@@ -103,7 +103,7 @@ test('the hub: no Why It Matches, the lazy JD loads the cleaned markup, Open Cov
   try {
     const page = (await hub.request('/reports/2026-10-17')).text;
     assert.doesNotMatch(page, /Why It Matches|class="facts reasons"/);
-    const src = /<details class="jd" data-jd-src="([^"]+)"><summary><span>Job Description<\/span><button type="button" class="jd-copy"[^>]*>[\s\S]*?<\/button><\/summary><div class="jd-body"><p>/.exec(page)?.[1];
+    const src = /<details class="jd" data-jd-src="([^"]+)"><summary><span>Job Description<\/span><button type="button" class="jd-copy"[^>]*>[\s\S]*?<\/button><\/summary><div class="jd-frame"><div class="jd-body"><p>/.exec(page)?.[1];
     assert.ok(src, 'a long JD loads on demand');
     const jd = await hub.request(src);
     assert.equal(jd.headers['content-type'], 'text/html; charset=utf-8');

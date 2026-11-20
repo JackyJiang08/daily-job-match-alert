@@ -1,0 +1,31 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Resumes — Daily Job Match Alert Hub</title>
+<link rel="stylesheet" href="/assets/hub-2d8407fa52b4ac10.css"></head>
+<body><div class="hub"><nav class="hub-nav"><p class="brand">Job Match Hub</p><a href="/reports">Reports</a><a href="/resumes" class="active">Resumes</a><a href="/letters">Letters</a><a href="/status">Status</a><a href="/settings">Settings</a><div class="mini"><b>Last Run</b><span class="ok">✓</span> Oct 16, 8:00 PM<b>Next Run</b><span id="next-run" data-at="2026-10-17T23:00:00.000Z" data-overdue-suffix="">Oct 17, 6:00 PM · <span class="rel">in 8h</span></span><b>Models</b><span class="model" data-model="review" title="Review: Local Only">Review · Local Only</span><span class="model" data-model="prescreen" title="Prescreen: Local Only">Prescreen · Local Only</span><span class="model" data-model="coverLetter" title="CoverLetter: Local Only">CoverLetter · Local Only</span></div></nav>
+<main class="hub-main"><div class="hub-content"><h1 class="hub-title">Resumes</h1>
+  <p class="hub-sub">One PDF per resume track; upload a new version here and tonight's run scores against it. Files stay on this Mac.</p>
+  <article class="card" data-track="data">
+    <h2>Data <span class="muted">(data)</span></h2>
+    <div class="badges"><span class="badge badge-good" data-badge="enabled">Enabled</span><span class="badge badge-bad" data-badge="no-pdf">No PDF Configured</span></div>
+    <dl class="kv"><dt>PDF</dt><dd>—</dd><dt>Profile</dt><dd><span title="ROOT/data-resume.md">Profile synced · 770 characters</span></dd></dl>
+    
+    <form method="post" action="/resumes/upload" enctype="multipart/form-data" class="row">
+      <input type="hidden" name="trackId" value="data">
+      <label class="file"><input type="file" name="file" accept=".pdf,application/pdf" required><span class="btn secondary">Choose PDF…</span><span class="file-name">No file chosen</span></label>
+      <button class="btn" type="submit">Upload Replacement PDF</button>
+      <span style="flex-basis:100%"></span>
+    </form>
+    <form method="post" action="/resumes/toggle" class="row">
+      <input type="hidden" name="trackId" value="data">
+      <input type="hidden" name="enabled" value="false">
+      <button class="btn danger" type="submit">Disable Track</button>
+    </form>
+  </article><article class="card"><h2>Add Track</h2>
+    <form method="post" action="/resumes/add" enctype="multipart/form-data">
+      <label class="field"><span>ID (letters, digits, _ or -)</span><input type="text" name="trackId" class="control-input" pattern="[A-Za-z][A-Za-z0-9_-]{0,31}" required></label>
+      <label class="field"><span>Label Shown in Reports</span><input type="text" name="label" class="control-input" required></label>
+      <div class="field"><span>PDF</span><label class="file"><input type="file" name="file" accept=".pdf,application/pdf" required><span class="btn secondary">Choose PDF…</span><span class="file-name">No file chosen</span></label></div>
+      <button class="btn" type="submit">Add Track</button>
+    </form></article></div></main></div>
+<script src="/assets/hub-f5444345215603bc.js"></script>
+</body></html>

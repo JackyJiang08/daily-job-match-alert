@@ -594,7 +594,7 @@ test('generate → edit → save renders a PDF, records the letter, marks the ca
     assert.match(reopened, /<details class="notes" id="editor-notes" open hidden><summary>Check Before Sending<\/summary><ul class="issues" id="editor-notes-list"><\/ul><p class="row">[\s\S]*?<\/p><\/details>/, 'a rule fix the editor applied needs no check');
     assert.match(reopened, /<ul class="letter-foot foot-notes" id="letter-info-notes"><li>Paragraph 1 lacks the GPA<\/li><\/ul>/, 'it is an info note in the footer');
     assert.match(reopened, /<p class="letter-foot" id="letter-foot">Samples used: sample\.txt · Engine: claude · claude-fable-5 · PDF via pdfkit<\/p>/);
-    assert.match(reopened, /<p class="letter-counts" id="letter-counts">\d+ words · 5 paragraphs · 1 page<\/p>\s*<p class="muted" id="letter-empty" hidden>[^<]*<\/p>\s*<div id="paragraphs"><div class="para-row"><span class="num">1<\/span><textarea class="para" name="paragraph" data-index="0">/);
+    assert.match(reopened, /<p class="letter-counts" id="letter-counts">\d+ words · 5 paragraphs · 1 page<\/p>\s*<p class="muted" id="letter-empty" hidden>[^<]*<\/p>\s*<div id="paragraphs"><div class="para-row"><span class="num">1<\/span><div class="text-frame"><textarea class="para" name="paragraph" data-index="0">/);
     assert.match(reopened, /<span>Resume Track<\/span><select id="letter-track" class="control-input">/);
     assert.match(reopened, /<span>Company Short Name<\/span>/);
     assert.match(reopened, /id="generate-button" type="button">Regenerate<\/button>/);

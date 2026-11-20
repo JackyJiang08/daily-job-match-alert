@@ -1,0 +1,62 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Settings — Daily Job Match Alert Hub</title>
+<link rel="stylesheet" href="/assets/hub-2d8407fa52b4ac10.css"></head>
+<body><div class="hub"><nav class="hub-nav"><p class="brand">Job Match Hub</p><a href="/reports">Reports</a><a href="/resumes">Resumes</a><a href="/letters">Letters</a><a href="/status">Status</a><a href="/settings" class="active">Settings</a><div class="mini"><b>Last Run</b><span class="ok">✓</span> Oct 16, 8:00 PM<b>Next Run</b><span id="next-run" data-at="2026-10-17T23:00:00.000Z" data-overdue-suffix="">Oct 17, 6:00 PM · <span class="rel">in 8h</span></span><b>Models</b><span class="model" data-model="review" title="Review: Local Only">Review · Local Only</span><span class="model" data-model="prescreen" title="Prescreen: Local Only">Prescreen · Local Only</span><span class="model" data-model="coverLetter" title="CoverLetter: Local Only">CoverLetter · Local Only</span></div></nav>
+<main class="hub-main"><div class="hub-content"><h1 class="hub-title">Settings</h1><nav class="tabs" aria-label="Settings sections"><a href="/settings?tab=models">Subscriptions &amp; Models</a><a href="/settings?tab=pipeline">Pipeline</a><a href="/settings?tab=letters" aria-current="page" class="active">Cover Letters</a></nav><article class="card" id="letter-rules"><h2>Letter Rules</h2>
+    <form method="post" action="/settings/letter-rules">
+      <label class="field"><span>Rules Version (v2: availability, candid paragraph for core gaps, number and scenario checks, no B5 fallback)</span><select name="rulesVersion" class="control-input"><option value="v1" selected>v1 (Before November 8, 2026)</option><option value="v2">v2</option></select></label>
+      <label class="field"><span>Opening Style</span><select name="openingStyle" class="control-input"><option value="limit-writing-to" selected>Limit &quot;I am writing to&quot; (at most 30 percent of the last 7 days)</option><option value="ban-writing-to">Ban &quot;I am writing to&quot;</option></select></label>
+      <label class="field"><span>Available Full Time From (Month and Year)</span><input type="text" name="fullTimeFrom" class="control-input" value="June 2027" placeholder="June 2027" required></label>
+      <div class="field"><label class="check"><input type="checkbox" name="springTerm"> A Spring Term Is Possible</label><label class="check"><input type="checkbox" name="mastersInternship" checked> Mention the Master's Plan in Internship Letters</label><label class="check"><input type="checkbox" name="mastersNewGrad"> Mention the Master's Plan in New Grad Letters</label></div>
+      <button class="btn" type="submit">Save</button>
+      <p class="form-foot">Without a spring term, no letter names a term or start date before the full-time date, and v2 skips the automatic letter for a posting whose term starts earlier (its card shows Term Conflict; you can still generate one).</p>
+    </form></article><article class="card" id="auto-letters"><h2>Automatic Letters</h2>
+    <form method="post" action="/settings/letters-auto" class="auto-letters-form">
+      <div class="field"><label class="check"><input type="checkbox" name="autoGenerate" checked> Write Cover Letters for New High Matches After Each Run</label></div>
+      <label class="field"><span>Letters Per Run (0 = no limit; best scores first; postings with a letter or an uncertain company are skipped)</span><input type="number" name="maxPerRun" class="control-input" min="0" max="500" step="1" value="0" required></label>
+      <button class="btn" type="submit">Save</button>
+      <p class="form-foot">Uses the Cover letter draft and editor assignments under Subscriptions &amp; Models. The report is written first; letters follow.</p>
+    </form></article><article class="card" id="reach-out"><h2>Message to Recruiters</h2>
+    <form method="post" action="/settings/outreach">
+      <label class="field"><span>Connection Note Limit (characters; LinkedIn allows 200 on a free account, 300 on Premium)</span><input type="number" name="connectionNoteLimit" class="control-input" min="100" max="300" step="1" value="200"></label>
+      <div class="field"><label class="check"><input type="checkbox" name="peopleSearch" checked> People Search</label><span class="muted">Opening a panel finds recruiters, team leads and alumni through the search API in private/search.json: up to three searches per company, kept for 30 days. Never in the nightly run.</span></div>
+      <label class="field"><span>People Search Monthly Cap</span><input type="number" name="peopleSearchCap" class="control-input" min="0" max="10000" step="1" value="300"></label>
+      <p class="muted" id="people-search-usage">Used This Month: 0 / 300 searches.</p>
+      <button class="btn" type="submit">Save</button>
+      <p class="form-foot">The note and the follow-up message are written with each cover letter; a posting without a letter can get them from its Message to Recruiters panel.</p>
+    </form></article><article class="card" id="cover-letters"><h2>Cover Letters</h2>
+  <p class="muted">Stored privately on this Mac and never shared. <span class="badge badge-warn" data-letter-ready="no">Missing: playbook, name, contact</span></p>
+  <form method="post" action="/settings/cover-letter" enctype="multipart/form-data">
+    <fieldset class="group"><legend>Contact Block</legend>
+      <div class="two-col">
+        <label class="field"><span>Name</span><input type="text" name="name" class="control-input" value="" placeholder="Jane Doe" required></label>
+        <label class="field"><span>Phone</span><input type="text" name="phone" class="control-input" value="" placeholder="555-0100"></label>
+        <label class="field"><span>Email</span><input type="text" name="email" class="control-input" value="" placeholder="jane@example.com"></label>
+        <label class="field"><span>Signature Name</span><input type="text" name="signatureName" class="control-input" value="" placeholder="Jane Doe"></label>
+        <label class="field"><span>File Name Prefix (letters are saved as Prefix_Cover_Letter_Company.pdf)</span><input type="text" name="fileNamePrefix" class="control-input" value="" placeholder="JaneDoe" pattern="[A-Za-z0-9]{1,60}" title="Letters and digits only"></label>
+      </div>
+    </fieldset>
+    <fieldset class="group" id="company-short-names"><legend>Company Short Names</legend>
+      <p class="muted" style="margin:0 0 var(--space-2)">One per line, full name = short name (for example: PricewaterhouseCoopers = PwC). A name listed here is used in the salutation, the file name, and the body after the first mention, ahead of the short name the model picks.</p>
+      <textarea name="companyAliases" class="control-input" rows="5" spellcheck="false" placeholder="Hewlett Packard Enterprise = HPE&#10;The Procter &amp; Gamble Company = P&amp;G"></textarea>
+    </fieldset>
+    <fieldset class="group"><legend>Playbook</legend>
+      <p class="muted" style="margin:0 0 var(--space-2)">Your writing rules and evidence library; Replace swaps the whole file.</p>
+      <div class="table-scroll"><table class="material" id="playbook-row"><colgroup><col class="c-name"><col class="c-track"><col class="c-chars"><col class="c-time"><col class="c-actions"></colgroup><tr data-playbook="none">
+      <td colspan="4"><span class="muted">No playbook yet. Upload your writing rules and evidence library as a .md or .txt file.</span></td>
+      <td class="actions"><label class="file"><input type="file" name="playbook" accept=".md,.txt,text/markdown,text/plain"><span class="btn secondary small">Choose Playbook…</span><span class="file-name"></span></label></td>
+    </tr></table></div>
+    </fieldset>
+    <fieldset class="group"><legend>Sample Letters</legend>
+      <p class="muted" style="margin:0 0 var(--space-2)">Style references only; up to 10. Change a sample's track here and it saves at once. Uploading a file with the same name replaces the old version.</p>
+      <p class="muted">No sample letters yet (optional). The three closest to the chosen track go into each letter.</p>
+      
+      <div class="upload-row">
+        <label class="file"><input type="file" name="sample" accept=".pdf,.txt,application/pdf,text/plain" multiple><span class="btn secondary">Choose Samples…</span><span class="file-name">No files chosen</span></label>
+        <label class="track-for"><span>Track for These Files</span><select name="sampleTrack" class="control-input" aria-label="Track for these files"><option value="" selected>Not tagged</option><option value="data">Data</option><option value="llm">LLM</option><option value="agent">AI Agent</option></select></label>
+      </div>
+    </fieldset>
+    <button class="btn" type="submit">Save Cover Letter Material</button>
+  </form></article></div></main></div>
+<script src="/assets/hub-2688d42e0a85b124.js"></script>
+</body></html>

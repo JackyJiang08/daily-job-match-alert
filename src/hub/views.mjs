@@ -31,8 +31,8 @@ export const HUB_STYLES = `
 .hub{display:grid;grid-template-columns:200px minmax(0,1fr);min-height:100vh}
 .hub-nav{position:sticky;top:0;height:100vh;overflow:auto;display:flex;flex-direction:column;border-right:1px solid var(--line);padding:var(--space-5) var(--space-3) var(--space-4);background:var(--surface)}
 .hub-nav .brand{font-size:var(--fs-body);font-weight:650;margin:0 0 var(--space-4) var(--space-3);line-height:1.5;white-space:nowrap}
-.hub-nav a{display:block;padding:6px var(--space-2) 6px 9px;margin:0 0 2px;border-left:3px solid transparent;border-radius:0 var(--radius-sm) var(--radius-sm) 0;text-decoration:none;color:var(--ink-2);font-size:var(--fs-body);line-height:1.5}
-.hub-nav a.active{background:var(--accent-soft);color:var(--accent);font-weight:650;border-left-color:var(--accent)}
+.hub-nav a{display:block;padding:6px var(--space-3);margin:0 0 2px;border-radius:var(--r-md);text-decoration:none;color:var(--ink-2);font-size:var(--fs-body);line-height:1.5}
+.hub-nav a.active{background:var(--accent-soft);color:var(--accent);font-weight:650}
 .hub-nav a:hover{color:var(--ink)}
 .hub-nav .mini{margin:auto 0 0 var(--space-3);padding-top:var(--space-4);border-top:1px solid var(--line);font-size:var(--fs-meta);line-height:1.5;color:var(--ink-2)}
 .hub-nav .mini b{display:block;font-weight:600;color:var(--ink-2)}
@@ -41,34 +41,35 @@ export const HUB_STYLES = `
 .hub-nav .mini .model{display:block;padding-left:var(--space-2);text-indent:calc(-1 * var(--space-2));overflow-wrap:anywhere}
 .hub-nav .mini .model.fallback{color:var(--warn-ink)}
 .hub-main{padding:var(--space-5) var(--space-5) var(--space-6);min-width:0}
+.hub-main .page{--gutter:var(--space-5)}
 .hub-content{max-width:1280px;margin:0}
 .hub-main .page{padding:0;margin:0;max-width:none}
 .hub-title{margin:0 0 var(--space-4);font-size:var(--fs-title);font-weight:700;letter-spacing:-0.01em;line-height:1.3}
 .hub-sub{margin:calc(-1 * var(--space-3)) 0 var(--space-4);font-size:var(--fs-body);color:var(--ink-2)}
-.flash{margin:0 0 var(--space-4);padding:var(--space-3) var(--space-4);border-radius:var(--radius);font-size:var(--fs-body)}
+.flash{margin:0 0 var(--space-4);padding:var(--space-3) var(--space-4);border-radius:var(--r-md);font-size:var(--fs-body)}
 .flash.notice{background:var(--accent-soft);color:var(--accent)}
 .flash.error{background:var(--bad-bg);color:var(--bad-ink)}
 /* The report takes the whole width beside the navigation. */
 .hub-content:has(.report-view){max-width:none}
 /* The top row's date controls: ‹ date ›, then " · N Jobs". The date never shrinks or wraps. */
 .date-nav{display:inline-flex;align-items:center;gap:var(--space-1);flex:0 0 auto;align-self:center}
-.date-step{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:1px solid var(--line-2);border-radius:var(--radius-sm);background:var(--surface);color:var(--ink);font:inherit;font-size:var(--fs-title);font-weight:400;line-height:1;text-decoration:none;cursor:pointer}
+.date-step{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:1px solid var(--line-2);border-radius:var(--r-xs);background:var(--surface);color:var(--ink);font:inherit;font-size:var(--fs-title);font-weight:400;line-height:1;text-decoration:none;cursor:pointer}
 .date-step:hover{border-color:var(--ink-3)}
 .date-step:disabled{color:var(--ink-3);opacity:.45;cursor:default}
 .date-pick{position:relative;display:inline-flex}
-.date-button{font:inherit;font-weight:700;color:var(--ink);background:none;border:0;border-radius:var(--radius-sm);padding:0 var(--space-1);white-space:nowrap;cursor:pointer}
+.date-button{font:inherit;font-weight:700;color:var(--ink);background:none;border:0;border-radius:var(--r-xs);padding:0 var(--space-2);white-space:nowrap;cursor:pointer}
 .date-button:hover,.date-button[aria-expanded=true]{background:var(--accent-soft);color:var(--accent)}
 .date-step:focus-visible,.date-button:focus-visible,.cal a:focus-visible,.cal button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 /* The month picker: a popover under the date (a bottom sheet at 760px and narrower). */
-.cal{position:absolute;left:0;top:calc(100% + var(--space-2));z-index:7;width:300px;padding:var(--space-3);background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 8px 24px rgba(16,24,40,.16);font-size:var(--fs-body);font-weight:400;letter-spacing:0;color:var(--ink)}
+.cal{position:absolute;left:0;top:calc(100% + var(--space-2));z-index:7;width:300px;padding:var(--space-3);background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow-pop);--in-r:max(var(--r-xs), calc(var(--r-lg) - var(--space-3)));font-size:var(--fs-body);font-weight:400;letter-spacing:0;color:var(--ink)}
 .cal-backdrop{display:none}
 .cal-head{display:flex;align-items:center;justify-content:space-between;gap:var(--space-2);margin:0 0 var(--space-2)}
 .cal-title{font-weight:650}
-.cal-step{width:28px;height:28px;padding:0;border:1px solid var(--line-2);border-radius:var(--radius-sm);background:var(--surface);color:var(--ink);font:inherit;font-size:var(--fs-title);line-height:1;cursor:pointer}
+.cal-step{width:28px;height:28px;padding:0;border:1px solid var(--line-2);border-radius:var(--in-r, var(--r-xs));background:var(--surface);color:var(--ink);font:inherit;font-size:var(--fs-title);line-height:1;cursor:pointer}
 .cal-step:disabled{color:var(--ink-3);opacity:.45;cursor:default}
 .cal-week,.cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:2px}
 .cal-week span{text-align:center;font-size:var(--fs-meta);color:var(--ink-3);padding:0 0 var(--space-1)}
-.cal-day{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;min-height:40px;border:1px solid transparent;border-radius:var(--radius-sm);text-decoration:none;color:var(--ink);line-height:1.2}
+.cal-day{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;min-height:40px;border:1px solid transparent;border-radius:var(--in-r, var(--r-sm));text-decoration:none;color:var(--ink);line-height:1.2}
 .cal-day .cal-d{font-size:var(--fs-body)}
 .cal-day .cal-n{min-height:1.2em;font-size:var(--fs-meta);font-variant-numeric:tabular-nums;color:var(--ink-2)}
 a.cal-day:hover{background:var(--accent-soft)}
@@ -78,8 +79,8 @@ a.cal-day:hover{background:var(--accent-soft)}
 .cal-day.current,.cal-day.current:hover{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .cal-day.current .cal-n{color:var(--accent-ink);opacity:1}
 .cal-foot{display:flex;justify-content:flex-end;margin:var(--space-2) 0 0}
-.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:var(--space-4);margin:0 0 var(--space-3);box-shadow:var(--shadow);min-width:0;overflow-x:auto}
-/* A wide table scrolls inside its card instead of widening the page. */
+/* A card clips to its corners; a wide table scrolls in its own .table-wrap inside the card, away from them. */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:var(--space-4);margin:0 0 var(--space-3);box-shadow:var(--shadow);min-width:0;overflow:hidden;--in-r:max(var(--r-xs), calc(var(--r-lg) - var(--space-4)))}
 .pair-grid>*{min-width:0}
 .card h2{margin:0 0 var(--space-1);font-size:var(--fs-title);font-weight:650}
 .card h3{margin:var(--space-3) 0 var(--space-1);font-size:var(--fs-meta);font-weight:650;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-2)}
@@ -90,6 +91,12 @@ a.cal-day:hover{background:var(--accent-soft)}
 .notice-list li{margin:0 0 4px}
 .notice-list q{font-size:var(--fs-meta);color:var(--ink-2)}
 .kv code,.mono{font-family:var(--font-mono);font-size:var(--fs-meta)}
+/* A text area in a frame: the frame carries the border, the corners and the focus ring and clips; the text area
+   inside scrolls (and resizes), inset from the corners. */
+.text-frame{display:block;padding:var(--space-3) var(--space-1);background:var(--surface);border:1px solid var(--line-2);border-radius:var(--in-r, var(--r-sm));overflow:hidden}
+.text-frame:focus-within{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+.text-frame>textarea{display:block;width:100%;min-width:0;max-width:100%;margin:0;padding:0 var(--space-2);border:0;border-radius:0;background:transparent;color:var(--ink)}
+.text-frame>textarea:focus{outline:none}
 .row{display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center;margin-top:var(--space-3)}
 .badge-good{background:var(--accent-soft);color:var(--accent)}
 .badge-muted{background:var(--line);color:var(--ink-3)}
@@ -101,11 +108,12 @@ a.cal-day:hover{background:var(--accent-soft)}
 .conn{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:var(--space-2) var(--space-4);font-size:var(--fs-body)}
 .conn dt{color:var(--ink-2)}.conn dd{margin:0}
 .conn .badge{vertical-align:middle}
-fieldset.group{min-inline-size:0;border:1px solid var(--line);border-radius:var(--radius);padding:var(--space-3) var(--space-4) var(--space-2);margin:0 0 var(--space-3)}
+/* A settings group inside a card: the card's inner radius, and its own padding taken off for the fields in it. */
+fieldset.group{min-inline-size:0;border:1px solid var(--line);border-radius:max(var(--r-xs), calc(var(--r-lg) - var(--space-4)));padding:var(--space-3) var(--space-4);margin:0 0 var(--space-3);--in-r:max(var(--r-xs), calc(max(var(--r-xs), calc(var(--r-lg) - var(--space-4))) - var(--space-4)))}
 fieldset.group legend{font-size:var(--fs-meta);font-weight:650;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-2);padding:0 var(--space-2)}
 .field{display:block;margin:0 0 var(--space-3);font-size:var(--fs-body)}
 .field>span{display:block;font-size:var(--fs-meta);color:var(--ink-2);margin-bottom:var(--space-1)}
-.field input[type=text],.field input[type=number],.field input[type=email],.field select{font:inherit;font-size:var(--fs-body);line-height:1.3;color:var(--ink);background:var(--surface);border:1px solid var(--line-2);border-radius:var(--radius-sm);padding:var(--space-1) var(--space-2);min-height:var(--control-height);min-width:240px;max-width:100%;box-sizing:border-box}
+.field input[type=text],.field input[type=number],.field input[type=email],.field select{font:inherit;font-size:var(--fs-body);line-height:1.3;color:var(--ink);background:var(--surface);border:1px solid var(--line-2);border-radius:var(--in-r, var(--r-sm));padding:var(--space-1) var(--space-2);min-height:var(--control-height);min-width:240px;max-width:100%;box-sizing:border-box}
 .field select{appearance:none;-webkit-appearance:none;background-image:var(--chevron);background-repeat:no-repeat;background-position:right 9px center;padding-right:28px;cursor:pointer}
 .field input:focus,.field select:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
 .radio-row .badge{margin-left:4px}
@@ -124,7 +132,9 @@ table.letters-table .mono{overflow-wrap:anywhere}
 table.letters-table td.file{min-width:14em}
 table.letters-table td.actions{white-space:nowrap}
 table.letters-table td.actions .btn+.btn{margin-left:var(--space-1)}
-pre.log{background:var(--bg);border:1px solid var(--line);border-radius:var(--radius-sm);padding:var(--space-3);max-height:360px;overflow:auto;font-family:var(--font-mono);font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere;margin:var(--space-2) 0 0}
+/* A log: the frame carries the corners and clips; the log inside it scrolls, inset from the corners. */
+.log-frame{background:var(--bg);border:1px solid var(--line);border-radius:var(--in-r, var(--r-md));padding:var(--space-3) var(--space-1);overflow:hidden;margin:var(--space-2) 0 0}
+pre.log{padding:0 var(--space-2);max-height:336px;overflow:auto;font-family:var(--font-mono);font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere;margin:0}
 details.day{margin:var(--space-2) 0}
 details.day>summary{cursor:pointer;font-size:var(--fs-body)}
 .count-zero{color:var(--ink-3)}
@@ -135,21 +145,24 @@ details.day>summary{cursor:pointer;font-size:var(--fs-body)}
 @media (min-width:761px) and (max-width:1279px){
   .hub{grid-template-columns:152px minmax(0,1fr)}
   .hub-main{padding:var(--space-4) var(--space-4) var(--space-6)}
+  .hub-main .page{--gutter:var(--space-4)}
 }
 @media (max-width:760px){
   .hub{grid-template-columns:1fr}
   .hub-nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line);flex-direction:row;flex-wrap:nowrap;align-items:center;gap:var(--space-1);padding:var(--space-2) var(--space-3);overflow-x:auto}
   .hub-nav .brand{display:none}
-  .hub-nav a{flex:0 0 auto;margin:0;padding:var(--space-1) var(--space-2);border-left:0;border-bottom:2px solid transparent;border-radius:0}
+  .hub-nav a{flex:0 0 auto;margin:0;padding:var(--space-1) var(--space-2);border-bottom:2px solid transparent;border-radius:0}
   .hub-nav a.active{border-bottom-color:var(--accent);background:transparent}
   .hub-nav .mini{display:none}
   /* The month picker becomes a bottom sheet over a dimmed page (no blur on the bar: a filter would make the
      bar, not the viewport, the sheet's frame). */
   .toolbar.stuck{-webkit-backdrop-filter:none;backdrop-filter:none;background:var(--bg)}
-  .cal{position:fixed;left:0;right:0;bottom:0;top:auto;width:auto;max-height:85vh;overflow:auto;border-radius:var(--radius) var(--radius) 0 0;padding:var(--space-4) var(--space-4) var(--space-5);z-index:31}
+  .cal{position:fixed;left:0;right:0;bottom:0;top:auto;width:auto;overflow:hidden;border-radius:var(--r-xl) var(--r-xl) 0 0;padding:var(--space-3) var(--space-2) 0;z-index:31;--in-r:max(var(--r-xs), calc(var(--r-xl) - var(--space-3) - var(--space-2)))}
+  .cal-body{max-height:calc(85vh - var(--space-3));overflow:auto;padding:var(--space-2) var(--space-2) var(--space-5)}
   .cal-backdrop:not([hidden]){display:block;position:fixed;inset:0;z-index:30;background:rgba(16,24,40,.4)}
   .cal-day{min-height:48px}
   .hub-main{padding:var(--space-3) var(--space-3) var(--space-5)}
+  .hub-main .page{--gutter:var(--space-3)}
   .kv{grid-template-columns:1fr;gap:0}
   .kv dt{margin-top:var(--space-2)}
   .conn{grid-template-columns:1fr;gap:0}
@@ -311,10 +324,10 @@ export function renderDateNav({ dates, selected, today, timeZone }) {
   const shown = months.indexOf(current);
   const jump = todayTarget([...dates].sort((a, b) => b.date.localeCompare(a.date)), today);
   const todayTitle = jump.isToday ? `Today's Report: ${formatLongDate(jump.date, timeZone)}` : `No Report for Today; Opens the Newest Report (${formatLongDate(jump.date, timeZone)})`;
-  const calendar = `<div class="cal" id="calendar" role="dialog" aria-label="Choose Date" data-current="${current}" hidden>
+  const calendar = `<div class="cal" id="calendar" role="dialog" aria-label="Choose Date" data-current="${current}" hidden><div class="cal-body">
 <div class="cal-head"><button type="button" class="cal-step" id="cal-prev" aria-label="Previous Month"${shown > 0 ? '' : ' disabled'}>‹</button><span class="cal-title" id="cal-title">${htmlEscape(formatMonthLabel(current, timeZone))}</span><button type="button" class="cal-step" id="cal-next" aria-label="Next Month"${shown >= 0 && shown < months.length - 1 ? '' : ' disabled'}>›</button></div>
 <div class="cal-week" aria-hidden="true">${WEEKDAYS.map(day => `<span>${day}</span>`).join('')}</div>${grids}
-<div class="cal-foot"><a class="btn secondary cal-today" id="cal-today" href="/reports/${jump.date}" data-keep-query title="${htmlEscape(todayTitle)}">Today</a></div></div><div class="cal-backdrop" id="cal-backdrop" hidden></div>`;
+<div class="cal-foot"><a class="btn secondary cal-today" id="cal-today" href="/reports/${jump.date}" data-keep-query title="${htmlEscape(todayTitle)}">Today</a></div></div></div><div class="cal-backdrop" id="cal-backdrop" hidden></div>`;
   return `<span class="date-nav" id="date-nav">${step(prev, 'date-prev', 'Previous Day With Matches', '‹')}<span class="date-pick"><button type="button" class="bar-date date-button" id="date-button" aria-haspopup="dialog" aria-expanded="false" aria-controls="calendar">${htmlEscape(formatLongDate(selected, timeZone))}</button>${calendar}</span>${step(next, 'date-next', 'Next Day With Matches', '›')}</span>`;
 }
 
@@ -491,7 +504,7 @@ function trackCard(track, timeZone) {
     ? `<span title="${htmlEscape(track.profile.path)}">Profile synced${track.lastSync ? ` ${htmlEscape(formatLocalDay(track.lastSync, timeZone))}` : ''} · ${formatCount(track.profile.characters)} characters</span>`
     : `<span class="muted" title="${htmlEscape(track.profile.path)}">Profile not extracted yet; the next nightly run creates it</span>`}</dd>`);
   const versions = track.versions.length
-    ? `<h3>Kept Versions</h3><table class="plain"><tr><th>File</th><th>Uploaded</th><th>Size</th><th></th></tr>${track.versions.map(version => `<tr><td><span class="mono" title="${htmlEscape(version.path)}">${htmlEscape(version.name)}</span>${version.path === track.pdf ? ' <span class="badge badge-good" data-badge="current">Current</span>' : ''}</td><td>${htmlEscape(formatLocalDateTime(version.modifiedAt, timeZone))}</td><td>${Math.round(version.size / 1024)} KB</td><td>${version.path === track.pdf ? '' : `<form class="inline" method="post" action="/resumes/select"><input type="hidden" name="trackId" value="${htmlEscape(track.id)}"><input type="hidden" name="file" value="${htmlEscape(version.name)}"><button class="btn secondary small" type="submit">Use This Version</button></form>`}</td></tr>`).join('')}</table>`
+    ? `<h3>Kept Versions</h3><div class="table-wrap"><table class="plain"><tr><th>File</th><th>Uploaded</th><th>Size</th><th></th></tr>${track.versions.map(version => `<tr><td><span class="mono" title="${htmlEscape(version.path)}">${htmlEscape(version.name)}</span>${version.path === track.pdf ? ' <span class="badge badge-good" data-badge="current">Current</span>' : ''}</td><td>${htmlEscape(formatLocalDateTime(version.modifiedAt, timeZone))}</td><td>${Math.round(version.size / 1024)} KB</td><td>${version.path === track.pdf ? '' : `<form class="inline" method="post" action="/resumes/select"><input type="hidden" name="trackId" value="${htmlEscape(track.id)}"><input type="hidden" name="file" value="${htmlEscape(version.name)}"><button class="btn secondary small" type="submit">Use This Version</button></form>`}</td></tr>`).join('')}</table></div>`
     : '';
   return `<article class="card" data-track="${htmlEscape(track.id)}">
     <h2>${htmlEscape(track.label)} <span class="muted">(${htmlEscape(track.id)})</span></h2>
@@ -533,7 +546,7 @@ export function resumesPage({ tracksView, timeZone }) {
 
 function dayRow(day) {
   const body = day.warningsText
-    ? `<pre class="log">${htmlEscape(day.warningsText)}</pre>`
+    ? `<div class="log-frame"><pre class="log">${htmlEscape(day.warningsText)}</pre></div>`
     : `<p class="muted">No warnings.txt for this date${day.count ? ' (the folder may have been moved)' : ''}.</p>`;
   const count = `<span class="${day.count ? 'count-some' : 'count-zero'}">${day.count} Warning${day.count === 1 ? '' : 's'}</span>`;
   return `<details class="day"><summary>${htmlEscape(formatDateLabel(day.date))} · ${count}${day.matchCount != null ? ` <span class="muted">· ${day.matchCount} Match${day.matchCount === 1 ? '' : 'es'}</span>` : ''}</summary>${body}</details>`;
@@ -635,7 +648,7 @@ function autoLettersCard(auto, timeZone) {
 
 function sourcesCard(rows, timeZone) {
   const body = rows.length
-    ? `<table class="plain" id="sources-table"><tr><th>Source</th><th>Enabled</th><th>Last Success</th><th>New This Run</th><th>Status</th></tr>${rows.map(row => sourceRow(row, timeZone)).join('')}</table>`
+    ? `<div class="table-wrap"><table class="plain" id="sources-table"><tr><th>Source</th><th>Enabled</th><th>Last Success</th><th>New This Run</th><th>Status</th></tr>${rows.map(row => sourceRow(row, timeZone)).join('')}</table></div>`
     : '<p class="muted">No sources configured.</p>';
   const boards = rows.filter(row => row.kind !== 'builtin');
   const summary = boards.length
@@ -691,7 +704,7 @@ export function statusPage({ status, timeZone }) {
     ? `<span title="${htmlEscape(lock.path)}">Held by PID ${lock.pid}</span>`
     : (lock.stale ? `Stale lock from PID ${lock.pid ?? '?'}; the next run clears it` : 'Free');
   const errors = status.errors.length
-    ? `<table class="plain"><tr><th>File</th><th>Written</th></tr>${status.errors.map(item => `<tr><td><a href="/status/error/${htmlEscape(item.name)}" title="${htmlEscape(item.path)}">${htmlEscape(item.name)}</a></td><td>${at(item.modifiedAt)}</td></tr>`).join('')}</table>`
+    ? `<div class="table-wrap"><table class="plain"><tr><th>File</th><th>Written</th></tr>${status.errors.map(item => `<tr><td><a href="/status/error/${htmlEscape(item.name)}" title="${htmlEscape(item.path)}">${htmlEscape(item.name)}</a></td><td>${at(item.modifiedAt)}</td></tr>`).join('')}</table></div>`
     : '<p class="muted">No ERROR-*.html files in the output directory.</p>';
   const runState = run.running ? 'running' : (run.startedAt ? 'finished' : 'idle');
   const lastRunLine = lastRun.at
@@ -736,7 +749,7 @@ export function statusPage({ status, timeZone }) {
       <dt>Finished</dt><dd id="run-finished">${run.finishedAt ? at(run.finishedAt) : '—'}${run.exitCode != null ? ` · exit ${run.exitCode}` : ''}${run.matchCount != null ? ` · ${run.matchCount} matches` : ''}</dd>
       <dt>Log</dt><dd id="run-log" class="mono">${run.logPath ? htmlEscape(run.logPath) : '—'}</dd>
     </dl>
-    <pre class="log" id="run-tail">${htmlEscape(run.tail.join('\n'))}</pre>
+    <div class="log-frame"><pre class="log" id="run-tail">${htmlEscape(run.tail.join('\n'))}</pre></div>
     </div>
   </article>
   ${quotaCard(status.quota, timeZone)}
@@ -758,7 +771,7 @@ function hubCard(hub, timeZone) {
   return `<article class="card" id="hub-card"><h2>Hub</h2>
   <p class="muted">Reports and Status page requests since the hub started (newest first; also in the hub log). Stages: reports index, payload read, eligibility and location re-check, letter status scan, Status summary and the rest of the Status data, HTML render, sidebar.</p>
   <dl class="kv"><dt>Render Cache</dt><dd id="hub-cache">${cacheLine}</dd></dl>
-  ${rows ? `<table class="plain" id="hub-timings"><tr><th>When</th><th>Page</th><th>Status</th><th>Total</th><th>Stages</th><th>Size</th><th>Cache</th></tr>${rows}</table>` : '<p class="muted" id="hub-timings">No Reports or Status requests yet.</p>'}
+  ${rows ? `<div class="table-wrap"><table class="plain" id="hub-timings"><tr><th>When</th><th>Page</th><th>Status</th><th>Total</th><th>Stages</th><th>Size</th><th>Cache</th></tr>${rows}</table></div>` : '<p class="muted" id="hub-timings">No Reports or Status requests yet.</p>'}
 </article>`;
 }
 

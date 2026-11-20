@@ -1,0 +1,165 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CoverLetter · Example Corp 1</title>
+<style>
+:root{
+  color-scheme: light dark;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* Type scale, three levels: titles (page and card headings), body, and supporting text. */
+  --fs-title: 18px;
+  --fs-body: 14px;
+  --fs-meta: 12px;
+  --fs-page: var(--fs-title);
+  --lh: 1.5;
+  /* One accent, one neutral ramp. */
+  --accent: #0f766e;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(15, 118, 110, 0.10);
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-glass: rgba(255, 255, 255, 0.82);
+  --ink: #1c2430;
+  --ink-2: #4b5563;
+  --ink-3: #5b6472;
+  --line: #e3e7ec;
+  --line-2: #cfd5dd;
+  --ring-track: #e5e9ee;
+  /* Semantic badge tones. */
+  --note-bg: #fbf3d5;
+  --note-ink: #6b5300;
+  --warn-bg: #fdebd3;
+  --warn-ink: #8a4b00;
+  --bad-bg: #fbe3e3;
+  --bad-ink: #8b1d1d;
+  /* Shape and rhythm: every gap, margin and padding is one of the six spacing steps. */
+  --radius: 10px;
+  --radius-sm: 6px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 40px;
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --control-height: 32px;
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5l3.5 3.5 3.5-3.5' fill='none' stroke='%235b6472' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+@media (prefers-color-scheme:dark){:root{
+  --accent: #2dd4bf;
+  --accent-ink: #04211e;
+  --accent-soft: rgba(45, 212, 191, 0.14);
+  --bg: #0f1318;
+  --surface: #171c23;
+  --surface-glass: rgba(23, 28, 35, 0.82);
+  --ink: #e6e9ee;
+  --ink-2: #b4bcc8;
+  --ink-3: #9aa3b1;
+  --line: #252c36;
+  --line-2: #333c48;
+  --ring-track: #2a323d;
+  --note-bg: #3a3412;
+  --note-ink: #e8d57a;
+  --warn-bg: #3a2a12;
+  --warn-ink: #f2c184;
+  --bad-bg: #3d1a1a;
+  --bad-ink: #f3a9a9;
+  --shadow: none;
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5l3.5 3.5 3.5-3.5' fill='none' stroke='%239aa3b1' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:var(--fs-body);line-height:var(--lh)}
+main{max-width:8.5in;margin:0 auto;padding:var(--space-5) var(--space-4) var(--space-6)}
+.top{display:flex;flex-direction:column;align-items:flex-end;gap:var(--space-1);margin:0 0 var(--space-3)}
+.buttons{display:flex;gap:var(--space-2)}
+.btn{display:inline-flex;align-items:center;justify-content:center;height:var(--control-height);padding:0 var(--space-4);border-radius:var(--radius-sm);border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);font:inherit;font-weight:600;cursor:pointer;min-width:96px}
+.btn.secondary{background:var(--surface);color:var(--accent)}
+.btn:disabled{opacity:.6;cursor:default}
+.error{margin:0;color:var(--bad-ink);font-size:var(--fs-meta);text-align:right;max-width:60ch}
+.flags-top{margin:0 0 var(--space-2);font-size:var(--fs-meta);color:var(--warn-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:default}
+.flags-top .first{overflow:hidden;text-overflow:ellipsis}
+.flags-top .more{font-weight:600}
+.flags-top .rest{display:none}
+.flags-top:hover{white-space:normal}
+.flags-top:hover .more{display:none}
+.flags-top:hover .rest{display:block}
+.flags-top:hover .rest span{display:block}
+.sheet{background:#fff;color:#000;box-shadow:0 1px 3px rgba(16,24,40,.12);border:1px solid var(--line);padding:1in;font-family:"Times New Roman",Times,serif;font-size:11pt;line-height:1.15}
+.sheet p{margin:0 0 7pt}
+.sheet header{text-align:center;margin-bottom:8pt}
+.sheet header p{text-align:center;margin:0}
+.sheet .name{font-size:16pt;font-weight:bold;margin:0 0 3pt}
+.sheet .closing{margin-top:4pt;margin-bottom:0}
+.sheet .signature{margin:0}
+.flag{text-decoration:underline;text-decoration-color:rgba(214,140,0,.55);text-decoration-thickness:2px;text-underline-offset:3px;cursor:help}
+@media (max-width:760px){main{padding:var(--space-3) var(--space-4)}.sheet{padding:var(--space-5)}}
+@media print{.top,.flags-top{display:none}body{background:#fff}.sheet{box-shadow:none;border:0;padding:0}.flag{text-decoration:none}}
+</style></head><body><main>
+<div class="top"><div class="buttons"><button class="btn secondary" id="copy-letter" type="button">Copy</button><button class="btn" id="regenerate-letter" type="button" data-date="2026-10-17" data-slug="ExampleCorp1">Regenerate</button></div><p class="error" id="letter-error" role="status" hidden></p></div>
+<div id="letter-holder"><article class="sheet" id="letter" data-letter="{&quot;name&quot;:&quot;&quot;,&quot;contact&quot;:&quot;&quot;,&quot;date&quot;:&quot;November 19, 2026&quot;,&quot;company&quot;:&quot;Example Corp 1&quot;,&quot;paragraphs&quot;:[],&quot;signature&quot;:&quot;&quot;}">
+<header><p class="name"></p></header>
+<p class="date">November 19, 2026</p>
+<p class="salutation">Dear Example Corp 1 Recruiting Team,</p>
+
+<p class="closing">Sincerely,</p>
+<p class="signature"></p>
+</article></div>
+</main><script>
+var LETTER_CLOSING = "Sincerely,";
+function salutationFor(company) {
+  return 'Dear ' + (String(company || '').trim() || 'Hiring') + ' Recruiting Team,';
+}
+function letterPlainText(parts, from) {
+  var clean = function (value) { return String(value == null ? '' : value).replace(/\s+/g, ' ').trim(); };
+  var body = (parts.paragraphs || []).map(clean).filter(Boolean);
+  var blocks = [];
+  if (from !== 'salutation') {
+    var head = [clean(parts.name), clean(parts.contact)].filter(Boolean).join('\n');
+    if (head) blocks.push(head);
+    if (clean(parts.date)) blocks.push(clean(parts.date));
+  }
+  blocks.push(salutationFor(parts.company));
+  blocks = blocks.concat(body);
+  blocks.push([LETTER_CLOSING, clean(parts.signature)].filter(Boolean).join('\n'));
+  return blocks.join('\n\n');
+}
+(function () {
+  var copyButton = document.getElementById('copy-letter');
+  var regenerate = document.getElementById('regenerate-letter');
+  var error = document.getElementById('letter-error');
+  var holder = document.getElementById('letter-holder');
+  function parts() { try { return JSON.parse(document.getElementById('letter').getAttribute('data-letter') || '{}'); } catch (e) { return {}; } }
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text);
+    return new Promise(function (resolve, reject) {
+      var area = document.createElement('textarea'); area.value = text; area.setAttribute('readonly', '');
+      area.style.position = 'fixed'; area.style.opacity = '0'; document.body.appendChild(area); area.select();
+      var ok = false; try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      document.body.removeChild(area);
+      if (ok) resolve(); else reject(new Error('copy refused'));
+    });
+  }
+  function fail(text) { error.textContent = text; error.hidden = false; }
+  copyButton.addEventListener('click', function () {
+    error.hidden = true;
+    copyText(letterPlainText(parts(), 'top')).then(function () {
+      copyButton.textContent = 'Copied';
+      setTimeout(function () { copyButton.textContent = 'Copy'; }, 1500);
+    }).catch(function () { fail('Could not copy; select the letter and copy it by hand.'); });
+  });
+  regenerate.addEventListener('click', function () {
+    error.hidden = true;
+    regenerate.disabled = true; regenerate.textContent = 'Regenerating…';
+    var body = new URLSearchParams({ date: regenerate.getAttribute('data-date'), slug: regenerate.getAttribute('data-slug') }).toString();
+    fetch('/letters/regenerate', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: body })
+      .then(function (r) { return r.json().then(function (data) { if (!r.ok) throw new Error(data.error || 'Regenerate failed; details in the hub log'); return data; }); })
+      .then(function (data) {
+        holder.innerHTML = data.sheet;
+        regenerate.setAttribute('data-slug', data.slug);
+        if (data.openUrl && window.history && window.history.replaceState) window.history.replaceState(null, '', data.openUrl);
+      })
+      .catch(function (e) { fail(e && e.message ? e.message : 'Regenerate failed; details in the hub log'); })
+      .then(function () { regenerate.disabled = false; regenerate.textContent = 'Regenerate'; });
+  });
+})();
+</script></body></html>

@@ -109,8 +109,8 @@ function renderDescription(card) {
   // text split at its line breaks. The hub embeds only the first characters of a long JD as text and loads the
   // markup when the section is opened (data-jd-src, REPORTS_SCRIPT); the Desktop file always carries the whole JD.
   return card.descriptionSrc
-    ? `<details class="jd" data-jd-src="${htmlEscape(card.descriptionSrc)}">${summary}<div class="jd-body"><p>${htmlEscape(card.descriptionPreview)}</p></div></details>`
-    : `<details class="jd">${summary}<div class="jd-body">${card.descriptionHtml ?? `<p>${htmlEscape(card.description)}</p>`}</div></details>`;
+    ? `<details class="jd" data-jd-src="${htmlEscape(card.descriptionSrc)}">${summary}<div class="jd-frame"><div class="jd-body"><p>${htmlEscape(card.descriptionPreview)}</p></div></div></details>`
+    : `<details class="jd">${summary}<div class="jd-frame"><div class="jd-body">${card.descriptionHtml ?? `<p>${htmlEscape(card.description)}</p>`}</div></div></details>`;
 }
 
 // Card layout, top to bottom (2026-11-15): company · title (left) with the scores and the ring (right);

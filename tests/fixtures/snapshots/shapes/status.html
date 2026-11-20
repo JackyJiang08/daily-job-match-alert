@@ -1,0 +1,56 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Status — Daily Job Match Alert Hub</title>
+<link rel="stylesheet" href="/assets/hub-2d8407fa52b4ac10.css"></head>
+<body><div class="hub"><nav class="hub-nav"><p class="brand">Job Match Hub</p><a href="/reports">Reports</a><a href="/resumes">Resumes</a><a href="/letters">Letters</a><a href="/status" class="active">Status</a><a href="/settings">Settings</a><div class="mini"><b>Last Run</b><span class="ok">✓</span> Oct 16, 8:00 PM<b>Next Run</b><span id="next-run" data-at="2026-10-17T23:00:00.000Z" data-overdue-suffix="">Oct 17, 6:00 PM · <span class="rel">in 8h</span></span><b>Models</b><span class="model" data-model="review" title="Review: Local Only">Review · Local Only</span><span class="model" data-model="prescreen" title="Prescreen: Local Only">Prescreen · Local Only</span><span class="model" data-model="coverLetter" title="CoverLetter: Local Only">CoverLetter · Local Only</span></div></nav>
+<main class="hub-main"><div class="hub-content"><h1 class="hub-title">Status</h1>
+  
+  
+  <article class="card"><h2>Runs</h2><dl class="kv">
+    <dt>Last Run</dt><dd>Oct 16, 2026, 8:00 PM · scheduled · success · 4 matches · <a href="/reports/2026-10-17">report</a></dd>
+    <dt>Engine</dt><dd>local_only</dd>
+    
+    
+    
+    <dt>Next Run</dt><dd>Oct 17, 2026, 6:00 PM <span class="badge badge-warn" data-badge="not-installed">LaunchAgent Not Installed</span> <span class="muted">showing the 18:00 default</span></dd>
+    <dt>Catch-up</dt><dd id="catch-up-line">Nothing to catch up</dd>
+    <dt>Lock</dt><dd id="lock-line">Free</dd>
+    <dt>Backup</dt><dd id="backup-line">No backup yet <span class="muted" title="ROOT/Library/Application Support/daily-job-match-alert/backups">· nightly after the scheduled run · <code>npm run backup</code></span></dd>
+  </dl></article>
+  <article class="card" id="run-card" data-time-zone="America/Chicago" data-state="idle"><h2>Run Now</h2>
+    <p class="muted">Runs the full pipeline now using your Claude subscription. Results merge into today's report.</p>
+    <div class="row">
+      <button class="btn" id="run-button" type="button">Run Now</button>
+      <span class="muted" id="run-reason"></span>
+    </div>
+    <div id="run-progress" hidden>
+    <dl class="kv" id="run-meta">
+      <dt>State</dt><dd id="run-state">idle</dd>
+      <dt>Started</dt><dd id="run-started">—</dd>
+      <dt>Finished</dt><dd id="run-finished">—</dd>
+      <dt>Log</dt><dd id="run-log" class="mono">—</dd>
+    </dl>
+    <pre class="log" id="run-tail"></pre>
+    </div>
+  </article>
+  <article class="card" id="quota-card"><h2>Quota</h2><dl class="kv">
+    <dt>Last Limit Event</dt><dd id="quota-last"><span class="muted">No limit reached so far</span></dd>
+    <dt>Plan</dt><dd id="quota-plan"><span class="muted">Claude plan unknown</span></dd>
+    <dt>Model in Effect</dt><dd id="quota-model">local_only · default</dd>
+    <dt>Deferred Postings</dt><dd id="quota-deferred">0 waiting for the next run</dd>
+    <dt>Policy</dt><dd>Ladder claude-fable-5-1 → claude-opus-5-5 · Codex fallback on</dd>
+    <dt>Usage (7 days)</dt><dd id="quota-usage"><span class="muted">No subscription calls recorded in the last 7 days.</span></dd>
+    
+    
+  </dl></article>
+  <article class="card" id="auto-letters-card"><h2>Automatic Cover Letters</h2><dl class="kv"><dt>Setting</dt><dd>On · every new high match <a href="/settings?tab=letters#auto-letters">Settings</a></dd><dt>Last Pass</dt><dd><span class="muted">None yet</span></dd></dl></article>
+  <article class="card" id="letter-variety"><h2>Letter Variety</h2><dl class="kv"><dt>Letters</dt><dd>None in the last 7 days</dd></dl><p class="form-foot">Openings and closing sentences used by more than 15 percent of these letters are passed to the next letter to avoid (v2 rules).</p></article>
+  <article class="card" id="sources-card"><h2>Sources</h2><p class="muted">Built-in lists and every public ATS board discovered from posting URLs. A board with no new posting for 30 days is polled weekly; one that fails seven nights in a row goes dormant and is probed every 30 days, resuming on its own once it answers (or when you resume it).</p><table class="plain" id="sources-table"><tr><th>Source</th><th>Enabled</th><th>Last Success</th><th>New This Run</th><th>Status</th></tr><tr data-source="simplifyInternships"><td>SimplifyJobs Summer Internships</td><td><span class="badge badge-muted" data-badge="disabled">Disabled</span></td><td><span class="muted">Never</span></td><td><span class="muted">—</span></td><td></td></tr><tr data-source="simplifyNewGrad"><td>SimplifyJobs New Grad</td><td><span class="badge badge-muted" data-badge="disabled">Disabled</span></td><td><span class="muted">Never</span></td><td><span class="muted">—</span></td><td></td></tr><tr data-source="jobrightDataAnalysisInternship"><td>Jobright Data Analysis Internships</td><td><span class="badge badge-good" data-badge="enabled">Enabled</span></td><td><span class="muted">Never</span></td><td><span class="muted">—</span></td><td></td></tr><tr data-source="jobrightDataAnalysisNewGrad"><td>Jobright Data Analysis New Grad</td><td><span class="badge badge-good" data-badge="enabled">Enabled</span></td><td><span class="muted">Never</span></td><td><span class="muted">—</span></td><td></td></tr><tr data-source="jobrightSoftwareEngineerInternship"><td>Jobright Software Engineer Internships</td><td><span class="badge badge-good" data-badge="enabled">Enabled</span></td><td><span class="muted">Never</span></td><td><span class="muted">—</span></td><td></td></tr><tr data-source="jobrightSoftwareEngineerNewGrad"><td>Jobright Software Engineer New Grad</td><td><span class="badge badge-good" data-badge="enabled">Enabled</span></td><td><span class="muted">Never</span></td><td><span class="muted">—</span></td><td></td></tr><tr data-source="vanshInternships"><td>vanshb03 Summer 2027 Internships</td><td><span class="badge badge-good" data-badge="enabled">Enabled</span></td><td><span class="muted">Never</span></td><td><span class="muted">—</span></td><td></td></tr><tr data-source="vanshNewGrad"><td>vanshb03 New Grad 2027</td><td><span class="badge badge-good" data-badge="enabled">Enabled</span></td><td><span class="muted">Never</span></td><td><span class="muted">—</span></td><td></td></tr><tr data-source="zapplyInternships"><td>Zapply Internships 2027</td><td><span class="badge badge-good" data-badge="enabled">Enabled</span></td><td><span class="muted">Never</span></td><td><span class="muted">—</span></td><td></td></tr><tr data-source="zapplyNewGrad"><td>Zapply New Grad Jobs 2027</td><td><span class="badge badge-good" data-badge="enabled">Enabled</span></td><td><span class="muted">Never</span></td><td><span class="muted">—</span></td><td></td></tr><tr data-source="zapplyMlInternships"><td>Zapply ML Internships 2027</td><td><span class="badge badge-good" data-badge="enabled">Enabled</span></td><td><span class="muted">Never</span></td><td><span class="muted">—</span></td><td></td></tr><tr data-source="zapplyNewGradDataScience"><td>Zapply New Grad Data Science 2027</td><td><span class="badge badge-good" data-badge="enabled">Enabled</span></td><td><span class="muted">Never</span></td><td><span class="muted">—</span></td><td></td></tr><tr data-source="zshahTechInternships"><td>zshah101 Tech Internships 2027</td><td><span class="badge badge-good" data-badge="enabled">Enabled</span></td><td><span class="muted">Never</span></td><td><span class="muted">—</span></td><td></td></tr><tr data-source="hackerNewsHiring"><td>Hacker News Who is Hiring</td><td><span class="badge badge-good" data-badge="enabled">Enabled</span></td><td><span class="muted">Never</span></td><td><span class="muted">—</span></td><td></td></tr><tr data-source="remoteOk"><td>RemoteOK</td><td><span class="badge badge-good" data-badge="enabled">Enabled</span></td><td><span class="muted">Never</span></td><td><span class="muted">—</span></td><td></td></tr><tr data-source="searchDiscovery"><td>Search discovery</td><td><span class="badge badge-muted" data-badge="disabled">Disabled</span></td><td><span class="muted">Never</span></td><td><span class="muted">—</span></td><td></td></tr><tr data-source="emailFiles"><td>Email files</td><td><span class="badge badge-muted" data-badge="disabled">Disabled</span></td><td><span class="muted">Never</span></td><td><span class="muted">—</span></td><td></td></tr><tr data-source="himalaya"><td>Himalaya job-alert mailbox</td><td><span class="badge badge-muted" data-badge="disabled">Disabled</span></td><td><span class="muted">Never</span></td><td><span class="muted">—</span></td><td></td></tr><tr data-source="careerOps"><td>career-ops history</td><td><span class="badge badge-muted" data-badge="disabled">Disabled</span></td><td><span class="muted">Never</span></td><td><span class="muted">—</span></td><td></td></tr></table></article>
+  <article class="card"><h2>Warnings</h2><p class="muted">Last 7 report dates.</p><details class="day"><summary>Sat, Oct 17 · <span class="count-zero">0 Warnings</span> <span class="muted">· 4 Matches</span></summary><p class="muted">No warnings.txt for this date.</p></details><details class="day"><summary>Fri, Oct 16 · <span class="count-zero">0 Warnings</span> <span class="muted">· 0 Matches</span></summary><p class="muted">No warnings.txt for this date.</p></details><details class="day"><summary>Thu, Oct 15 · <span class="count-zero">0 Warnings</span> <span class="muted">· 1 Match</span></summary><p class="muted">No warnings.txt for this date.</p></details><details class="day"><summary>Mon, Oct 12 · <span class="count-zero">0 Warnings</span> <span class="muted">· 1 Match</span></summary><p class="muted">No warnings.txt for this date.</p></details></article>
+  <article class="card"><h2>Error Reports</h2><p class="muted">No ERROR-*.html files in the output directory.</p></article>
+  <article class="card" id="hub-card"><h2>Hub</h2>
+  <p class="muted">Reports and Status page requests since the hub started (newest first; also in the hub log). Stages: reports index, payload read, eligibility and location re-check, letter status scan, Status summary and the rest of the Status data, HTML render, sidebar.</p>
+  <dl class="kv"><dt>Render Cache</dt><dd id="hub-cache">0 hit(s), 1 miss(es) · 1 render(s) and 1 day(s) held</dd></dl>
+  <table class="plain" id="hub-timings"><tr><th>When</th><th>Page</th><th>Status</th><th>Total</th><th>Stages</th><th>Size</th><th>Cache</th></tr><tr><td>Nov 19, 2026, 7:03 PM</td><td class="mono">/reports/2026-10-17</td><td>200</td><td>8 ms</td><td>index 2.1 ms · payload 0.2 ms · review 0.1 ms · letters 0.4 ms · render 1 ms · sidebar 1.6 ms</td><td>22 KB</td><td>miss</td></tr></table>
+</article></div></main></div>
+<script src="/assets/hub-95e635a43da8b20d.js"></script>
+</body></html>

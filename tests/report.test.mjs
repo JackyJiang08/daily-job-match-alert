@@ -213,7 +213,7 @@ test('semantic markers render as badges instead of text prefixes', () => {
 
 test('the stylesheet defines the token set, dark mode, and a single-column mobile layout', () => {
   const html = buildHtml([job], meta);
-  for (const token of ['--fs-page', '--fs-title', '--fs-body', '--fs-meta', '--accent', '--ink', '--ink-2', '--ink-3', '--line', '--radius', '--space-4', '--font']) {
+  for (const token of ['--fs-page', '--fs-title', '--fs-body', '--fs-meta', '--accent', '--ink', '--ink-2', '--ink-3', '--line', '--r-xs', '--r-sm', '--r-md', '--r-lg', '--r-xl', '--r-pill', '--space-4', '--font']) {
     assert.match(html, new RegExp(`${token}:`), `missing token ${token}`);
   }
   assert.match(html, /@media \(prefers-color-scheme: dark\)\{:root\{/);

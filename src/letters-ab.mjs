@@ -12,6 +12,7 @@ import { experiencesIn, resumeExperiences } from './cover-letter/evidence.mjs';
 import { letterRulesSettings } from './cover-letter/availability.mjs';
 import { enabledResumeTracks } from './config.mjs';
 import { htmlEscape } from './utils.mjs';
+import { RADIUS_TOKENS, SQUIRCLE_STYLES } from './report-theme.mjs';
 import { findLetterJob, finishLetterV2, generateLetter, letterCompanyFor, resumeTextFor, v2RulesInputs } from './hub/letters.mjs';
 
 function slugOf(text) {
@@ -111,8 +112,9 @@ function indexHtml(rows, { rulesVersion }) {
   const table = summaryMarkdown(rows, { rulesVersion }).split('\n').filter(line => line.startsWith('|') && !/^\|\s*---/.test(line));
   const tableHtml = `<table>${table.map((line, index) => `<tr>${line.split('|').slice(1, -1).map(cell => index ? `<td>${htmlEscape(cell.trim())}</td>` : `<th>${htmlEscape(cell.trim())}</th>`).join('')}</tr>`).join('')}</table>`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Letter A/B</title><style>
+:root{${RADIUS_TOKENS}}${SQUIRCLE_STYLES}
 body{font:14px/1.5 -apple-system,Segoe UI,sans-serif;margin:24px;color:#1c2430}table{border-collapse:collapse;font-size:12px}td,th{border:1px solid #d0d5dd;padding:4px 6px;vertical-align:top}
-.pair{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin:16px 0 40px}.col{background:#f6f7f9;padding:12px 16px;border-radius:8px}.meta{color:#5b6472;font-size:12px}h2{margin-top:40px}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin:16px 0 40px}.col{background:#f6f7f9;padding:12px 16px;border-radius:var(--r-md)}.meta{color:#5b6472;font-size:12px}h2{margin-top:40px}
 </style></head><body><h1>Letter A/B: v1 (old) vs ${htmlEscape(rulesVersion)} (new)</h1>${tableHtml}
 ${rows.map(row => `<h2>${htmlEscape(row.label)}</h2><p class="meta">New: ${htmlEscape(row.new.engine)}; editor ${htmlEscape(row.new.editor)}${row.new.pdfNote ? `; ${htmlEscape(row.new.pdfNote)}` : ''}</p><div class="pair">${column('Old (v1)', row.old)}${column(`New (${rulesVersion})`, row.new)}</div>`).join('\n')}
 </body></html>`;

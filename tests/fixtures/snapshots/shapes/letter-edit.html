@@ -1,0 +1,42 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cover letter · Example Corp 1 — Daily Job Match Alert Hub</title>
+<link rel="stylesheet" href="/assets/hub-2d8407fa52b4ac10.css"></head>
+<body><div class="hub"><nav class="hub-nav"><p class="brand">Job Match Hub</p><a href="/reports">Reports</a><a href="/resumes">Resumes</a><a href="/letters" class="active">Letters</a><a href="/status">Status</a><a href="/settings">Settings</a><div class="mini"><b>Last Run</b><span class="ok">✓</span> Oct 16, 8:00 PM<b>Next Run</b><span id="next-run" data-at="2026-10-17T23:00:00.000Z" data-overdue-suffix="">Oct 17, 6:00 PM · <span class="rel">in 8h</span></span><b>Models</b><span class="model" data-model="review" title="Review: Local Only">Review · Local Only</span><span class="model" data-model="prescreen" title="Prescreen: Local Only">Prescreen · Local Only</span><span class="model" data-model="coverLetter" title="CoverLetter: Local Only">CoverLetter · Local Only</span></div></nav>
+<main class="hub-main"><div class="hub-content"><h1 class="hub-title">Cover Letter</h1>
+  <div class="row letter-copy" id="letter-copy" hidden data-letter="{&quot;name&quot;:&quot;&quot;,&quot;contact&quot;:&quot;&quot;,&quot;date&quot;:&quot;October 17, 2026&quot;,&quot;signature&quot;:&quot;&quot;}"><button class="btn" id="copy-full" type="button">Copy Full Letter</button><button class="btn secondary" id="copy-salutation" type="button">Copy From Salutation</button><span class="letter-status" id="copy-status" role="status"></span></div>
+  <div class="flash error">Add your contact block and a playbook under <a href="/settings?tab=letters#cover-letters">Settings → Cover Letters</a> first (missing: playbook, name, contact).</div>
+  <article class="card letter-head" id="letter-panel" data-date="2026-10-17" data-job="8275fbf134959526" data-ready="no" data-slug="ExampleCorp1" data-company-uncertain="no" data-da-track="data" data-rules="null">
+    <dl class="kv">
+      <dt>Role</dt><dd>Data Analyst 1</dd>
+      <dt>Company</dt><dd>Example Corp 1</dd>
+      <dt>Location</dt><dd>Remote - US · New Grad</dd>
+      <dt>Report</dt><dd><a href="/reports/2026-10-17">2026-10-17</a></dd>
+    </dl>
+    <div class="letter-controls">
+      <label class="field"><span>Resume Track</span><select id="letter-track" class="control-input"><option value="data" selected>Data (recommended)</option><option value="llm">LLM</option></select></label>
+      <label class="field"><span>Company Short Name</span><input type="text" id="letter-company" class="control-input" value="Example Corp 1" required title="Used in &quot;Dear … Recruiting Team,&quot;, the file name, and the body after the first mention. A name typed here is kept on Regenerate; Rename Company &amp; Re-render applies it to the saved letter."></label>
+      
+      <div class="row">
+        <button class="btn" id="generate-button" type="button" disabled>Regenerate</button>
+        <button class="btn secondary" id="save-button" type="button" hidden>Save &amp; Render PDF</button>
+        <button class="btn secondary" id="rename-button" type="button" title="Replace the salutation and the file name and render the PDF again; the model is not called">Rename Company &amp; Re-render</button>
+        <button class="btn secondary" id="codex-button" type="button" hidden>Generate With Codex</button>
+        <button class="btn secondary" id="da-button" type="button" hidden title="The scorer's reasons cite experience that is only on the DA resume">Regenerate With DA Resume</button>
+        <a class="btn" id="download-link" hidden href="#">Download PDF</a>
+      </div>
+      <p class="letter-status" id="letter-status"></p>
+    </div>
+  </article>
+  <article class="card" id="letter-editor" data-state="empty">
+    <h2>Body</h2>
+    <p class="muted">The header, date, greeting, and sign-off are added for you; edit the paragraphs here, switch the track and Regenerate, or render the PDF again.</p>
+    <p class="letter-counts" id="letter-counts">0 words · 0 paragraphs</p>
+    <p class="muted" id="letter-empty">No draft yet. Regenerate writes one with the selected track and company name.</p>
+    <div id="paragraphs"></div>
+    <ul class="issues" id="letter-issues"></ul>
+    <details class="notes" id="editor-notes" open hidden><summary>Check Before Sending</summary><ul class="issues" id="editor-notes-list"></ul><p class="row"><button class="btn secondary" id="clear-review" type="button">Mark Details Checked</button><span class="letter-status" id="review-status"></span></p></details>
+    <p class="letter-foot" id="letter-foot">No samples used · Engine: undefined</p>
+    <ul class="letter-foot foot-notes" id="letter-info-notes" hidden></ul>
+  </article></div></main></div>
+<script src="/assets/hub-127159115142aed9.js"></script>
+</body></html>

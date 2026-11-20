@@ -544,9 +544,9 @@ test('Status merges runs into one card, formats every time in the configured zon
     assert.doesNotMatch(page.text, /<h2>Last run<\/h2>|<h2>Schedule<\/h2>|<h2>Fatal error reports<\/h2>|\bUTC\b/);
     assert.match(page.text, /<div id="run-progress" hidden>/);
     assert.match(page.text, /<h2>Warnings<\/h2>/);
-    assert.match(page.text, /<summary>Thu, Aug 27 · <span class="count-some">2 Warnings<\/span> <span class="muted">· 1 Match<\/span><\/summary><pre class="log">Daily Job Match Alert — 2026-08-27 — 2 warnings\n\[collector \/ Job board\] network unavailable/);
+    assert.match(page.text, /<summary>Thu, Aug 27 · <span class="count-some">2 Warnings<\/span> <span class="muted">· 1 Match<\/span><\/summary><div class="log-frame"><pre class="log">Daily Job Match Alert — 2026-08-27 — 2 warnings\n\[collector \/ Job board\] network unavailable/);
     assert.match(page.text, /<summary>Wed, Aug 26 · <span class="count-zero">0 Warnings<\/span> <span class="muted">· 0 Matches<\/span><\/summary><p class="muted">No warnings\.txt/);
-    assert.match(page.text, /<h2>Error Reports<\/h2><table class="plain">[\s\S]*?<a href="\/status\/error\/ERROR-2026-08-20\.html" title="[^"]*">ERROR-2026-08-20\.html<\/a>/);
+    assert.match(page.text, /<h2>Error Reports<\/h2><div class="table-wrap"><table class="plain">[\s\S]*?<a href="\/status\/error\/ERROR-2026-08-20\.html" title="[^"]*">ERROR-2026-08-20\.html<\/a>/);
     assert.match(page.text, /id="run-card" data-time-zone="America\/Chicago"/);
     const report = await hub.request('GET', '/status/error/ERROR-2026-08-20.html');
     assert.equal(report.status, 200);

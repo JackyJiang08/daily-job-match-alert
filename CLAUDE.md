@@ -690,7 +690,8 @@ disabled; do not expand them unless a task says so.
   Only Days With Matches, History fold). REPORTS_SCRIPT removes the old localStorage keys hub.reports.history and
   hub.reports.onlyMatches once. See "Date controls (2026-11-18)".
 - Screenshots: tests/fixtures/demo-output/screenshots/ (gitignored; playwright-core installed with --no-save,
-  Chrome channel; the capture script lives outside the repo). Checked at 1440/1100 × light/dark: one-row bar
+  Chrome channel; tests/shapes.test.mjs and scripts/shape-check.mjs import it as 'playwright-core'; the older
+  capture scripts live outside the repo). Checked at 1440/1100 × light/dark: one-row bar
   that fits, stuck after scrolling with the nav gone, aligned counts, card order.
 
 ## Date controls (2026-11-18, src/hub/views.mjs)
@@ -718,6 +719,48 @@ disabled; do not expand them unless a task says so.
   REPORT_SCRIPT restore() appends an option for a select value the date does not offer (data-absent) so the filter
   survives a date change. Tests: tests/report-date-nav.test.mjs (fake DOM via vm), hub/report-speed/run-schedule
   updates; snapshot allowances DATE_NAV in tests/helpers/page-content.mjs (addedLinkPrefixes, missingWordPatterns).
+
+## Corner shapes (2026-11-19, src/report-theme.mjs)
+- Tokens: RADIUS_TOKENS (inside REPORT_TOKENS) --r-xs 6 / --r-sm 10 / --r-md 14 / --r-lg 20 / --r-xl 28, each
+  calc(Npx * var(--corner-k)), and --r-pill 999px. --radius / --radius-sm are gone. No border-radius in src/ or
+  scripts/ may hold a length (tests/shapes.test.mjs scans): only var(--…), calc()/max() of tokens, 0, or 50%.
+  Pages outside REPORT_STYLES (letter page, fatal ERROR page in index.mjs, letters-ab) import RADIUS_TOKENS and
+  SQUIRCLE_STYLES.
+- SQUIRCLE_STYLES: @supports (corner-shape: squircle) sets --corner-k to CORNER_K (1.6) and corner-shape:squircle on
+  every element; .ring, .ring::before, .facts li::before, .tag and .round stay round. 1.6 was chosen by measuring in
+  Chrome 157: the area a squircle corner removes is ~53% of the plain corner's at 1.25, ~88% at 1.6, equal at 1.7.
+  Support (2026-11-19): Chrome/Edge 139+; Safari 27.2 (macOS and iOS) and Firefox do not; Safari TP has it. Spec
+  (css-borders-4): squircle = superellipse(2), initial round, not inherited; Chrome serializes computed values as
+  superellipse(n). No mask/clip-path emulation.
+- Concentric rule via --in-r: every rounded container sets --in-r: max(var(--r-xs), calc(<own radius> - <own
+  padding>)) (.job, .card, .menu-list, .cal, the mobile .cal sheet, .reach-drawer, .sub-card/.model-card and
+  .assignments-card with 12px padding, fieldset.group). Nested parts use border-radius: var(--in-r, <default token>)
+  (.btn/.apply, inputs/selects, .badge, .jd-copy, .cal-step, .cal-day, .stage, .reach-person, .reach-icon,
+  .reach-text, .jd-frame, .log-frame, .text-frame). A container must not read its own --in-r for its own radius
+  (custom properties resolve on the element: fieldset.group spells the card's calc() out).
+- Frames (the rounded box clips and pads --space-3 top/bottom and --space-1 at the sides; the inner element
+  scrolls with padding 0 --space-2, so text scrolled to its edge still stops 12px from the frame's edge): details.jd .jd-frame > .jd-body,
+  .log-frame > pre.log, .text-frame > textarea (letter paragraphs, also created in the editor script; Company Short
+  Names), .cal > .cal-body (scrolls only in the mobile sheet), .reach-drawer (overflow hidden, flex column) >
+  .reach-panel (scrolls). Cards are overflow:hidden; every hub table sits in .table-wrap / .table-scroll.
+  .letter-status:empty has no margin (keeps the editor's last button row in the card's corner zone concentric).
+- The drawer is flush right with its two left corners at --r-xl (square at 480px and narrower), so its scrollbar runs
+  down the square edge. The toolbar's background and bottom rule reach across the page gutter (--gutter on .page /
+  .hub-main .page; margin-inline negative, padding-inline the same). Nav rows: filled --r-md rows, no left bar.
+- Shadows: --shadow (cards, softer two-layer), --shadow-pop (popovers, picker, letter sheet), --shadow-drawer.
+- Checks: scripts/shape-check.mjs (auditShapes runs in the page) over tests/helpers/ui-pages.mjs (Reports, Letters,
+  letter editor, Resumes, Status, the three Settings tabs, letter page, Desktop HTML; report states: JD open,
+  Filters, picker, "⋯", drawer) at 1440/1100 × light/dark (also checked by hand at 390 and 760) × squircle/plain (plain = --corner-k 1 and corner-shape
+  round forced, i.e. what Safari draws). Rules: corner (text boxes inside the curve, superellipse for squircle),
+  nested (corner zone only: both gaps ≤ the outer radius; expected max(outer − gap + outer border, xs), capped at
+  half the inner box), padding (box >48px: text ≥ max(12, 0.6 × token radius) from every edge, legends exempt;
+  control ≤48px: ≥ 0.8 × radius left/right; capsule ≥ 0.8 × h/2), scroll, clip, round. `node scripts/shape-check.mjs
+  --shots <dir>` also writes screenshots (tests/fixtures/demo-output/screenshots/shapes/, gitignored). The test
+  skips when playwright-core or Chrome is missing (CI).
+- Content snapshots: tests/fixtures/snapshots/shapes/*.html, captured from e813d85 before the restyle. contentOf()
+  drops <style> bodies, asset hashes, class/style attributes and the frame wrappers (WRAPPERS), blanks timings and
+  the hub-timings rows, then compares exactly. The hub JS asset may differ only by SCRIPT_CHANGES (the editor's
+  text-frame), checked by re-hashing.
 
 ## Letter rules v2 (2026-11-08, from private/review/cover-letter-review-response.md)
 - config.coverLetter.rulesVersion "v1" (DEFAULT, unchanged behavior; v1 reads private/cover-letter/playbook-v1.md, the

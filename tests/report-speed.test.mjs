@@ -67,7 +67,7 @@ test('the JD section embeds the first 300 characters (code points) as text and t
     assert.ok(emoji.endsWith('😀'));
     assert.equal(Array.from(emoji).length, 300);
     // The short JD is embedded as before.
-    assert.match(page.text, /<details class="jd"><summary><span>Job Description<\/span><button type="button" class="jd-copy"[^>]*>[\s\S]*?<\/button><\/summary><div class="jd-body"><p>Short JD: under three hundred characters, kept whole\. &lt;i&gt;tags&lt;\/i&gt; &amp; &quot;quotes&quot;\.<\/p><\/div><\/details>/);
+    assert.match(page.text, /<details class="jd"><summary><span>Job Description<\/span><button type="button" class="jd-copy"[^>]*>[\s\S]*?<\/button><\/summary><div class="jd-frame"><div class="jd-body"><p>Short JD: under three hundred characters, kept whole\. &lt;i&gt;tags&lt;\/i&gt; &amp; &quot;quotes&quot;\.<\/p><\/div><\/div><\/details>/);
     // Unknown posting, unknown date, bad id.
     assert.equal((await hub.request('/reports/2026-10-17/jd/0000000000000000')).status, 404);
     assert.equal((await hub.request('/reports/2026-10-01/jd/0000000000000000')).status, 404);

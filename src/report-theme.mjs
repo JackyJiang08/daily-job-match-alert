@@ -5,6 +5,28 @@
 import { cardPasses, filtersActive, readFilters, writeFilters } from './report-filters.mjs';
 import { descriptionPlainText } from './jd-html.mjs';
 
+// Corner radii (2026-11-19). --corner-k is 1 for plain rounded corners; where the browser draws continuous
+// (squircle) corners it is CORNER_K, so a squircle cuts about as much off a corner as the plain radius would.
+// The tokens are the only place a radius has a length; every border-radius in the code names one of them, a
+// calc() of them, 50% for a circle, or 0.
+export const CORNER_K = 1.6;
+export const RADIUS_TOKENS = `--corner-k: 1;
+  --r-xs: calc(6px * var(--corner-k));
+  --r-sm: calc(10px * var(--corner-k));
+  --r-md: calc(14px * var(--corner-k));
+  --r-lg: calc(20px * var(--corner-k));
+  --r-xl: calc(28px * var(--corner-k));
+  --r-pill: 999px;`;
+
+// Continuous corners: every rounded box gets corner-shape: squircle where the browser supports it, with the
+// radii scaled by --corner-k; circles (50%) and capsules (--r-pill) stay round. Browsers without corner-shape keep
+// plain border-radius (no mask or clip-path: those would cut off shadows, borders and focus rings).
+export const SQUIRCLE_STYLES = `@supports (corner-shape: squircle){
+  :root{--corner-k:${CORNER_K}}
+  *,::before,::after{corner-shape:squircle}
+  .ring,.ring::before,.facts li::before,.tag,.round{corner-shape:round}
+}`;
+
 export const REPORT_TOKENS = `
   color-scheme: light dark;
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -35,16 +57,20 @@ export const REPORT_TOKENS = `
   --warn-ink: #8a4b00;
   --bad-bg: #fbe3e3;
   --bad-ink: #8b1d1d;
-  /* Shape and rhythm: every gap, margin and padding is one of the six spacing steps. */
-  --radius: 10px;
-  --radius-sm: 6px;
+  /* Shape and rhythm: every gap, margin and padding is one of the six spacing steps. Corner radii come in five
+     steps (RADIUS_TOKENS); a box inside another rounded box takes its radius from --in-r, which every rounded
+     container sets to its own radius minus its padding (never below --r-xs), so nested corners are concentric. */
+  ${RADIUS_TOKENS}
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 24px;
   --space-6: 40px;
-  --shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+  /* Shadows: soft and wide, so they read as depth under the large corners. */
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 4px 16px rgba(16, 24, 40, 0.04);
+  --shadow-pop: 0 12px 40px rgba(16, 24, 40, 0.10), 0 2px 6px rgba(16, 24, 40, 0.04);
+  --shadow-drawer: -16px 0 48px rgba(16, 24, 40, 0.10);
   --control-height: 32px;
   --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5l3.5 3.5 3.5-3.5' fill='none' stroke='%235b6472' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 `;
@@ -69,21 +95,24 @@ export const REPORT_TOKENS_DARK = `
   --bad-bg: #3d1a1a;
   --bad-ink: #f3a9a9;
   --shadow: none;
+  --shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.45);
+  --shadow-drawer: -16px 0 48px rgba(0, 0, 0, 0.45);
   --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5l3.5 3.5 3.5-3.5' fill='none' stroke='%239aa3b1' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 `;
 
 export const REPORT_STYLES = `
 :root{${REPORT_TOKENS}}
 @media (prefers-color-scheme: dark){:root{${REPORT_TOKENS_DARK}}}
+${SQUIRCLE_STYLES}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg);color:var(--ink);font:var(--fs-body)/var(--lh) var(--font)}
 a{color:inherit}
-.page{max-width:920px;margin:0 auto;padding:var(--space-5) var(--space-4) var(--space-6)}
+.page{--gutter:var(--space-4);max-width:920px;margin:0 auto;padding:var(--space-5) var(--gutter) var(--space-6)}
 
 /* Buttons: one primary style (filled) and one secondary style (outlined), one size everywhere. "small" is
    kept as a class for older markup and no longer changes the size. */
-.btn,.apply{display:inline-flex;align-items:center;justify-content:center;gap:var(--space-1);min-height:var(--control-height);padding:0 var(--space-3);border:1px solid var(--accent);border-radius:var(--radius-sm);background:var(--accent);color:var(--accent-ink);font:inherit;font-size:var(--fs-body);font-weight:600;line-height:1.2;text-decoration:none;white-space:nowrap;cursor:pointer}
+.btn,.apply{display:inline-flex;align-items:center;justify-content:center;gap:var(--space-1);min-height:var(--control-height);padding:0 var(--space-3);border:1px solid var(--accent);border-radius:var(--in-r, var(--r-sm));background:var(--accent);color:var(--accent-ink);font:inherit;font-size:var(--fs-body);font-weight:600;line-height:1.2;text-decoration:none;white-space:nowrap;cursor:pointer}
 .btn:hover,.apply:hover{filter:brightness(1.06)}
 .btn.secondary{background:var(--surface);color:var(--ink);border-color:var(--line-2)}
 .btn.secondary:hover{filter:none;border-color:var(--ink-3)}
@@ -93,19 +122,20 @@ a{color:inherit}
 .btn:focus-visible,.apply:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .btn[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
 
-.banner{margin:0 0 var(--space-4);padding:var(--space-3) var(--space-4);border-radius:var(--radius);background:var(--warn-bg);color:var(--warn-ink);font-size:var(--fs-body)}
+.banner{margin:0 0 var(--space-4);padding:var(--space-3) var(--space-4);border-radius:var(--r-md);background:var(--warn-bg);color:var(--warn-ink);font-size:var(--fs-body)}
 .quota-note{margin:0 0 var(--space-3);font-size:var(--fs-body);color:var(--warn-ink);font-weight:600}
 /* The one top row: the date ("November 15, 2026"; ‹ date › in the hub) and the count, then the search, sort, Track and Role Type controls, the Filters
    popover and the hub's "⋯" menu. It stays at the top while the list scrolls (a rule and a blur once it is
    stuck); at 1100px and wider it never wraps. */
 .bar-sentinel{height:0}
-.toolbar{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2);margin:0 0 var(--space-4);padding:var(--space-2) 0;background:var(--bg);border-bottom:1px solid transparent}
+/* The bar's background and bottom rule reach across the page's side gutters; the controls stay in the column. */
+.toolbar{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2);margin:0 calc(-1 * var(--gutter, 0px)) var(--space-4);padding:var(--space-2) var(--gutter, 0px);background:var(--bg);border-bottom:1px solid transparent}
 .toolbar.stuck{background:var(--surface-glass);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);border-bottom-color:var(--line)}
 .bar-title{display:inline-flex;align-items:baseline;gap:var(--space-2);flex:0 0 auto;margin-right:auto;font-size:var(--fs-title);font-weight:700;letter-spacing:-0.01em;line-height:1.3;white-space:nowrap}
 .bar-title .sep{color:var(--ink-3);font-weight:400}
 .bar-title .count{font-size:var(--fs-body);font-weight:400;color:var(--ink-2);font-variant-numeric:tabular-nums}
 /* One control style for every text input and select, in the report toolbar and in the hub forms. */
-.control-input,.toolbar input:not([type=checkbox]),.toolbar select{font:inherit;font-size:var(--fs-body);line-height:1.3;color:var(--ink);background:var(--surface);border:1px solid var(--line-2);border-radius:var(--radius-sm);padding:var(--space-1) var(--space-2);min-height:var(--control-height);box-sizing:border-box}
+.control-input,.toolbar input:not([type=checkbox]),.toolbar select{font:inherit;font-size:var(--fs-body);line-height:1.3;color:var(--ink);background:var(--surface);border:1px solid var(--line-2);border-radius:var(--in-r, var(--r-sm));padding:var(--space-1) var(--space-2);min-height:var(--control-height);box-sizing:border-box}
 select.control-input,.toolbar select{appearance:none;-webkit-appearance:none;background-image:var(--chevron);background-repeat:no-repeat;background-position:right var(--space-2) center;padding-right:28px;cursor:pointer}
 select.control-input:focus,.control-input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
 .toolbar input[type=search]{flex:1 1 120px;min-width:56px;max-width:320px}
@@ -119,7 +149,7 @@ select.control-input:focus,.control-input:focus{outline:2px solid var(--accent);
 .menu>summary{list-style:none}
 .menu>summary::-webkit-details-marker{display:none}
 .menu>summary.active{border-color:var(--accent);color:var(--accent)}
-.menu .menu-list{position:absolute;right:0;top:calc(100% + var(--space-1));z-index:6;display:flex;flex-direction:column;align-items:stretch;gap:var(--space-2);min-width:240px;padding:var(--space-3);background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 8px 24px rgba(16,24,40,.12)}
+.menu .menu-list{position:absolute;right:0;top:calc(100% + var(--space-1));z-index:6;display:flex;flex-direction:column;align-items:stretch;gap:var(--space-2);min-width:240px;padding:var(--space-3);background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow-pop);--in-r:max(var(--r-xs), calc(var(--r-lg) - var(--space-3)))}
 .menu .menu-list .control{justify-content:space-between}
 .menu .menu-list .control>span:first-child{flex:0 0 auto}
 .menu .menu-list .inline,.menu .menu-list form{display:block;width:100%}
@@ -129,7 +159,7 @@ select.control-input:focus,.control-input:focus{outline:2px solid var(--accent);
 @media (min-width:1100px) and (max-width:1279px){.toolbar{gap:6px}.bar-title{gap:6px}}
 
 .jobs{display:flex;flex-direction:column;gap:var(--space-3);margin:0;padding:0;list-style:none}
-.job{padding:var(--space-4);background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
+.job{padding:var(--space-4);background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow);--in-r:max(var(--r-xs), calc(var(--r-lg) - var(--space-4)))}
 .job[hidden]{display:none}
 .group-title{margin:var(--space-5) 0 var(--space-3);font-size:var(--fs-title);font-weight:650}
 .group-count{color:var(--ink-2);font-weight:400}
@@ -157,7 +187,7 @@ select.control-input:focus,.control-input:focus{outline:2px solid var(--accent);
 .scores .track b{display:inline-block;min-width:2.2ch;text-align:right;font-weight:inherit}
 .scores .track.top{color:var(--ink);font-weight:600}
 .badges{display:flex;flex-wrap:wrap;gap:var(--space-1) var(--space-2);margin-top:var(--space-2)}
-.badge{display:inline-block;font-size:var(--fs-meta);font-weight:600;line-height:1.5;border-radius:var(--radius-sm);padding:0 var(--space-2);background:var(--note-bg);color:var(--note-ink);white-space:nowrap;max-width:100%}
+.badge{display:inline-block;font-size:var(--fs-meta);font-weight:600;line-height:1.5;border-radius:var(--in-r, var(--r-xs));padding:0 var(--space-2);background:var(--note-bg);color:var(--note-ink);white-space:nowrap;max-width:100%}
 .badge-warn{background:var(--warn-bg);color:var(--warn-ink)}
 .badge-bad{background:var(--bad-bg);color:var(--bad-ink)}
 
@@ -178,11 +208,15 @@ details.jd>summary{display:flex;align-items:center;gap:var(--space-2);cursor:poi
 details.jd>summary::before{content:"";width:5px;height:5px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);margin:0 2px 0 1px;transition:transform .12s}
 details.jd[open]>summary::before{transform:rotate(45deg);margin-top:-2px}
 details.jd>summary::-webkit-details-marker{display:none}
-.jd-copy{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:1px solid transparent;border-radius:var(--radius-sm);background:transparent;color:var(--ink-3);cursor:pointer}
+.jd-copy{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:1px solid transparent;border-radius:var(--in-r, var(--r-xs));background:transparent;color:var(--ink-3);cursor:pointer}
 .jd-copy:hover{color:var(--accent);border-color:var(--line-2);background:var(--surface)}
 .jd-copy:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .jd-copy.done{color:var(--accent)}
-details.jd .jd-body{margin:var(--space-2) 0 0;padding:var(--space-3);max-height:420px;overflow:auto;font-size:var(--fs-body);line-height:1.55;color:var(--ink-2);background:var(--bg);border-radius:var(--radius-sm);overflow-wrap:anywhere}
+/* The JD box: the frame carries the corners and clips; the body inside it scrolls, inset from the corners so
+   neither the text nor the scrollbar reaches them (the frame holds the top and bottom space, so text scrolled
+   to the edge of the body still stops 12px short of the frame's edge). */
+details.jd .jd-frame{margin:var(--space-2) 0 0;padding:var(--space-3) var(--space-1);background:var(--bg);border-radius:var(--in-r, var(--r-md));overflow:hidden}
+details.jd .jd-body{padding:0 var(--space-2);max-height:396px;overflow:auto;font-size:var(--fs-body);line-height:1.55;color:var(--ink-2);overflow-wrap:anywhere}
 .jd-body p{margin:0 0 var(--space-2)}
 .jd-body h1,.jd-body h2,.jd-body h3,.jd-body h4{margin:var(--space-3) 0 var(--space-1);font-size:var(--fs-body);font-weight:650;color:var(--ink)}
 .jd-body ul,.jd-body ol{margin:0 0 var(--space-2);padding-left:var(--space-5)}
@@ -197,7 +231,7 @@ details.jd .jd-body{margin:var(--space-2) 0 0;padding:var(--space-3);max-height:
 .job-foot a{color:var(--ink-2)}
 .alternates{margin:var(--space-2) 0 0;font-size:var(--fs-meta);color:var(--ink-2);overflow-wrap:anywhere}
 
-.empty{padding:var(--space-6) var(--space-4);text-align:center;background:var(--surface);border:1px dashed var(--line-2);border-radius:var(--radius);color:var(--ink-2)}
+.empty{padding:var(--space-6) var(--space-4);text-align:center;background:var(--surface);border:1px dashed var(--line-2);border-radius:var(--r-lg);color:var(--ink-2)}
 .empty[hidden]{display:none}
 
 details.run{margin-top:var(--space-6);padding-top:var(--space-3);border-top:1px solid var(--line);font-size:var(--fs-meta);color:var(--ink-2)}
@@ -212,8 +246,8 @@ details.run-list ul{max-height:320px;overflow:auto}
 .foot{margin-top:var(--space-5);font-size:var(--fs-meta);color:var(--ink-2)}
 
 @media (max-width:640px){
-  .page{padding:var(--space-4) var(--space-3) var(--space-5)}
-  .job{padding:var(--space-3)}
+  .page{--gutter:var(--space-3);padding:var(--space-4) var(--gutter) var(--space-5)}
+  .job{padding:var(--space-3);--in-r:max(var(--r-xs), calc(var(--r-lg) - var(--space-3)))}
   .job-head{grid-template-columns:1fr;gap:var(--space-2)}
   .job-score{flex-direction:row-reverse;justify-content:flex-end}
   .ring{width:48px;height:48px}.ring::before{inset:5px}.ring b{font-size:var(--fs-body)}
@@ -221,7 +255,7 @@ details.run-list ul{max-height:320px;overflow:auto}
   .job .actions{display:grid;grid-template-columns:1fr 1fr}
   .job .actions .btn,.job .actions .apply{width:100%;white-space:normal;text-align:center;padding:var(--space-1) var(--space-2)}
   /* The bar wraps: the title on its own line, then two controls per row. */
-  .toolbar{position:static;display:grid;grid-template-columns:1fr 1fr;gap:var(--space-2);padding:var(--space-2) 0}
+  .toolbar{position:static;display:grid;grid-template-columns:1fr 1fr;gap:var(--space-2);padding:var(--space-2) var(--gutter, 0px)}
   .bar-title,.toolbar input[type=search]{grid-column:1/-1;min-width:0;max-width:none}
   .toolbar select{width:100%;min-width:0}
   .menu .menu-list{left:0;right:auto;min-width:min(280px,calc(100vw - 2 * var(--space-3)))}

@@ -85,7 +85,12 @@ export function outreachSettingsCard(view = {}) {
 }
 
 export const OUTREACH_STYLES = `
-.reach-drawer{position:fixed;top:0;right:0;bottom:0;width:min(440px,100%);overflow:auto;background:var(--surface);border-left:1px solid var(--line);box-shadow:-8px 0 24px rgba(16,24,40,.12);z-index:50;padding:var(--space-4)}
+/* The drawer: flush with the window's right edge, its two inner corners rounded. It clips; the panel inside it
+   scrolls, so the scrollbar runs down the square right edge and never meets a rounded corner. */
+.reach-drawer{position:fixed;top:0;right:0;bottom:0;width:min(440px,100%);display:flex;flex-direction:column;overflow:hidden;background:var(--surface);border-left:1px solid var(--line);border-radius:var(--r-xl) 0 0 var(--r-xl);box-shadow:var(--shadow-drawer);z-index:50;--in-r:max(var(--r-xs), calc(var(--r-xl) - var(--space-5)))}
+.reach-drawer>*{flex:0 0 auto;margin:0;padding:var(--space-5)}
+.reach-drawer>.reach-panel{flex:1 1 auto;min-height:0;overflow:auto}
+@media (max-width:480px){.reach-drawer{border-radius:0}}
 .reach-drawer[hidden]{display:none}
 .reach-head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--space-2);margin:0 0 var(--space-3)}
 .reach-title{margin:0;font-size:var(--fs-meta);color:var(--ink-2);line-height:1.4}
@@ -93,21 +98,21 @@ export const OUTREACH_STYLES = `
 .reach-close:hover{color:var(--ink)}
 .reach-people{margin:0 0 var(--space-4)}
 .reach-list{list-style:none;margin:0;padding:0}
-.reach-person{display:flex;align-items:center;gap:var(--space-2);padding:6px var(--space-2);border-radius:var(--radius-sm);cursor:pointer}
+.reach-person{display:flex;align-items:center;gap:var(--space-2);padding:6px var(--space-3);border-radius:var(--in-r, var(--r-md));cursor:pointer}
 .reach-person:hover{background:var(--bg)}
 .reach-person.selected{background:var(--accent-bg, var(--bg));box-shadow:inset 2px 0 0 var(--accent)}
 .reach-person.copied{opacity:.55}
 .reach-who{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .reach-headline{color:var(--ink-3);font-size:var(--fs-meta)}
 .reach-kind{flex:none;font-size:11px}
-.reach-icon{flex:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border:0;border-radius:var(--radius-sm);background:none;color:var(--ink-3);text-decoration:none;cursor:pointer;font-size:14px}
+.reach-icon{flex:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border:0;border-radius:var(--in-r, var(--r-xs));background:none;color:var(--ink-3);text-decoration:none;cursor:pointer;font-size:14px}
 .reach-icon:hover{background:var(--line);color:var(--ink)}
 .reach-check{flex:none;width:14px;color:var(--good-ink, var(--accent));visibility:hidden}
 .reach-person.copied .reach-check{visibility:visible}
 .reach-finding{margin:0}
 .reach-find{display:flex;flex-wrap:wrap;gap:var(--space-2)}
 .reach-box{position:relative}
-.reach-text{white-space:pre-wrap;margin:0;padding:var(--space-3) 36px var(--space-3) var(--space-3);background:var(--bg);border-radius:var(--radius-sm);font-size:var(--fs-body);line-height:1.5}
+.reach-text{white-space:pre-wrap;margin:0;padding:var(--space-3) 36px var(--space-3) var(--space-3);background:var(--bg);border-radius:var(--in-r, var(--r-md));font-size:var(--fs-body);line-height:1.5}
 .reach-copy{position:absolute;top:6px;right:6px}
 .reach-foot{display:flex;justify-content:space-between;align-items:center;margin-top:4px}
 .reach-link{border:0;background:none;padding:0;color:var(--accent);font:inherit;font-size:var(--fs-meta);cursor:pointer}
