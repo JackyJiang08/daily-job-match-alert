@@ -882,7 +882,7 @@ disabled; do not expand them unless a task says so.
 - Engines expose generateText(prompt, { schema, tempDirectory }); local_only
   gets a labelled placeholder engine (src/engines/fake.mjs) so demos and tests
   never call a model. compose.mjs holds the fixed letter architecture (sign-off "Sincerely," and the
-  name on consecutive lines; openings follow the samples with "with a 3.91 GPA"
+  name on consecutive lines; openings follow the samples with "with a 3.8 GPA"
   wording and varied phrasing across letters; the editor pass lists unverified
   scenario details as "unverified detail:" notes without deleting them)  (P1:
   role + location, degree/GPA, role-type timeline sentence, in-state line for
