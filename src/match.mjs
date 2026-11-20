@@ -9,7 +9,8 @@ const STOP = new Set('a an and are as at be by for from has have in into is it i
 
 // Keyword profiles for the local (pre-review) score, keyed by track id. A track whose id has no
 // profile of its own is scored against the union of every profile, so any custom track still gets a
-// sensible triage score; the subscription review supplies the real per-track judgment.
+// sensible triage score; the subscription review supplies the real per-track judgment. A track with
+// resumes.tracks[].keywords ({ title: [...], skills: [...] }) is scored against its own lists instead.
 const LOCAL_PROFILES = {
   data: {
     title: ['data analyst', 'data scientist', 'analytics', 'business intelligence', 'bi analyst', 'product analyst', 'decision scientist', 'data engineer'],
@@ -34,7 +35,12 @@ const UNION_PROFILE = {
   skills: unique(Object.values(LOCAL_PROFILES).flatMap(profile => profile.skills)),
 };
 
-export function localProfileFor(trackId) {
+export function localProfileFor(trackId, keywords = null) {
+  const own = keywords && typeof keywords === 'object' ? keywords : null;
+  if (own && (Array.isArray(own.title) || Array.isArray(own.skills))) {
+    const list = value => (Array.isArray(value) ? value.map(item => String(item || '').trim().toLowerCase()).filter(Boolean) : []);
+    return { title: list(own.title), skills: list(own.skills) };
+  }
   return LOCAL_PROFILES[String(trackId || '').toLowerCase()] || UNION_PROFILE;
 }
 
@@ -76,7 +82,7 @@ function blockers(job, preferences) {
 }
 
 function scoreTrack(job, track, preferences) {
-  const rules = localProfileFor(track.id);
+  const rules = localProfileFor(track.id, track.keywords);
   const resume = String(track.text || '');
   const titleMatches = rules.title.filter(phrase => includesPhrase(job.title, phrase));
   const descriptionTitleMatches = rules.title.filter(phrase => includesPhrase(job.description, phrase));

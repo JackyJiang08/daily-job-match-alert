@@ -259,16 +259,28 @@ async function withQuotaPolicy(ctx, config, engineChoice, attempt) {
 }
 
 // v2 track rule (from the playbook's decision rule): business analyst, customer support, operations, product,
-// project, and consulting roles take the DA (data) resume even when the title says AI. Without a data track the
-// recommendation stands.
+// project, and consulting roles take the DA (data) resume even when the title says AI. Without that track the
+// recommendation stands. The track is config.coverLetter.businessRoleTrack (default "data"; "" or null switches
+// the rule off) and the letter editor's "Regenerate With DA Resume" button names it businessRoleTrackLabel
+// (default "DA" for the default track, the track's own label otherwise).
 export const DA_TRACK_ID = 'data';
+export const DA_TRACK_LABEL = 'DA';
+
+export function businessRoleTrack(config = {}) {
+  const settings = config?.coverLetter || {};
+  const has = key => Object.prototype.hasOwnProperty.call(settings, key);
+  const id = has('businessRoleTrack') ? String(settings.businessRoleTrack ?? '').trim() || null : DA_TRACK_ID;
+  const trackLabel = (config?.resumes?.tracks || []).find(track => track.id === id)?.label || id;
+  const label = has('businessRoleTrackLabel') ? String(settings.businessRoleTrackLabel || '').trim() || trackLabel : id === DA_TRACK_ID ? DA_TRACK_LABEL : trackLabel;
+  return { id, label };
+}
 const DA_ROLE = /\b(?:business\s+analyst|customer\s+(?:support|success|service|experience)|operations?|product|project|program\s+manager|consult(?:ant|ants|ing)?|strateg(?:y|ist))\b/i;
 
-export function letterTrackFor(job, enabledTracks = []) {
+export function letterTrackFor(job, enabledTracks = [], ruleTrack = DA_TRACK_ID) {
   const recommended = job?.recommendedTrack || null;
   const title = String(job?.title || '');
   const daRole = DA_ROLE.test(title) || ['product', 'consulting'].includes(roleFamilyOf(title));
-  if (daRole && enabledTracks.some(track => track.id === DA_TRACK_ID)) return { id: DA_TRACK_ID, ruled: recommended !== DA_TRACK_ID };
+  if (ruleTrack && daRole && enabledTracks.some(track => track.id === ruleTrack)) return { id: ruleTrack, ruled: recommended !== ruleTrack };
   return { id: recommended || enabledTracks[0]?.id || null, ruled: false };
 }
 
@@ -278,7 +290,7 @@ export function letterTrackFor(job, enabledTracks = []) {
 // A/B script's), counted as written now. closing: keep an already assigned thank-you sentence.
 export const BATCH_PROMPT_LIMIT = 10;
 export async function v2RulesInputs(ctx, config, { job, jobId = null, trackId, resumeText, settings, withRecent = true, withBatch = withRecent, extraLetters = [], closing = undefined }) {
-  const graduation = graduationTerms(config.preferences?.graduationDate);
+  const graduation = graduationTerms(config.preferences?.graduationDate, config.preferences);
   const letters = withRecent || withBatch ? [...await ctx.letterStore.listLetters().catch(() => []), ...extraLetters] : [];
   const recent = withRecent ? recentLetterStats(letters, { now: ctx.now(), experiences: resumeExperiences(resumeText) }) : null;
   const id = jobId || (job ? jobIdOf(job) : null);
@@ -307,12 +319,12 @@ export async function generateLetter(ctx, { date, jobId, trackId, company, compa
   const readiness = await ctx.letterStore.readiness();
   if (!readiness.ready) throw new HubInputError(`Cover-letter material is incomplete (${readiness.missing.join(', ')}); upload it under Settings first`);
   const { job, id, tracks } = await findLetterJob(ctx, date, jobId);
-  const ruledTrack = version === 'v2' && !trackId ? letterTrackFor(job, enabledResumeTracks(config)) : null;
+  const ruledTrack = version === 'v2' && !trackId ? letterTrackFor(job, enabledResumeTracks(config), businessRoleTrack(config).id) : null;
   const chosenTrack = trackId || ruledTrack?.id || job.recommendedTrack || tracks[0]?.id;
   const { track, text } = await resumeTextFor(ctx, config, chosenTrack);
   const { playbook, samples } = await ctx.letterStore.loadMaterial({ rulesVersion: version });
   const rules = version === 'v2' ? await v2RulesInputs(ctx, config, { job, jobId: id, trackId: track.id, resumeText: text, settings, extraLetters }) : null;
-  const graduation = graduationTerms(config.preferences?.graduationDate);
+  const graduation = graduationTerms(config.preferences?.graduationDate, config.preferences);
   const review = config.coverLetter?.editorReview !== false;
   const engineId = engineChoice ? (normalizeEngineId(engineChoice) || null) : null;
   if (engineChoice && !engineId) throw new HubInputError('Engine must be claude or codex');
@@ -606,7 +618,7 @@ export async function generateOutreachMessages(ctx, { date, jobId }) {
   const readiness = await ctx.letterStore.readiness().catch(() => ({ profile: {} }));
   const company = initialShortName(job, readiness.profile?.companyAliases || []).name || letterCompanyFor(job).name;
   const limit = connectionNoteLimit(config);
-  const graduation = graduationTerms(config.preferences?.graduationDate);
+  const graduation = graduationTerms(config.preferences?.graduationDate, config.preferences);
   const playbook = renderPlaybook(material.playbook || '', { availability: availabilityText({ roleType: job.roleType || 'unknown', availability: settings.availability, graduation }) });
   const prompt = buildOutreachPrompt({ resumeText: text, playbook, job, company, graduation, limit });
   const plan = await letterStagePlan(ctx, config, 'letterDraft');

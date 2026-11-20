@@ -101,8 +101,9 @@ export function createLetterStore({ root, io = fs, now = () => new Date(), extra
     return profile;
   }
 
-  function normalizeTrack(track) {
-    return SAMPLE_TRACKS.includes(String(track || '').toLowerCase()) ? String(track).toLowerCase() : null;
+  // allowed: the track ids a sample may carry (config.coverLetter.sampleTracks; SAMPLE_TRACKS by default).
+  function normalizeTrack(track, allowed = SAMPLE_TRACKS) {
+    return allowed.includes(String(track || '').toLowerCase()) ? String(track).toLowerCase() : null;
   }
 
   async function removeSampleFiles(sample) {
@@ -112,12 +113,12 @@ export function createLetterStore({ root, io = fs, now = () => new Date(), extra
 
   // Uploading a file whose name is already on file replaces that sample in place (keeping its track);
   // `track` may pre-tag a new sample (data / llm / agent), otherwise it starts untagged.
-  async function saveSample(file, { track = null } = {}) {
+  async function saveSample(file, { track = null, allowed = SAMPLE_TRACKS } = {}) {
     const { name, extension } = textFromUpload(file, ['pdf', 'txt']);
     const originalName = path.basename(name);
     const profile = await readProfile();
     const existingIndex = (profile.samples || []).findIndex(item => item.originalName === originalName);
-    const trackTag = normalizeTrack(track) ?? (existingIndex >= 0 ? profile.samples[existingIndex].track || null : null);
+    const trackTag = normalizeTrack(track, allowed) ?? (existingIndex >= 0 ? profile.samples[existingIndex].track || null : null);
     if (existingIndex < 0 && (profile.samples || []).length >= MAX_SAMPLES) throw new LetterInputError(`At most ${MAX_SAMPLES} sample letters are kept; remove one first`);
     const samplesDirectory = path.join(materialDirectory, 'samples');
     await io.mkdir(samplesDirectory, { recursive: true });
@@ -154,12 +155,12 @@ export function createLetterStore({ root, io = fs, now = () => new Date(), extra
     return { ...sample, replaced: existingIndex >= 0 };
   }
 
-  async function setSampleTrack(fileName, track) {
+  async function setSampleTrack(fileName, track, allowed = SAMPLE_TRACKS) {
     const profile = await readProfile();
     const name = path.basename(String(fileName || ''));
     const sample = (profile.samples || []).find(item => item.file === name);
     if (!sample) throw new LetterInputError('Unknown sample');
-    sample.track = normalizeTrack(track);
+    sample.track = normalizeTrack(track, allowed);
     await writeJson(profilePath, profile);
     return sample;
   }

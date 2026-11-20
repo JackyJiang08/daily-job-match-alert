@@ -10,7 +10,7 @@ Record the date and commit next to each item when it passes.
 
 - [ ] **Fresh clone builds and tests green**
   ```bash
-  git clone https://github.com/JackyJiang08/daily-job-match-alert.git verify-clone
+  git clone <this repository's URL> verify-clone
   cd verify-clone
   npm ci
   npm test

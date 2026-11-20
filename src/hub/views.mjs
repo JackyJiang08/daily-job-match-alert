@@ -97,6 +97,15 @@ a.cal-day:hover{background:var(--accent-soft)}
 .text-frame:focus-within{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
 .text-frame>textarea{display:block;width:100%;min-width:0;max-width:100%;margin:0;padding:0 var(--space-2);border:0;border-radius:0;background:transparent;color:var(--ink)}
 .text-frame>textarea:focus{outline:none}
+/* The first-run steps on an empty Reports page. */
+.onboard{max-width:760px}
+.onboard-steps{list-style:none;margin:var(--space-3) 0 0;padding:0;display:flex;flex-direction:column;gap:var(--space-3)}
+.onboard-step{display:grid;grid-template-columns:32px minmax(0,1fr) auto;gap:var(--space-3);align-items:center}
+.onboard-num{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-weight:700}
+.onboard-step[data-done] .onboard-num{background:var(--accent);color:var(--accent-ink)}
+.onboard-text h3{margin:0;font-size:var(--fs-body);font-weight:650;letter-spacing:0;text-transform:none;color:var(--ink)}
+.onboard-text p{margin:2px 0 0}
+@media (max-width:640px){.onboard-step{grid-template-columns:32px minmax(0,1fr)}.onboard-step .btn{grid-column:2}}
 .row{display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center;margin-top:var(--space-3)}
 .badge-good{background:var(--accent-soft);color:var(--accent)}
 .badge-muted{background:var(--line);color:var(--ink-3)}
@@ -366,11 +375,24 @@ export function reportMenu({ selected, desktopPath, missingLetters }) {
   return `<details class="menu overflow" id="more-menu"><summary class="btn secondary" aria-label="More Actions" title="More Actions">⋯</summary><div class="menu-list">${items.join('')}</div></details>`;
 }
 
+// A hub with no report yet (a fresh clone): three steps, each with a button to where it is done. A step
+// that is already done is marked; a hub with any report never shows this.
+export function onboardingSteps({ resumesReady = false, rolesChosen = false } = {}) {
+  const steps = [
+    { id: 'resumes', title: 'Upload Resumes', text: 'Add one PDF per resume track; the text is extracted on this Mac.', href: '/resumes', done: resumesReady },
+    { id: 'roles', title: 'Choose Roles', text: 'Pick the role families and title words to look for, and the words to leave out.', href: '/settings?tab=pipeline#role-scope', done: rolesChosen },
+    { id: 'run', title: 'Run Now', text: 'Run the pipeline once; its report appears here, and the schedule takes over from then on.', href: '/status#run-card', done: false },
+  ];
+  const items = steps.map((step, index) => `<li class="onboard-step" data-step="${step.id}"${step.done ? ' data-done="1"' : ''}><span class="onboard-num" aria-hidden="true">${step.done ? '✓' : index + 1}</span><div class="onboard-text"><h3>${step.title}</h3><p class="muted">${step.text}</p></div><a class="btn${step.done ? ' secondary' : ''}" href="${step.href}">${step.title}</a></li>`).join('');
+  return `<article class="card onboard" id="onboarding"><h2>Get Started</h2><p class="muted">No report yet. Three steps make this hub yours:</p><ol class="onboard-steps">${items}</ol></article>`;
+}
+
 // The report fills the width beside the navigation; its top row's date slot gets ‹ date › and the picker, and
 // the "⋯" slot the secondary actions (both request-specific, so they are not in the cached body).
-export function reportsPage({ dates, selected, reportBody, desktopPath, today, missingLetters = null, timeZone }) {
+export function reportsPage({ dates, selected, reportBody, desktopPath, today, missingLetters = null, timeZone, onboarding = null }) {
   const body = reportBody
     ? `<div class="page">${reportBody.replace(DATE_SLOT, renderDateNav({ dates, selected, today, timeZone })).replace(MENU_SLOT, reportMenu({ selected, desktopPath, missingLetters }))}</div>`
+    : !dates.length && onboarding ? onboardingSteps(onboarding)
     : `<p class="muted">${dates.length ? 'No report for this date.' : 'Run the pipeline once and its report will appear here.'}</p>`;
   // The Message to Recruiters drawer (src/hub/outreach-views.mjs), filled when a card's button is pressed.
   const drawer = reportBody ? '<aside class="reach-drawer" id="reach-drawer" hidden aria-label="Message to Recruiters"></aside>' : '';
@@ -892,10 +914,12 @@ export function settingsPage({ settings, connections = null, timeZone, coverLett
       <div class="field"><label class="check"><input type="checkbox" name="includeCarriedOver"${settings.includeCarriedOver !== false ? ' checked' : ''}> Include Carried-Over Postings</label><span class="muted">Postings over the review limit wait for the next run and appear under "From Yesterday". Off: they are left unreviewed and not carried.</span></div>
       <div class="field"><label class="check"><input type="checkbox" name="autoCatchUp"${settings.autoCatchUp !== false ? ' checked' : ''}> Auto Catch-Up After Network Outage</label><span class="muted">When the nightly run is cut short by this Mac's network, the hub checks every 10 minutes and reruns it once the network is back (at most twice a day, until the next nightly run).</span></div>
     </fieldset>
-    <fieldset class="group"><legend>Role Scope</legend>
+    <fieldset class="group" id="role-scope"><legend>Role Scope</legend>
       <input type="hidden" name="roleScopePresent" value="1">
       ${tagEditor('titleFamilies', settings.titleFamilies || [], { label: 'Title Families', placeholder: 'Add a family, then Enter', hint: 'Postings from ATS boards, Hacker News, RemoteOK, and search discovery must name one of these in the title (whole words; the last word also takes common endings). "Associate" passes only beside a family word.' })}
+      <input type="hidden" name="excludeTermsPresent" value="1">
       ${tagEditor('targetRoleFamilies', settings.targetRoleFamilies || [], { label: 'Target Role Families', placeholder: 'Add a role family, then Enter', hint: 'Given to the prescreen and the review: postings in these families are judged on what the role asks for, and a product or consulting role is not marked down for not being a data role. The score bands stay the same.' })}
+      ${tagEditor('excludeTitleTerms', settings.excludeTitleTerms || [], { label: 'Excluded Title Words', placeholder: 'Add a word, then Enter', hint: 'A posting whose title has one of these words is left out (senior, staff, manager, ...); new grad, early career and the other override phrases lift the manager and level exclusions.' })}
     </fieldset>
     <fieldset class="group"><legend>Reports</legend>
       <div class="field"><label class="check"><input type="checkbox" name="xlsxRequired"${settings.xlsxRequired ? ' checked' : ''}> Require XLSX Workbook (fail the run when it cannot be written)</label></div>

@@ -29,7 +29,7 @@ import { quotaNoticesPath, readQuotaNotices } from '../engines/quota-notices.mjs
 import { describeQuota, normalizeQuotaPolicy } from '../engines/quota.mjs';
 import { HubLockedError } from './config-file.mjs';
 import { prescreenOverview } from '../prescreen.mjs';
-import { DEFAULT_TITLE_FAMILIES, NON_FAMILY_TERMS } from '../prefilter.mjs';
+import { DEFAULT_ELIGIBILITY_EXCLUDES, DEFAULT_TITLE_FAMILIES, NON_FAMILY_TERMS } from '../prefilter.mjs';
 import { targetRoleFamilies } from '../role-families.mjs';
 import { DEFAULT_SCHEDULE } from '../schedule.mjs';
 import { connectionNoteLimit } from '../outreach/messages.mjs';
@@ -808,6 +808,7 @@ export async function readSettings(ctx) {
     autoCatchUp: autoCatchUpEnabled(config),
     titleFamilies: Array.isArray(config.preferences?.titleFamilies) ? config.preferences.titleFamilies.map(String) : [...DEFAULT_TITLE_FAMILIES],
     targetRoleFamilies: targetRoleFamilies(config.preferences),
+    excludeTitleTerms: Array.isArray(config.preferences?.excludeTitleTerms) ? config.preferences.excludeTitleTerms.map(String) : [...DEFAULT_ELIGIBILITY_EXCLUDES],
     modelLadder: normalizeQuotaPolicy({ ...(semantic.quotaPolicy || {}), catalog }).modelLadder.join(', '),
     reasoningEffort: semantic.reasoningEffort ? String(semantic.reasoningEffort) : '',
     catalog,
@@ -921,15 +922,21 @@ export function validateSettings(form, { catalog = DEFAULT_CATALOG } = {}) {
   // Role scope: only a form with the roleScopePresent marker (Settings > Pipeline) changes the two lists.
   let titleFamilies = null;
   let roleFamilies = null;
+  let excludeTitleTerms = null;
   if (form.roleScopePresent != null) {
     titleFamilies = tagListField(form, 'titleFamilies');
     roleFamilies = tagListField(form, 'targetRoleFamilies');
     errors.push(...tagListErrors(titleFamilies, 'Title families'), ...tagListErrors(roleFamilies, 'Target role families'));
     const lone = titleFamilies.find(tag => NON_FAMILY_TERMS.has(tag.toLowerCase()));
     if (lone) errors.push(`"${lone}" is not a title family on its own; it passes beside a family word (Associate Consultant, Associate Product Manager)`);
+    // Excluded title words may be empty (nothing excluded by title).
+    if (form.excludeTermsPresent != null) {
+      excludeTitleTerms = tagListField(form, 'excludeTitleTerms');
+      errors.push(...tagListErrors(excludeTitleTerms, 'Excluded title words').filter(error => !/needs at least one entry/.test(error)));
+    }
   }
   if (errors.length) throw new HubInputError(errors.join('; '));
-  return { minimumMatchScore, acceptedMatchLevels: MATCH_LEVELS.filter(level => levels.includes(level)), engine, model, xlsxRequired, editorReview, hubPort, maxReviewedPerRun, catchUpBudget, payloadRetentionDays, includeCarriedOver, autoCatchUp, titleFamilies, targetRoleFamilies: roleFamilies, modelLadder, fallbackEngine, reasoningEffort };
+  return { minimumMatchScore, acceptedMatchLevels: MATCH_LEVELS.filter(level => levels.includes(level)), engine, model, xlsxRequired, editorReview, hubPort, maxReviewedPerRun, catchUpBudget, payloadRetentionDays, includeCarriedOver, autoCatchUp, titleFamilies, excludeTitleTerms, targetRoleFamilies: roleFamilies, modelLadder, fallbackEngine, reasoningEffort };
 }
 
 // "Save this path to config": pins the resolved binary as semanticMatching.<engine>Command.
@@ -967,10 +974,16 @@ export async function saveSettings(ctx, form) {
     if (settings.maxReviewedPerRun != null) config.semanticMatching.maxReviewedPerRun = settings.maxReviewedPerRun;
     if (settings.catchUpBudget != null) config.semanticMatching.catchUpBudget = settings.catchUpBudget;
     if (settings.includeCarriedOver != null) config.semanticMatching.includeCarriedOver = settings.includeCarriedOver;
-    if (settings.titleFamilies || settings.targetRoleFamilies) {
+    if (settings.titleFamilies || settings.targetRoleFamilies || settings.excludeTitleTerms) {
       config.preferences = config.preferences && typeof config.preferences === 'object' ? config.preferences : {};
       if (settings.titleFamilies) config.preferences.titleFamilies = settings.titleFamilies;
       if (settings.targetRoleFamilies) config.preferences.targetRoleFamilies = settings.targetRoleFamilies;
+      // A config without excludeTitleTerms is left without it while the list is still the default: the final
+      // eligibility check (match.mjs) applies the list only when the key is present, so writing the default
+      // would change what passes.
+      const unchangedDefault = !Array.isArray(config.preferences.excludeTitleTerms) && settings.excludeTitleTerms
+        && settings.excludeTitleTerms.join('\n') === DEFAULT_ELIGIBILITY_EXCLUDES.join('\n');
+      if (settings.excludeTitleTerms && !unchangedDefault) config.preferences.excludeTitleTerms = settings.excludeTitleTerms;
     }
     if (settings.autoCatchUp != null) config.autoCatchUp = { ...(config.autoCatchUp && typeof config.autoCatchUp === 'object' ? config.autoCatchUp : {}), enabled: settings.autoCatchUp };
     if (settings.modelLadder || settings.fallbackEngine !== undefined) {

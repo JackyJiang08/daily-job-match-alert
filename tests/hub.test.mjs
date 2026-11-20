@@ -1307,6 +1307,28 @@ test('Settings > Pipeline edits the title families and target role families as t
   }
 });
 
+test('Settings > Pipeline edits the excluded title words; an unchanged default is not written to a config without the key', async () => {
+  const root = await prepareProject();
+  const hub = await startHub(root);
+  const base = { pipelinePresent: '1', roleScopePresent: '1', excludeTermsPresent: '1', includeCarriedOver: 'on', autoCatchUp: 'on', minimumMatchScore: '70', acceptedMatchLevels: 'high', hubPort: '4747', titleFamilies: ['data'], targetRoleFamilies: ['data'] };
+  try {
+    const original = await readConfig(root);
+    delete original.preferences.excludeTitleTerms;
+    await fs.writeFile(path.join(root, 'config.json'), JSON.stringify(original, null, 2));
+    const page = (await hub.request('GET', '/settings?tab=pipeline')).text;
+    assert.match(page, /data-name="excludeTitleTerms"[\s\S]*?data-tag="senior"[\s\S]*?data-tag="director"/, 'the default list is shown');
+    await hub.form('/settings', { ...base, excludeTitleTerms: ['senior', 'staff', 'principal', 'lead', 'manager', 'director'] });
+    assert.equal('excludeTitleTerms' in (await readConfig(root)).preferences, false, 'saving the shown default leaves the key out');
+    await hub.form('/settings', { ...base, excludeTitleTerms: ['senior', 'staff'], excludeTitleTermsAdd: 'intern' });
+    assert.deepEqual((await readConfig(root)).preferences.excludeTitleTerms, ['senior', 'staff', 'intern']);
+    await hub.form('/settings', { ...base });
+    assert.deepEqual((await readConfig(root)).preferences.excludeTitleTerms, [], 'an empty list is allowed');
+  } finally {
+    await hub.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('validateSettings reads the tag lists only with the role-scope marker', () => {
   const base = { minimumMatchScore: '60', acceptedMatchLevels: 'high', hubPort: '4747' };
   assert.equal(validateSettings(base).titleFamilies, null);

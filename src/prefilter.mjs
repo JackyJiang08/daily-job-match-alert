@@ -14,6 +14,7 @@
 import { assessLocation } from './eligibility.mjs';
 import { ATS_SOURCE_KIND } from './collectors/ats-boards.mjs';
 import { SEARCH_SOURCE_KIND } from './collectors/search-discovery.mjs';
+import { cohortYearOf } from './candidate-profile.mjs';
 
 export const ENTRY_PROGRAM_TERMS = ['rotational program', 'development program', 'leadership program', 'graduate program', 'analyst program', 'early career program', 'associate program'];
 
@@ -196,7 +197,12 @@ const APM = /(?<![A-Za-z0-9])APM(?![A-Za-z0-9])/;
 const ENTRY_TITLE = /(?<![A-Za-z0-9])(?:associate|junior|jr\.?|graduate|university|early[\s-]+career|entry(?:[\s-]+level)?|rotational)(?![A-Za-z0-9])/i;
 const LEVEL_ONE = /(?<![A-Za-z0-9])I(?![A-Za-z0-9])(?!\s*(?:\/|&))/;
 const ANALYST = /(?<![A-Za-z0-9])analyst(?![A-Za-z0-9])/i;
-const NEW_GRAD_JD = /(?<![A-Za-z0-9])(?:0\s*(?:[-–]|to)\s*2\s*(?:\+\s*)?years?|recent(?:ly)?\s+graduate[ds]?|class\s+of\s+2027|new[\s-]+grad(?:uate)?s?)(?![A-Za-z0-9])/i;
+// The class year is preferences.cohortYear (default 2027, src/candidate-profile.mjs).
+const NEW_GRAD_JD = new Map();
+function newGradJd(year) {
+  if (!NEW_GRAD_JD.has(year)) NEW_GRAD_JD.set(year, new RegExp(`(?<![A-Za-z0-9])(?:0\\s*(?:[-–]|to)\\s*2\\s*(?:\\+\\s*)?years?|recent(?:ly)?\\s+graduate[ds]?|class\\s+of\\s+${year}|new[\\s-]+grad(?:uate)?s?)(?![A-Za-z0-9])`, 'i'));
+  return NEW_GRAD_JD.get(year);
+}
 const INTERN = /(?<![A-Za-z0-9])(?:intern(?:ship)?s?|co[\s-]?op)(?![A-Za-z0-9])/i;
 
 // 'new_grad' when the description (read after enrichment) names an early-career signal ("0-2 years",
@@ -214,7 +220,7 @@ export function detectEarlyCareer(job, preferences = {}) {
   const range = LEVEL_ONE_RANGE.exec(title)?.[0];
   const role = ENTRY_ROLE.exec(title)?.[0].replace(/\s+/g, ' ').toLowerCase() || APM.exec(title)?.[0] || null;
   const titleSignal = (range ? `level ${range.replace(/\s+/g, ' ')}` : null) || role || ENTRY_TITLE.exec(title)?.[0] || (LEVEL_ONE.test(title) ? 'level I' : null) || (ANALYST.test(title) ? 'analyst' : null);
-  const jdSignal = NEW_GRAD_JD.exec(String(job?.description || ''))?.[0] || null;
+  const jdSignal = newGradJd(cohortYearOf(preferences)).exec(String(job?.description || ''))?.[0] || null;
   if (jdSignal) return { level: 'new_grad', signal: titleSignal ? `${titleSignal}; JD: ${jdSignal}` : `JD: ${jdSignal}` };
   if (titleSignal) return { level: 'entry_level', signal: titleSignal };
   return { level: null, signal: null };

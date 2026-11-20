@@ -2,6 +2,7 @@
 // be this machine. Path parameters are validated against strict patterns before they touch the
 // filesystem, and request bodies are capped just above the 5 MB upload limit.
 import { reviewBadge } from '../cover-letter/notes.mjs';
+import { enabledResumeTracks } from '../config.mjs';
 import { buildReportView, reviewReportJobs } from '../report.mjs';
 import { jobDescriptionHtml } from '../jd-html.mjs';
 import { assembleLetter } from '../cover-letter/compose.mjs';
@@ -20,10 +21,10 @@ import {
   autoLettersView, latestReportSummary, readReportPayload, readSettings, resumeAtsBoard, saveAssignments, saveAutoLetters, saveLetterRules, saveOutreachSettings, validateLetterRules, savePrescreen, saveWeeklyReset, saveCliPath, saveSettings, selectResumeVersion, setTrackEnabled, sidebarSummary, uploadResumePdf, ModelTestBusyError, savePlan, testModel,
 } from './services.mjs';
 import { localDate } from '../time-format.mjs';
-import { LETTER_SCRIPT, ONECLICK_SCRIPT, SAMPLE_TRACK_SCRIPT, letterPanel, lettersPage, trackLabelOf } from './letter-views.mjs';
+import { LETTER_SCRIPT, ONECLICK_SCRIPT, SAMPLE_TRACK_SCRIPT, letterPanel, lettersPage, sampleTrackLabels, trackLabelOf } from './letter-views.mjs';
 import { todayTarget } from './views.mjs';
 import { letterRulesSettings, postingTermConflict, termConflictBadge } from '../cover-letter/availability.mjs';
-import { clearLetterReview, findLetterJob, generateLetter, generateOutreachMessages, initialShortName, jobIdOf, letterCompanyFor, letterEngineFor, markLetterReviewSeen, oneClickLetter, regenerateLetter, renameLetter, saveLetter, updateSalutations } from './letters.mjs';
+import { businessRoleTrack, clearLetterReview, findLetterJob, generateLetter, generateOutreachMessages, initialShortName, jobIdOf, letterCompanyFor, letterEngineFor, markLetterReviewSeen, oneClickLetter, regenerateLetter, renameLetter, saveLetter, updateSalutations } from './letters.mjs';
 import { letterDocument, letterSheet, letterViewOf } from './letter-page.mjs';
 import { LetterBusyError } from './letter-jobs.mjs';
 import { QuotaError, describeQuota } from '../engines/quota.mjs';
@@ -208,6 +209,15 @@ export function createHubHandler(ctx) {
     return `${ctx.reportCache.versions.config}|${info?.mtimeMs ?? 0}`;
   }
 
+  // The first-run steps (an empty Reports page): has every enabled track a resume text, and has the owner
+  // chosen roles (title families or target role families in config.json)?
+  async function onboardingState(config) {
+    const tracks = enabledResumeTracks(config);
+    const sizes = await Promise.all(tracks.map(track => ctx.io.stat(track.profile).then(info => info.size).catch(() => 0)));
+    const preferences = config.preferences || {};
+    return { resumesReady: tracks.length > 0 && sizes.every(size => size >= 250), rolesChosen: Array.isArray(preferences.titleFamilies) || Array.isArray(preferences.targetRoleFamilies) };
+  }
+
   async function getReports(url, response) {
     const timer = ctx.reportTimings.start(url.pathname);
     const config = await ctx.loadConfig();
@@ -289,7 +299,7 @@ export function createHubHandler(ctx) {
       desktopPath = desktopCopyPath(config, selected);
       missingLetters = { count: rendered.missingCount, letters: rendered.letterCount || 0, running: Boolean(autoStatus?.running), done: autoStatus?.done || 0, planned: autoStatus?.planned || 0 };
     }
-    await page(response, 200, { active: 'reports', title: tabTitle || 'Reports', content: reportsPage({ dates, selected, reportBody, desktopPath, today, missingLetters, timeZone }), script: REPORTS_SCRIPT + ONECLICK_SCRIPT + OUTREACH_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' }, timer);
+    await page(response, 200, { active: 'reports', title: tabTitle || 'Reports', content: reportsPage({ dates, selected, reportBody, desktopPath, today, missingLetters, timeZone, onboarding: dates.length ? null : await onboardingState(config) }), script: REPORTS_SCRIPT + ONECLICK_SCRIPT + OUTREACH_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' }, timer);
   }
 
   // GET /reports/<date>/jd/<card id>: the full Job Description of one card as the markup the Desktop report
@@ -339,7 +349,7 @@ export function createHubHandler(ctx) {
     const events = [...(latest?.meta?.quota?.events || []).map(event => ({ ...event, source: 'nightly run' })), ...(ctx.quotaLog?.last ? [{ ...ctx.quotaLog.last, source: ctx.quotaLog.last.source || 'hub' }] : [])];
     const modelView = modelSettingsView({ config, settings, connections, record, events, usage: { entries: usage.entries, options: { now: ctx.now(), timeZone, days: 7 } }, now: ctx.now(), timeZone });
     const tab = url.searchParams.get('tab') || 'models';
-    await page(response, 200, { active: 'settings', title: 'Settings', content: settingsPage({ settings, connections, timeZone, modelAvailability, modelView, tab, coverLetter: { profile: readiness.profile, readiness } }), script: SETTINGS_SCRIPT + SAMPLE_TRACK_SCRIPT + MODEL_SETTINGS_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
+    await page(response, 200, { active: 'settings', title: 'Settings', content: settingsPage({ settings, connections, timeZone, modelAvailability, modelView, tab, coverLetter: { profile: readiness.profile, readiness, trackLabels: sampleTrackLabels(config) } }), script: SETTINGS_SCRIPT + SAMPLE_TRACK_SCRIPT + MODEL_SETTINGS_SCRIPT, notice: url.searchParams.get('notice') || '', error: url.searchParams.get('error') || '' });
   }
 
   // Read-only pass-through of the Desktop folder's own files: the HTML report and the workbook.
@@ -386,7 +396,7 @@ export function createHubHandler(ctx) {
     const record = existing?.record || null;
     const parts = assembleLetter({ profile: readiness.profile || {}, company: '', paragraphs: [], now: record?.createdAt ? new Date(record.createdAt) : ctx.now(), timeZone: record?.timeZone || config.timeZone || 'America/Chicago' });
     const copy = { name: parts.name, contact: parts.contact, date: parts.date, signature: parts.signature };
-    const content = letterPanel({ copy, date, jobId: id, job: shownJob, tracks, selectedTrack, company: existing?.record?.company || shortGuess || companyGuess.name || '', readiness, existing, engineLabel: `${engine.label} · ${engine.model}`, confirmCompany: confirm, companyUncertain: companyGuess.uncertain });
+    const content = letterPanel({ copy, date, jobId: id, job: shownJob, tracks, selectedTrack, company: existing?.record?.company || shortGuess || companyGuess.name || '', readiness, existing, engineLabel: `${engine.label} · ${engine.model}`, confirmCompany: confirm, companyUncertain: companyGuess.uncertain, ruleTrack: businessRoleTrack(config) });
     await page(response, 200, { active: 'letters', title: `Cover letter · ${companyGuess.name || job.title}`, content, script: LETTER_SCRIPT, error: url.searchParams.get('error') || '', notice: confirm ? `Confirm the company name${companyGuess.name ? ` (best guess: ${companyGuess.name})` : ''}, then Regenerate` : (url.searchParams.get('notice') || '') });
   }
 
@@ -635,9 +645,10 @@ export function createHubHandler(ctx) {
         if (playbook) { const saved = await ctx.letterStore.savePlaybook(playbook); notes.push(`playbook ${saved.originalName} (${saved.characters} characters)`); }
         // Every file chosen in this batch gets the "Track for these files" tag; rows can be retagged later.
         const samples = files.filter(file => file.field === 'sample' && file.data?.length);
+        const labels = sampleTrackLabels(await ctx.loadConfig().catch(() => ({})));
         for (const sample of samples) {
-          const saved = await ctx.letterStore.saveSample(sample, { track: fields.sampleTrack || null });
-          notes.push(`${saved.replaced ? 'replaced' : 'added'} sample ${saved.originalName}${saved.track ? ` as ${trackLabelOf(saved.track)}` : ''} (${saved.characters} characters)`);
+          const saved = await ctx.letterStore.saveSample(sample, { track: fields.sampleTrack || null, allowed: Object.keys(labels) });
+          notes.push(`${saved.replaced ? 'replaced' : 'added'} sample ${saved.originalName}${saved.track ? ` as ${trackLabelOf(saved.track, labels)}` : ''} (${saved.characters} characters)`);
         }
         redirect(response, '/settings?tab=letters#cover-letters', notes.join('; '));
         return;
@@ -653,8 +664,9 @@ export function createHubHandler(ctx) {
         return;
       }
       case '/settings/cover-letter/sample-track': {
-        const sample = await ctx.letterStore.setSampleTrack(fields.file, fields.track || null);
-        json(response, 200, { file: sample.file, track: sample.track, trackLabel: sample.track ? trackLabelOf(sample.track) : null });
+        const labels = sampleTrackLabels(await ctx.loadConfig().catch(() => ({})));
+        const sample = await ctx.letterStore.setSampleTrack(fields.file, fields.track || null, Object.keys(labels));
+        json(response, 200, { file: sample.file, track: sample.track, trackLabel: sample.track ? trackLabelOf(sample.track, labels) : null });
         return;
       }
       case '/status/sources/resume': {

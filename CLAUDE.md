@@ -720,6 +720,45 @@ disabled; do not expand them unless a task says so.
   survives a date change. Tests: tests/report-date-nav.test.mjs (fake DOM via vm), hub/report-speed/run-schedule
   updates; snapshot allowances DATE_NAV in tests/helpers/page-content.mjs (addedLinkPrefixes, missingWordPatterns).
 
+## Making a clone someone else's hub (2026-11-19)
+- Owner facts are config keys whose ABSENCE keeps the old output byte for byte (tests/make-it-yours.test.mjs
+  compares against tests/fixtures/defaults/golden.json, written by the code before the change; regenerate it
+  only on an intended prompt change, via tests/helpers/defaults-golden.mjs):
+  preferences.homeState (default IL; "" none) → the "in state" clause in v1/v2 rules and editor prompts;
+  preferences.degree ("bachelor's degree") and plannedProgram ("a master's program"; "" none) → internship
+  timeline and v2 availability text (context.mastersAllowed also needs a plannedProgram);
+  preferences.cohortYear (2027) → the "Class of" new-grad JD signal (prefilter.mjs newGradJd);
+  coverLetter.businessRoleTrack (default "data"; null off) + businessRoleTrackLabel (default "DA") →
+  hub/letters.mjs businessRoleTrack()/letterTrackFor and the editor's "Regenerate With DA Resume" button;
+  coverLetter.sampleTracks (default data/llm/agent) → sampleTrackLabels() for the sample selects and the
+  store's allowed list; resumes.tracks[].keywords → match.mjs localProfileFor(id, keywords).
+- src/candidate-profile.mjs holds US_STATES, homeStateOf, letterProfile, cohortYearOf. graduationTerms(date,
+  preferences) carries letterProfile as a NON-enumerable `profile` (so graduation still serializes and
+  deep-equals as {month,nextFall,year}); hub/letters.mjs passes config.preferences at all three call sites.
+- Settings > Pipeline > Role Scope (fieldset#role-scope) also edits preferences.excludeTitleTerms (marker
+  excludeTermsPresent; empty allowed). A config without the key keeps it absent while the submitted list
+  equals DEFAULT_ELIGIBILITY_EXCLUDES, because match.mjs applies the list only when the key exists.
+- npm run setup (src/setup.mjs, readline only): name, school, graduation, home state, time zone, roles
+  (numbers from DEFAULT_TARGET_ROLE_FAMILIES and/or typed title words), role types, 1-4 tracks (name + optional
+  PDF), CLI login check (describeConnections), run time. buildConfig() starts from config.example.json.
+  Writes config.json + private/cover-letter/{playbook.md (from cover-letter/playbook.example.md),
+  profile.json} with flag 'wx' only. config.json present → prints "config.json already exists, nothing
+  changed" and stops, unless --force-new and --config names a path that does not exist. EOF mid-way → nothing
+  written. Never run it in the owner's checkout except to see that line.
+- npm run doctor (src/doctor.mjs): ✓/✗ lines with a "Fix:" for Node, config.json (time zone, graduationDate,
+  homeState), Claude/Codex logins (optional each; one required), pdftotext, resume texts, playbook, LaunchAgent
+  (~/Library/LaunchAgents/com.dailyjobmatchalert.daily.plist, reads Hour/Minute). Writes nothing; exit 1 when a
+  required check fails.
+- Empty Reports page (no report dates at all): views.mjs onboardingSteps() — Upload Resumes (/resumes), Choose
+  Roles (/settings?tab=pipeline#role-scope), Run Now (/status#run-card); routes.mjs onboardingState() marks
+  done steps. Any report date hides it.
+- Docs: README.md is ≤120 lines and ≤80 chars a line (badges, link definitions exempt), sections fixed (How It
+  Works mermaid, Quick Start ≤5 commands, Make It Yours 3 rows, What You Get ≤5, Privacy 3, Docs), no personal
+  details and no owner GitHub URL (clone line uses a placeholder). Detail lives in docs/{pipeline,sources,hub,
+  cover-letters,outreach,configuration,troubleshooting}.md (≤100 chars a line, ≤3-line summary under the
+  title). docs/images/hub.png is the demo fixture state in a temp copy (fixed browser clock). tests/docs.test.mjs
+  checks widths, sections, personal words, and every relative link/image. SETUP.zh-CN.md follows npm run setup.
+
 ## Corner shapes (2026-11-19, src/report-theme.mjs)
 - Tokens: RADIUS_TOKENS (inside REPORT_TOKENS) --r-xs 6 / --r-sm 10 / --r-md 14 / --r-lg 20 / --r-xl 28, each
   calc(Npx * var(--corner-k)), and --r-pill 999px. --radius / --radius-sm are gone. No border-radius in src/ or

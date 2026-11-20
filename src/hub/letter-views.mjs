@@ -8,14 +8,24 @@ import { htmlEscape } from '../utils.mjs';
 import { looksLikeEntityCode } from '../posting-fields.mjs';
 import { aliasText } from '../cover-letter/short-name.mjs';
 import { SCORING_EVIDENCE_NOTE } from '../cover-letter/checks.mjs';
-import { DA_TRACK_ID } from './letters.mjs';
+import { DA_TRACK_ID, DA_TRACK_LABEL } from './letters.mjs';
 import { LETTER_CLOSING, letterPlainText, salutationFor } from '../cover-letter/plain-text.mjs';
 
 export const TRACK_LABELS = { data: 'Data', llm: 'LLM', agent: 'AI Agent' };
+
+// The tracks a sample letter can be tagged with: config.coverLetter.sampleTracks (track ids, labelled from
+// resumes.tracks), or TRACK_LABELS when the key is absent.
+export function sampleTrackLabels(config = {}) {
+  const ids = config?.coverLetter?.sampleTracks;
+  if (!Array.isArray(ids)) return TRACK_LABELS;
+  const labels = new Map((config?.resumes?.tracks || []).map(track => [String(track.id).toLowerCase(), track.label]));
+  return Object.fromEntries(ids.map(id => String(id || '').trim().toLowerCase()).filter(Boolean).map(id => [id, labels.get(id) || id]));
+}
+
 export const MAX_SAMPLE_COUNT = 10;
 
-export function trackLabelOf(track) {
-  return TRACK_LABELS[String(track || '').toLowerCase()] || String(track || '');
+export function trackLabelOf(track, labels = TRACK_LABELS) {
+  return labels[String(track || '').toLowerCase()] || TRACK_LABELS[String(track || '').toLowerCase()] || String(track || '');
 }
 
 export const LETTER_STYLES = `
@@ -61,8 +71,8 @@ function trackBadge(track) {
   return label ? `<span class="badge" data-track-badge="${htmlEscape(String(track).toLowerCase())}">${htmlEscape(label)}</span>` : '';
 }
 
-function trackOptions(current) {
-  return [['', 'Not tagged'], ...Object.entries(TRACK_LABELS)].map(([value, label]) => `<option value="${value}"${(current || '') === value ? ' selected' : ''}>${htmlEscape(label)}</option>`).join('');
+function trackOptions(current, labels = TRACK_LABELS) {
+  return [['', 'Not tagged'], ...Object.entries(labels)].map(([value, label]) => `<option value="${value}"${(current || '') === value ? ' selected' : ''}>${htmlEscape(label)}</option>`).join('');
 }
 
 // ---------------------------------------------------------------------------------------------- settings
@@ -92,11 +102,11 @@ function playbookRow(profile, timeZone) {
     </tr></table></div>`;
 }
 
-function sampleRows(samples, timeZone) {
+function sampleRows(samples, timeZone, labels = TRACK_LABELS) {
   if (!samples.length) return '<p class="muted">No sample letters yet (optional). The three closest to the chosen track go into each letter.</p>';
   return `<div class="table-scroll"><table class="material" id="sample-rows">${MATERIAL_COLUMNS}${samples.map(sample => `<tr data-sample="${htmlEscape(sample.file)}">
       <td><span class="mono">${htmlEscape(sample.originalName || sample.file)}</span></td>
-      <td><select name="track" class="control-input sample-track" data-file="${htmlEscape(sample.file)}" aria-label="Track for ${htmlEscape(sample.originalName || sample.file)}">${trackOptions(sample.track)}</select></td>
+      <td><select name="track" class="control-input sample-track" data-file="${htmlEscape(sample.file)}" aria-label="Track for ${htmlEscape(sample.originalName || sample.file)}">${trackOptions(sample.track, labels)}</select></td>
       <td class="meta">${Number(sample.characters || 0).toLocaleString('en-US')} characters</td>
       <td class="meta">${readable(sample.uploadedAt, timeZone)}</td>
       <td class="actions"><button class="btn secondary small" type="submit" name="file" value="${htmlEscape(sample.file)}" formaction="/settings/cover-letter/remove-sample" formnovalidate>Remove</button></td>
@@ -131,7 +141,7 @@ export function autoLettersSettingsCard(settings = {}) {
     </form></article>`;
 }
 
-export function coverLetterSettingsSection({ profile, readiness, timeZone }) {
+export function coverLetterSettingsSection({ profile, readiness, timeZone, trackLabels = TRACK_LABELS }) {
   const samples = profile.samples || [];
   const atLimit = samples.length >= MAX_SAMPLE_COUNT;
   const state = readiness.ready
@@ -159,11 +169,11 @@ export function coverLetterSettingsSection({ profile, readiness, timeZone }) {
     </fieldset>
     <fieldset class="group"><legend>Sample Letters</legend>
       <p class="muted" style="margin:0 0 var(--space-2)">Style references only; up to ${MAX_SAMPLE_COUNT}. Change a sample's track here and it saves at once. Uploading a file with the same name replaces the old version.</p>
-      ${sampleRows(samples, timeZone)}
+      ${sampleRows(samples, timeZone, trackLabels)}
       ${atLimit ? `<p class="sample-limit" data-sample-limit="reached">Sample limit reached (${MAX_SAMPLE_COUNT}). Remove one to add another.</p>` : ''}
       <div class="upload-row">
         ${fileChooser('sample', '.pdf,.txt,application/pdf,text/plain', 'Choose Samples…', { multiple: true, disabled: atLimit, empty: 'No files chosen' })}
-        <label class="track-for"><span>Track for These Files</span><select name="sampleTrack" class="control-input" aria-label="Track for these files">${trackOptions('')}</select></label>
+        <label class="track-for"><span>Track for These Files</span><select name="sampleTrack" class="control-input" aria-label="Track for these files">${trackOptions('', trackLabels)}</select></label>
       </div>
     </fieldset>
     <button class="btn" type="submit">Save Cover Letter Material</button>
@@ -244,7 +254,7 @@ export function passLine(record) {
 
 // copy { name, contact, date, signature }: the parts around the body for the two copy buttons (the body and the
 // salutation's company come from the page as it is edited).
-export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, readiness, existing, engineLabel, confirmCompany = false, companyUncertain = false, copy = null }) {
+export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, readiness, existing, engineLabel, confirmCompany = false, companyUncertain = false, copy = null, ruleTrack = { id: DA_TRACK_ID, label: DA_TRACK_LABEL } }) {
   const trackOptions = tracks.map(track => `<option value="${htmlEscape(track.id)}"${track.id === selectedTrack ? ' selected' : ''}>${htmlEscape(track.label)}${track.id === job.recommendedTrack ? ' (recommended)' : ''}</option>`).join('');
   const notReady = readiness.ready ? '' : `<div class="flash error">Add your contact block and a playbook under <a href="/settings?tab=letters#cover-letters">Settings → Cover Letters</a> first (missing: ${htmlEscape(readiness.missing.join(', '))}).</div>`;
   const record = existing?.record || null;
@@ -254,8 +264,8 @@ export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, 
   // was made (engines, fallbacks, applied fixes), which only goes in the footer.
   const levels = classifyEditorNotes(record?.editorNotes || []);
   // "Regenerate With DA Resume": offered when the scorer's reasons cite experience only the DA resume carries.
-  const hasDa = tracks.some(track => track.id === DA_TRACK_ID);
-  const daOffer = hasDa && (record?.track || selectedTrack) !== DA_TRACK_ID && levels.needsReview.some(note => note.includes(SCORING_EVIDENCE_NOTE));
+  const hasDa = Boolean(ruleTrack?.id) && tracks.some(track => track.id === ruleTrack.id);
+  const daOffer = hasDa && (record?.track || selectedTrack) !== ruleTrack.id && levels.needsReview.some(note => note.includes(SCORING_EVIDENCE_NOTE));
   const savedRules = record?.rulesVersion === 'v2' ? { version: 'v2', candidParagraphIndex: record.candidParagraphIndex ?? -1, candidGaps: record.candidGaps || [], openingForbidden: record.openingForbidden === true } : null;
   const notes = levels.needsReview.map(note => `<li>${htmlEscape(note)}</li>`).join('');
   const infoNotes = levels.info.map(note => `<li>${htmlEscape(note)}</li>`).join('');
@@ -270,7 +280,7 @@ export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, 
   return `<h1 class="hub-title">Cover Letter</h1>
   ${copyRow}
   ${notReady}
-  <article class="card letter-head" id="letter-panel" data-date="${htmlEscape(date)}" data-job="${htmlEscape(jobId)}" data-ready="${readiness.ready ? 'yes' : 'no'}" data-slug="${htmlEscape(existing?.slug || '')}" data-company-uncertain="${companyUncertain ? 'yes' : 'no'}" data-da-track="${hasDa ? DA_TRACK_ID : ''}" data-rules="${htmlEscape(JSON.stringify(savedRules))}">
+  <article class="card letter-head" id="letter-panel" data-date="${htmlEscape(date)}" data-job="${htmlEscape(jobId)}" data-ready="${readiness.ready ? 'yes' : 'no'}" data-slug="${htmlEscape(existing?.slug || '')}" data-company-uncertain="${companyUncertain ? 'yes' : 'no'}" data-da-track="${hasDa ? htmlEscape(ruleTrack.id) : ''}" data-rules="${htmlEscape(JSON.stringify(savedRules))}">
     <dl class="kv">
       <dt>Role</dt><dd>${htmlEscape(job.title || '')}</dd>
       <dt>Company</dt><dd>${htmlEscape(job.company || 'Company not resolved')}</dd>
@@ -286,7 +296,7 @@ export function letterPanel({ date, jobId, job, tracks, selectedTrack, company, 
         <button class="btn secondary" id="save-button" type="button"${paragraphs.length ? '' : ' hidden'}>Save &amp; Render PDF</button>
         <button class="btn secondary" id="rename-button" type="button"${existing?.slug ? '' : ' hidden'} title="Replace the salutation and the file name and render the PDF again; the model is not called">Rename Company &amp; Re-render</button>
         <button class="btn secondary" id="codex-button" type="button" hidden>Generate With Codex</button>
-        <button class="btn secondary" id="da-button" type="button"${daOffer ? '' : ' hidden'} title="The scorer's reasons cite experience that is only on the DA resume">Regenerate With DA Resume</button>
+        <button class="btn secondary" id="da-button" type="button"${daOffer ? '' : ' hidden'} title="The scorer's reasons cite experience that is only on the ${htmlEscape(ruleTrack.label)} resume">Regenerate With ${htmlEscape(ruleTrack.label)} Resume</button>
         ${download}
       </div>
       <p class="letter-status" id="letter-status"></p>

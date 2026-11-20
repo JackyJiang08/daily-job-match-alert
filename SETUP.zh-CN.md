@@ -127,32 +127,56 @@ Cover letter 由同一个订阅引擎根据你的 playbook、最多三封样稿�
 - **评分配额。** `semanticMatching.maxReviewedPerRun`（默认 60，`0` 为不限）限制每晚送引擎评审的本地候选数。新鲜度优先于完整性：回看窗口内的当晚岗位永远排在积压之前，本地分数与顺延加权只在同一桶内重排。超出的岗位顺延且不写 seen，但只在发布时间（天级日期按当天 23:59 当地时间计；仅无日期岗位用首次发现时间）距今不超过 `lookbackHours + deferralGraceHours`（默认 24 + 24 小时）时仍可评审，超期的从队列移除、不评分（Run Details 记 "expired N backlog postings"）。Settings → Pipeline 的 "Include carried-over postings"（`semanticMatching.includeCarriedOver`，默认开）关掉后不再顺延：超出预算的岗位当晚不评审、也不留到下一晚（配额拒绝造成的顺延照旧保留）。报告主列表包含当天全部已评审的匹配岗位（仅有日期与无日期的也在内），按所选排序排列；采集阶段的新鲜度规则（精确时间 24 小时内、仅日期按当地当日结束、看板 new since last poll）决定哪些岗位进入，渲染时不再重新判定。原 Settings → Pipeline 的 "Strict 24-Hour Window" 开关与折叠的 "Date Only" 分组已于 2026-11-15 取消（config.json 里残留的 `semanticMatching.strict24HourWindow` 会被忽略）。条数为 0 的分组整组不显示。页头只有顶部一行（"Sat, Nov 14 · 42 Jobs"）；运行时间与主列表的发布时间范围（"posted within the last 24 hours"）在 Run Details 中。额度、登出、断网、状态文件完整性等横幅照常显示。hub 与报告中的按钮、分组名、标签、表头与徽章统一为 Title Case。窗口内候选连续 3 晚超过预算时，warnings 与 Status 的 Quota 卡提示并显示近 7 晚的候选/预算数字。同一需求在多个招聘站路径出现（Workday 多站点）时合并为一张卡、只评审一次，备用链接列在卡片上。Run Details 按主列表实际最早发布时间写明 "posted within the last 24 hours / N days"。
 - **chaos 套件。** `npm run chaos` 在临时目录跑十四个场景，CI 每次执行：基线、全部采集源断网、订阅 CLI 不可用、畸形 `.eml`、XLSX 失败后恢复、某 ATS 接口返回 500、候选超出评审上限、Fable 周限额（降级到 Opus）、账户总限额（全部顺延并显示横幅）、state.json 损坏（从备份恢复并记 warning）等。每个场景都必须仍留下当日文件夹与 HTML。
 
-## 快速开始
+## 快速开始（十分钟变成你自己的 hub）
 
-需要 macOS（Linux 可运行除 launchd 与 iCloud 取回外的一切）、Node.js 20+、`pdftotext`，以及一个已登录的订阅 CLI。
+需要 macOS（Linux 可运行除 launchd 与 iCloud 取回外的一切）、Node.js 20+、`pdftotext`（`brew install poppler`），以及一个已登录的订阅 CLI（`claude auth login --claudeai`，或 `codex login` 选 ChatGPT）。
 
 ```bash
-git clone https://github.com/JackyJiang08/daily-job-match-alert.git
-cd daily-job-match-alert
+git clone <本仓库地址> && cd daily-job-match-alert
 npm ci
-cp config.example.json config.json
+npm run setup                       # 交互式向导，写出 config.json 与 private/ 下的骨架文件
+npm run hub                         # 打开 http://127.0.0.1:4747/
+zsh scripts/install-launchd.sh 18 0 # 每晚 18:00 运行（时间换成你自己的）
 ```
 
-编辑 `config.json`：把 `resumes.tracks` 的每一项指向你的私有 PDF（示例带 `data`、`llm`、`agent` 三条轨道），设置 `preferences.graduationDate`，选择引擎。然后：
+`npm run setup` 依次询问：姓名、学校、毕业时间（YYYY-MM）、所在州、时区；想找的方向（从 role families 里按编号多选，或直接输入职位关键词，逗号分隔）；岗位类型（Internship / New Grad / Both）；1 到 4 条简历 track（每条一个名字和一个 PDF 路径，可以先回车跳过，之后在 hub 的 Resumes 页上传）；检测 claude 与 codex CLI 是否已登录，没登录就给出登录命令；每晚运行时间。然后从 `config.example.json` 生成 `config.json`，并把 `cover-letter/playbook.example.md` 复制为 `private/cover-letter/playbook.md`、写出 `private/cover-letter/profile.json`（姓名）。
+
+向导从不覆盖文件：`config.json` 已存在时只打印 "config.json already exists, nothing changed" 后退出；`npm run setup -- --force-new --config other.json` 只在目标路径还不存在时写一份新的配置；`private/` 下已存在的文件一律保留。答题中途输入结束（Ctrl-D）则什么都不写。
+
+`npm run doctor` 逐行检查 Node 版本、CLI 登录、`pdftotext`、`config.json` 是否合法（时区、毕业时间、所在州的格式）、每条 track 的简历文本、playbook 与 launchd 是否安装，每项一行 ✓ / ✗，失败时附一句怎么修；它不写任何文件。
+
+hub 第一次运行（还没有任何报告）时，Reports 页显示三步：Upload Resumes → Choose Roles → Run Now，每步一个按钮直达对应位置；只要有过一份报告，这三步就不再出现。
+
+## 改成你自己的
+
+| 要改什么 | 在哪里改 |
+|---|---|
+| 简历 | hub → Resumes（每条 track 一个 PDF），或 `npm run resume:sync` |
+| 方向与职位词 | hub → Settings → Pipeline → Role Scope（Title Families、Target Role Families、Excluded Title Words） |
+| 运行时间 | `zsh scripts/install-launchd.sh <小时> <分钟>` |
+
+只对某一个人成立的设定都改成了配置项，配置里没有这个键时取原来的行为：
+
+- `preferences.homeState`：所在州（州代码）。岗位在该州时，信里加一句 in state；`""` 表示不加。缺省 `IL`。
+- `preferences.degree` / `preferences.plannedProgram`：实习信时间线里正在读的学位与之后的深造计划；`plannedProgram` 为 `""` 表示没有。缺省 `bachelor's degree` / `a master's program`。
+- `preferences.cohortYear`：JD 里 "Class of" 算作应届的届别。缺省 2027。
+- `coverLetter.businessRoleTrack`：v2 写信规则里 business analyst、运营、产品、项目、咨询类岗位改用哪条 track（`null` 为不用这条规则）。缺省 `data`。
+- `coverLetter.sampleTracks`：样信可以标记的 track。缺省 data、llm、agent。
+- `resumes.tracks[].keywords`：该 track 本地预评分用的 `{ "title": [...], "skills": [...] }`；没有时 data、llm、agent、ai 用内置词表，其他 track 用全部词表的并集。
+
+不用向导也可以：复制 `config.example.json` 为 `config.json`，把 `resumes.tracks` 指向你的 PDF，设置 `preferences.graduationDate` 与上面这些键，选择引擎。其他常用命令：
 
 ```bash
-claude auth login --claudeai      # 或 codex login（选 ChatGPT）
 npm run resume:sync               # 抽取简历文本
-npm run boards:probe -- --limit 20 # 抽查若干 board，逐个打印结果与 error.cause；不评分、不写 state、不发通知
-npm run payloads:compact          # 对已有 payload 一次性瘦身并压缩（先备份到 state/backups/；-- --dry-run 只预览）
-npm run backup                    # 备份 private/、state/（不含 payload 与日志）与 config.json；npm run restore -- <zip> 恢复
+npm run boards:probe -- --limit 20 # 抽查若干 board，逐个打印结果；不评分、不写 state
+npm run payloads:compact          # 对已有 payload 瘦身压缩（-- --dry-run 只预览）
+npm run backup                    # 备份 private/、state/ 与 config.json
 npm test && npm run demo && npm run chaos
 npm run run                       # 真实跑一次，检查桌面文件夹
-./scripts/install-launchd.sh 18 0 # 安装每晚定时（zsh）
-./scripts/install-hub-launchd.sh  # 常驻中枢；然后打开 http://127.0.0.1:4747/
+zsh scripts/install-hub-launchd.sh # 常驻中枢
 ```
 
-拉取新代码后运行 `npm run hub:restart`。完整验收清单见 [VERIFICATION.md](VERIFICATION.md)。
+拉取新代码后运行 `npm run hub:restart`。完整验收清单见 [VERIFICATION.md](VERIFICATION.md)，英文详细文档在 [docs/](docs/configuration.md)。
 
 ## 当前限制
 

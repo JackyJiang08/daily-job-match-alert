@@ -48,7 +48,10 @@
     "rulesNote": "rulesVersion: v1 = the letter rules before 2026-11-08 (the playbook backup private/cover-letter/playbook-v1.md when present); v2 = availability from the window below, candid paragraph for the core gaps (at most three), number and scenario checks, overused openings and closings avoided, no B5 fallback. openingStyle: limit-writing-to allows an \"I am writing to apply\" opening while the last 7 days use it at most 30 percent of the time; ban-writing-to never. availability: no letter names a term before fullTimeFrom unless springTerm; mentionMasters chooses where the master's plan appears. Settings > Cover Letters > Letter Rules edits these.",
     "rulesVersion": "v1",
     "openingStyle": "limit-writing-to",
-    "availability": { "fullTimeFrom": "June 2027", "springTerm": false, "mentionMasters": { "internship": true, "newGrad": false } }
+    "availability": { "fullTimeFrom": "June 2027", "springTerm": false, "mentionMasters": { "internship": true, "newGrad": false } },
+    "tracksNote": "businessRoleTrack: the resume track the v2 rules give business analyst, operations, product, project and consulting roles (null for no such rule; left out, \"data\"). sampleTracks: the track ids a sample letter can be tagged with (left out: data, llm, agent).",
+    "businessRoleTrack": "data",
+    "sampleTracks": ["data", "llm", "agent"]
   },
   "outreach": {
     "note": "Message to Recruiters panel: the LinkedIn invitation note is held to connectionNoteLimit characters (100 to 300). searchCandidates (default off) runs one search per posting with the search discovery provider and key in private/search.json, under its monthly cap. Nothing requests linkedin.com and nothing is sent.",
@@ -89,12 +92,13 @@
   },
   "plans": {
     "plansNote": "Plans are detected from the CLIs (Claude: auth status; ChatGPT: codex login status, else the plan claim in ~/.codex/auth.json, decoded locally). manual overrides or fills in a plan; scheduledChange announces a known switch and takes effect on its local date.",
-    "claude": { "scheduledChange": { "plan": "pro", "effectiveDate": "2026-10-26" } },
+    "claude": {},
     "chatgpt": { "manual": "" }
   },
   "resumes": {
     "autoRefresh": true,
     "pdftotextCommand": "pdftotext",
+    "keywordsNote": "Optional per track: \"keywords\": { \"title\": [...], \"skills\": [...] } for the local pre-review score. Without it, data, llm, agent and ai use built-in lists and any other id uses all of them.",
     "tracks": [
       { "id": "data", "label": "Data", "pdf": "~/Desktop/Your Data Resume.pdf", "enabled": true },
       { "id": "llm", "label": "LLM", "pdf": "~/Desktop/Your LLM Resume.pdf", "enabled": true },
@@ -109,6 +113,11 @@
     "maxYearsExperience": 3,
     "needsSponsorship": false,
     "graduationDate": "2027-05",
+    "profileNote": "Facts the letters state about you. homeState: a US state code; a posting there adds that you are in state (\"\" for none). degree: what the internship timeline says you are completing. plannedProgram: further study the letter may mention (\"\" for none). cohortYear: the class a posting's \"Class of\" must name to count as new grad. Left out, they default to IL, bachelor's degree, a master's program and 2027.",
+    "homeState": "",
+    "degree": "bachelor's degree",
+    "plannedProgram": "",
+    "cohortYear": 2027,
     "excludeTitleTerms": ["senior", "staff", "principal", "manager", "director", "lead"],
     "titleFamiliesNote": "Title pre-screen before enrichment: ATS boards, Hacker News, and RemoteOK postings must name one of these families; curated lists and alert emails skip this check. Family terms also match common endings (engineer → engineering, developer → development, statistic → statistician); acronyms stay whole-word. prefilterExcludeTitleTerms and excludeLevelSuffixes add to excludeTitleTerms for the pre-screen only (every source); a title with a prefilterExcludeOverrides phrase is exempt from the manager and level-suffix exclusions only.",
     "titleFamilies": ["data", "analytics", "analyst", "scientist", "machine learning", "ML", "AI", "quantitative", "quant", "business intelligence", "BI", "data engineer", "software engineer", "developer", "product analyst", "research", "insights", "decision", "statistic", "actuarial", "consultant", "strategist", "forward deployed engineer", "solutions engineer", "associate product manager", "product manager", "consulting", "strategy", "business analyst", "program manager", "APM", "rotational program", "development program", "leadership program", "graduate program", "analyst program", "early career program", "associate program"],

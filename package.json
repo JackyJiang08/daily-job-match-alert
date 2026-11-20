@@ -34,6 +34,8 @@
     "restore": "node src/backup-cli.mjs restore --config config.json",
     "hub": "node src/hub/index.mjs --config config.json",
     "hub:restart": "sh scripts/hub-restart.sh",
+    "setup": "node src/setup.mjs",
+    "doctor": "node src/doctor.mjs",
     "test": "node --test tests/*.test.mjs",
     "demo": "node src/index.mjs --config tests/fixtures/config.demo.json --now 2026-08-27T12:00:00Z",
     "chaos": "bash scripts/chaos-check.sh",

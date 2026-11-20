@@ -7,6 +7,7 @@
 //                                     the last 7 days' letters) | "ban-writing-to" (never)
 //   config.coverLetter.availability   { fullTimeFrom: "June 2027", springTerm: false,
 //                                       mentionMasters: { internship: true, newGrad: false } }
+import { letterProfile } from '../candidate-profile.mjs';
 
 export const RULES_VERSIONS = ['v1', 'v2'];
 export const OPENING_STYLES = ['limit-writing-to', 'ban-writing-to'];
@@ -86,6 +87,11 @@ export function termMentions(text) {
   return found;
 }
 
+// The degree and the planned program the graduation terms carry (compose.mjs graduationTerms; defaults otherwise).
+function studyOf(graduation) {
+  return graduation?.profile || letterProfile({});
+}
+
 // Should the master's plan be mentioned for this role type?
 export function mastersAllowed(roleType, availability) {
   return roleType === 'internship' ? availability.mentionMasters.internship : availability.mentionMasters.newGrad;
@@ -98,8 +104,9 @@ export function availabilityText({ roleType = 'unknown', availability, graduatio
   const terms = availability.springTerm
     ? ` A spring term starting no earlier than January ${graduation.year} may be accepted when the posting asks for one; never name an earlier term or start date, and never promise an end date.`
     : ` Never name, accept, or imply a work term, season, or start date earlier than ${from} (spring or winter co-ops, January starts, part-time work during the semester), and never promise an end date. If the posting's term starts earlier or is not stated, write "I am available full time from ${from}" and nothing else about dates.`;
-  const masters = mastersAllowed(roleType, availability)
-    ? ` For this role, the timeline sentence mentions the plan to begin a master's program in ${graduation.nextFall}.`
+  const { plannedProgram } = studyOf(graduation);
+  const masters = mastersAllowed(roleType, availability) && plannedProgram
+    ? ` For this role, the timeline sentence mentions the plan to begin ${plannedProgram} in ${graduation.nextFall}.`
     : ` Do not mention a master's program, graduate school, or any study plan after ${graduation.month}.`;
   return `${window}${terms}${masters}`;
 }
@@ -107,9 +114,10 @@ export function availabilityText({ roleType = 'unknown', availability, graduatio
 // The v2 timeline sentence for the role type, following the master's setting.
 export function timelineRuleV2(roleType, graduation, availability) {
   if (roleType === 'internship') {
-    return mastersAllowed(roleType, availability)
-      ? `say you are completing your bachelor's degree in ${graduation.month} with plans to begin a master's program in ${graduation.nextFall}`
-      : `say you are completing your bachelor's degree in ${graduation.month}`;
+    const { degree, plannedProgram } = studyOf(graduation);
+    return mastersAllowed(roleType, availability) && plannedProgram
+      ? `say you are completing your ${degree} in ${graduation.month} with plans to begin ${plannedProgram} in ${graduation.nextFall}`
+      : `say you are completing your ${degree} in ${graduation.month}`;
   }
   return `state that your ${graduation.month} graduation falls inside the employer's start window, with no mention of further study`;
 }

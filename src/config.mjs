@@ -59,7 +59,8 @@ export function normalizeResumeConfig(raw, root, options = {}) {
     const enabled = track.enabled !== false;
     const profile = resolveFrom(root, track.profile ? String(track.profile) : `./resumes/${id}.md`);
     const pdf = track.pdf ? resolveFrom(root, String(track.pdf)) : null;
-    return { id, label, profile, pdf, enabled };
+    // keywords (optional): the track's own local-score lists (match.mjs localProfileFor).
+    return { id, label, profile, pdf, enabled, ...(track.keywords && typeof track.keywords === 'object' ? { keywords: track.keywords } : {}) };
   });
   if (!tracks.some(track => track.enabled)) {
     throw new Error('config.json must define at least one enabled resume track under resumes.tracks (all tracks are missing or disabled)');
@@ -113,6 +114,6 @@ export async function loadResumes(config) {
     if (text.length < 250 || /resume placeholder|replace this file/i.test(text)) {
       throw new Error(`${track.label} resume (${track.id}) is still a placeholder or is too short: ${track.profile}`);
     }
-    return { id: track.id, label: track.label, text };
+    return { id: track.id, label: track.label, text, ...(track.keywords ? { keywords: track.keywords } : {}) };
   }));
 }
