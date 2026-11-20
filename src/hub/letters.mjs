@@ -36,6 +36,7 @@ import { autoFix, withoutCheckNotes, wordCount as bodyWords } from '../cover-let
 import { checkLetter, condenseCoverLetterV2, generateCoverLetterV2 } from '../cover-letter/generate-v2.mjs';
 import { renderLetterPdfV2 } from '../cover-letter/pdf.mjs';
 import { roleFamilyOf } from '../role-families.mjs';
+import { loadPromptExamples } from '../cover-letter/prompt-examples.mjs';
 
 export function jobIdOf(job) {
   return job.semanticId || sha256(job.url || '').slice(0, 16);
@@ -290,7 +291,7 @@ export function letterTrackFor(job, enabledTracks = [], ruleTrack = DA_TRACK_ID)
 // A/B script's), counted as written now. closing: keep an already assigned thank-you sentence.
 export const BATCH_PROMPT_LIMIT = 10;
 export async function v2RulesInputs(ctx, config, { job, jobId = null, trackId, resumeText, settings, withRecent = true, withBatch = withRecent, extraLetters = [], closing = undefined }) {
-  const graduation = graduationTerms(config.preferences?.graduationDate, config.preferences);
+  const graduation = graduationTerms(config.preferences?.graduationDate, config.preferences, await loadPromptExamples(config.root, ctx.io));
   const letters = withRecent || withBatch ? [...await ctx.letterStore.listLetters().catch(() => []), ...extraLetters] : [];
   const recent = withRecent ? recentLetterStats(letters, { now: ctx.now(), experiences: resumeExperiences(resumeText) }) : null;
   const id = jobId || (job ? jobIdOf(job) : null);
@@ -324,7 +325,7 @@ export async function generateLetter(ctx, { date, jobId, trackId, company, compa
   const { track, text } = await resumeTextFor(ctx, config, chosenTrack);
   const { playbook, samples } = await ctx.letterStore.loadMaterial({ rulesVersion: version });
   const rules = version === 'v2' ? await v2RulesInputs(ctx, config, { job, jobId: id, trackId: track.id, resumeText: text, settings, extraLetters }) : null;
-  const graduation = graduationTerms(config.preferences?.graduationDate, config.preferences);
+  const graduation = graduationTerms(config.preferences?.graduationDate, config.preferences, await loadPromptExamples(config.root, ctx.io));
   const review = config.coverLetter?.editorReview !== false;
   const engineId = engineChoice ? (normalizeEngineId(engineChoice) || null) : null;
   if (engineChoice && !engineId) throw new HubInputError('Engine must be claude or codex');
@@ -618,7 +619,7 @@ export async function generateOutreachMessages(ctx, { date, jobId }) {
   const readiness = await ctx.letterStore.readiness().catch(() => ({ profile: {} }));
   const company = initialShortName(job, readiness.profile?.companyAliases || []).name || letterCompanyFor(job).name;
   const limit = connectionNoteLimit(config);
-  const graduation = graduationTerms(config.preferences?.graduationDate, config.preferences);
+  const graduation = graduationTerms(config.preferences?.graduationDate, config.preferences, await loadPromptExamples(config.root, ctx.io));
   const playbook = renderPlaybook(material.playbook || '', { availability: availabilityText({ roleType: job.roleType || 'unknown', availability: settings.availability, graduation }) });
   const prompt = buildOutreachPrompt({ resumeText: text, playbook, job, company, graduation, limit });
   const plan = await letterStagePlan(ctx, config, 'letterDraft');

@@ -8,6 +8,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
+import { createHash } from 'node:crypto';
+import { GENERIC_PROMPT_EXAMPLES, PROMPT_EXAMPLES_FILE, loadPromptExamples, normalizePromptExamples } from '../src/cover-letter/prompt-examples.mjs';
 import { goldenOutputs } from './helpers/defaults-golden.mjs';
 import { buildCoverLetterPrompt, graduationTerms } from '../src/cover-letter/compose.mjs';
 import { buildCoverLetterPromptV2, v2Context } from '../src/cover-letter/rules-v2.mjs';
@@ -24,10 +26,14 @@ import { doctorText, runDoctor } from '../src/doctor.mjs';
 import { loadConfig } from '../src/config.mjs';
 import { prepareReportProject, startReportHub } from './helpers/report-hub.mjs';
 
-const GOLDEN = new URL('./fixtures/defaults/golden.json', import.meta.url);
+const GOLDEN = new URL('./fixtures/defaults/golden-generic.json', import.meta.url);
+// sha256 of each output as the code wrote it before the example numbers became generic (the owner's own
+// numbers, kept only as hashes); private/cover-letter/prompt-examples.json must reproduce them.
+const ORIGINAL_HASHES = new URL('./fixtures/defaults/golden-original.sha256.json', import.meta.url);
 const ROOT = new URL('..', import.meta.url).pathname;
+const sha = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
-test('with none of the new keys, every owner-specific output is word for word what it was before', async () => {
+test('with none of the new keys and no prompt-examples file, every owner-specific output matches the generic baseline', async () => {
   const want = JSON.parse(await fs.readFile(GOLDEN, 'utf8'));
   const got = JSON.parse(JSON.stringify(goldenOutputs()));
   assert.deepEqual(Object.keys(got).sort(), Object.keys(want).sort());
@@ -36,6 +42,48 @@ test('with none of the new keys, every owner-specific output is word for word wh
   assert.deepEqual(JSON.parse(JSON.stringify(goldenOutputs({ preferences: {} }))), want);
   // graduationTerms still serializes as before (the profile is not enumerable).
   assert.deepEqual(graduationTerms('2026-12', { homeState: 'NY' }), { month: 'December 2026', nextFall: 'Fall 2027', year: 2026 });
+  const hashes = JSON.parse(await fs.readFile(ORIGINAL_HASHES, 'utf8'));
+  assert.deepEqual(Object.keys(hashes).sort(), Object.keys(want).sort());
+});
+
+test('prompt examples change only the example spots: any examples give the generic text with those values in place', async () => {
+  const generic = JSON.stringify(goldenOutputs());
+  const custom = { gpa: '9.99', proseNumbers: ['A1 units', 'B2 units', 'C3 units', 'D4 units'], sameValue: ['E5+', 'E5,000'], differentValue: ['F6', 'F6.6'] };
+  let expected = generic;
+  const pairs = [
+    ...GENERIC_PROMPT_EXAMPLES.proseNumbers.map((item, index) => [item, custom.proseNumbers[index]]),
+    [`(${GENERIC_PROMPT_EXAMPLES.sameValue[0]} and ${GENERIC_PROMPT_EXAMPLES.sameValue[1]} match; ${GENERIC_PROMPT_EXAMPLES.differentValue[0]} and ${GENERIC_PROMPT_EXAMPLES.differentValue[1]} do not)`, '(E5+ and E5,000 match; F6 and F6.6 do not)'],
+    [`with a ${GENERIC_PROMPT_EXAMPLES.gpa} GPA`, 'with a 9.99 GPA'], [`${GENERIC_PROMPT_EXAMPLES.gpa}/4.00`, '9.99/4.00'], [`${GENERIC_PROMPT_EXAMPLES.gpa} out of 4.0`, '9.99 out of 4.0'],
+  ];
+  for (const [from, to] of pairs) {
+    assert.ok(expected.includes(from), from);
+    expected = expected.split(from).join(to);
+  }
+  assert.equal(JSON.stringify(goldenOutputs({ examples: custom })), expected);
+  // The loader: a missing or broken file gives the generic examples; a partial one fills the rest.
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'examples-'));
+  try {
+    assert.deepEqual(await loadPromptExamples(root), normalizePromptExamples());
+    await fs.mkdir(path.join(root, 'private', 'cover-letter'), { recursive: true });
+    await fs.writeFile(path.join(root, PROMPT_EXAMPLES_FILE), '{ not json');
+    assert.deepEqual(await loadPromptExamples(root), normalizePromptExamples());
+    await fs.writeFile(path.join(root, PROMPT_EXAMPLES_FILE), JSON.stringify({ gpa: '9.99', sameValue: ['one'] }));
+    assert.deepEqual(await loadPromptExamples(root), { ...normalizePromptExamples(), gpa: '9.99' });
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("with the owner's private/cover-letter/prompt-examples.json, every output is word for word the one from before", async t => {
+  const file = path.join(ROOT, PROMPT_EXAMPLES_FILE);
+  if (!await fs.stat(file).then(() => true, () => false)) {
+    t.skip('no private/cover-letter/prompt-examples.json in this checkout (a fresh clone or CI)');
+    return;
+  }
+  const hashes = JSON.parse(await fs.readFile(ORIGINAL_HASHES, 'utf8'));
+  const got = JSON.parse(JSON.stringify(goldenOutputs({ examples: await loadPromptExamples(ROOT) })));
+  const differ = Object.keys(hashes).filter(key => sha(got[key]) !== hashes[key]);
+  assert.deepEqual(differ, []);
 });
 
 const JOB = state => ({ title: 'Analyst', company: 'Example Corp', roleType: 'internship', location: state, description: 'Reporting.' });

@@ -132,7 +132,8 @@ Cover letter 由同一个订阅引擎根据你的 playbook、最多三封样稿�
 需要 macOS（Linux 可运行除 launchd 与 iCloud 取回外的一切）、Node.js 20+、`pdftotext`（`brew install poppler`），以及一个已登录的订阅 CLI（`claude auth login --claudeai`，或 `codex login` 选 ChatGPT）。
 
 ```bash
-git clone <本仓库地址> && cd daily-job-match-alert
+git clone https://github.com/JackyJiang08/daily-job-match-alert.git
+cd daily-job-match-alert
 npm ci
 npm run setup                       # 交互式向导，写出 config.json 与 private/ 下的骨架文件
 npm run hub                         # 打开 http://127.0.0.1:4747/

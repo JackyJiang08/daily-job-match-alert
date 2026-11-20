@@ -31,25 +31,25 @@ const DATA_RESUME = `# Data resume
 Jane Doe
 EDUCATION
 Example University    Aug 2023 – May 2027
-Bachelor of Science, Statistics    Cumulative GPA: 3.91/4.00
+Bachelor of Science, Statistics    Cumulative GPA: 3.85/4.00
 WORK EXPERIENCE
 Example Corp | Data Analyst Intern | Remote                    Sep 2025 – Nov 2025
-   Parsed 500K+ nested JSON records with Python and SQL into KPI dashboards
-   Built churn models (AUC 0.78) showing low-activity users drove 61% of churn
+   Parsed 20K+ nested JSON records with Python and SQL into KPI dashboards
+   Built churn models (AUC 0.73) showing low-activity users drove 61% of churn
 Northwind Logistics | Data Analyst Intern | Chicago, IL         Jun 2024 – Aug 2024
    Built 4 Power BI dashboards used by 50 managers; cut manual effort 25%
 `;
 const AGENT_RESUME = `# Agent resume
 Jane Doe
-Cumulative GPA: 3.91/4.00
+Cumulative GPA: 3.85/4.00
 WORK EXPERIENCE
 Example Corp | Data Analyst Intern | Remote                    Sep 2025 – Nov 2025
-   Parsed 500K+ nested JSON records with Python and SQL into KPI dashboards
+   Parsed 20K+ nested JSON records with Python and SQL into KPI dashboards
 PROJECTS
 Widget Agent (LangGraph, FastAPI)                              Aug 2026
    Built a 10-node LangGraph workflow covered by 319 test cases
 `;
-const PLAYBOOK = '# Playbook\n- Availability window (hard fact): {{AVAILABILITY}}\n- Evidence: Example Corp churn work (AUC 0.78, 61 percent); a factor of 4,073.\n';
+const PLAYBOOK = '# Playbook\n- Availability window (hard fact): {{AVAILABILITY}}\n- Evidence: Example Corp churn work (AUC 0.73, 61 percent); a factor of 2,048.\n';
 
 const job = (extra = {}) => ({
   url: 'https://example.com/jobs/1', title: 'Data Analyst Intern', company: 'Example Corp', companySource: 'source', location: 'Remote - US', roleType: 'internship',
@@ -57,10 +57,10 @@ const job = (extra = {}) => ({
   reasons: ['Python and SQL dashboards at Example Corp'], gaps: [], blockers: [], description: 'Build dashboards for the analytics team. The internship runs June 1 to August 31, 2027, with 12 weeks of mentoring.', ...extra,
 });
 
-const P1 = 'Please consider my application for the Data Analyst Intern role with Example Corp, a remote position. I am a Statistics student at Example University with a 3.91 GPA, completing my bachelor\'s degree in May 2027 with plans to begin a master\'s program in Fall 2027. I am available full time from June 2027. Dashboards only matter when managers change a decision because of them.';
+const P1 = 'Please consider my application for the Data Analyst Intern role with Example Corp, a remote position. I am a Statistics student at Example University with a 3.85 GPA, completing my bachelor\'s degree in May 2027 with plans to begin a master\'s program in Fall 2027. I am available full time from June 2027. Dashboards only matter when managers change a decision because of them.';
 const MIDDLE = [
-  'Turning messy records into reliable tables is where I started at Example Corp. I parsed more than 500,000 nested JSON records with Python and SQL into tables behind KPI dashboards. Clean inputs make every later number easier to defend.',
-  'Predicting which users leave is the second part of that work. I built churn models with an AUC of 0.78 that showed low-activity users drove 61 percent of churn. The result shaped which users the team contacted first.',
+  'Turning messy records into reliable tables is where I started at Example Corp. I parsed more than 20,000 nested JSON records with Python and SQL into tables behind KPI dashboards. Clean inputs make every later number easier to defend.',
+  'Predicting which users leave is the second part of that work. I built churn models with an AUC of 0.73 that showed low-activity users drove 61 percent of churn. The result shaped which users the team contacted first.',
   'Making dashboards people use came next at Northwind Logistics. I built 4 Power BI dashboards that 50 managers relied on and cut manual effort by 25 percent. Adoption is the real measure of a dashboard.',
 ];
 const CLOSE = 'Thank you for your consideration. I would welcome the chance to support the analytics team from June 2027.';
@@ -162,21 +162,21 @@ test('banned phrases, principle openers, graduation once, JD echo, and metric re
 });
 
 test('symbols and title separators are rewritten before rendering; what cannot be rewritten fails', () => {
-  const fixed = autoFix(['Lifted engagement 15% across 500K+ records, ≥85% coverage, Kendall τ 0.956, ρ 0.79; Data Analyst - Remote role.']);
-  assert.equal(fixed.paragraphs[0], 'Lifted engagement 15 percent across more than 500,000 records, at least 85 percent coverage, Kendall tau 0.956, rho 0.79; Data Analyst, Remote role.');
+  const fixed = autoFix(['Lifted engagement 15% across 20K+ records, ≥85% coverage, Kendall τ 0.912, ρ 0.74; Data Analyst - Remote role.']);
+  assert.equal(fixed.paragraphs[0], 'Lifted engagement 15 percent across more than 20,000 records, at least 85 percent coverage, Kendall tau 0.912, rho 0.74; Data Analyst, Remote role.');
   assert.deepEqual(fixed.info, ['auto-fix: wrote K+, ≥, %, τ, ρ out in words', 'auto-fix: rewrote " - " separators as commas']);
   assert.equal(classifyEditorNotes(fixed.info).info.length, 2, 'fixes are info notes');
-  assert.deepEqual(failed([P1, MIDDLE[0].replace('Python and SQL', 'Python and SQL ×4,073'), ...MIDDLE.slice(1), CLOSE]), ['symbols']);
+  assert.deepEqual(failed([P1, MIDDLE[0].replace('Python and SQL', 'Python and SQL ×2,048'), ...MIDDLE.slice(1), CLOSE]), ['symbols']);
   assert.deepEqual(failed([P1.replace('the Data Analyst Intern role', 'the Data Analyst - Intern role'), ...MIDDLE, CLOSE]), ['title-separators']);
 });
 
 test('numbers must come from the selected resume, the playbook, or the posting, compared by value', () => {
   const whitelist = numberWhitelist(DATA_RESUME, PLAYBOOK);
-  assert.deepEqual(numbersOutside('more than 500,000 records and 500K rows and $500,000+', whitelist), []);
-  assert.deepEqual(numbersOutside('an AUC of 0.788', whitelist), ['0.788'], '0.78 and 0.788 differ');
-  assert.deepEqual(numbersOutside('a factor of 4,073 by 2027', whitelist), [], 'years are not checked');
+  assert.deepEqual(numbersOutside('more than 20,000 records and 20K rows and $20,000+', whitelist), []);
+  assert.deepEqual(numbersOutside('an AUC of 0.734', whitelist), ['0.734'], '0.73 and 0.734 differ');
+  assert.deepEqual(numbersOutside('a factor of 2,048 by 2027', whitelist), [], 'years are not checked');
   assert.deepEqual(numbersOutside('12 weeks starting June 1', whitelist, job().description), [], 'the posting\'s numbers describe the employer');
-  assert.deepEqual(failed([P1, MIDDLE[0].replace('500,000', '750,000'), ...MIDDLE.slice(1), CLOSE]), ['numbers']);
+  assert.deepEqual(failed([P1, MIDDLE[0].replace('20,000', '750,000'), ...MIDDLE.slice(1), CLOSE]), ['numbers']);
   assert.deepEqual(numbersOutside('GPT-4 and Qwen-2.5 on S3', whitelist), [], 'names with digits are not quantities');
 });
 
@@ -215,7 +215,7 @@ test('editor issues: case-only name mismatches and issues whose quote is not in 
 
 test('an editor rewrite may not add numbers outside the sources or scenario wording: that paragraph keeps the draft', () => {
   const whitelist = numberWhitelist(DATA_RESUME, PLAYBOOK);
-  const revised = [P1, MIDDLE[0].replace('500,000', '900,000'), MIDDLE[1].replace('The result', 'This production-grade result'), MIDDLE[2].replace('Adoption is', 'Adoption is still'), CLOSE];
+  const revised = [P1, MIDDLE[0].replace('20,000', '900,000'), MIDDLE[1].replace('The result', 'This production-grade result'), MIDDLE[2].replace('Adoption is', 'Adoption is still'), CLOSE];
   const guarded = guardEditorRewrite({ draft: LETTER, revised, whitelist, job: job(), resumeText: DATA_RESUME, playbook: PLAYBOOK });
   assert.equal(guarded.paragraphs[1], MIDDLE[0]);
   assert.equal(guarded.paragraphs[2], MIDDLE[1]);
@@ -487,7 +487,7 @@ test('in the hub, a letter saved earlier tonight is passed to the next letter\'s
 
 test('v2 editor: unquoted or case-only issues are set aside, unverified details are rewritten, and a rewrite that adds a number keeps the draft paragraph', async () => {
   const root = await project();
-  const revised = [P1, MIDDLE[0].replace('500,000', '800,000'), MIDDLE[1], MIDDLE[2], CLOSE];
+  const revised = [P1, MIDDLE[0].replace('20,000', '800,000'), MIDDLE[1], MIDDLE[2], CLOSE];
   const hub = await hubFor(root, { editor: () => ({ issues: ['unverified detail: "Clean inputs make every later number easier to defend"', 'salutation says Example Corp, body says example corp', 'unverified detail: "regulated work"'], revised_paragraphs: revised, candidParagraphIndex: -1 }) });
   try {
     const draft = JSON.parse((await hub.request('POST', '/letters/generate', { date: '2026-11-08', job: jobIdOf(job()), company: 'Example Corp' })).text);

@@ -80,7 +80,7 @@ test('the prompt carries the playbook, the chosen track resume, the samples with
   assert.equal(letterRules().split('\n').length, 12, 'the naming rule is one more line');
   assert.equal(letterRules({ condense: true }).split('\n').length, 13);
   assert.match(prompt, /Prefer opening with "I am writing to apply for the <role> position at <company>" unless the samples open differently/);
-  assert.match(prompt, /State the GPA as "with a 3\.91 GPA" \(the number exactly as the RESUME or PLAYBOOK gives it\), never as "3\.91\/4\.00"/);
+  assert.match(prompt, /State the GPA as "with a 3\.8 GPA" \(the number exactly as the RESUME or PLAYBOOK gives it\), never as "3\.8\/4\.00"/);
   assert.match(prompt, /Vary the phrasing between letters: do not reuse one fixed set of opening, transition, and closing phrases/);
   assert.match(buildReviewPrompt({ paragraphs: ['x'], job: {}, resumeText: 'R', playbook: 'P' }), /List each one you cannot find as an issue that starts with "unverified detail:" and names the detail\. Do NOT remove or rewrite those details in revised_paragraphs/);
 });

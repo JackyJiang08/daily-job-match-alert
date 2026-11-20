@@ -721,9 +721,10 @@ disabled; do not expand them unless a task says so.
   updates; snapshot allowances DATE_NAV in tests/helpers/page-content.mjs (addedLinkPrefixes, missingWordPatterns).
 
 ## Making a clone someone else's hub (2026-11-19)
-- Owner facts are config keys whose ABSENCE keeps the old output byte for byte (tests/make-it-yours.test.mjs
-  compares against tests/fixtures/defaults/golden.json, written by the code before the change; regenerate it
-  only on an intended prompt change, via tests/helpers/defaults-golden.mjs):
+- Owner facts are config keys whose ABSENCE keeps the old output (tests/make-it-yours.test.mjs; baselines in
+  tests/fixtures/defaults/: golden-generic.json = the outputs with the generic prompt examples, and
+  golden-original.sha256.json = sha256 of each output as the code wrote it before, which the owner's
+  private/cover-letter/prompt-examples.json must reproduce; that test skips without the file):
   preferences.homeState (default IL; "" none) → the "in state" clause in v1/v2 rules and editor prompts;
   preferences.degree ("bachelor's degree") and plannedProgram ("a master's program"; "" none) → internship
   timeline and v2 availability text (context.mastersAllowed also needs a plannedProgram);
@@ -732,6 +733,12 @@ disabled; do not expand them unless a task says so.
   hub/letters.mjs businessRoleTrack()/letterTrackFor and the editor's "Regenerate With DA Resume" button;
   coverLetter.sampleTracks (default data/llm/agent) → sampleTrackLabels() for the sample selects and the
   store's allowed list; resumes.tracks[].keywords → match.mjs localProfileFor(id, keywords).
+- Prompt example numbers (src/cover-letter/prompt-examples.mjs): the v1 GPA rule ("with a 3.8 GPA", "3.8/4.00",
+  "3.8 out of 4.0"), the v2 prose-number list, and the v2 editor's same-value example are generic in code.
+  private/cover-letter/prompt-examples.json ({ gpa, proseNumbers[4], sameValue[2], differentValue[2]}, each
+  optional) replaces them; hub/letters.mjs loads it at the three graduationTerms call sites and it rides on
+  graduation.profile.examples. Never write the owner's numbers into code, tests or docs; npm run setup does
+  not create the file.
 - src/candidate-profile.mjs holds US_STATES, homeStateOf, letterProfile, cohortYearOf. graduationTerms(date,
   preferences) carries letterProfile as a NON-enumerable `profile` (so graduation still serializes and
   deep-equals as {month,nextFall,year}); hub/letters.mjs passes config.preferences at all three call sites.
@@ -752,12 +759,16 @@ disabled; do not expand them unless a task says so.
 - Empty Reports page (no report dates at all): views.mjs onboardingSteps() — Upload Resumes (/resumes), Choose
   Roles (/settings?tab=pipeline#role-scope), Run Now (/status#run-card); routes.mjs onboardingState() marks
   done steps. Any report date hides it.
-- Docs: README.md is ≤120 lines and ≤80 chars a line (badges, link definitions exempt), sections fixed (How It
-  Works mermaid, Quick Start ≤5 commands, Make It Yours 3 rows, What You Get ≤5, Privacy 3, Docs), no personal
-  details and no owner GitHub URL (clone line uses a placeholder). Detail lives in docs/{pipeline,sources,hub,
-  cover-letters,outreach,configuration,troubleshooting}.md (≤100 chars a line, ≤3-line summary under the
-  title). docs/images/hub.png is the demo fixture state in a temp copy (fixed browser clock). tests/docs.test.mjs
-  checks widths, sections, personal words, and every relative link/image. SETUP.zh-CN.md follows npm run setup.
+- Docs: README.md is ≤120 lines and ≤80 chars a line (badges, link definitions exempt), sections fixed (title,
+  one sentence, CI + License + Node + macOS badges, How It Works mermaid, Quick Start ≤5 commands, Make It Yours
+  3 rows, What You Get ≤5, Privacy 3, Docs = exactly the seven docs/ links). No screenshot and no docs/images/
+  (removed 2026-11-19). The clone command uses the real repository URL
+  (https://github.com/JackyJiang08/daily-job-match-alert.git, with "\ && cd" on a continuation line to stay
+  under 80) in README, VERIFICATION.md and SETUP.zh-CN.md; the public repo URL and CI badge are not treated as
+  personal. Detail lives in docs/{pipeline,sources,hub,cover-letters,outreach,configuration,troubleshooting}.md
+  (≤100 chars a line, ≤3-line summary under the title). tests/docs.test.mjs checks widths, sections, personal
+  words (author and account read from package.json; the repo URL and CI badge are allowed), and every relative
+  link. SETUP.zh-CN.md follows npm run setup.
 
 ## Corner shapes (2026-11-19, src/report-theme.mjs)
 - Tokens: RADIUS_TOKENS (inside REPORT_TOKENS) --r-xs 6 / --r-sm 10 / --r-md 14 / --r-lg 20 / --r-xl 28, each

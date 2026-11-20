@@ -1,7 +1,7 @@
 // Evidence helpers for the v2 letter checks: the experiences a resume lists (employers and projects, read from
 // the resume text itself, so no name is written in code), which of them a text mentions, and the numbers a
 // letter may use (the selected resume, the playbook, and the posting), compared by value with the formats
-// normalized: "500K+" = "500,000" = "more than 500,000", "$150,000+" = "150,000", "40%" = "40 percent".
+// normalized: "20K+" = "20,000" = "more than 20,000", "$150,000+" = "150,000", "40%" = "40 percent".
 
 // Words too common to identify an experience on their own.
 const GENERIC = new Set(['International', 'Company', 'Corporation', 'Association', 'Professional', 'Financial', 'Group', 'Holdings', 'University',
@@ -68,7 +68,7 @@ export function experiencesIn(text, experiences) {
 
 // ----------------------------------------------------------------------------------------------- numbers
 
-// A number as written, with its unit: "$150K+", "500,000", "8.2", "40%". Numbers glued to letters or a hyphen
+// A number as written, with its unit: "$150K+", "20,000", "7.5", "40%". Numbers glued to letters or a hyphen
 // before them ("GPT-4", "Qwen-2.5", "S3") are names, not quantities.
 const NUMBER = /(?<![A-Za-z0-9.\-])\$?\d{1,3}(?:,\d{3})+(?:\.\d+)?(?:\s?[KkMm](?![A-Za-z]))?\+?|(?<![A-Za-z0-9.\-])\$?\d+(?:\.\d+)?(?:\s?[KkMm](?![A-Za-z]))?\+?/g;
 

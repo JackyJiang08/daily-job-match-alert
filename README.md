@@ -6,13 +6,12 @@ Every evening it finds new internship and new-grad postings, scores them
 against your resumes with the Claude or ChatGPT plan you already have, and
 drafts cover letters, all on your Mac.
 
+[![CI](https://github.com/JackyJiang08/daily-job-match-alert/actions/workflows/ci.yml/badge.svg)](https://github.com/JackyJiang08/daily-job-match-alert/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-339933?logo=nodedotjs&logoColor=white)
 ![macOS](https://img.shields.io/badge/macOS-launchd-000000?logo=apple&logoColor=white)
 
 </div>
-
-![The hub's Reports page, filled with demo data](docs/images/hub.png)
 
 ## How It Works
 
@@ -28,7 +27,8 @@ flowchart LR
 ## Quick Start
 
 ```bash
-git clone <this repository's URL> && cd daily-job-match-alert
+git clone https://github.com/JackyJiang08/daily-job-match-alert.git \
+  && cd daily-job-match-alert
 npm ci
 npm run setup
 npm run hub
@@ -69,5 +69,3 @@ zsh scripts/install-launchd.sh 18 0
 - [Message to Recruiters](docs/outreach.md): the people panel
 - [Configuration](docs/configuration.md): every key, engines, commands
 - [Troubleshooting](docs/troubleshooting.md): `npm run doctor`, fixes
-- [中文安装指南](SETUP.zh-CN.md) · [Verification](VERIFICATION.md)
-- [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)

@@ -8,6 +8,7 @@ import { normalizeLocation } from '../utils.mjs';
 import { LETTER_CLOSING, salutationFor } from './plain-text.mjs';
 import { DEFAULT_CONNECTION_NOTE_LIMIT, OUTREACH_PROPERTIES, outreachRules } from '../outreach/messages.mjs';
 import { inHomeState, letterProfile } from '../candidate-profile.mjs';
+import { gpaRule, normalizePromptExamples, proseNumberExamples, sameValueExample } from './prompt-examples.mjs';
 
 export const MIN_PARAGRAPHS = 5;
 export const MAX_PARAGRAPHS = 7;
@@ -55,13 +56,13 @@ export function wordCount(paragraphs) {
 // "May 2027" and "Fall 2027" from preferences.graduationDate ("2027-05"); the defaults match the example config.
 // The owner's home state, degree and planned program (letterProfile, src/candidate-profile.mjs) ride along as a
 // non-enumerable `profile`, so every rule that is handed the graduation terms can state them.
-export function graduationTerms(graduationDate, preferences = {}) {
+export function graduationTerms(graduationDate, preferences = {}, examples = null) {
   const match = /^(\d{4})-(\d{2})/.exec(String(graduationDate || '2027-05'));
   const year = match ? Number(match[1]) : 2027;
   const monthIndex = match ? Number(match[2]) - 1 : 4;
   const month = new Date(Date.UTC(year, monthIndex, 1)).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
   const terms = { month, nextFall: `Fall ${monthIndex >= 8 ? year + 1 : year}`, year };
-  Object.defineProperty(terms, 'profile', { value: letterProfile(preferences || {}), enumerable: false });
+  Object.defineProperty(terms, 'profile', { value: { ...letterProfile(preferences || {}), examples: normalizePromptExamples(examples) }, enumerable: false });
   return terms;
 }
 
@@ -118,7 +119,7 @@ export function letterRules({ roleType = 'unknown', graduation = graduationTerms
     naming ? companyNamingRule(shortName) : null,
     `Body length: ${MIN_WORDS} to ${MAX_WORDS} words in total (header and sign-off are added separately). Plain prose paragraphs only; no bullet points, no lists, no headings.`,
     'Never use an em dash or an en dash as punctuation; use commas, periods, or colons. Professional, human, first-person voice; specific and direct; no slang or chatty phrasing; avoid "I am writing to express my interest".',
-    'Opening and degree wording follow the SAMPLE LETTERS. Prefer opening with "I am writing to apply for the <role> position at <company>" unless the samples open differently, and then follow the samples. State the GPA as "with a 3.91 GPA" (the number exactly as the RESUME or PLAYBOOK gives it), never as "3.91/4.00" or "3.91 out of 4.0".',
+    `Opening and degree wording follow the SAMPLE LETTERS. Prefer opening with "I am writing to apply for the <role> position at <company>" unless the samples open differently, and then follow the samples. ${gpaRule(profileOf(graduation).examples)}`,
     'Vary the phrasing between letters: do not reuse one fixed set of opening, transition, and closing phrases in every letter; take phrasing cues from the SAMPLE LETTERS instead.',
     `Paragraph 1 must contain, in this order: the role title and location; your degree and GPA exactly as the RESUME states them; the timeline sentence (${timelineRule(roleType, graduation)})${homeStateClause(inState, graduation)}; and, as its last sentence, one specific judgment about this company or this role (a hook drawn from what the posting actually asks for), not praise and not a quotation of the posting.`,
     'Before writing, list to yourself the 3 to 4 core responsibilities of the JOB POSTING; do not output that list. Then write one middle paragraph per responsibility (3 to 4 paragraphs): the first sentence names the responsibility using the posting\'s own vocabulary; the next one or two sentences give evidence from the RESUME or the PLAYBOOK evidence library that carries a number; the last sentence closes with a principle you work by.',

@@ -18,10 +18,10 @@ const JOBS = [
 const DESCRIPTIONS = ['Open to the Class of 2027.', 'class of 2028 only', 'Recent graduates welcome', 'Class of 2026', 'No signal here.'];
 const TITLES = ['Business Analyst', 'Product Analyst, AI', 'Machine Learning Engineer', 'Operations Associate', 'Strategy Consultant', 'Data Scientist'];
 
-export function goldenOutputs({ preferences = {}, coverLetter = {}, tracks = null } = {}) {
+export function goldenOutputs({ preferences = {}, coverLetter = {}, tracks = null, examples = null } = {}) {
   const out = {};
   for (const graduationDate of [undefined, '2026-12']) {
-    const graduation = graduationTerms(graduationDate ?? preferences.graduationDate, preferences);
+    const graduation = graduationTerms(graduationDate ?? preferences.graduationDate, preferences, examples);
     JOBS.forEach((job, index) => {
       const base = { playbook: 'PLAYBOOK', samples: [], track: { id: 'data', label: 'Data' }, resumeText: 'RESUME', job, graduation };
       out[`v1:${graduationDate}:${index}:prompt`] = buildCoverLetterPrompt(base);
